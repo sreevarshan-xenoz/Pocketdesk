@@ -2,6 +2,9 @@ package dev.pocketdesk.android
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.content.edit
 import dev.pocketdesk.android.wake.WakeInfo
 import dev.pocketdesk.android.wake.WakeMethod
@@ -83,7 +86,17 @@ object HostStore {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
             putLong("$KEY_LAST_USED_PREFIX$address", now)
         }
+        usedStamps++
     }
+
+    /**
+     * How many times [markUsed] has recorded a time, as Compose snapshot
+     * state: Home reads the cards' times again when it changes. A camera or
+     * cast stopped from its notification ends while Home stays resumed, and
+     * its card kept its old time until Home was left and opened again.
+     */
+    var usedStamps by mutableIntStateOf(0)
+        private set
 
     /**
      * UX1: when [address] was last used, in ms since the epoch; null before,

@@ -41,7 +41,7 @@ The desktop end runs on Linux and Windows; the phone end is the Android app. The
 
 | | Linux host | Windows host |
 |---|---|---|
-| Screen capture | wlroots screencopy (Hyprland, Sway), the portal (GNOME, KDE; it asks at each session, or with Settings "Remember the screen-sharing grant" on, off by default, once until you revoke it, so sessions start with no one at the desk), X11 | Windows.Graphics.Capture, DXGI duplication |
+| Screen capture | wlroots screencopy (Hyprland, Sway), the portal (GNOME, KDE; it asks at each session, or with Settings "Remember the screen-sharing grant" on, off by default, once until you revoke it, so sessions start with no one at the desk; on KDE Plasma 6 it can be [allowed ahead](#kde-plasma-no-dialog-at-all), so it never asks), X11 | Windows.Graphics.Capture, DXGI duplication |
 | Hardware encoding | VAAPI (in process), NVENC (through `ffmpeg`) | NVENC, AMF, Quick Sync, Media Foundation (every encoder, software too, through `ffmpeg.exe` on `PATH`) |
 | Remote input | uinput (Wayland), else the compositor's virtual pointer and keyboard on wlroots (Sway, Hyprland) when uinput is root-only, or GNOME's and KDE's RemoteDesktop portal through the session's screen sharing (one grant for both; a remote without the screen gets no input there), XTEST (X11); text typed from the phone goes through the compositor's virtual keyboard on wlroots (Sway, Hyprland), so any character arrives on any layout, else as US-layout keys with Shift | `SendInput`: elevated windows need `install --elevated`; the UAC prompt and the lock screen are never reachable |
 | Clipboard: text and images, anywhere | `wl-clipboard` on Wayland, `xclip` on X11 | Win32 clipboard |
@@ -72,7 +72,7 @@ The desktop end runs on Linux and Windows; the phone end is the Android app. The
 | KDE Connect devices (pairing, ping, clipboard, battery, Ring, notifications, files both ways) | yes, but not beside `kdeconnectd` or GSConnect: started after one of them, Pocketdesk's server listens on the next free port (1717 to 1725) and leaves KDE Connect devices to that program | yes, with KDE Connect 1.36 on the A71 |
 | Events, hooks, named tasks, Home Assistant | yes | yes |
 | Desktop app tray | yes, where the desktop shows StatusNotifierItems (closing quits where it does not) | yes |
-| Device-checked | Hyprland on a laptop (2026-09: pairing, video with VAAPI, input, Tailscale, start at login); a headless Sway VM across the internet (2026-10-14: pairing, LAN and WAN sessions, clipboard; 2026-10-15: links both ways, the phone's battery, now-playing and Pause through `playerctl`; 2026-10-16: typing any character, input without uinput, the phone as a remote; 2026-10-22: the desktop app's window, its typing and phone-screen windows, the tray program under waybar with the phone's music in MPRIS, the laser dot); on the laptop, the shared keyboard and mouse's receiving end from a script into a headless Sway (2026-10-28: keys in order and none left down, a killed sender's key let go, a lock screen typed into). Not yet: files, notifications and texts, sound on the phone, the phone's sound and pen, GNOME/KDE, and the shared keyboard and mouse driven from a real Windows computer at the desk | most rows, with a Galaxy A71 (2026-10), and the newer features with an OPPO phone on ColorOS 14 (2026-10-20 on); the phone as another screen driven from a script (2026-10-29); another computer's screen in a window between two servers on one computer (2026-10-29). Not yet: start at login, the tray menu by hand, single-window streaming, the phone's sound and its music in the media controls, the pen and gamepad from the phone into an app, the phone's window by hand (drops, paste, screenshots, recordings), and the shared keyboard and mouse at the desk (driving Linux, the phone with the real mouse, files dragged across, the sound following, another real computer's screen in a window) |
+| Device-checked | Hyprland on a laptop (2026-09: pairing, video with VAAPI, input, Tailscale, start at login); a headless Sway VM across the internet (2026-10-14: pairing, LAN and WAN sessions, clipboard; 2026-10-15: links both ways, the phone's battery, now-playing and Pause through `playerctl`; 2026-10-16: typing any character, input without uinput, the phone as a remote; 2026-10-22: the desktop app's window, its typing and phone-screen windows, the tray program under waybar with the phone's music in MPRIS, the laser dot); on the laptop, the shared keyboard and mouse's receiving end from a script into a headless Sway (2026-10-28: keys in order and none left down, a killed sender's key let go, a lock screen typed into); KDE Plasma 6.8 headless in a container on the laptop, the portal capture driven by a script rather than a phone (2026-10-31: the screen at about 58 fps, both kinds of grant restored with no dialog, allowed ahead with no dialog at all, input through the portal; the wheel there barely scrolls). Not yet: files, notifications and texts, sound on the phone, the phone's sound and pen, GNOME, KDE at a real desk with a phone, and the shared keyboard and mouse driven from a real Windows computer at the desk | most rows, with a Galaxy A71 (2026-10), and the newer features with an OPPO phone on ColorOS 14 (2026-10-20 on); the phone as another screen driven from a script (2026-10-29); another computer's screen in a window between two servers on one computer (2026-10-29). Not yet: start at login, the tray menu by hand, single-window streaming, the phone's sound and its music in the media controls, the pen and gamepad from the phone into an app, the phone's window by hand (drops, paste, screenshots, recordings), and the shared keyboard and mouse at the desk (driving Linux, the phone with the real mouse, files dragged across, the sound following, another real computer's screen in a window) |
 
 The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 (Android 16) and an OPPO Reno8 (ColorOS 14).
 
@@ -513,6 +513,47 @@ journalctl --user -u pocketdesk -f
 The unit is `WantedBy=graphical-session.target`, so it starts at login and
 stops with the session. To run it without a login session (headless), enable
 lingering first: `sudo loginctl enable-linger $USER`.
+
+### KDE Plasma: No Dialog at All
+
+The server names itself to the desktop portal as `dev.pocketdesk.Pocketdesk`,
+the desktop file the .deb and the AUR package install. A build from source
+has none until its tray program has run on a desktop with the GlobalShortcuts
+portal: the tray then writes one in your own `~/.local/share/applications`
+that starts the app, never where a package installed one. Without either,
+Plasma's dialog calls it "an unidentifiable application".
+Plasma 6 can then allow it ahead, as it allows KRdp, so its screen-sharing
+dialog never shows.
+
+**Before you do:** this lets any program running as you share your screen and
+control the keyboard and mouse without asking, since the portal takes any
+program's word for its name. Prefer "Remember the screen-sharing grant",
+which asks once at the desk, unless no one is ever at the computer.
+
+```bash
+flatpak permission-set kde-authorized remote-desktop dev.pocketdesk.Pocketdesk yes
+# or, without flatpak installed, over D-Bus:
+gdbus call --session --dest org.freedesktop.impl.portal.PermissionStore \
+  --object-path /org/freedesktop/impl/portal/PermissionStore \
+  --method org.freedesktop.impl.portal.PermissionStore.SetPermission \
+  kde-authorized true remote-desktop dev.pocketdesk.Pocketdesk "['yes']"
+# to take it back:
+flatpak permission-remove kde-authorized remote-desktop dev.pocketdesk.Pocketdesk
+```
+
+(Without flatpak, the same `gdbus` call with `"['no']"` takes it back.) This covers the session the server
+opens when it cannot open uinput: the screen with the keyboard and mouse,
+under one grant. With uinput, the screen alone is shared, which Plasma asks
+about once; "Remember the screen-sharing grant" keeps that answer.
+
+**After updating from 0.8.2 or earlier**, GNOME and KDE ask once more, even
+with "Remember the screen-sharing grant" on: the grant kept before was for an
+unnamed program, and the portal keeps grants by name. Answer the dialog at
+the computer once after the update. Until then a computer with no one at it
+waits a minute at each session, or two where input goes through the portal
+(its dialog, then the screen's), and ends it ("No one answered the
+screen-sharing dialog"), and a dialog answered late leaves "The kept
+screen-sharing grant was not taken" in the server's log.
 
 ### Away From Home: Your Own Relay
 

@@ -17,6 +17,63 @@ pub const TOKEN_FILE: &str = "portal_restore_token";
 /// one kind of session is refused by the other.
 pub const REMOTE_TOKEN_FILE: &str = "portal_remote_token";
 
+/// The id the desktop portal knows Pocketdesk by: its desktop file's name,
+/// as the packages install it (`packaging/linux`).
+pub const APP_ID: &str = "dev.pocketdesk.Pocketdesk";
+
+/// Name this process to the desktop portal as Pocketdesk, before its first
+/// portal call. Unnamed, a host program is "an unidentifiable application"
+/// in KDE's dialog, its grants are kept for every unnamed program alike,
+/// and KDE's pre-authorization for remote control cannot name it alone
+/// (seen on Plasma 6.8, 2026-10-31). The portal names it only when the
+/// desktop file is installed; otherwise, or with a portal older than its
+/// host registry (1.19), it stays unnamed, as before. True when named.
+#[cfg(all(target_os = "linux", feature = "capture"))]
+pub async fn register_app() -> bool {
+    register(None).await
+}
+
+/// [`register_app`] on a D-Bus connection of the caller's own: the portal
+/// names each connection apart (the input capture keeps one of its own).
+#[cfg(all(target_os = "linux", feature = "capture"))]
+pub async fn register_app_on(connection: ashpd::zbus::Connection) -> bool {
+    register(Some(connection)).await
+}
+
+#[cfg(all(target_os = "linux", feature = "capture"))]
+async fn register(connection: Option<ashpd::zbus::Connection>) -> bool {
+    // In Flatpak or Snap the portal names the program by its package, and
+    // the registry is not asked (review N4: this had logged a name it never
+    // gave).
+    if ashpd::is_sandboxed() {
+        tracing::debug!("In a sandbox: the desktop portal names this program by its package");
+        return false;
+    }
+    let Ok(id) = ashpd::AppID::try_from(APP_ID) else {
+        return false;
+    };
+    let call = async {
+        match connection {
+            Some(connection) => ashpd::register_host_app_with_connection(connection, id).await,
+            None => ashpd::register_host_app(id).await,
+        }
+    };
+    match tokio::time::timeout(std::time::Duration::from_secs(3), call).await {
+        Ok(Ok(())) => {
+            tracing::info!("Named to the desktop portal as {APP_ID}");
+            true
+        }
+        Ok(Err(e)) => {
+            tracing::debug!("Not named to the desktop portal ({e}): its dialogs say so");
+            false
+        }
+        Err(_) => {
+            tracing::debug!("The desktop portal did not answer the naming in 3 s");
+            false
+        }
+    }
+}
+
 /// The longest token kept; the portal's are UUIDs.
 const MAX_TOKEN: usize = 256;
 
@@ -92,6 +149,26 @@ pub fn forget(state_dir: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_portal_id_is_the_desktop_file_the_packages_install() {
+        // The portal names the server only when a desktop file of this id
+        // is installed: the .deb and the AUR package install this one.
+        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../packaging/linux")
+            .join(format!("{APP_ID}.desktop"));
+        assert!(file.is_file(), "{} is missing", file.display());
+        for script in ["../packaging/linux/build-deb.sh", "../aur/PKGBUILD"] {
+            let text = std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(script),
+            )
+            .unwrap();
+            assert!(
+                text.contains(&format!("/usr/share/applications/{APP_ID}.desktop")),
+                "{script} does not install {APP_ID}.desktop"
+            );
+        }
+    }
 
     fn temp_dir(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("pd-grant-{name}-{}", std::process::id()));

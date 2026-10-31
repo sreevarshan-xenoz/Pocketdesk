@@ -16,9 +16,6 @@ use tracing::{debug, error, info, trace, warn};
 use super::capture::{CaptureSession, monitor_rect};
 use super::{StreamingConfig, VideoFrame};
 
-/// SPA_PARAM_Format property ID (from SPA param type enum).
-const SPA_PARAM_FORMAT: u32 = 0;
-
 /// Shared state between the PipeWire thread and stream callbacks.
 struct StreamUserData {
     frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
@@ -72,7 +69,7 @@ pub async fn start_capture(
     // come from one RemoteDesktop session, under one grant.
     // A desktop without RemoteDesktop, or one that refused it, still gets
     // its picture (N8 review); a dialog the owner cancelled is not asked
-    // again.
+    // again, nor one left unanswered unless a kept grant restores the screen.
     if crate::streaming::portal_input::wanted() {
         match start_remote_desktop_capture(
             config.clone(),
@@ -83,8 +80,18 @@ pub async fn start_capture(
         .await
         {
             Ok(session) => return Ok(session),
-            Err(e) if cancelled_by_owner(&e) => return Err(e),
-            Err(e) => warn!("No remote desktop session ({e:#}): the screen alone, with no input"),
+            Err(e) => {
+                let screen_token_saved = screen_grant
+                    .as_deref()
+                    .and_then(crate::portal_grant::read)
+                    .is_some();
+                match after_remote_failed(&e, screen_token_saved) {
+                    AfterRemote::GiveUp => return Err(e),
+                    AfterRemote::ScreenAlone => {
+                        warn!("No remote desktop session ({e:#}): the screen alone, with no input")
+                    }
+                }
+            }
         }
     }
 
@@ -140,13 +147,16 @@ pub async fn start_capture(
         // Step 3: Start capture and get PipeWire node ID
         debug!("Starting capture and waiting for PipeWire stream...");
         // The owner answers the dialog here the first time: room to read it.
+        let token_sent = token.is_some();
+        let asked = std::time::Instant::now();
         let response = tokio::time::timeout(
             START_WAIT,
             screencast.start(&session, None, Default::default()),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("No answer to the screen-sharing dialog within a minute"))?
+        .map_err(|_| anyhow::Error::new(NoAnswer))?
         .context("Failed to start capture")?;
+        note_slow_restore(token_sent, asked.elapsed());
 
         let streams = response
             .response()
@@ -239,17 +249,64 @@ fn spawn_pipewire_capture(
 /// and answers its dialog (N8 review: 10 s failed a slow first grant).
 const START_WAIT: Duration = Duration::from_secs(60);
 
-/// Whether `e` is the owner cancelling the portal's dialog, which is not
-/// asked again in another form.
-fn cancelled_by_owner(e: &anyhow::Error) -> bool {
-    e.chain().any(|cause| {
+/// The portal's dialog went unanswered for [`START_WAIT`].
+#[derive(Debug)]
+struct NoAnswer;
+
+impl std::fmt::Display for NoAnswer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(
+            "No one answered the screen-sharing dialog at the computer within a minute: \
+             someone there must allow it once (\"Remember the screen-sharing grant\" keeps it)",
+        )
+    }
+}
+
+impl std::error::Error for NoAnswer {}
+
+/// What follows a RemoteDesktop session that did not start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AfterRemote {
+    /// End the session with the error: no second dialog.
+    GiveUp,
+    /// Share the screen alone, with no input.
+    ScreenAlone,
+}
+
+/// Whether to fall back to the screen alone after the RemoteDesktop session
+/// failed with `e`. A cancelled dialog is never asked again. An unanswered
+/// one (no one at the desk) falls back only when a kept ScreenCast grant
+/// should restore with no dialog; without one, a second dialog would only
+/// double the wait to two minutes (KDE Plasma 6.8, 2026-10-31). A desktop
+/// without RemoteDesktop, or one that failed, still gets its picture.
+fn after_remote_failed(e: &anyhow::Error, screen_token_saved: bool) -> AfterRemote {
+    let cancelled = e.chain().any(|cause| {
         matches!(
             cause.downcast_ref::<ashpd::Error>(),
             Some(ashpd::Error::Response(
                 ashpd::desktop::ResponseError::Cancelled
             ))
         )
-    })
+    });
+    let unanswered = e.chain().any(|cause| cause.is::<NoAnswer>());
+    if cancelled || (unanswered && !screen_token_saved) {
+        AfterRemote::GiveUp
+    } else {
+        AfterRemote::ScreenAlone
+    }
+}
+
+/// A kept grant was sent but Start took long: the portal refused the token
+/// and asked at the desk instead (a revoked grant, or one kept under another
+/// app id, as after the update that named the server). Said once in the log,
+/// so a host that stalls with no one at it explains itself.
+fn note_slow_restore(token_sent: bool, took: Duration) {
+    if token_sent && took > Duration::from_secs(5) {
+        warn!(
+            "The kept screen-sharing grant was not taken ({}s to start): the desktop asked again",
+            took.as_secs()
+        );
+    }
 }
 
 /// What the portal is asked to do with its grant (N8).
@@ -323,15 +380,16 @@ async fn start_remote_desktop_capture(
         .map_err(|_| unavailable())?
         .context("Failed to select sources")?;
         // The owner answers the dialog here the first time: room to read it.
+        let token_sent = token.is_some();
+        let asked = std::time::Instant::now();
         let started =
             tokio::time::timeout(START_WAIT, remote.start(&session, None, Default::default()))
                 .await
-                .map_err(|_| {
-                    anyhow::anyhow!("No answer to the screen-sharing dialog within a minute")
-                })?
+                .map_err(|_| anyhow::Error::new(NoAnswer))?
                 .context("Failed to start the remote desktop session")?
                 .response()
                 .context("No response from the remote desktop start")?;
+        note_slow_restore(token_sent, asked.elapsed());
         if let (Some(dir), Some(token)) = (screen_grant.as_deref(), started.restore_token()) {
             match crate::portal_grant::write_remote(dir, token) {
                 Ok(()) => info!("Screen-sharing grant kept for the next session"),
@@ -486,10 +544,8 @@ fn run_pipewire_capture(
         .connect(None)
         .context("Failed to connect to PipeWire daemon")?;
 
-    // Create stream properties for video capture.
-    // The stream properties guide the format negotiation.
-    // We don't pass explicit format params to connect(); instead,
-    // we learn the negotiated format from the param_changed callback.
+    // Create stream properties for video capture. The formats are offered
+    // to connect() below; the one chosen comes in param_changed.
     let stream_props = pipewire::properties::properties! {
         *pipewire::keys::MEDIA_TYPE => "Video",
         *pipewire::keys::MEDIA_CATEGORY => "Capture",
@@ -515,17 +571,30 @@ fn run_pipewire_capture(
         .param_changed(|_stream, ud, id, param| {
             on_param_changed(id, param, ud);
         })
+        .state_changed(|_stream, ud, _old, new| {
+            if let Some(why) = stream_failed(&new) {
+                // A link that cannot agree a format (a portal offering none of
+                // BGRx and BGRA) or that breaks: said, and the capture ends,
+                // rather than an active stream with no frame (review N2).
+                error!("{why}");
+                ud.cancel.cancel();
+            }
+        })
         .process(|stream, ud| {
             on_process(stream, ud);
         })
         .register()
         .context("Failed to register stream listener")?;
 
-    // Connect the stream to the specific PipeWire node.
-    // We pass an empty params array -- the format will be negotiated
-    // automatically based on stream properties and server capabilities.
-    // The actual format is learned via the param_changed callback.
-    let mut params: [&libspa::pod::Pod; 0] = [];
+    // Connect the stream to the specific PipeWire node, offering the formats
+    // the encoder takes. A stream that offers none is never given one: the
+    // link stays unnegotiated and no frame ever comes (seen on KDE Plasma
+    // 6.8, 2026-10-31). Memory buffers, as no modifier is offered; the
+    // format chosen is learned in the param_changed callback.
+    let format = video_format_pod(config)?;
+    let format =
+        libspa::pod::Pod::from_bytes(&format).context("The capture's video format is not a pod")?;
+    let mut params = [format];
     stream
         .connect(
             libspa::utils::Direction::Input,
@@ -560,9 +629,82 @@ fn run_pipewire_capture(
     Ok(())
 }
 
+/// The `EnumFormat` the capture offers: raw video in the byte orders the
+/// encoder reads as `bgra` (BGRx first, as compositors share no alpha), any
+/// size, any rate up to 1000 fps, preferring the configured ones.
+fn video_format_pod(config: &StreamingConfig) -> Result<Vec<u8>> {
+    use libspa::param::format::{FormatProperties, MediaSubtype, MediaType};
+    use libspa::param::video::VideoFormat;
+    use libspa::utils::{Fraction, Rectangle};
+    let object = libspa::pod::object!(
+        libspa::utils::SpaTypes::ObjectParamFormat,
+        libspa::param::ParamType::EnumFormat,
+        libspa::pod::property!(FormatProperties::MediaType, Id, MediaType::Video),
+        libspa::pod::property!(FormatProperties::MediaSubtype, Id, MediaSubtype::Raw),
+        libspa::pod::property!(
+            FormatProperties::VideoFormat,
+            Choice,
+            Enum,
+            Id,
+            VideoFormat::BGRx,
+            VideoFormat::BGRx,
+            VideoFormat::BGRA
+        ),
+        libspa::pod::property!(
+            FormatProperties::VideoSize,
+            Choice,
+            Range,
+            Rectangle,
+            Rectangle {
+                width: config.width.max(1),
+                height: config.height.max(1)
+            },
+            Rectangle {
+                width: 1,
+                height: 1
+            },
+            Rectangle {
+                width: 16384,
+                height: 16384
+            }
+        ),
+        libspa::pod::property!(
+            FormatProperties::VideoFramerate,
+            Choice,
+            Range,
+            Fraction,
+            Fraction {
+                num: config.fps.max(1),
+                denom: 1
+            },
+            Fraction { num: 0, denom: 1 },
+            Fraction {
+                num: 1000,
+                denom: 1
+            }
+        ),
+    );
+    let (cursor, _) = libspa::pod::serialize::PodSerializer::serialize(
+        std::io::Cursor::new(Vec::new()),
+        &libspa::pod::Value::Object(object),
+    )
+    .map_err(|e| anyhow::anyhow!("The capture's video format did not serialize: {e:?}"))?;
+    Ok(cursor.into_inner())
+}
+
+/// What to say when the stream reached `state` and failed.
+fn stream_failed(state: &pipewire::stream::StreamState) -> Option<String> {
+    match state {
+        pipewire::stream::StreamState::Error(why) => Some(format!(
+            "The screen's PipeWire stream failed ({why}); it offers BGRx and BGRA only"
+        )),
+        _ => None,
+    }
+}
+
 /// Handle the param_changed callback to learn the negotiated video format.
 fn on_param_changed(id: u32, param: Option<&libspa::pod::Pod>, user_data: &StreamUserData) {
-    if id != SPA_PARAM_FORMAT {
+    if id != libspa::param::ParamType::Format.as_raw() {
         return;
     }
 
@@ -571,13 +713,10 @@ fn on_param_changed(id: u32, param: Option<&libspa::pod::Pod>, user_data: &Strea
         return;
     };
 
-    // Parse the negotiated format
-    let mut video_info = libspa::param::video::VideoInfoRaw::new();
-    if video_info.parse(param).is_err() {
+    let Some(video_info) = negotiated(id, param) else {
         warn!("Failed to parse video format from param_changed");
         return;
-    }
-
+    };
     let format = video_info.format();
     let size = video_info.size();
     let framerate = video_info.framerate();
@@ -590,6 +729,46 @@ fn on_param_changed(id: u32, param: Option<&libspa::pod::Pod>, user_data: &Strea
     // Update the actual dimensions for frame capture
     user_data.width.store(size.width, Ordering::Relaxed);
     user_data.height.store(size.height, Ordering::Relaxed);
+}
+
+/// The video format a `param_changed` of `id` settled on, when it is the
+/// stream's Format (`SPA_PARAM_Format`, 4; this was checked against 0,
+/// `SPA_PARAM_Invalid`, so the frames kept the configured size whatever the
+/// compositor sent, 2026-10-31).
+fn negotiated(id: u32, param: &libspa::pod::Pod) -> Option<libspa::param::video::VideoInfoRaw> {
+    if id != libspa::param::ParamType::Format.as_raw() {
+        return None;
+    }
+    let mut video_info = libspa::param::video::VideoInfoRaw::new();
+    video_info.parse(param).ok()?;
+    Some(video_info)
+}
+
+/// Where a chunk's pixels lie in its mapped data of `map_len` bytes, and
+/// their rows' stride: from the chunk's offset, at most its size; none for
+/// a chunk marked corrupted or empty. A stride of zero or below (bottom-up
+/// rows) is read as tightly packed rows of `width` 4-byte pixels.
+fn chunk_pixels(
+    map_len: usize,
+    offset: u32,
+    size: u32,
+    stride: i32,
+    width: u32,
+    corrupted: bool,
+) -> Option<(std::ops::Range<usize>, u32)> {
+    if corrupted || size == 0 {
+        return None;
+    }
+    let start = offset as usize;
+    let end = start.checked_add(size as usize)?.min(map_len);
+    if start >= end {
+        return None;
+    }
+    let stride = u32::try_from(stride)
+        .ok()
+        .filter(|&s| s > 0)
+        .unwrap_or_else(|| width.saturating_mul(4));
+    Some((start..end, stride))
 }
 
 /// Handle the process callback -- dequeue frames and send them through the channel.
@@ -612,14 +791,18 @@ fn on_process(stream: &pipewire::stream::Stream, user_data: &StreamUserData) {
 
     let data = &mut datas[0];
 
-    // Get chunk info first (size and stride)
-    let (size, stride) = {
+    // Get chunk info first (where the pixels are, and the rows' stride)
+    let (offset, size, stride, corrupted) = {
         let chunk = data.chunk();
-        (chunk.size() as usize, chunk.stride())
+        (
+            chunk.offset(),
+            chunk.size(),
+            chunk.stride(),
+            chunk
+                .flags()
+                .contains(libspa::buffer::ChunkFlags::CORRUPTED),
+        )
     };
-    if size == 0 {
-        return;
-    }
 
     // Then get the data slice
     let Some(data_slice) = data.data() else {
@@ -627,16 +810,17 @@ fn on_process(stream: &pipewire::stream::Stream, user_data: &StreamUserData) {
         return;
     };
 
-    if data_slice.is_empty() {
-        return;
-    }
-
     // Get the actual negotiated dimensions
     let width = user_data.width.load(Ordering::Relaxed);
     let height = user_data.height.load(Ordering::Relaxed);
 
-    // Copy the frame data (cap at actual data slice length)
-    let frame_data = data_slice[..size.min(data_slice.len())].to_vec();
+    let Some((range, stride)) =
+        chunk_pixels(data_slice.len(), offset, size, stride, width, corrupted)
+    else {
+        return;
+    };
+    let size = range.len();
+    let frame_data = data_slice[range].to_vec();
 
     // Update frame counter
     let count = user_data.frame_count.fetch_add(1, Ordering::Relaxed);
@@ -649,7 +833,7 @@ fn on_process(stream: &pipewire::stream::Stream, user_data: &StreamUserData) {
         data: frame_data,
         width,
         height,
-        stride: stride as u32,
+        stride,
         timestamp: Instant::now(),
         gpu: None,
     };
@@ -905,6 +1089,183 @@ fn run_x11_capture_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_capture_offers_raw_bgr_video_at_the_configured_size_and_rate() {
+        use libspa::param::format::{FormatProperties, MediaSubtype, MediaType};
+        use libspa::param::video::VideoFormat;
+        use libspa::pod::{ChoiceValue, Value};
+        use libspa::utils::{Choice, ChoiceEnum, Fraction, Id, Rectangle};
+        let config = StreamingConfig {
+            width: 1280,
+            height: 720,
+            fps: 30,
+            ..StreamingConfig::default()
+        };
+        let bytes = video_format_pod(&config).unwrap();
+        let (_, value) =
+            libspa::pod::deserialize::PodDeserializer::deserialize_any_from(&bytes).unwrap();
+        let Value::Object(object) = value else {
+            panic!("not an object: {value:?}");
+        };
+        assert_eq!(object.id, libspa::param::ParamType::EnumFormat.as_raw());
+        let find = |key: FormatProperties| {
+            object
+                .properties
+                .iter()
+                .find(|p| p.key == key.as_raw())
+                .map(|p| p.value.clone())
+                .unwrap_or_else(|| panic!("no {key:?}"))
+        };
+        assert_eq!(
+            find(FormatProperties::MediaType),
+            Value::Id(Id(MediaType::Video.as_raw()))
+        );
+        assert_eq!(
+            find(FormatProperties::MediaSubtype),
+            Value::Id(Id(MediaSubtype::Raw.as_raw()))
+        );
+        let Value::Choice(ChoiceValue::Id(Choice(
+            _,
+            ChoiceEnum::Enum {
+                default,
+                alternatives,
+            },
+        ))) = find(FormatProperties::VideoFormat)
+        else {
+            panic!("the formats are not an enum");
+        };
+        assert_eq!(default, Id(VideoFormat::BGRx.as_raw()));
+        assert!(alternatives.contains(&Id(VideoFormat::BGRA.as_raw())));
+        let Value::Choice(ChoiceValue::Rectangle(Choice(_, ChoiceEnum::Range { default, .. }))) =
+            find(FormatProperties::VideoSize)
+        else {
+            panic!("the size is not a range");
+        };
+        assert_eq!(
+            default,
+            Rectangle {
+                width: 1280,
+                height: 720
+            }
+        );
+        let Value::Choice(ChoiceValue::Fraction(Choice(_, ChoiceEnum::Range { default, min, .. }))) =
+            find(FormatProperties::VideoFramerate)
+        else {
+            panic!("the rate is not a range");
+        };
+        assert_eq!(default, Fraction { num: 30, denom: 1 });
+        assert_eq!(min, Fraction { num: 0, denom: 1 });
+    }
+
+    #[test]
+    fn the_size_the_compositor_settled_on_is_read_from_the_format_param() {
+        use libspa::param::ParamType;
+        use libspa::param::format::{FormatProperties, MediaSubtype, MediaType};
+        use libspa::param::video::VideoFormat;
+        use libspa::utils::{Fraction, Rectangle};
+        let object = libspa::pod::object!(
+            libspa::utils::SpaTypes::ObjectParamFormat,
+            ParamType::Format,
+            libspa::pod::property!(FormatProperties::MediaType, Id, MediaType::Video),
+            libspa::pod::property!(FormatProperties::MediaSubtype, Id, MediaSubtype::Raw),
+            libspa::pod::property!(FormatProperties::VideoFormat, Id, VideoFormat::BGRx),
+            libspa::pod::property!(
+                FormatProperties::VideoSize,
+                Rectangle,
+                Rectangle {
+                    width: 1280,
+                    height: 720
+                }
+            ),
+            libspa::pod::property!(
+                FormatProperties::VideoFramerate,
+                Fraction,
+                Fraction { num: 0, denom: 1 }
+            ),
+        );
+        let (cursor, _) = libspa::pod::serialize::PodSerializer::serialize(
+            std::io::Cursor::new(Vec::new()),
+            &libspa::pod::Value::Object(object),
+        )
+        .unwrap();
+        let bytes = cursor.into_inner();
+        let pod = libspa::pod::Pod::from_bytes(&bytes).unwrap();
+
+        let info = negotiated(ParamType::Format.as_raw(), pod).expect("the format");
+        assert_eq!(
+            info.size(),
+            Rectangle {
+                width: 1280,
+                height: 720
+            }
+        );
+        assert_eq!(info.format(), VideoFormat::BGRx);
+        // Only the Format param is the one settled on.
+        assert!(negotiated(ParamType::EnumFormat.as_raw(), pod).is_none());
+        assert!(negotiated(0, pod).is_none());
+    }
+
+    #[test]
+    fn after_a_failed_remote_session_the_screen_alone_only_when_it_asks_no_one() {
+        use AfterRemote::{GiveUp, ScreenAlone};
+        let unanswered = anyhow::Error::new(NoAnswer).context("Failed to start");
+        // No one at the desk and no kept screen grant: a second dialog
+        // would only double the wait.
+        assert_eq!(after_remote_failed(&unanswered, false), GiveUp);
+        // A kept ScreenCast grant restores with no dialog: the picture.
+        assert_eq!(after_remote_failed(&unanswered, true), ScreenAlone);
+        // The owner cancelled: never asked again, kept grant or not.
+        let cancelled = anyhow::Error::new(ashpd::Error::Response(
+            ashpd::desktop::ResponseError::Cancelled,
+        ))
+        .context("Failed to start");
+        assert_eq!(after_remote_failed(&cancelled, false), GiveUp);
+        assert_eq!(after_remote_failed(&cancelled, true), GiveUp);
+        // No RemoteDesktop portal, or one that failed: the screen alone.
+        let failed =
+            anyhow::Error::new(ashpd::Error::Response(ashpd::desktop::ResponseError::Other));
+        assert_eq!(after_remote_failed(&failed, false), ScreenAlone);
+        let timed_out = anyhow::anyhow!("Portal request timed out");
+        assert_eq!(after_remote_failed(&timed_out, false), ScreenAlone);
+    }
+
+    #[test]
+    fn a_chunks_pixels_start_at_its_offset_and_a_bad_stride_is_packed_rows() {
+        // Offset and size inside the map, stride as given.
+        assert_eq!(
+            chunk_pixels(10_000, 64, 4096, 512, 128, false),
+            Some((64..4160, 512))
+        );
+        // A size past the map's end is cut at the end.
+        assert_eq!(
+            chunk_pixels(1000, 100, 4096, 512, 128, false),
+            Some((100..1000, 512))
+        );
+        // Zero or negative (bottom-up) stride: packed rows of the width.
+        assert_eq!(
+            chunk_pixels(4096, 0, 4096, 0, 128, false),
+            Some((0..4096, 512))
+        );
+        assert_eq!(
+            chunk_pixels(4096, 0, 4096, -512, 128, false),
+            Some((0..4096, 512))
+        );
+        // Corrupted, empty, or an offset past the map: no frame.
+        assert_eq!(chunk_pixels(4096, 0, 4096, 512, 128, true), None);
+        assert_eq!(chunk_pixels(4096, 0, 0, 512, 128, false), None);
+        assert_eq!(chunk_pixels(4096, 5000, 10, 512, 128, false), None);
+    }
+
+    #[test]
+    fn a_failed_stream_is_said_and_others_are_not() {
+        use pipewire::stream::StreamState;
+        let why = stream_failed(&StreamState::Error("no more input formats".into()))
+            .expect("an error is said");
+        assert!(why.contains("no more input formats"));
+        assert_eq!(stream_failed(&StreamState::Streaming), None);
+        assert_eq!(stream_failed(&StreamState::Paused), None);
+    }
 
     #[test]
     fn pick_stream_matches_position() {
