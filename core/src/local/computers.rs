@@ -646,7 +646,7 @@ pub fn update(state_dir: &Path, change: impl FnOnce(&mut ComputersFile)) -> io::
     let tmp = path.with_extension("json.tmp");
     std::fs::create_dir_all(state_dir)?;
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// Leave a request for the server (the app's side).
@@ -665,7 +665,7 @@ pub fn request(state_dir: &Path, ask: ComputerAsk, now_unix: u64) -> io::Result<
     let json = serde_json::to_string(&request).map_err(io::Error::other)?;
     let tmp = file.with_extension("json.tmp");
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    if let Err(e) = std::fs::rename(&tmp, &file) {
+    if let Err(e) = crate::atomic_file::replace(&tmp, &file) {
         // Not left behind (BD3 review): a Pair request holds the PIN.
         let _ = std::fs::remove_file(&tmp);
         return Err(e);

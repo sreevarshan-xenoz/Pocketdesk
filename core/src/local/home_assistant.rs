@@ -111,7 +111,7 @@ pub fn write_status(state_dir: &Path, status: &Status) -> io::Result<()> {
     let tmp = path.with_extension("json.tmp");
     std::fs::create_dir_all(state_dir)?;
     std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// Remove the status file: the bridge is off.

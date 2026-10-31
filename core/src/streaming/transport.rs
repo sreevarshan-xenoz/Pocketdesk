@@ -195,10 +195,10 @@ impl CertManager {
                 let key_tmp = key_path.with_extension(format!("key.{}.tmp", std::process::id()));
                 // The private half of the TOFU-pinned identity: owner-only.
                 crate::secure_fs::write_private(&key_tmp, &key)?;
-                std::fs::rename(&key_tmp, &key_path)?;
+                crate::atomic_file::replace(&key_tmp, &key_path)?;
                 let cert_tmp = cert_path.with_extension(format!("der.{}.tmp", std::process::id()));
                 std::fs::write(&cert_tmp, &cert)?;
-                std::fs::rename(&cert_tmp, &cert_path)?;
+                crate::atomic_file::replace(&cert_tmp, &cert_path)?;
                 (cert, key)
             }
         };
@@ -494,7 +494,7 @@ fn update_pins(
         uuid::Uuid::new_v4()
     ));
     std::fs::write(&tmp, serde_json::to_string_pretty(&pins)?)?;
-    if let Err(e) = std::fs::rename(&tmp, path) {
+    if let Err(e) = crate::atomic_file::replace(&tmp, path) {
         let _ = std::fs::remove_file(&tmp);
         return Err(e).context("Failed to save known peers");
     }

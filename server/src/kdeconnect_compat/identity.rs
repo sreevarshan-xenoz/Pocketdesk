@@ -58,7 +58,7 @@ impl CompatIdentity {
             } else {
                 std::fs::write(&tmp, bytes)?;
             }
-            std::fs::rename(&tmp, path)?;
+            pocketdesk_core::atomic_file::replace(&tmp, path)?;
             Ok(())
         };
         write(&id_path, id.as_bytes(), false)?;

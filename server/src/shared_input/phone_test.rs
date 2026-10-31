@@ -243,9 +243,7 @@ fn write_whole(path: &Path, json: &str) -> std::io::Result<()> {
     }
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })
+    pocketdesk_core::atomic_file::replace(&tmp, path)
 }
 
 /// The command: check the script, ask the running server to send it to

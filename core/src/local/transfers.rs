@@ -90,7 +90,7 @@ pub fn write(state_dir: &Path, mirror: &Mirror) -> io::Result<()> {
     let tmp = path.with_extension("json.tmp");
     std::fs::create_dir_all(state_dir)?;
     std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// A request to stop the transfer `transfer`.
@@ -125,7 +125,7 @@ pub fn request_cancel(
     let json = serde_json::to_string(&request).map_err(io::Error::other)?;
     let tmp = file.with_extension("json.tmp");
     std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, &file)?;
+    crate::atomic_file::replace(&tmp, &file)?;
     Ok(request)
 }
 

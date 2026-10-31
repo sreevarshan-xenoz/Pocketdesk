@@ -68,7 +68,7 @@ fn write(state_dir: &Path, answers: Vec<Outcome>) -> io::Result<()> {
     let json = serde_json::to_string(&AnswersFile { answers }).map_err(io::Error::other)?;
     // What was answered, to whom: owner-only.
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// How far along a state is: an answer only moves forward (E1 review), so

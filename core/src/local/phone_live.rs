@@ -61,7 +61,7 @@ fn write(state_dir: &Path, cards: Vec<LiveCard>) -> io::Result<()> {
     std::fs::create_dir_all(state_dir)?;
     // What a phone's apps are doing: owner-only.
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// Keep `card` in place of its earlier one; whether it is new (its first

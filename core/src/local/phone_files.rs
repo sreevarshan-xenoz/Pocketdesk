@@ -65,7 +65,7 @@ pub fn keep(
     std::fs::create_dir_all(state_dir)?;
     // What is on a phone: owner-only.
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// Drop them all (at start: they describe a run that ended).
@@ -125,7 +125,7 @@ pub fn request(
     let json = serde_json::to_string(&request).map_err(io::Error::other)?;
     let tmp = file.with_extension("json.tmp");
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &file)?;
+    crate::atomic_file::replace(&tmp, &file)?;
     Ok(request)
 }
 

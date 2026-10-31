@@ -102,7 +102,7 @@ fn write(state_dir: &Path, files: Vec<SentFile>) -> io::Result<()> {
     let tmp = path.with_extension("json.tmp");
     std::fs::create_dir_all(state_dir)?;
     std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 #[cfg(test)]

@@ -114,7 +114,7 @@ pub fn write(state_dir: &Path, phones: &BTreeMap<String, PhoneSwitches>) -> io::
     let tmp = path.with_extension("json.tmp");
     std::fs::create_dir_all(state_dir)?;
     std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// The packet a phone asks what this computer allows it with (M2): `{}`

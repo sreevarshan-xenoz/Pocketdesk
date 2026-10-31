@@ -547,7 +547,7 @@ fn save(made: &Made) {
     if let Ok(json) = serde_json::to_string(&made) {
         let tmp = dir.join(format!("{STATE_FILE}.tmp"));
         if pocketdesk_core::secure_fs::write_private(&tmp, json.as_bytes()).is_ok() {
-            let _ = std::fs::rename(&tmp, dir.join(STATE_FILE));
+            let _ = pocketdesk_core::atomic_file::replace(&tmp, dir.join(STATE_FILE));
         }
     }
 }

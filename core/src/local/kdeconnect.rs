@@ -60,7 +60,7 @@ pub fn record(state_dir: &Path, device: SeenDevice) -> io::Result<()> {
     let tmp = path.with_extension("json.tmp");
     std::fs::create_dir_all(state_dir)?;
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// Ask the server to look for devices for `secs` from `now_unix` (the

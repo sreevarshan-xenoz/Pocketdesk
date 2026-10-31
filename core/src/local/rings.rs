@@ -35,7 +35,7 @@ pub fn request(state_dir: &Path, device_id: &str, now_unix: u64) -> io::Result<R
     let json = serde_json::to_string(&request).map_err(io::Error::other)?;
     let tmp = file.with_extension("json.tmp");
     std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, &file)?;
+    crate::atomic_file::replace(&tmp, &file)?;
     Ok(request)
 }
 

@@ -74,9 +74,7 @@ fn write(state_dir: &Path, apps: Vec<MutedApp>) -> io::Result<()> {
     ));
     std::fs::create_dir_all(state_dir)?;
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// Change the list under its lock (K2b review: the desktop app and the

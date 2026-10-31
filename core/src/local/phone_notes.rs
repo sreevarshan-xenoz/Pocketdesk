@@ -79,7 +79,7 @@ fn write(state_dir: &Path, notes: Vec<PhoneNote>) -> io::Result<()> {
     std::fs::create_dir_all(state_dir)?;
     // What a phone's notifications say: owner-only, as texts are.
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// Keep `note`, replacing the phone's earlier one of the same key; past
@@ -222,7 +222,7 @@ pub fn request(
     let tmp = file.with_extension("json.tmp");
     // A reply is what the person typed: owner-only.
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &file)?;
+    crate::atomic_file::replace(&tmp, &file)?;
     Ok(request)
 }
 

@@ -2,6 +2,7 @@
 //!
 //! Shared protocol types and cross-platform logic.
 
+pub mod atomic_file;
 pub mod capabilities;
 pub mod error;
 pub mod input;

@@ -968,7 +968,8 @@ pub fn load_or_create_device_key(path: &std::path::Path) -> Result<iroh::SecretK
     let tmp = std::path::PathBuf::from(tmp);
     crate::secure_fs::write_private(&tmp, &key.to_bytes())
         .with_context(|| format!("writing {}", tmp.display()))?;
-    std::fs::rename(&tmp, path).with_context(|| format!("placing {}", path.display()))?;
+    crate::atomic_file::replace(&tmp, path)
+        .with_context(|| format!("placing {}", path.display()))?;
     Ok(key)
 }
 

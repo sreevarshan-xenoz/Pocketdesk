@@ -240,7 +240,7 @@ fn write_private_json<T: Serialize>(path: &Path, value: &T) -> io::Result<()> {
         std::fs::create_dir_all(dir)?;
     }
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, path)
+    crate::atomic_file::replace(&tmp, path)
 }
 
 /// The paired devices. A missing file is none; one that does not read is
@@ -354,7 +354,7 @@ pub fn request(state_dir: &Path, ask: KdeAsk, now_unix: u64) -> io::Result<KdeRe
     let json = serde_json::to_string(&request).map_err(io::Error::other)?;
     let tmp = file.with_extension("json.tmp");
     std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, &file)?;
+    crate::atomic_file::replace(&tmp, &file)?;
     Ok(request)
 }
 

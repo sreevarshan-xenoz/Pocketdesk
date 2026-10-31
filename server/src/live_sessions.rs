@@ -81,7 +81,7 @@ fn write_live_json(json: &str) -> anyhow::Result<()> {
     }
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, &path)?;
+    pocketdesk_core::atomic_file::replace(&tmp, &path)?;
     Ok(())
 }
 

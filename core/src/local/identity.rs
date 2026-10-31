@@ -28,7 +28,7 @@ pub fn write_endpoint(state_dir: &Path, body: &serde_json::Value) -> io::Result<
     let path = state_dir.join(ENDPOINT_FILE);
     let tmp = state_dir.join(format!("{ENDPOINT_FILE}.tmp"));
     std::fs::write(&tmp, serde_json::to_vec(body)?)?;
-    std::fs::rename(&tmp, path)
+    crate::atomic_file::replace(&tmp, path)
 }
 
 /// The endpoint the server last recorded, if any.

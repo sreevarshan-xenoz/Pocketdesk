@@ -302,9 +302,7 @@ pub fn update(state_dir: &Path, change: impl FnOnce(&mut ScreensFile)) -> io::Re
     let tmp = path.with_extension("json.tmp");
     std::fs::create_dir_all(state_dir)?;
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// `bytes` as `name` in `state_dir`, written whole (a reader never sees it
@@ -314,9 +312,7 @@ fn write_whole(state_dir: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
     let tmp = path.with_extension("json.tmp");
     std::fs::create_dir_all(state_dir)?;
     crate::secure_fs::write_private(&tmp, bytes)?;
-    std::fs::rename(&tmp, &path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// Where the owner put each computer (the Keyboard and mouse page's
@@ -638,9 +634,7 @@ pub fn request(state_dir: &Path, ask: ShareAsk, now_unix: u64) -> io::Result<Sha
     let json = serde_json::to_string(&request).map_err(io::Error::other)?;
     let tmp = file.with_extension("json.tmp");
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &file).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })?;
+    crate::atomic_file::replace(&tmp, &file)?;
     Ok(request)
 }
 

@@ -134,7 +134,7 @@ pub fn request_kick(state_dir: &Path, target: &str, now_unix: u64) -> io::Result
     let name = uuid::Uuid::new_v4().to_string();
     let tmp = dir.join(format!("{name}.tmp"));
     std::fs::write(&tmp, format!("{target}\n{now_unix}\n"))?;
-    std::fs::rename(tmp, dir.join(format!("{name}.kick")))
+    crate::atomic_file::replace(tmp, dir.join(format!("{name}.kick")))
 }
 
 /// Ask the running server to end the sessions of the device `device_id`
@@ -152,7 +152,7 @@ pub fn request_kick_device(state_dir: &Path, device_id: &str, now_unix: u64) -> 
     let name = uuid::Uuid::new_v4().to_string();
     let tmp = dir.join(format!("{name}.tmp"));
     std::fs::write(&tmp, format!("{device_id}\n{now_unix}\n"))?;
-    std::fs::rename(tmp, dir.join(format!("{name}.device")))
+    crate::atomic_file::replace(tmp, dir.join(format!("{name}.device")))
 }
 
 /// The devices of every fresh [`request_kick_device`], each taken once.
@@ -219,7 +219,7 @@ pub fn request_control(state_dir: &Path, session: u64, now_unix: u64) -> io::Res
     let name = format!("{}.json", uuid::Uuid::new_v4());
     let tmp = dir.join(format!("{name}.tmp"));
     std::fs::write(&tmp, body)?;
-    std::fs::rename(tmp, dir.join(name))
+    crate::atomic_file::replace(tmp, dir.join(name))
 }
 
 /// The sessions named in fresh control requests, oldest request first;

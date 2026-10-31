@@ -1026,7 +1026,7 @@ impl TrustStore {
         let tmp = std::path::PathBuf::from(tmp);
         std::fs::write(&tmp, bytes)
             .with_context(|| format!("failed to write {}", tmp.display()))?;
-        std::fs::rename(&tmp, &self.path)
+        crate::atomic_file::replace(&tmp, &self.path)
             .with_context(|| format!("failed to replace {}", self.path.display()))?;
         Ok(())
     }
@@ -1340,6 +1340,48 @@ mod tests {
         let reloaded = TrustStore::load_or_create(&path).unwrap();
         assert_eq!(reloaded.permissions("desk"), DevicePermissions::computer());
         let _ = std::fs::remove_file(path);
+    }
+
+    /// A revoke while another program (a scan, an editor) holds the trust
+    /// store open without sharing delete: on Windows the replace waits the
+    /// handle out instead of failing with "Access is denied" and leaving
+    /// the device trusted, and no temp copy is left behind.
+    #[cfg(windows)]
+    #[test]
+    fn a_revoke_lands_while_another_handle_holds_the_store() {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_READ: u32 = 1;
+        let dir = std::env::temp_dir().join(format!(
+            "ll-trust-held-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("trusted_devices.json");
+        TrustStore::update(&path, |s| s.trust_device("lost-phone")).unwrap();
+        let holder = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(&path)
+            .unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            drop(holder);
+        });
+        TrustStore::update(&path, |s| s.untrust_device("lost-phone")).unwrap();
+        release.join().unwrap();
+        assert!(
+            !TrustStore::load_or_create(&path)
+                .unwrap()
+                .is_trusted("lost-phone")
+        );
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn temp_store_path(tag: &str) -> PathBuf {

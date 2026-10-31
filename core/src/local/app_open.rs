@@ -55,7 +55,7 @@ pub fn request(state_dir: &Path, page: &str, phone: Option<&str>, now_unix: u64)
     std::fs::create_dir_all(state_dir)?;
     let json = serde_json::to_string(&request).map_err(io::Error::other)?;
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// The request waiting, taken (removed); `None` when there is none, or it

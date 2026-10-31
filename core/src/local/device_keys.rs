@@ -146,9 +146,7 @@ fn write(state_dir: &Path, devices: HashMap<String, DeviceKeys>) -> io::Result<(
     file.write_all(json.as_bytes())?;
     file.sync_all()?;
     drop(file);
-    std::fs::rename(&tmp, &path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 fn lock(state_dir: &Path) -> io::Result<StoreLock> {

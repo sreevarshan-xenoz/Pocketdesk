@@ -431,7 +431,7 @@ pub fn write_window(state_dir: &Path, window: u8, view: &ViewFile) -> io::Result
     let tmp = path.with_extension("json.tmp");
     std::fs::create_dir_all(state_dir)?;
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// The first window's view ended: forget it, if it is still the one with

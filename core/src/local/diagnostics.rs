@@ -93,7 +93,7 @@ pub fn write_wan_status(state_dir: &Path, status: &WanStatus) -> std::io::Result
     std::fs::create_dir_all(state_dir)?;
     let tmp = state_dir.join(format!("{WAN_STATUS_FILE}.tmp"));
     std::fs::write(&tmp, serde_json::to_vec(status)?)?;
-    std::fs::rename(&tmp, state_dir.join(WAN_STATUS_FILE))
+    crate::atomic_file::replace(&tmp, state_dir.join(WAN_STATUS_FILE))
 }
 
 /// The server's last measurement, if it made one.
