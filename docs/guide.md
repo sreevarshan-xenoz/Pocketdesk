@@ -37,7 +37,7 @@ Tailscale is not required. It carries everything, adds a second encrypted layer 
 
 ## What works where
 
-The desktop end runs on Linux and Windows; the phone end is the Android app. It describes 0.8.3 and what has merged to `main` since (PRs #592 to #598: the portable Linux tarball, the Linux firewall row, shared input's receiving end, and the OpenH264 fallback), which ships with the next release. The last row says what a person has run on real hardware (dates and details in [the checklist](device-verification-checklist.md)); everything else is unit- or integration-tested only.
+The desktop end runs on Linux and Windows; the phone end is the Android app. It describes 0.8.3 and what has merged to `main` since (PRs #592 to #598, among them: the portable Linux tarball, the Linux firewall row, shared input's receiving end, and the OpenH264 fallback), which ships with the next release. The last row says what a person has run on real hardware (dates and details in [the checklist](device-verification-checklist.md)); everything else is unit- or integration-tested only.
 
 | | Linux host | Windows host |
 |---|---|---|
