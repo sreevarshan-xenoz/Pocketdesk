@@ -650,6 +650,11 @@ impl Channel {
                 .map_err(|e| format!("not sent: {e}"));
         }
         if let Some(ahead) = ahead {
+            // The move and its click are queued both or neither: one slot
+            // left would take the move and refuse the click.
+            if self.stream.as_ref().is_some_and(|f| f.capacity() < 2) {
+                return Err("the other computer is not taking shared input".to_string());
+            }
             self.frame(&ahead)?;
         }
         self.frame(msg)
