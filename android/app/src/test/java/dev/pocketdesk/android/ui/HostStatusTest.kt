@@ -74,4 +74,22 @@ class HostStatusTest {
         org.junit.Assert.assertEquals(HostStatus.Ago.Days(6), HostStatus.ago(now - (7 * 24 * 60 - 1) * min, now))
         org.junit.Assert.assertEquals(HostStatus.Ago.LongAgo, HostStatus.ago(now - 7 * 24 * 60 * min, now))
     }
+
+    /** A "No longer paired" card offers its next steps instead of buttons the computer turns down. */
+    @Test
+    fun `an unpaired card offers Pair again and Remove`() {
+        assertEquals(
+            listOf(HostStatus.Button.PAIR_AGAIN, HostStatus.Button.REMOVE),
+            HostStatus.buttons(paired = true, unpairedByIt = true),
+        )
+    }
+
+    @Test
+    fun `paired or never paired cards keep Connect, Remote and Show screen`() {
+        val usual = listOf(HostStatus.Button.CONNECT, HostStatus.Button.REMOTE, HostStatus.Button.CAST)
+        assertEquals(usual, HostStatus.buttons(paired = true, unpairedByIt = false))
+        // Never paired here: Connect brings up pairing as before.
+        assertEquals(usual, HostStatus.buttons(paired = false, unpairedByIt = false))
+        assertEquals(usual, HostStatus.buttons(paired = false, unpairedByIt = true))
+    }
 }
