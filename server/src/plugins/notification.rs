@@ -2139,7 +2139,8 @@ mod tests {
     /// for its phone; an unknown tag, none.
     #[test]
     fn a_notification_closed_here_is_cleared_on_its_phone() {
-        let dir = crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
+        let dir: &std::path::Path = &_state;
         std::fs::create_dir_all(dir).unwrap();
         let tag = tag_for("phone-l1", "0|com.chat|7|null|10");
         remember_note(&tag, "phone-l1", "0|com.chat|7|null|10");
@@ -2190,7 +2191,8 @@ mod tests {
     /// the case of its name.
     #[test]
     fn a_muted_app_is_muted_here() {
-        let dir = crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
+        let dir: &std::path::Path = &_state;
         std::fs::create_dir_all(dir).unwrap();
         assert!(!muted_here("Mail (K2b test)"));
         pocketdesk_core::local::muted_apps::mute(dir, "Mail (K2b test)", 1).unwrap();
@@ -2213,7 +2215,8 @@ mod tests {
     /// phone and waiting, and a word out of bounds is dropped.
     #[tokio::test]
     async fn a_phone_s_word_is_kept_only_for_its_own_answer() {
-        let dir = crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
+        let dir: &std::path::Path = &_state;
         std::fs::create_dir_all(dir).unwrap();
         let sent = |id: &str, device: &str| answers::Outcome {
             id: id.to_string(),

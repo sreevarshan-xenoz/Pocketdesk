@@ -1718,7 +1718,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_folder_send_says_what_it_left_out() {
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         let dir = temp_dir("deliver-folder-note");
         let root = dir.join("Notes");
         std::fs::create_dir_all(&root).unwrap();
@@ -1744,7 +1744,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_asked_folders_offers_remember_where_they_must_stay() {
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         let dir = temp_dir("asked-within");
         let root = folder_of_two(&dir, "Kept");
         let phone = Conn::new("phone-within", true);
@@ -1772,7 +1772,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_folder_the_phone_asks_for_is_answered_then_offered_to_it() {
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         let dir = temp_dir("asked-folder");
         let root = folder_of_two(&dir, "Notes");
         let phone = Conn::new("phone-asks", true);
@@ -1798,7 +1798,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_phone_may_have_two_folders_on_the_way_and_no_more() {
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         let dir = temp_dir("asked-busy");
         let phone = Conn::new("phone-busy", true);
         for n in 0..2 {
@@ -2218,7 +2218,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_folder_is_offered_file_by_file_with_each_files_place() {
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         let dir = temp_dir("deliver-folder");
         let root = dir.join("Trip");
         std::fs::create_dir_all(root.join("day 2")).unwrap();
@@ -2273,7 +2273,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_file_is_offered_to_a_phone_in_a_session() {
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         let dir = temp_dir("deliver");
         let file = dir.join("report.pdf");
         std::fs::write(&file, b"12345").unwrap();
@@ -2308,7 +2308,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_send_that_cannot_be_offered_is_recorded_as_failed() {
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         let dir = temp_dir("refuse");
         let file = dir.join("a.txt");
         std::fs::write(&file, b"x").unwrap();

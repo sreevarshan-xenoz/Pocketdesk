@@ -74,6 +74,8 @@ tokio = { workspace = true, features = ["rt", "sync"] }
 snapshots = ["dep:egui_kittest"]
 
 [dev-dependencies]
+# Tests never reach the owner's state or config folder (core `test-harness`).
+pocketdesk-core = { path = "../core", default-features = false, features = ["test-harness"] }
 # C4: the app driven headless through AccessKit.
 egui_kittest = { version = "=0.36.2", features = ["eframe"] }
 # C7: a fixture answer's thumbnails, as the phone encodes them.

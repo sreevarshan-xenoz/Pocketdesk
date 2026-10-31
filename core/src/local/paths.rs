@@ -169,7 +169,9 @@ pub fn config_dir() -> io::Result<PathBuf> {
     if let Some(dir) = dir_from_env(CONFIG_DIR_VAR, std::env::var_os(CONFIG_DIR_VAR)) {
         return dir;
     }
-    refuse_in_tests("config");
+    if let Some(dir) = instead_in_tests("config", true) {
+        return Ok(dir);
+    }
     Ok(app_dir(
         &dirs::config_dir().ok_or_else(|| missing("config"))?,
     ))
@@ -213,12 +215,117 @@ pub fn use_test_dirs(name: &str) -> &'static std::path::Path {
     dir
 }
 
-/// A test of this crate that reaches the owner's folder fails loudly
-/// instead (the other crates' tests call [`use_test_dirs`]; `cfg(test)` does
-/// not reach them).
-fn refuse_in_tests(what: &str) {
+/// A test that reaches the owner's folder never gets it. One of this crate
+/// fails loudly (it must call [`use_test_dirs`] first). With the
+/// `test-harness` feature, which only test builds turn on (other crates'
+/// `[dev-dependencies]`, never a release or normal build), a Cargo test
+/// binary of another crate, where `cfg(test)` does not reach, is turned to
+/// throwaway folders of its own, `pd-harness-<pid>`, so a test that skipped
+/// [`use_test_dirs`] can never read the owner's settings or write beside
+/// the owner's pairings. `Some` is then the folder to use (state or config,
+/// as `config` says); `None` otherwise.
+///
+/// An override set in-process, then `POCKETDESK_STATE_DIR` /
+/// `POCKETDESK_CONFIG_DIR`, are read before this: a test run from a shell
+/// that exported one of them uses that folder.
+fn instead_in_tests(what: &str, config: bool) -> Option<PathBuf> {
     if cfg!(test) {
         panic!("a test reached the owner's {what} folder: call use_test_dirs first");
+    }
+    #[cfg(feature = "test-harness")]
+    if harness::is_test_binary() {
+        return Some(harness::folder(what, config));
+    }
+    #[cfg(not(feature = "test-harness"))]
+    let _ = config;
+    None
+}
+
+/// The test-binary redirect ([`instead_in_tests`]), compiled only into test
+/// builds (and this crate's own tests of it).
+#[cfg(any(test, feature = "test-harness"))]
+mod harness {
+    use std::path::Path;
+
+    /// Throwaway folders older than this, left by test processes long gone,
+    /// are removed when a new one is made.
+    #[cfg(feature = "test-harness")]
+    const STALE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+    /// The throwaway folder for `what` (state, or config when `config`),
+    /// said once on stderr, the older ones swept the first time.
+    #[cfg(feature = "test-harness")]
+    pub(super) fn folder(what: &str, config: bool) -> std::path::PathBuf {
+        static SAID: std::sync::Once = std::sync::Once::new();
+        SAID.call_once(|| {
+            sweep_stale(&std::env::temp_dir());
+            eprintln!(
+                "pocketdesk: a test binary reached the {what} folder with no override; using throwaway pd-harness-{} folders",
+                std::process::id()
+            );
+        });
+        let state = super::use_test_dirs("harness");
+        match (config, super::CONFIG_DIR_OVERRIDE.get()) {
+            (true, Some(dir)) => dir.clone(),
+            (true, None) => state.join("config"),
+            (false, _) => state.to_path_buf(),
+        }
+    }
+
+    /// Remove `pd-harness-*` folders in `temp` not changed for [`STALE`].
+    #[cfg(feature = "test-harness")]
+    fn sweep_stale(temp: &Path) {
+        let Ok(entries) = std::fs::read_dir(temp) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let old = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .is_some_and(|age| age > STALE);
+            if old
+                && entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("pd-harness-")
+            {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+
+    /// Whether this process is a Cargo test binary, read once from its own
+    /// path.
+    #[cfg(feature = "test-harness")]
+    pub(super) fn is_test_binary() -> bool {
+        static HARNESS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *HARNESS.get_or_init(|| {
+            std::env::current_exe()
+                .ok()
+                .is_some_and(|exe| is_harness_path(&exe))
+        })
+    }
+
+    /// Cargo builds every test binary as `target/<profile>/deps/<crate>-<16
+    /// hex digits>` (`.exe` on Windows). With the feature on, `cargo test`
+    /// also builds the crate's real binaries (`target/<profile>/<name>`,
+    /// for the integration tests to run): those are not in a `deps` folder
+    /// under a hashed name, and keep the real folders.
+    pub(super) fn is_harness_path(exe: &Path) -> bool {
+        let in_deps = exe
+            .parent()
+            .and_then(|p| p.file_name())
+            .is_some_and(|name| name == "deps");
+        let hashed = exe
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|s| s.rsplit_once('-'))
+            .is_some_and(|(_, hash)| {
+                hash.len() == 16 && hash.bytes().all(|b| b.is_ascii_hexdigit())
+            });
+        in_deps && hashed
     }
 }
 
@@ -232,7 +339,9 @@ pub fn state_dir() -> io::Result<PathBuf> {
     if let Some(dir) = dir_from_env(STATE_DIR_VAR, std::env::var_os(STATE_DIR_VAR)) {
         return dir;
     }
-    refuse_in_tests("state");
+    if let Some(dir) = instead_in_tests("state", false) {
+        return Ok(dir);
+    }
     Ok(app_dir(
         &dirs::state_dir()
             .or_else(dirs::data_local_dir)
@@ -308,6 +417,40 @@ fn app_dir(base: &std::path::Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_test_binary_is_told_from_an_installed_one() {
+        use harness::is_harness_path;
+        use std::path::Path;
+        assert!(is_harness_path(Path::new(
+            "/w/target/debug/deps/pocketdesk_server-afd6384e55342381"
+        )));
+        assert!(is_harness_path(Path::new(
+            "E:/w/target/debug/deps/pocketdesk_server-afd6384e55342381.exe"
+        )));
+        // `cargo run`, an install, and a hashless name in a deps folder.
+        assert!(!is_harness_path(Path::new("/w/target/debug/pocketdesk")));
+        assert!(!is_harness_path(Path::new("/usr/bin/pocketdesk")));
+        assert!(!is_harness_path(Path::new("/opt/deps/pocketdesk")));
+        assert!(!is_harness_path(Path::new("/opt/deps/pocketdesk-server")));
+        // Near misses: 15 or 17 digits, a letter past f, a hashed binary
+        // outside deps, and a build script.
+        assert!(!is_harness_path(Path::new(
+            "/w/target/debug/deps/pocketdesk-afd6384e5534238"
+        )));
+        assert!(!is_harness_path(Path::new(
+            "/w/target/debug/deps/pocketdesk-afd6384e553423811"
+        )));
+        assert!(!is_harness_path(Path::new(
+            "/w/target/debug/deps/pocketdesk-afd6384e5534238g"
+        )));
+        assert!(!is_harness_path(Path::new(
+            "/w/target/debug/pocketdesk-afd6384e55342381"
+        )));
+        assert!(!is_harness_path(Path::new(
+            "/w/target/debug/build/pocketdesk-core-afd6384e55342381/build-script-build"
+        )));
+    }
 
     #[cfg(unix)]
     #[test]

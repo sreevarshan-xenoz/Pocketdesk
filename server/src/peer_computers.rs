@@ -2871,7 +2871,7 @@ mod tests {
     /// Power here is refused by name. Nothing here grabs or locks.
     #[tokio::test]
     async fn privacy_on_the_link_is_heard_and_refused_as_on_a_connection() {
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         let dir = std::env::temp_dir().join(format!("pd-pc8-link-{}", std::process::id()));
         let mut host = crate::computer_view::PrivacyHost::real();
         let (outgoing, mut sent) = mpsc::channel(4);
@@ -2912,14 +2912,19 @@ mod tests {
             "another link's"
         );
         drop(crate::plugins::privacy::LinkGrab("pc8-link-desk".into()));
+        // Released on the blocking pool (it joins the input hook's thread on
+        // Windows), which a loaded test run can keep busy past a second:
+        // up to 5 s.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let mut released = false;
-        for _ in 0..50 {
+        while std::time::Instant::now() < deadline {
             if !crate::plugins::privacy::held_by_test("pc8-link-desk") {
                 released = true;
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
+        released = released || !crate::plugins::privacy::held_by_test("pc8-link-desk");
         assert!(released, "its own link's end lets it go");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -3355,6 +3360,7 @@ mod tests {
     /// the computer as it was listed then; listed again since, it stays.
     #[test]
     fn a_stale_forget_leaves_a_computer_listed_since() {
+        let _state = crate::state::use_test_dirs();
         let dir = temp("forget-as-listed");
         let certs = CertManager::load_or_create(&dir).unwrap();
         computers::update(&dir, |file| {
@@ -3378,6 +3384,7 @@ mod tests {
     /// stale ask (listed again since) leaves the view alone.
     #[tokio::test]
     async fn forgetting_a_paired_computer_ends_its_view() {
+        let _state = crate::state::use_test_dirs();
         let dir = temp("forget-paired-view");
         let certs = CertManager::load_or_create(&dir).unwrap();
         computers::update(&dir, |file| {
