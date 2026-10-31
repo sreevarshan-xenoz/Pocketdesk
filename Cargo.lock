@@ -5719,6 +5719,7 @@ dependencies = [
  "ashpd",
  "async-trait",
  "base64 0.22.1",
+ "bytes",
  "clap",
  "dashmap",
  "dirs 5.0.1",
