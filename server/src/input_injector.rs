@@ -269,6 +269,10 @@ const ABS_MAX_COORD: i32 = 65535;
 /// uinput works on ALL compositors but requires /dev/uinput access (root or uinput group).
 pub struct InputInjector {
     backend: InputBackend,
+    /// enigo's main display size, and when it was read: X11 asks the X
+    /// server for it, a round trip, so it is not asked on every absolute
+    /// move ([`DISPLAY_SIZE_FOR`], [`InputInjector::forget_display_size`]).
+    display_size: Option<((i32, i32), std::time::Instant)>,
     /// Button mask of the previous `Gamepad` packet. That packet is a state
     /// snapshot, so every bit must be treated as an edge (see 2063).
     gamepad_buttons: u16,
@@ -497,7 +501,34 @@ impl Drop for InputInjector {
     }
 }
 
+/// How long enigo's display size is taken as read: a screen change is
+/// also told ([`InputInjector::forget_display_size`]), and this bounds a
+/// change nothing told.
+const DISPLAY_SIZE_FOR: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The display size `cache` holds at `now`, else `read` (kept).
+fn display_size(
+    cache: &mut Option<((i32, i32), std::time::Instant)>,
+    now: std::time::Instant,
+    read: impl FnOnce() -> Result<(i32, i32)>,
+) -> Result<(i32, i32)> {
+    if let Some((size, at)) = *cache
+        && now.saturating_duration_since(at) < DISPLAY_SIZE_FOR
+    {
+        return Ok(size);
+    }
+    let size = read()?;
+    *cache = Some((size, now));
+    Ok(size)
+}
+
 impl InputInjector {
+    /// The screens changed: the display size is read again at the next
+    /// absolute move.
+    pub fn forget_display_size(&mut self) {
+        self.display_size = None;
+    }
+
     /// Create a new input injector.
     ///
     /// Under a Wayland compositor uinput is tried first: enigo's XTEST only
@@ -512,6 +543,7 @@ impl InputInjector {
             Ok(Self {
                 backend: InputBackend::SendInput(crate::input_sendinput::SendInputBackend::new()),
                 gamepad_buttons: 0,
+                display_size: None,
                 #[cfg(target_os = "linux")]
                 pad: PadSlot::Untried,
                 pen: PenState::default(),
@@ -539,6 +571,7 @@ impl InputInjector {
                             return Ok(Self {
                                 backend: InputBackend::Wlr(wlr),
                                 gamepad_buttons: 0,
+                                display_size: None,
                                 #[cfg(target_os = "linux")]
                                 pad: PadSlot::Untried,
                                 pen: PenState::default(),
@@ -556,6 +589,7 @@ impl InputInjector {
                             return Ok(Self {
                                 backend: InputBackend::Portal,
                                 gamepad_buttons: 0,
+                                display_size: None,
                                 #[cfg(target_os = "linux")]
                                 pad: PadSlot::Untried,
                                 pen: PenState::default(),
@@ -578,6 +612,7 @@ impl InputInjector {
                 return Ok(Self {
                     backend: InputBackend::Enigo(Box::new(Mutex::new(enigo))),
                     gamepad_buttons: 0,
+                    display_size: None,
                     #[cfg(target_os = "linux")]
                     pad: PadSlot::Untried,
                     pen: PenState::default(),
@@ -633,6 +668,7 @@ impl InputInjector {
                     .ok(),
             })),
             gamepad_buttons: 0,
+            display_size: None,
             #[cfg(target_os = "linux")]
             pad: PadSlot::Untried,
             pen: PenState::default(),
@@ -682,7 +718,10 @@ impl InputInjector {
             InputBackend::SendInput(backend) => backend.move_absolute(x_norm, y_norm),
             InputBackend::Enigo(enigo) => {
                 let e = enigo.get_mut().unwrap();
-                let (w, h) = e.main_display().context("enigo main_display failed")?;
+                let (w, h) =
+                    display_size(&mut self.display_size, std::time::Instant::now(), || {
+                        e.main_display().context("enigo main_display failed")
+                    })?;
                 // Over one past the largest value, so 65535 is the last
                 // pixel, not one past it.
                 let span = |norm: u16, len: i32| {
@@ -2571,5 +2610,43 @@ mod frame_tests {
             "no empty frame after: {} bytes",
             rest.len()
         );
+    }
+}
+
+#[cfg(test)]
+mod display_size_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// The display size is read once, then taken from the cache until it
+    /// is stale or forgotten; a failed read is not kept.
+    #[test]
+    fn the_display_size_is_read_once_and_kept() {
+        let mut cache = None;
+        let mut reads = 0;
+        let t0 = Instant::now();
+        let mut read_at =
+            |cache: &mut Option<((i32, i32), Instant)>, now: Instant, size: (i32, i32)| {
+                display_size(cache, now, || {
+                    reads += 1;
+                    Ok(size)
+                })
+                .unwrap()
+            };
+        assert_eq!(read_at(&mut cache, t0, (1920, 1080)), (1920, 1080));
+        // Within its time: the cached size, however the screen changed.
+        let soon = t0 + Duration::from_millis(500);
+        assert_eq!(read_at(&mut cache, soon, (1280, 720)), (1920, 1080));
+        // Stale: read again.
+        let later = t0 + DISPLAY_SIZE_FOR;
+        assert_eq!(read_at(&mut cache, later, (1280, 720)), (1280, 720));
+        // Forgotten (a screen change told): read again.
+        cache = None;
+        assert_eq!(read_at(&mut cache, later, (800, 600)), (800, 600));
+        assert_eq!(reads, 3);
+        // A failed read is an error, and nothing is kept.
+        let mut empty = None;
+        assert!(display_size(&mut empty, t0, || anyhow::bail!("no display")).is_err());
+        assert!(empty.is_none());
     }
 }

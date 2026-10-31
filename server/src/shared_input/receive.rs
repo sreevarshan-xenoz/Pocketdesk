@@ -52,6 +52,9 @@ pub trait Inject: Send {
     /// at the first event misses it (libinput opens new devices a moment
     /// after they appear).
     fn prepare(&mut self) {}
+    /// This computer's screens changed: whatever was read of them for
+    /// absolute moves is read again.
+    fn screens_changed(&mut self) {}
     /// Flash `badge` on this computer's screens for `how_long` (which
     /// computer has the keyboard and mouse, Identify); on Windows, never
     /// over a full-screen program or a game holding the cursor in front,
@@ -188,6 +191,7 @@ impl Receiver {
     pub fn set_screens(&mut self, screens: &[Screen]) {
         if self.screens != screens {
             self.screens = screens.to_vec();
+            self.inject.screens_changed();
         }
     }
 
@@ -573,6 +577,12 @@ impl LazyInjector {
 impl Inject for LazyInjector {
     fn prepare(&mut self) {
         self.get();
+    }
+
+    fn screens_changed(&mut self) {
+        if let Some(injector) = self.injector.as_mut() {
+            injector.forget_display_size();
+        }
     }
 
     fn key(&mut self, code: u16, pressed: bool) {
