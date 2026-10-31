@@ -51,6 +51,12 @@ wan = ["dep:iroh", "dep:iroh-mainline-address-lookup", "dep:n0-mainline", "dep:n
 # sessions, identity): `core::local`. No tokio, no transport.
 local = ["dep:toml", "dep:toml_edit", "dep:base64", "dep:netdev", "dep:regex"]
 
+# Tests only: a Cargo test binary that reaches the state or config folder
+# with no override gets throwaway folders, never the owner's
+# (`local::paths`). Turned on from other crates' `[dev-dependencies]` only,
+# so no release or normal build has it; CI checks that it stays out.
+test-harness = []
+
 [dependencies]
 anyhow.workspace = true
 base64 = { version = "0.22", optional = true }

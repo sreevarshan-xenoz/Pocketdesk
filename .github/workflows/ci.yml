@@ -67,6 +67,15 @@ jobs:
             echo "pocketdesk-desktop pulls zbus with tokio"; exit 1
           fi
 
+      # The test-harness feature turns a test binary's state and config to
+      # throwaway folders; only test builds ([dev-dependencies]) may have it,
+      # never what a release, a package or the Android bridge builds.
+      - name: Core's test-harness stays out of normal builds
+        run: |
+          if cargo tree --target all -p pocketdesk-server -p pocketdesk-desktop -p pocketdesk-android-bridge -e features,normal,build -i pocketdesk-core | grep -q 'feature "test-harness"'; then
+            echo "a normal build turns on pocketdesk-core's test-harness"; exit 1
+          fi
+
       - name: Test
         run: cargo test --workspace
 

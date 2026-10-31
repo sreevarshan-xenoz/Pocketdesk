@@ -112,6 +112,8 @@ windows-core = "0.62"
 windows-future = "0.3"
 
 [dev-dependencies]
+# Tests never reach the owner's state or config folder (core `test-harness`).
+pocketdesk-core = { path = "../core", features = ["test-harness"] }
 rustls.workspace = true
 # A local Mainline DHT for the N3 publishing test (no internet).
 n0-mainline = "0.7"
