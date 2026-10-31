@@ -86,7 +86,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import androidx.compose.material3.MenuDefaults
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.heading
@@ -350,7 +349,13 @@ fun HomeScreen(
     // (review N3: not from the preferences at every recomposition), and the
     // clock it is told against, a tick a minute while Home shows: only while
     // resumed, so a paused app is not woken each minute (UX2, review N9).
-    val lastUsed = remember(hosts, resumes) { hosts.associate { it.address to HostStore.lastUsed(context, it.address) } }
+    // Also when a stamp is recorded while Home shows: a camera or cast
+    // stopped from its notification leaves Home resumed (device check
+    // 2026-10-31).
+    val usedStamps = HostStore.usedStamps
+    val lastUsed = remember(hosts, resumes, usedStamps) {
+        hosts.associate { it.address to HostStore.lastUsed(context, it.address) }
+    }
     val minuteNow by produceState(System.currentTimeMillis(), lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             while (true) {
@@ -1128,10 +1133,14 @@ private fun HostCard(
                                         )
                                     },
                                     onClick = { run(action) },
+                                    // Room above and below the label, so an
+                                    // item that wraps (Tamil or Spanish at a
+                                    // large font) does not run into the next;
+                                    // a one-line item keeps its 48 dp.
                                     contentPadding = if (section.folded) {
-                                        PaddingValues(start = 24.dp, end = 12.dp)
+                                        PaddingValues(start = 24.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)
                                     } else {
-                                        MenuDefaults.DropdownMenuItemContentPadding
+                                        PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                                     },
                                 )
                             }

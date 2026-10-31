@@ -56,7 +56,8 @@ pub(crate) fn is_owner_device(store: &TrustStore, file: &ComputersFile, device_i
 /// here, else a listed computer's name, with its kind and the start of
 /// its id, as the Activity page names it.
 pub(crate) fn asker_name(store: &TrustStore, file: &ComputersFile, device_id: &str) -> String {
-    let kind = if store.is_computer(device_id) {
+    let listed = file.computers.iter().any(|c| c.device_id == device_id);
+    let kind = if store.is_computer(device_id) || listed {
         "computer"
     } else {
         "phone"
@@ -897,6 +898,21 @@ mod tests {
         assert_eq!(
             asker_name(&d.store(), &file, "a1b2c3d4e5"),
             "Pixel 8 (phone a1b2c3d4)"
+        );
+    }
+
+    /// A computer still listed here but no longer in the trust store (its
+    /// pairing just undone, as when an introduced phone loses its owner
+    /// mark) is named a computer, not a phone. Seen on the laptop
+    /// 2026-10-31: "<computer> (phone <id>) is no longer paired both ways".
+    #[test]
+    fn a_listed_computer_out_of_the_trust_store_is_named_a_computer() {
+        let d = Dirs::new("asker-name-listed");
+        d.list_computer("c0ffee1234", true);
+        let file = computers::read(&d.dir);
+        assert_eq!(
+            asker_name(&d.store(), &file, "c0ffee1234"),
+            "Computer c0ffee1234 (computer c0ffee12)"
         );
     }
 

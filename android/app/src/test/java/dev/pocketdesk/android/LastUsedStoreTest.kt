@@ -5,6 +5,7 @@ import android.content.ContextWrapper
 import android.content.SharedPreferences
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -56,6 +57,17 @@ class LastUsedStoreTest {
         // Saved again, it starts with no time.
         HostStore.save(ctx, b)
         assertNull(HostStore.lastUsed(ctx, b.address, now = 10_000L))
+    }
+
+    @Test
+    fun `a recorded time is announced for Home to read again`() {
+        HostStore.save(ctx, a)
+        val before = HostStore.usedStamps
+        HostStore.markUsed(ctx, a.address, now = 5_000L)
+        assertTrue("a stamp bumps the count", HostStore.usedStamps > before)
+        val after = HostStore.usedStamps
+        HostStore.markUsed(ctx, b.address, now = 6_000L)
+        assertEquals("an unsaved address announces nothing", after, HostStore.usedStamps)
     }
 }
 
