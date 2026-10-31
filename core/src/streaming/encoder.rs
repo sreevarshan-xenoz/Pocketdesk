@@ -1008,15 +1008,15 @@ pub(crate) fn vbv_kbit_bounds(bitrate_bps: u32, fps: u32) -> (u64, u64) {
     (maxrate_kbps, bufsize_kbits)
 }
 
-/// Build the FFmpeg command-line arguments for encoding.
-///
 /// The DRM render node the VAAPI sidecar should bind to. Honours the
-/// `POCKETDESK_VAAPI_DEVICE` override, else the lowest existing
-/// `/dev/dri/renderD*`. On hybrid-GPU laptops the first node (`renderD128`)
-/// is often the discrete NVIDIA card with no VA driver, so hardcoding it
-/// fails; picking a present node + the C2 startup verify lets a broken pick
-/// degrade instead of killing the session (the in-process path tests each
-/// node's actual VAAPI usability).
+/// `POCKETDESK_VAAPI_DEVICE` override, else the existing `/dev/dri/renderD*`
+/// whose kernel driver has a VA-API encoder ([`pick_vaapi_node`]). On
+/// hybrid-GPU laptops either node can be the discrete NVIDIA card, whose
+/// driver has none, and the numbering changes between boots, so the lowest
+/// node is not enough; a wrong pick still degrades through the C2 startup
+/// verify instead of killing the session. Where `inproc` is built, the
+/// in-process path tries each node itself; the sidecar is the only VAAPI path
+/// in the portable Linux tarball.
 fn vaapi_device_node() -> String {
     #[cfg(all(target_os = "linux", feature = "inproc"))]
     use super::encoder_vaapi::VAAPI_DEVICE_ENV;
@@ -1027,30 +1027,57 @@ fn vaapi_device_node() -> String {
     {
         return node;
     }
-    let mut nodes: Vec<u32> = (128..136)
-        .filter(|n| std::path::Path::new(&format!("/dev/dri/renderD{n}")).exists())
-        .collect();
-    if nodes.is_empty()
-        && let Ok(entries) = std::fs::read_dir("/dev/dri")
-    {
+    let mut nodes: Vec<u32> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir("/dev/dri") {
         for entry in entries.flatten() {
             let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if let Some(tail) = name.strip_prefix("renderD")
-                && let Ok(n) = tail.parse::<u32>()
+            if let Some(n) = name
+                .to_string_lossy()
+                .strip_prefix("renderD")
+                .and_then(|tail| tail.parse::<u32>().ok())
             {
                 nodes.push(n);
             }
         }
-        nodes.sort_unstable();
-        nodes.dedup();
     }
-    nodes
-        .first()
+    let with_drivers: Vec<(u32, Option<String>)> = nodes
+        .into_iter()
+        .map(|n| {
+            let driver = std::fs::read_link(format!("/sys/class/drm/renderD{n}/device/driver"))
+                .ok()
+                .and_then(|link| link.file_name().map(|f| f.to_string_lossy().into_owned()));
+            (n, driver)
+        })
+        .collect();
+    pick_vaapi_node(&with_drivers)
         .map(|n| format!("/dev/dri/renderD{n}"))
         .unwrap_or_else(|| "/dev/dri/renderD128".to_string())
 }
 
+/// Kernel drivers whose GPUs have a VA-API encoder: Intel (`i915`, `xe`,
+/// through iHD or i965) and AMD (`amdgpu`, `radeon`, through Mesa).
+const VA_ENCODE_DRIVERS: &[&str] = &["i915", "xe", "amdgpu", "radeon"];
+
+/// Pick the render node for VAAPI from `(renderD number, kernel driver)`
+/// pairs: a driver in [`VA_ENCODE_DRIVERS`] first, then any other or unknown
+/// driver, and NVIDIA's own driver last (it has no VA-API encoder); the lowest
+/// number within each group. `None` when there are no nodes.
+fn pick_vaapi_node(nodes: &[(u32, Option<String>)]) -> Option<u32> {
+    nodes
+        .iter()
+        .min_by_key(|(n, driver)| {
+            let rank = match driver.as_deref() {
+                Some(d) if VA_ENCODE_DRIVERS.contains(&d) => 0,
+                Some("nvidia") => 2,
+                _ => 1,
+            };
+            (rank, *n)
+        })
+        .map(|(n, _)| *n)
+}
+
+/// Build the FFmpeg command-line arguments for encoding.
+///
 /// Input: raw BGRA frames via stdin (pipe:0)
 /// Output: H.264/H.265 access units in FLV tags via stdout (pipe:1)
 fn build_ffmpeg_args(
@@ -1389,6 +1416,44 @@ mod tests {
 
     use super::super::ffmpeg_flags::{FPS_MODE, VSYNC};
     use super::*;
+
+    fn nodes(list: &[(u32, Option<&str>)]) -> Vec<(u32, Option<String>)> {
+        list.iter()
+            .map(|(n, d)| (*n, d.map(str::to_string)))
+            .collect()
+    }
+
+    #[test]
+    fn vaapi_picks_the_intel_node_whatever_its_number() {
+        // A hybrid laptop, in both of the orders it boots in.
+        let nvidia_first = nodes(&[(128, Some("nvidia")), (129, Some("i915"))]);
+        assert_eq!(pick_vaapi_node(&nvidia_first), Some(129));
+        let intel_first = nodes(&[(128, Some("i915")), (129, Some("nouveau"))]);
+        assert_eq!(pick_vaapi_node(&intel_first), Some(128));
+        let amd_second = nodes(&[(128, Some("nouveau")), (129, Some("amdgpu"))]);
+        assert_eq!(pick_vaapi_node(&amd_second), Some(129));
+        let xe = nodes(&[(128, Some("nvidia")), (130, Some("xe"))]);
+        assert_eq!(pick_vaapi_node(&xe), Some(130));
+    }
+
+    #[test]
+    fn vaapi_puts_nvidias_driver_last_and_unknowns_before_it() {
+        let unknown = nodes(&[(128, Some("nvidia")), (129, None)]);
+        assert_eq!(pick_vaapi_node(&unknown), Some(129));
+        let only_nvidia = nodes(&[(128, Some("nvidia"))]);
+        assert_eq!(
+            pick_vaapi_node(&only_nvidia),
+            Some(128),
+            "still a node to try"
+        );
+        let unread = nodes(&[(129, None), (128, None)]);
+        assert_eq!(
+            pick_vaapi_node(&unread),
+            Some(128),
+            "the lowest when nothing is known"
+        );
+        assert_eq!(pick_vaapi_node(&[]), None);
+    }
 
     /// The frame-rate flag is the one the probe chose: FFmpeg 9 has no
     /// `-vsync`, FFmpeg 4.4 no `-fps_mode`.
