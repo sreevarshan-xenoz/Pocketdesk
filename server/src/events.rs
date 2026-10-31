@@ -54,6 +54,8 @@ pub(crate) fn current_config() -> Config {
     };
     match read {
         Ok(config) => {
+            // Noted for shared input's channels, which never read a file.
+            pocketdesk_core::streaming::wheel::set_smooth(config.smooth_scrolling);
             *cached = Some((modified, config.clone()));
             config
         }

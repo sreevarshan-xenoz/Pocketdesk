@@ -438,6 +438,15 @@ pub struct Config {
     /// Read as each window opens. Off by default.
     #[serde(default)]
     pub computer_view_scancodes: bool,
+    /// Smooth scrolling: a touchpad's scroll goes to the other computer in
+    /// 120ths of a notch (`wheel120`), as finely as it comes, from a
+    /// computer's screen window and from shared input; that computer takes
+    /// it as a high-resolution wheel. Off, only whole notches go, as before.
+    /// A computer older than fine scrolling gets whole notches either way.
+    /// Read as each window opens, and by shared input within a second or
+    /// two. On by default.
+    #[serde(default = "default_true")]
+    pub smooth_scrolling: bool,
     /// The microphone a computer's screen window sends to that computer
     /// with "Send my mic" (PC10): part of its name as Windows lists it, or
     /// the source's name on Linux. None (blank) is the system's default
@@ -694,6 +703,7 @@ impl Default for Config {
             computer_view_hevc: true,
             computer_view_lock_on_close: false,
             computer_view_scancodes: false,
+            smooth_scrolling: true,
             computer_view_mic_device: None,
             computer_wake_facts: true,
             version_hints: true,
@@ -962,6 +972,7 @@ impl Config {
         "computer_view_hevc",
         "computer_view_lock_on_close",
         "computer_view_scancodes",
+        "smooth_scrolling",
         "computer_view_mic_device",
         "computer_wake_facts",
         "version_hints",
@@ -1488,6 +1499,26 @@ phone_battery = \"x\"
         assert_eq!(
             Config::default().changed_keys(&chosen),
             ["computer_view_grab_keys"]
+        );
+    }
+
+    /// Fine scrolling: smooth until turned off, and the choice saves and
+    /// reads back.
+    #[test]
+    fn scrolling_is_smooth_until_turned_off() {
+        let path = temp("smooth-scrolling");
+        std::fs::write(&path, "").unwrap();
+        assert!(Config::load_from(&path).unwrap().smooth_scrolling);
+        assert!(Config::default().smooth_scrolling);
+        let chosen = Config {
+            smooth_scrolling: false,
+            ..Config::default()
+        };
+        chosen.save_keys_to(&path, &["smooth_scrolling"]).unwrap();
+        assert!(!Config::load_from(&path).unwrap().smooth_scrolling);
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["smooth_scrolling"]
         );
     }
 

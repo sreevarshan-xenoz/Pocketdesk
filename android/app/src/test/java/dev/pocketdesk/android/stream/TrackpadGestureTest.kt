@@ -72,6 +72,29 @@ class TrackpadGestureTest {
     }
 
     @Test
+    fun smoothScrollingSendsEveryMoveIn120thsWithTheNotchesItCompletes() {
+        val pad = TrackpadGesture(slop = 8f, pxPerNotch = 10f, fine = true)
+        pad.down(0)
+        assertEquals(emptyList<PadOutput>(), pad.move(0f, 3f, fingers = 2))
+        assertEquals(
+            "9 px past the slop: 0.9 of a notch, none whole yet",
+            listOf(PadOutput.Scroll(0, 0, 0, 108, fine = true)),
+            pad.move(0f, 6f, fingers = 2),
+        )
+        assertEquals(
+            "2 px more completes a notch, for an older computer",
+            listOf(PadOutput.Scroll(0, 1, 0, 24, fine = true)),
+            pad.move(0f, 2f, fingers = 2),
+        )
+        assertEquals(
+            "finger right is the wheel left",
+            listOf(PadOutput.Scroll(0, 0, -60, 0, fine = true)),
+            pad.move(5f, 0f, fingers = 2),
+        )
+        assertEquals(emptyList<PadOutput>(), pad.up(500))
+    }
+
+    @Test
     fun tapThenTouchAndMoveDragsWithTheButtonHeld() {
         val pad = pad()
         pad.down(0)

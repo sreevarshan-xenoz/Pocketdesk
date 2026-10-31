@@ -11,7 +11,7 @@
 //!
 //! `PD_PORTAL_PROBE_ACTIONS` replaces the default input with a list, comma
 //! separated: `click:X:Y` (0 to 1 across the screen), `key:CODE` (evdev),
-//! `scroll:STEPS` (positive down), `hscroll:STEPS` (positive right), `wait:MS` and `snap:NAME` (the newest frame as a PPM, written only as
+//! `scroll:STEPS` (positive down), `hscroll:STEPS` (positive right), `fscroll:V120` and `hfscroll:V120` (a fine turn, 120 a notch), `wait:MS` and `snap:NAME` (the newest frame as a PPM, written only as
 //! NAME in `PD_PORTAL_PROBE_DIR`, the throwaway folder).
 //!
 //! `PD_PORTAL_PROBE_DIR="$XDG_RUNTIME_DIR/pd-grant" cargo test -p pocketdesk-core --test
@@ -138,6 +138,14 @@ async fn the_portal_shares_the_screen_and_takes_input() {
                 ["hscroll", steps] => vec![PortalEvent::Scroll {
                     axis: 1,
                     steps: steps.parse().unwrap(),
+                }],
+                ["fscroll", v120] => vec![PortalEvent::FineScroll {
+                    axis: 0,
+                    v120: v120.parse().unwrap(),
+                }],
+                ["hfscroll", v120] => vec![PortalEvent::FineScroll {
+                    axis: 1,
+                    v120: v120.parse().unwrap(),
                 }],
                 ["key", code] => {
                     let code = code.parse().unwrap();

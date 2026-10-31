@@ -370,6 +370,7 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "Keys by position",
         Section::Computers,
     ),
+    ("smooth_scrolling", "Smooth scrolling", Section::Computers),
     (
         "computer_view_mic_device",
         "Microphone for computer windows",
@@ -660,6 +661,9 @@ pub fn applies_live(key: &str) -> bool {
             | "computer_view_lock_on_close"
             // Read as each window opens.
             | "computer_view_scancodes"
+            // Read by an open window at once, and by shared input within a
+            // second or two.
+            | "smooth_scrolling"
             // PC10: read as the window's mic starts.
             | "computer_view_mic_device"
             | "events"
@@ -872,6 +876,11 @@ impl SettingsForm {
     /// "Lock it when I close the window" as saved (PC8), for an open window.
     pub fn saved_computer_view_lock_on_close(&self) -> bool {
         self.saved.computer_view_lock_on_close
+    }
+
+    /// "Smooth scrolling" as saved, for an open window.
+    pub fn saved_smooth_scrolling(&self) -> bool {
+        self.saved.smooth_scrolling
     }
 
     /// The window's bar saved `computer_view_lock_on_close` (PC8): this
@@ -2294,6 +2303,17 @@ impl SettingsForm {
                         "The other computer's own keyboard layout then says what each key types. The window's bar switches it for each computer, and that choice is kept for that computer; this is the start for a computer never switched. Shortcuts follow the key's place there too, and the keypad's digits go as the main keyboard's.",
                     );
                 });
+                // Fine scrolling: a touchpad's scroll in 120ths of a notch.
+                row(ui, "smooth_scrolling", |ui| {
+                    ui.checkbox(
+                        &mut e.smooth_scrolling,
+                        "smooth scrolling: a touchpad's scroll goes to the other computer as finely as it comes, from a computer's screen window and from shared input",
+                    );
+                    note(
+                        ui,
+                        "That computer scrolls by it as by a high-resolution wheel, so a slow two-finger scroll moves a little at a time instead of a notch at a time. Off, only whole notches go. A computer older than this gets whole notches either way. The phone has its own switch.",
+                    );
+                });
                 // PC10: the microphone "Send my mic" sends.
                 if drawn_here("computer_view_mic_device") {
                     let mic = &mut self.view_mic_text;
@@ -3105,6 +3125,7 @@ mod tests {
             "computer_view_hevc",
             "computer_view_lock_on_close",
             "computer_view_scancodes",
+            "smooth_scrolling",
             "computer_view_mic_device",
         ] {
             assert!(

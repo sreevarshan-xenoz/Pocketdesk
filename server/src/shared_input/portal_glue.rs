@@ -128,11 +128,10 @@ const STRAY_GRACE: Duration = Duration::from_millis(300);
 /// A pause in such input this long starts its count over.
 const STRAY_GAP: Duration = Duration::from_secs(1);
 
-/// Smooth scroll, in pixels, that makes one notch of a wheel.
-const SMOOTH_PER_NOTCH: f64 = 15.0;
-
-/// A wheel's notch in libei's discrete scroll.
-const DISCRETE_PER_NOTCH: i32 = 120;
+/// Smooth scroll in 120ths of a notch a pixel: a wheel's notch is 15
+/// pixels of libei's smooth scroll, and 120 of its discrete scroll.
+const FINE_PER_PIXEL: f64 = pocketdesk_core::streaming::wheel::NOTCH as f64
+    / pocketdesk_core::streaming::wheel::NOTCH_PIXELS;
 
 /// The words said once when an edge turns into a wall.
 pub const WALL_WORDS: &str = "An edge stopped leading to the next computer: the desktop kept \
@@ -169,7 +168,6 @@ pub struct PortalGlue<B: Backend> {
     /// notch.
     motion: (f64, f64),
     smooth: (f64, f64),
-    discrete: (i32, i32),
     keys: Keys,
     breaker: FlipBreaker,
     standing: Standing,
@@ -201,7 +199,6 @@ impl<B: Backend> PortalGlue<B> {
             park: (0, 0),
             motion: (0.0, 0.0),
             smooth: (0.0, 0.0),
-            discrete: (0, 0),
             keys: Keys::new(hotkey),
             breaker: FlipBreaker::default(),
             standing: Standing::Starting,
@@ -343,37 +340,17 @@ impl<B: Backend> PortalGlue<B> {
                 if self.captured.is_none() {
                     return Vec::new();
                 }
-                let (nx, ny) = match discrete {
-                    Some((x, y)) => {
-                        self.discrete.0 = self.discrete.0.saturating_add(x);
-                        self.discrete.1 = self.discrete.1.saturating_add(y);
-                        let n = (
-                            self.discrete.0 / DISCRETE_PER_NOTCH,
-                            self.discrete.1 / DISCRETE_PER_NOTCH,
-                        );
-                        self.discrete.0 -= n.0 * DISCRETE_PER_NOTCH;
-                        self.discrete.1 -= n.1 * DISCRETE_PER_NOTCH;
-                        n
-                    }
-                    None => {
-                        let (x, y) = whole(
-                            &mut self.smooth,
-                            (dx / SMOOTH_PER_NOTCH, dy / SMOOTH_PER_NOTCH),
-                        );
-                        (x, y)
-                    }
+                // In 120ths of a notch: a wheel's discrete scroll as it
+                // is, else its smooth pixels; the computer driven is sent
+                // them fine or as the notches they add up to.
+                let (x, y) = match discrete {
+                    Some(fine) => fine,
+                    None => whole(&mut self.smooth, (dx * FINE_PER_PIXEL, dy * FINE_PER_PIXEL)),
                 };
-                if nx == 0 && ny == 0 {
+                if x == 0 && y == 0 {
                     return Vec::new();
                 }
-                let notch = |n: i32| n.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16;
-                self.tell(
-                    driver,
-                    Captured::Wheel {
-                        dx: notch(nx),
-                        dy: notch(ny),
-                    },
-                )
+                self.tell(driver, Captured::Wheel { dx: x, dy: y })
             }
             Portal::Key { code, down } => {
                 if self.captured.is_none() {
@@ -541,7 +518,6 @@ impl<B: Backend> PortalGlue<B> {
     fn reset_rests(&mut self) {
         self.motion = (0.0, 0.0);
         self.smooth = (0.0, 0.0);
-        self.discrete = (0, 0);
     }
 
     /// Set the barriers there should be now, if they changed: while the
@@ -838,8 +814,9 @@ mod tests {
         assert_eq!(sends(&moved), vec![sent("W", Msg::Move { seq: 2, x, y })]);
         assert_eq!(rig.say(Portal::Motion { dx: 0.2, dy: 0.2 }), vec![]);
 
-        // Buttons, the wheel (a notch is 120 of libei's discrete scroll;
-        // smooth scroll alone counts 15 pixels a notch), keys.
+        // Buttons, the wheel (in 120ths of a notch: libei's discrete
+        // scroll as it is; smooth scroll alone counts 15 pixels a notch),
+        // keys.
         assert_eq!(
             sends(&rig.say(Portal::Button {
                 code: 0x111,
@@ -859,31 +836,40 @@ mod tests {
                 dy: 30.0,
                 discrete: Some((0, 240))
             })),
-            vec![sent("W", Msg::Wheel { dx: 0, dy: 2 })]
+            vec![sent("W", Msg::WheelFine { dx: 0, dy: 240 })]
+        );
+        assert_eq!(
+            sends(&rig.say(Portal::Scroll {
+                dx: 0.0,
+                dy: 0.0,
+                discrete: Some((0, 60))
+            })),
+            vec![sent("W", Msg::WheelFine { dx: 0, dy: 60 })]
         );
         assert_eq!(
             rig.say(Portal::Scroll {
                 dx: 0.0,
                 dy: 0.0,
-                discrete: Some((0, 60))
+                discrete: Some((0, 0))
             }),
             vec![]
         );
+        // Smooth alone: 8 a pixel, the part of one kept for the next.
         assert_eq!(
             sends(&rig.say(Portal::Scroll {
-                dx: 0.0,
-                dy: 0.0,
-                discrete: Some((0, 60))
-            })),
-            vec![sent("W", Msg::Wheel { dx: 0, dy: 1 })]
-        );
-        assert_eq!(
-            sends(&rig.say(Portal::Scroll {
-                dx: -31.0,
+                dx: -31.1,
                 dy: 0.0,
                 discrete: None
             })),
-            vec![sent("W", Msg::Wheel { dx: -2, dy: 0 })]
+            vec![sent("W", Msg::WheelFine { dx: -248, dy: 0 })]
+        );
+        assert_eq!(
+            sends(&rig.say(Portal::Scroll {
+                dx: -0.1,
+                dy: 0.0,
+                discrete: None
+            })),
+            vec![sent("W", Msg::WheelFine { dx: -1, dy: 0 })]
         );
         assert_eq!(
             sends(&rig.say(Portal::Key {

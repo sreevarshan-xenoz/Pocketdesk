@@ -4020,6 +4020,7 @@ pub async fn send_mouse_event(
             InputPacket::MouseScroll {
                 dx: x as i16,
                 dy: y as i16,
+                fine: None,
             }
         } else if button != 0 {
             InputPacket::MouseClick {
@@ -4226,6 +4227,40 @@ pub async fn send_mouse_click(button: u8, pressed: bool) -> Result<(), String> {
         .ok_or_else(|| "Mouse click requires an active QUIC streaming connection".to_string())?;
 
     let data = InputPacket::MouseClick { button, pressed }.encode();
+    let mut send_stream = conn
+        .open_uni()
+        .await
+        .map_err(|e| format!("QUIC open stream: {e}"))?;
+    send_stream
+        .write_all(&data)
+        .await
+        .map_err(|e| format!("QUIC write: {e}"))?;
+    send_stream
+        .finish()
+        .map_err(|e| format!("QUIC finish: {e}"))?;
+    Ok(())
+}
+
+/// A wheel turn on the screen session: whole notches (`dx` right, `dy` up)
+/// and, with smooth scrolling, the same turn in 120ths of a notch, which a
+/// computer before fine scrolling ignores ([`InputPacket::MouseScroll`]).
+pub async fn send_scroll(dx: i16, dy: i16, fine: Option<(i16, i16)>) -> Result<(), String> {
+    let quic_conn = {
+        let guard = (*STREAMING_HANDLE).lock().await;
+        if let Some(h) = guard.as_ref() {
+            Some(h.connection.clone())
+        } else {
+            let v2_guard = (*crate::V2_HANDLE).lock().await;
+            v2_guard
+                .as_ref()
+                .map(|h| QuinnConnection::shared(h.connection.clone()))
+        }
+    };
+
+    let conn = quic_conn
+        .ok_or_else(|| "Scrolling requires an active QUIC streaming connection".to_string())?;
+
+    let data = InputPacket::MouseScroll { dx, dy, fine }.encode();
     let mut send_stream = conn
         .open_uni()
         .await

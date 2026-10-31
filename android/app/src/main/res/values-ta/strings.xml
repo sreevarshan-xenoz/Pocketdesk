@@ -576,6 +576,8 @@
     <string name="texts_contacts_refused">தொடர்புகள் அணுகல் தேவை: Android மறுத்தது. Pocketdesk-க்கான Android அமைப்புகளில் தொடர்புகளை அனுமதிக்கவும்</string>
     <string name="texts_contacts_open_app_settings">Pocketdesk-க்கான Android அமைப்புகளைத் திற</string>
     <string name="settings_capture_mouse">இணைக்கப்பட்ட சுட்டியைக் கணினியில் பயன்படுத்து</string>
+    <string name="settings_smooth_scrolling">மென்மையான உருட்டல்</string>
+    <string name="settings_smooth_scrolling_summary">டிராக்பேடில் இரு விரல்கள் நகரும் அளவுக்கு நுணுக்கமாகக் கணினியை உருட்டும், ஒவ்வொரு படியாக அல்ல. பழைய Pocketdesk உள்ள கணினி எப்படியும் படிப்படியாகவே உருட்டும்</string>
     <string name="settings_capture_mouse_summary">அமர்வின்போது இந்தத் தொலைபேசியில் இணைத்த சுட்டி (USB அல்லது Bluetooth) கணினியின் சுட்டுக்குறியை நகர்த்திச் சொடுக்கும்</string>
     <string name="send_clipboard_label">கிளிப்போர்டை அனுப்பு</string>
     <string name="send_clipboard_no_computer">முதலில் ஒரு கணினியுடன் இணைக்கவும்</string>

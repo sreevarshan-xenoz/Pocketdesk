@@ -3369,6 +3369,17 @@ Built 2026-10-31. The sidecar's software rung, reached by an explicit Software c
 - [ ] A phone session against the tarball's server on a real stock Fedora machine with no working hardware encoder and `ffmpeg-free` plus `openh264`: the picture appears and stays, Diagnostics' last session names `ffmpeg-sidecar-openh264`, and the picture quality at the default bitrate is acceptable. (where: linux)
 - [ ] install.sh on a fresh stock Fedora: it lists `ffmpeg-free` and `openh264` and, once they are installed, `pocketdesk capabilities` names libopenh264; with `fedora-cisco-openh264` disabled it says how to enable it and enables nothing. (where: linux)
 
+## 249. Fine scrolling end to end
+
+Built 2026-10-31. The wheel goes in 120ths of a notch (`wheel120`) from a computer's screen window (egui's touchpad deltas) and the phone's two-finger scroll, beside the whole notches an older computer reads; shared input sends fine turns to a computer that says it takes them. Each backend scrolls as finely as it can: uinput `REL_WHEEL_HI_RES`, wlroots `axis` pixels, KDE's portal pixels, Windows `WHEEL_DELTA` fractions; GNOME's portal and X11 whole notches added up. "Smooth scrolling" (on) in both apps' Settings.
+- [x] Two throwaway servers on the Linux laptop's loopback, the second injecting into a headless sway (its virtual pointer), a `wev` filling its output: a whole notch up from a sender before fine scrolling gave `axis` -15 and `value120` -120; four quarter notches down gave `axis` 3.75 each and `value120` 120 on the fourth only; two half notches right `axis` 7.5 each and `value120` 120 on the second (the ignored live test `a_touchpads_fine_scroll_lands_in_120ths`). (where: linux)
+- [ ] KDE Plasma through the portal: a slow touchpad scroll from the window or the phone moves a few pixels at a time (`NotifyPointerAxis` pixels, 3.75 a quarter notch), the right way. (where: linux)
+- [ ] GNOME through the portal: a slow touchpad scroll still scrolls, a notch once the turns make one. (where: linux)
+- [ ] uinput on a Linux computer where `/dev/uinput` is writable: `libinput debug-events` shows `v120` values below 120 for a slow scroll, and a mouse wheel's notch from an older phone app still scrolls one notch. (where: linux)
+- [ ] Windows host: a slow two-finger scroll from the phone or another computer's window scrolls a browser page a little at a time (`SendInput` wheel data below 120). (where: second computer)
+- [ ] The phone's trackpad: a slow two-finger scroll moves the page smoothly; with Settings' Smooth scrolling off it moves a notch at a time as before. (where: linux)
+- [ ] Shared input between two computers on this build: a touchpad's slow scroll on the driving one scrolls finely on the other; with one on an older build, by notches. (where: second computer)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
