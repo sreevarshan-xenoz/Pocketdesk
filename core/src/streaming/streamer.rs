@@ -188,21 +188,29 @@ pub enum AbsoluteSpace {
     Layout { monitor: Rect, layout: Rect },
 }
 
-/// What the server's injector says of a session's screen ([`AbsoluteSpace`]),
-/// by the session's monitor index, as things stand now. Asked at the
-/// session's start and again for each absolute move, so a change of screens
-/// is followed: it must answer at once, from what it already knows (never a
-/// compositor round trip), and say [`AbsoluteSpace::Unknown`] while a change
-/// is not yet read.
-pub type AbsoluteSpaceFn = fn(u32) -> AbsoluteSpace;
+/// What the server's injector says of a session's screen ([`AbsoluteSpace`]).
+/// A session is bound to the output its monitor index names when it starts
+/// (`bind`, to a key for that output, such as its name), as its capture is,
+/// and then asks where that output is for each absolute move (`space`), so
+/// a screen moved, rescaled or reordered is followed and the clicks stay on
+/// the screen the picture shows. Both must answer at once, from what the
+/// server already knows (never a compositor round trip): `bind` says `None`
+/// while it cannot tell which output the index names, and `space` says
+/// [`AbsoluteSpace::Unknown`] while a change is not yet read, or once the
+/// output is gone or its name is not its own.
+#[derive(Debug, Clone, Copy)]
+pub struct AbsoluteSpaces {
+    pub bind: fn(u32) -> Option<u32>,
+    pub space: fn(u32) -> AbsoluteSpace,
+}
 
-static ABSOLUTE_SPACE: std::sync::OnceLock<AbsoluteSpaceFn> = std::sync::OnceLock::new();
+static ABSOLUTE_SPACE: std::sync::OnceLock<AbsoluteSpaces> = std::sync::OnceLock::new();
 
 /// Name where the server's input backend lands an absolute move (Linux:
 /// the per-screen remap of a computer's screen windows, PC11). Set once at
 /// start; later calls change nothing.
-pub fn set_absolute_space(space: AbsoluteSpaceFn) {
-    let _ = ABSOLUTE_SPACE.set(space);
+pub fn set_absolute_space(spaces: AbsoluteSpaces) {
+    let _ = ABSOLUTE_SPACE.set(spaces);
 }
 
 /// Where a whole-monitor session's absolute pointer input has to land.
@@ -307,11 +315,17 @@ enum PointerSource {
     Off,
     /// Windows: the rectangles read at the session's start, its formula.
     Fixed(PointerSpace),
-    /// Linux: asked of the server's injector at each move, so a change of
-    /// screens is followed; while it says nothing is known, moves go on as
-    /// they came (over the whole desktop, as before), never to a screen
-    /// that has moved or gone.
-    Live { index: u32, said: AbsoluteSpaceFn },
+    /// Linux: the output the session is bound to (its key), asked of the
+    /// server's injector at each move, so a change of screens is followed;
+    /// while it says nothing is known, moves go on as they came (over the
+    /// whole desktop, as before), never to a screen that has moved or gone.
+    /// A session that could not be bound at its start (the server had not
+    /// read its screens yet) binds its index at its first move that can.
+    Live {
+        index: u32,
+        bound: Option<u32>,
+        spaces: AbsoluteSpaces,
+    },
 }
 
 impl PointerSource {
@@ -323,25 +337,45 @@ impl PointerSource {
             return (source, true);
         }
         match ABSOLUTE_SPACE.get().copied() {
-            Some(said) => Self::live(index, said),
+            Some(spaces) => Self::live(index, spaces),
             None => (Self::Off, false),
         }
     }
 
-    fn live(index: u32, said: AbsoluteSpaceFn) -> (Self, bool) {
-        let (_, per_screen) = PointerSpace::from_space(said(index));
-        (Self::Live { index, said }, per_screen)
+    fn live(index: u32, spaces: AbsoluteSpaces) -> (Self, bool) {
+        let bound = (spaces.bind)(index);
+        let per_screen = bound.is_some_and(|key| PointerSpace::from_space((spaces.space)(key)).1);
+        (
+            Self::Live {
+                index,
+                bound,
+                spaces,
+            },
+            per_screen,
+        )
     }
 
     /// `(x_norm, y_norm)` as the backend takes it now.
-    fn remap(&self, x_norm: u16, y_norm: u16) -> (u16, u16) {
+    fn remap(&mut self, x_norm: u16, y_norm: u16) -> (u16, u16) {
         match self {
             Self::Off => (x_norm, y_norm),
             Self::Fixed(space) => space.remap(x_norm, y_norm),
-            Self::Live { index, said } => match PointerSpace::from_space(said(*index)).0 {
-                Some(space) => space.remap_cells(x_norm, y_norm),
-                None => (x_norm, y_norm),
-            },
+            Self::Live {
+                index,
+                bound,
+                spaces,
+            } => {
+                if bound.is_none() {
+                    *bound = (spaces.bind)(*index);
+                }
+                let Some(key) = *bound else {
+                    return (x_norm, y_norm);
+                };
+                match PointerSpace::from_space((spaces.space)(key)).0 {
+                    Some(space) => space.remap_cells(x_norm, y_norm),
+                    None => (x_norm, y_norm),
+                }
+            }
         }
     }
 }
@@ -825,7 +859,7 @@ impl StreamingServer {
         // Where this session's absolute moves land (PC11 on Linux): read
         // before the ready stream, which says whether they land on its
         // screen.
-        let (pointer, per_screen) = if no_picture {
+        let (mut pointer, per_screen) = if no_picture {
             (PointerSource::Off, false)
         } else {
             PointerSource::start(self.config.monitor_index)
@@ -2726,34 +2760,59 @@ mod tests {
         }
     }
 
+    /// The stand-in server's state: 0 screen B (key 7) beside screen A
+    /// (key 3), B at index 1; 1 B moved left of A; 2 a change not yet read;
+    /// 3 the outputs reordered (index 1 now names A); 4 B gone.
     static LIVE_SPACE: AtomicU8 = AtomicU8::new(0);
 
-    /// A stand-in for the server's injector: screen 2 beside screen 1,
-    /// then moved left of it, then a change not yet read.
-    fn live_space(index: u32) -> AbsoluteSpace {
-        let screen = |x| (x, 0, 1280, 1024);
+    fn live_bind(index: u32) -> Option<u32> {
         match (LIVE_SPACE.load(Ordering::SeqCst), index) {
-            (0, 1) => AbsoluteSpace::Layout {
-                monitor: screen(1920),
-                layout: (0, 0, 3200, 1080),
+            (2, _) => None,
+            (3, 0) => Some(7),
+            (3, 1) => Some(3),
+            (_, 0) => Some(3),
+            (_, 1) => Some(7),
+            _ => None,
+        }
+    }
+
+    fn live_space(key: u32) -> AbsoluteSpace {
+        let a = (0, 0, 1920, 1080);
+        let b = |x| (x, 0, 1280, 1024);
+        let beside = (0, 0, 3200, 1080);
+        match (LIVE_SPACE.load(Ordering::SeqCst), key) {
+            (0 | 3, 3) => AbsoluteSpace::Layout {
+                monitor: a,
+                layout: beside,
             },
-            (1, 1) => AbsoluteSpace::Layout {
-                monitor: screen(-1280),
+            (0 | 3, 7) => AbsoluteSpace::Layout {
+                monitor: b(1920),
+                layout: beside,
+            },
+            (1, 7) => AbsoluteSpace::Layout {
+                monitor: b(-1280),
                 layout: (-1280, 0, 3200, 1080),
             },
             _ => AbsoluteSpace::Unknown,
         }
     }
 
-    /// Review I1: the mapping follows a change of screens mid-session, and
-    /// while the change is not yet read, moves go on as they came (the old
-    /// whole-desktop behaviour), never to where the screen was.
+    const LIVE: AbsoluteSpaces = AbsoluteSpaces {
+        bind: live_bind,
+        space: live_space,
+    };
+
+    /// Review I1, I4: the mapping follows the bound screen through a move,
+    /// and through a reorder that gives its index to another screen (the
+    /// picture stays on the screen the session started on); while a change
+    /// is not yet read, or once the screen is gone, moves go on as they
+    /// came (the old whole-desktop behaviour), never to where it was.
     #[test]
-    fn a_live_source_follows_a_change_of_screens() {
-        LIVE_SPACE.store(0, Ordering::SeqCst);
-        let (source, per_screen) = PointerSource::live(1, live_space);
-        assert!(per_screen);
+    fn a_live_source_follows_its_screen_through_moves_and_reorders() {
         let beside = (0, 0, 3200, 1080);
+        LIVE_SPACE.store(0, Ordering::SeqCst);
+        let (mut source, per_screen) = PointerSource::live(1, LIVE);
+        assert!(per_screen);
         assert_eq!(landed(source.remap(0, 0), beside), (1920, 0));
         LIVE_SPACE.store(2, Ordering::SeqCst);
         assert_eq!(source.remap(0, 0), (0, 0), "unread: as it came");
@@ -2762,11 +2821,18 @@ mod tests {
         let left = (-1280, 0, 3200, 1080);
         assert_eq!(landed(source.remap(0, 0), left), (-1280, 0));
         assert_eq!(landed(source.remap(65535, 65535), left), (-1, 1023));
+        // Reordered: index 1 names A now, but the session still shows B.
+        LIVE_SPACE.store(3, Ordering::SeqCst);
+        assert_eq!(landed(source.remap(0, 0), beside), (1920, 0), "still B");
+        // B gone: as it came, not onto whatever has its index.
+        LIVE_SPACE.store(4, Ordering::SeqCst);
+        assert_eq!(source.remap(0, 0), (0, 0));
         // A session started before anything was known says no bit, and
-        // still follows once the injector knows.
+        // binds at its first move that can.
         LIVE_SPACE.store(2, Ordering::SeqCst);
-        let (late, per_screen) = PointerSource::live(1, live_space);
+        let (mut late, per_screen) = PointerSource::live(1, LIVE);
         assert!(!per_screen);
+        assert_eq!(late.remap(9, 9), (9, 9));
         LIVE_SPACE.store(0, Ordering::SeqCst);
         assert_eq!(landed(late.remap(0, 0), beside), (1920, 0));
     }

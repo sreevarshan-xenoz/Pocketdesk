@@ -253,6 +253,11 @@ fn note_absolute_kind(backend: &InputBackend) {
         _ => AbsoluteKind::Unknown,
     };
     ABSOLUTE_KIND.store(kind as u8, std::sync::atomic::Ordering::Relaxed);
+    // Follow the screens from now, so the first session finds them read.
+    #[cfg(target_os = "linux")]
+    if kind == AbsoluteKind::Layout {
+        crate::pointer_space::ensure_watching();
+    }
 }
 
 /// Send `event` to the capture's RemoteDesktop session (N8). With none (a

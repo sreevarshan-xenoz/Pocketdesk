@@ -16,18 +16,25 @@
 //!
 //! The outputs are followed (review I1): a thread keeps a connection to the
 //! compositor and hears outputs come, go and change, and re-reads xcap's
-//! names every [`REFRESH`]. The streamer asks at each absolute move, and is
-//! answered from what the thread last saw, at once. From an output's first
-//! changed property until the compositor says it is done, nothing is known,
-//! so moves go on over the whole desktop as before, never to where a screen
-//! was.
+//! names every [`REFRESH`]. It runs only where the backend spans the
+//! compositor's layout (review I5: never on GNOME, KDE or X), started as
+//! such an injector is made. A session is bound to its output by name
+//! when it starts (review I4), as its capture is bound to it, and asks where
+//! that output is at each absolute move, answered at once from a table the
+//! thread worked out as the screens last settled (review N6: a read lock
+//! and a short scan, nothing allocated). From an output's first changed
+//! property until the compositor says it is done, and once the output is
+//! gone or its name is not its own, nothing is known, so moves go on over
+//! the whole desktop as before, never to where a screen was. (The ready
+//! byte's bit is said once, at the session's start: review N8, left so.)
 
 use std::os::fd::AsRawFd;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant};
 
-use pocketdesk_core::streaming::AbsoluteSpace;
 use pocketdesk_core::streaming::capture;
+use pocketdesk_core::streaming::{AbsoluteSpace, AbsoluteSpaces};
 use wayland_client::backend::WaylandError;
 use wayland_client::protocol::wl_output::{self, WlOutput};
 use wayland_client::protocol::wl_registry::{self, WlRegistry};
@@ -46,6 +53,10 @@ type Rect = (i32, i32, u32, u32);
 /// How often xcap's names are read again, and the compositor tried again
 /// once its connection is gone.
 const REFRESH: Duration = Duration::from_secs(2);
+
+/// How long the compositor may take to finish saying a change before the
+/// log says it has not (review N7).
+const SETTLE_SAID: Duration = Duration::from_secs(5);
 
 /// xcap's monitors, which a session's monitor index counts.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,40 +78,109 @@ pub struct Snapshot {
     pub outputs: Vec<WaylandOutput>,
 }
 
-static SNAPSHOT: Mutex<Option<Snapshot>> = Mutex::new(None);
+/// Where each output is now, worked out as the screens settled: what a
+/// session's monitor index binds to, and where each bound output is.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Table {
+    /// Each monitor index's output key, where it names one output for sure.
+    by_index: Vec<Option<u32>>,
+    /// Each output key's place, for outputs whose name is their own.
+    places: Vec<(u32, AbsoluteSpace)>,
+}
 
-/// Tell the streamer where this computer's absolute moves land, and follow
-/// the compositor's outputs (at start).
+impl Table {
+    /// The key monitor `index` names now.
+    pub fn bind(&self, index: u32) -> Option<u32> {
+        self.by_index.get(index as usize).copied().flatten()
+    }
+
+    /// Where output `key` is now: [`AbsoluteSpace::Unknown`] once it is gone
+    /// or its name is shared.
+    pub fn space(&self, key: u32) -> AbsoluteSpace {
+        self.places
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map_or(AbsoluteSpace::Unknown, |(_, space)| *space)
+    }
+}
+
+static TABLE: RwLock<Option<Table>> = RwLock::new(None);
+
+/// Output names, each given a key for good (looked up only as screens
+/// settle and keys are made, never per move).
+static KEYS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+fn key_of(name: &str) -> u32 {
+    let mut keys = KEYS.lock().unwrap_or_else(|e| e.into_inner());
+    let at = keys.iter().position(|k| k == name).unwrap_or_else(|| {
+        keys.push(name.to_string());
+        keys.len() - 1
+    });
+    u32::try_from(at).unwrap_or(u32::MAX)
+}
+
+/// The watching thread runs (or is starting).
+static WATCHING: AtomicBool = AtomicBool::new(false);
+
+/// Tell the streamer where this computer's absolute moves land (at start).
+/// Nothing is followed yet: an injector that spans the compositor's layout
+/// starts it as it is made.
 pub fn install() {
-    pocketdesk_core::streaming::set_absolute_space(absolute_space);
-    if std::env::var_os("WAYLAND_DISPLAY").is_none() {
+    pocketdesk_core::streaming::set_absolute_space(AbsoluteSpaces { bind, space });
+}
+
+/// Whether the screens are to be followed: only where the backend spans the
+/// compositor's layout (not GNOME, KDE or X, review I5), on Wayland.
+pub fn should_watch(kind: AbsoluteKind, wayland: bool) -> bool {
+    kind == AbsoluteKind::Layout && wayland
+}
+
+/// Start following the screens, once, where they are to be: as the
+/// injector is made, and again at a session's start (after a thread that
+/// ended).
+pub fn ensure_watching() {
+    if WATCHING.load(Ordering::Relaxed)
+        || !should_watch(
+            absolute_kind(),
+            std::env::var_os("WAYLAND_DISPLAY").is_some(),
+        )
+        || WATCHING.swap(true, Ordering::AcqRel)
+    {
         return;
     }
     if let Err(e) = std::thread::Builder::new()
         .name("pointer-space".into())
         .spawn(watch)
     {
+        WATCHING.store(false, Ordering::Release);
         tracing::warn!(error = %e, "Could not follow the screens: clicks go over the whole desktop");
     }
 }
 
-/// [`AbsoluteSpace`] for the session showing monitor `index`, from what
-/// the watching thread last saw; never blocks. The injector is asked each
-/// time, so one made late counts once it is made.
-fn absolute_space(index: u32) -> AbsoluteSpace {
+/// The output monitor `index` names now, for a session starting on it.
+fn bind(index: u32) -> Option<u32> {
+    ensure_watching();
+    if absolute_kind() != AbsoluteKind::Layout {
+        return None;
+    }
+    let table = TABLE.read().unwrap_or_else(|e| e.into_inner());
+    table.as_ref().and_then(|t| t.bind(index))
+}
+
+/// Where output `key` is now; never blocks, allocates nothing.
+fn space(key: u32) -> AbsoluteSpace {
     if absolute_kind() != AbsoluteKind::Layout {
         return AbsoluteSpace::Unknown;
     }
-    let snapshot = SNAPSHOT.lock().unwrap_or_else(|e| e.into_inner());
-    match snapshot.as_ref() {
-        Some(s) => space_for(index, &s.names, &s.outputs),
-        None => AbsoluteSpace::Unknown,
-    }
+    let table = TABLE.read().unwrap_or_else(|e| e.into_inner());
+    table
+        .as_ref()
+        .map_or(AbsoluteSpace::Unknown, |t| t.space(key))
 }
 
-fn publish(next: Option<Snapshot>) {
-    let mut snapshot = SNAPSHOT.lock().unwrap_or_else(|e| e.into_inner());
-    if *snapshot == next {
+/// Publish `next` (`None`: nothing known) when it differs from `last`.
+fn publish(last: &mut Option<Snapshot>, next: Option<Snapshot>) {
+    if *last == next {
         return;
     }
     match &next {
@@ -120,7 +200,9 @@ fn publish(next: Option<Snapshot>) {
             tracing::debug!(outputs = s.outputs.len(), "The screens as laid out now");
         }
     }
-    *snapshot = next;
+    let table = next.as_ref().map(table_for);
+    *TABLE.write().unwrap_or_else(|e| e.into_inner()) = table;
+    *last = next;
 }
 
 /// xcap's names now.
@@ -134,27 +216,36 @@ fn names_now() -> Names {
     }
 }
 
-/// The thread: follow the compositor while it answers, then try again.
+/// The thread: follow the compositor while it answers and the backend
+/// still spans its layout, then try again; it ends once the backend no
+/// longer does.
 fn watch() {
-    loop {
+    let mut last = None;
+    while absolute_kind() == AbsoluteKind::Layout {
         if let Some(stream) = screens_wayland::connect()
             && let Ok(conn) = Connection::from_socket(stream)
         {
-            follow(&conn);
+            follow(&conn, &mut last);
         }
-        publish(None);
+        publish(&mut last, None);
         std::thread::sleep(REFRESH);
     }
+    WATCHING.store(false, Ordering::Release);
 }
 
 /// Hear `conn`'s outputs until it fails, publishing each settled state.
-fn follow(conn: &Connection) {
+fn follow(conn: &Connection, last: &mut Option<Snapshot>) {
     let mut queue: EventQueue<Watch> = conn.new_event_queue();
     let qh = queue.handle();
     let _registry = conn.display().get_registry(&qh, ());
     let mut state = Watch::default();
     let mut names_read: Option<Instant> = None;
+    let mut unsettled_since: Option<Instant> = None;
+    let mut said_unsettled = false;
     loop {
+        if absolute_kind() != AbsoluteKind::Layout {
+            return;
+        }
         if queue.dispatch_pending(&mut state).is_err() {
             return;
         }
@@ -169,7 +260,22 @@ fn follow(conn: &Connection) {
                 .iter()
                 .map(|o| (o.settled, o.said.clone()))
                 .collect();
-            publish(settled(&said, names_now()));
+            let next = settled(&said, names_now());
+            // Review N7: a compositor that never finishes saying a change
+            // leaves clicks over the whole desktop; said once.
+            if next.is_none() {
+                let since = *unsettled_since.get_or_insert_with(Instant::now);
+                if !said_unsettled && since.elapsed() >= SETTLE_SAID {
+                    said_unsettled = true;
+                    tracing::info!(
+                        "The compositor has not finished saying its screens for 5 s: a screen window's clicks go over the whole desktop"
+                    );
+                }
+            } else {
+                unsettled_since = None;
+                said_unsettled = false;
+            }
+            publish(last, next);
             state.changed = false;
             names_read = Some(Instant::now());
         }
@@ -381,50 +487,60 @@ fn has_duplicates<'a>(mut names: impl Iterator<Item = &'a str>) -> bool {
     names.any(|name| !seen.insert(name))
 }
 
-/// The space for monitor `index`, xcap's monitors being `names`, over the
-/// compositor's `outputs` in its order. Pure, so measured on every system.
-/// Only where a capture provably counts the same way is an output taken by
-/// position (no X); a name that is missing, empty or shared by two is not
-/// guessed, nor an X server whose monitors could not be listed.
-pub fn space_for(index: u32, names: &Names, outputs: &[WaylandOutput]) -> AbsoluteSpace {
-    let placed: Vec<(Option<&str>, Rect)> = outputs
+/// The table for a settled `snapshot`. Pure, so measured on every system.
+/// Each output whose name is its own gets a key and a place; a monitor
+/// index binds to one only where a capture provably counts the same way:
+/// by xcap's name for it, or by the compositor's order with no X (review
+/// I2). A name that is missing, empty or shared by two binds to nothing,
+/// nor does any index of an X server whose monitors could not be listed.
+pub fn table_for(snapshot: &Snapshot) -> Table {
+    let screens: Vec<(Option<&str>, Rect)> = snapshot
+        .outputs
         .iter()
-        .filter_map(|o| {
-            let s = o.screen().filter(|s| s.is_sound())?;
-            Some((o.name.as_deref(), (s.x, s.y, s.width, s.height)))
+        .map(|o| {
+            let rect = o
+                .screen()
+                .filter(|s| s.is_sound())
+                .map(|s| (s.x, s.y, s.width, s.height));
+            (o.name.as_deref(), rect)
+        })
+        .filter_map(|(name, rect)| Some((name, rect?)))
+        .collect();
+    let Some(layout) = bounds(screens.iter().map(|(_, r)| *r)) else {
+        return Table::default();
+    };
+    // The outputs whose name is their own, with their places.
+    let own = |name: &str| screens.iter().filter(|(n, _)| *n == Some(name)).count() == 1;
+    let places: Vec<(u32, AbsoluteSpace)> = screens
+        .iter()
+        .filter_map(|(name, monitor)| {
+            let name = name.filter(|n| !n.is_empty() && own(n))?;
+            let space = if *monitor == layout {
+                AbsoluteSpace::Screen
+            } else {
+                AbsoluteSpace::Layout {
+                    monitor: *monitor,
+                    layout,
+                }
+            };
+            Some((key_of(name), space))
         })
         .collect();
-    let monitor = match names {
-        Names::NoX => outputs
-            .get(index as usize)
-            .and_then(WaylandOutput::screen)
-            .filter(|s| s.is_sound())
-            .map(|s| (s.x, s.y, s.width, s.height)),
-        Names::Failed => None,
-        Names::List(names) => {
-            let wanted = names
-                .get(index as usize)
-                .filter(|name| !name.is_empty())
-                .filter(|_| !has_duplicates(names.iter().map(String::as_str)));
-            wanted.and_then(|name| {
-                let mut same = placed
-                    .iter()
-                    .filter(|(said, _)| *said == Some(name.as_str()));
-                match (same.next(), same.next()) {
-                    (Some((_, rect)), None) => Some(*rect),
-                    _ => None,
-                }
-            })
-        }
+    let placed = |name: Option<&str>| {
+        let name = name.filter(|n| !n.is_empty() && own(n))?;
+        Some(key_of(name))
     };
-    let (Some(monitor), Some(layout)) = (monitor, bounds(placed.iter().map(|(_, r)| *r))) else {
-        return AbsoluteSpace::Unknown;
+    let by_index = match &snapshot.names {
+        Names::NoX => snapshot
+            .outputs
+            .iter()
+            .map(|o| placed(o.name.as_deref()))
+            .collect(),
+        Names::Failed => Vec::new(),
+        Names::List(names) if has_duplicates(names.iter().map(String::as_str)) => Vec::new(),
+        Names::List(names) => names.iter().map(|n| placed(Some(n))).collect(),
     };
-    if monitor == layout {
-        AbsoluteSpace::Screen
-    } else {
-        AbsoluteSpace::Layout { monitor, layout }
-    }
+    Table { by_index, places }
 }
 
 /// The box around `rects`; `None` with none.
@@ -465,6 +581,88 @@ mod tests {
 
     fn names(names: &[&str]) -> Names {
         Names::List(names.iter().map(|n| n.to_string()).collect())
+    }
+
+    /// Where monitor `index` lands, bound now.
+    fn space_for(index: u32, names: &Names, outputs: &[WaylandOutput]) -> AbsoluteSpace {
+        let table = table_for(&Snapshot {
+            names: names.clone(),
+            outputs: outputs.to_vec(),
+        });
+        table
+            .bind(index)
+            .map_or(AbsoluteSpace::Unknown, |key| table.space(key))
+    }
+
+    fn snapshot(names: Names, outputs: &[WaylandOutput]) -> Snapshot {
+        Snapshot {
+            names,
+            outputs: outputs.to_vec(),
+        }
+    }
+
+    /// Review I4: a session bound to its output follows that output, not
+    /// its index: the outputs reordered (index 1 now names the other) leave
+    /// it on the screen its picture shows, moved there too; once the output
+    /// is gone, or another takes its name, it is not known.
+    #[test]
+    fn a_bound_output_is_followed_through_a_reorder_and_lost_when_gone() {
+        let a = output("REORDER-A", (0, 0), (1920, 1080));
+        let b = output("REORDER-B", (1920, 0), (1280, 1024));
+        let first = table_for(&snapshot(
+            names(&["REORDER-A", "REORDER-B"]),
+            &[a.clone(), b.clone()],
+        ));
+        let bound = first.bind(1).expect("index 1 is B");
+        // Reordered, and B moved left of A.
+        let b_left = output("REORDER-B", (-1280, 0), (1280, 1024));
+        let reordered = table_for(&snapshot(
+            names(&["REORDER-B", "REORDER-A"]),
+            &[b_left.clone(), a.clone()],
+        ));
+        assert_ne!(reordered.bind(1), Some(bound), "index 1 names A now");
+        assert_eq!(
+            reordered.space(bound),
+            AbsoluteSpace::Layout {
+                monitor: (-1280, 0, 1280, 1024),
+                layout: (-1280, 0, 3200, 1080),
+            },
+            "still B, where B is"
+        );
+        // With no X too: the compositor's order changes, the key does not.
+        let no_x = table_for(&snapshot(Names::NoX, &[b_left, a.clone()]));
+        assert_eq!(no_x.bind(0), Some(bound));
+        // Gone.
+        let gone = table_for(&snapshot(names(&["REORDER-A"]), std::slice::from_ref(&a)));
+        assert_eq!(gone.space(bound), AbsoluteSpace::Unknown);
+        // Its name taken by two outputs.
+        let twice = table_for(&snapshot(
+            names(&["REORDER-A"]),
+            &[a, output("REORDER-B", (0, 1080), (800, 600)), b],
+        ));
+        assert_eq!(twice.space(bound), AbsoluteSpace::Unknown);
+    }
+
+    /// Review I5: the screens are followed only where the backend spans the
+    /// compositor's layout, on Wayland; never on GNOME, KDE or X (Unknown).
+    #[test]
+    fn the_screens_are_followed_only_where_the_backend_spans_the_layout() {
+        assert!(should_watch(AbsoluteKind::Layout, true));
+        assert!(!should_watch(AbsoluteKind::Layout, false));
+        assert!(!should_watch(AbsoluteKind::Unknown, true));
+        assert!(!should_watch(AbsoluteKind::Unknown, false));
+    }
+
+    /// Review I5: in a process whose injector does not span the layout (no
+    /// injector here), asking binds nothing and starts no thread.
+    #[test]
+    fn asking_without_a_layout_backend_starts_nothing() {
+        if absolute_kind() == AbsoluteKind::Layout {
+            return;
+        }
+        assert_eq!(bind(0), None);
+        assert_eq!(space(0), AbsoluteSpace::Unknown);
+        assert!(!WATCHING.load(Ordering::SeqCst));
     }
 
     #[test]
@@ -621,6 +819,15 @@ mod tests {
         );
         assert_eq!(space_for(9, &Names::NoX, &outputs), AbsoluteSpace::Unknown);
         assert_eq!(space_for(0, &Names::NoX, &[]), AbsoluteSpace::Unknown);
+        // An output with no name cannot be bound (nor followed).
+        let unnamed = WaylandOutput {
+            name: None,
+            ..output("x", (0, 0), (1920, 1080))
+        };
+        assert_eq!(
+            space_for(0, &Names::NoX, &[unnamed, outputs[1].clone()]),
+            AbsoluteSpace::Unknown
+        );
     }
 
     /// Review I1: while any output is part way through a change, nothing is

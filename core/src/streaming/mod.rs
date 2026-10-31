@@ -127,7 +127,7 @@ pub use session_telemetry::{
 };
 #[cfg(feature = "server")]
 pub use streamer::{
-    AbsoluteSpace, AbsoluteSpaceFn, SessionClaim, SessionInput, StreamingServer, set_absolute_space,
+    AbsoluteSpace, AbsoluteSpaces, SessionClaim, SessionInput, StreamingServer, set_absolute_space,
 };
 
 use serde::{Deserialize, Serialize};
