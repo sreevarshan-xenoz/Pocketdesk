@@ -17,6 +17,43 @@ pub const TOKEN_FILE: &str = "portal_restore_token";
 /// one kind of session is refused by the other.
 pub const REMOTE_TOKEN_FILE: &str = "portal_remote_token";
 
+/// The id the desktop portal knows Pocketdesk by: its desktop file's name,
+/// as the packages install it (`packaging/linux`).
+pub const APP_ID: &str = "dev.pocketdesk.Pocketdesk";
+
+/// Name this process to the desktop portal as Pocketdesk, before its first
+/// portal call. Unnamed, a host program is "an unidentifiable application"
+/// in KDE's dialog, its grants are kept for every unnamed program alike,
+/// and KDE's pre-authorization for remote control cannot name it alone
+/// (seen on Plasma 6.8, 2026-10-31). The portal names it only when the
+/// desktop file is installed; otherwise, or with a portal older than its
+/// host registry (1.19), it stays unnamed, as before. True when named.
+#[cfg(all(target_os = "linux", feature = "capture"))]
+pub async fn register_app() -> bool {
+    let Ok(id) = ashpd::AppID::try_from(APP_ID) else {
+        return false;
+    };
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        ashpd::register_host_app(id),
+    )
+    .await
+    {
+        Ok(Ok(())) => {
+            tracing::info!("Named to the desktop portal as {APP_ID}");
+            true
+        }
+        Ok(Err(e)) => {
+            tracing::debug!("Not named to the desktop portal ({e}): its dialogs say so");
+            false
+        }
+        Err(_) => {
+            tracing::debug!("The desktop portal did not answer the naming in 3 s");
+            false
+        }
+    }
+}
+
 /// The longest token kept; the portal's are UUIDs.
 const MAX_TOKEN: usize = 256;
 
@@ -92,6 +129,26 @@ pub fn forget(state_dir: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_portal_id_is_the_desktop_file_the_packages_install() {
+        // The portal names the server only when a desktop file of this id
+        // is installed: the .deb and the AUR package install this one.
+        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../packaging/linux")
+            .join(format!("{APP_ID}.desktop"));
+        assert!(file.is_file(), "{} is missing", file.display());
+        for script in ["../packaging/linux/build-deb.sh", "../aur/PKGBUILD"] {
+            let text = std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(script),
+            )
+            .unwrap();
+            assert!(
+                text.contains(&format!("/usr/share/applications/{APP_ID}.desktop")),
+                "{script} does not install {APP_ID}.desktop"
+            );
+        }
+    }
 
     fn temp_dir(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("pd-grant-{name}-{}", std::process::id()));

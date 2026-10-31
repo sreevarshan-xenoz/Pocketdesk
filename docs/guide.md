@@ -41,7 +41,7 @@ The desktop end runs on Linux and Windows; the phone end is the Android app. The
 
 | | Linux host | Windows host |
 |---|---|---|
-| Screen capture | wlroots screencopy (Hyprland, Sway), the portal (GNOME, KDE; it asks at each session, or with Settings "Remember the screen-sharing grant" on, off by default, once until you revoke it, so sessions start with no one at the desk), X11 | Windows.Graphics.Capture, DXGI duplication |
+| Screen capture | wlroots screencopy (Hyprland, Sway), the portal (GNOME, KDE; it asks at each session, or with Settings "Remember the screen-sharing grant" on, off by default, once until you revoke it, so sessions start with no one at the desk; on KDE Plasma 6 it can be [allowed ahead](#kde-plasma-no-dialog-at-all), so it never asks), X11 | Windows.Graphics.Capture, DXGI duplication |
 | Hardware encoding | VAAPI (in process), NVENC (through `ffmpeg`) | NVENC, AMF, Quick Sync, Media Foundation (every encoder, software too, through `ffmpeg.exe` on `PATH`) |
 | Remote input | uinput (Wayland), else the compositor's virtual pointer and keyboard on wlroots (Sway, Hyprland) when uinput is root-only, or GNOME's and KDE's RemoteDesktop portal through the session's screen sharing (one grant for both; a remote without the screen gets no input there), XTEST (X11); text typed from the phone goes through the compositor's virtual keyboard on wlroots (Sway, Hyprland), so any character arrives on any layout, else as US-layout keys with Shift | `SendInput`: elevated windows need `install --elevated`; the UAC prompt and the lock screen are never reachable |
 | Clipboard: text and images, anywhere | `wl-clipboard` on Wayland, `xclip` on X11 | Win32 clipboard |
@@ -512,6 +512,28 @@ journalctl --user -u pocketdesk -f
 The unit is `WantedBy=graphical-session.target`, so it starts at login and
 stops with the session. To run it without a login session (headless), enable
 lingering first: `sudo loginctl enable-linger $USER`.
+
+### KDE Plasma: No Dialog at All
+
+The server names itself to the desktop portal as `dev.pocketdesk.Pocketdesk`,
+the desktop file the .deb and the AUR package install (run from a source
+build without it, Plasma's dialog calls it "an unidentifiable application").
+Plasma 6 can then allow it ahead, as it allows KRdp, so its screen-sharing
+dialog never shows:
+
+```bash
+flatpak permission-set kde-authorized remote-desktop dev.pocketdesk.Pocketdesk yes
+# or, without flatpak installed, over D-Bus:
+gdbus call --session --dest org.freedesktop.impl.portal.PermissionStore \
+  --object-path /org/freedesktop/impl/portal/PermissionStore \
+  --method org.freedesktop.impl.portal.PermissionStore.SetPermission \
+  kde-authorized true remote-desktop dev.pocketdesk.Pocketdesk "['yes']"
+```
+
+`no` in place of `yes` takes it back. This covers the session the server
+opens when it cannot open uinput: the screen with the keyboard and mouse,
+under one grant. With uinput, the screen alone is shared, which Plasma asks
+about once; "Remember the screen-sharing grant" keeps that answer.
 
 ### Away From Home: Your Own Relay
 
