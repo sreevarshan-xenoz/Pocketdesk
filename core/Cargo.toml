@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [features]
-default = ["server"]
+default = ["server", "inproc"]
 
 # Desktop server features (Linux and Windows; the backends differ by target)
 server = ["capture", "encode", "injection", "opus"]
@@ -24,7 +24,15 @@ capture = [
     "dep:bitflags",
     "wayland-portal",
 ]
-encode = ["dep:ffmpeg-sidecar", "dep:ffmpeg-next"]
+# Video encoding through the system `ffmpeg` program (the sidecar), on both
+# OSes. It links no FFmpeg library, so a build with `encode` alone runs
+# whatever FFmpeg the machine has.
+encode = ["dep:ffmpeg-sidecar"]
+# The in-process Linux encoders (libx264/libx265 and VAAPI through
+# `ffmpeg-next`), on by default. They link the build machine's libav*, whose
+# sonames change with each FFmpeg major, so the portable Linux tarball leaves
+# them out and encodes through the sidecar (packaging/README.md).
+inproc = ["encode", "dep:ffmpeg-next"]
 # BG8: the in-process encoder on Windows too (NVENC with keyframes on request
 # and bitrate changes in place, no FFmpeg child). Off unless asked for: it
 # needs FFmpeg's development files to build and its DLLs to run
@@ -148,8 +156,8 @@ wayland-protocols = { version = "0.32", features = ["client", "unstable", "stagi
 wayland-scanner = { version = "0.31", optional = true }
 wayland-backend = { version = "0.3", optional = true }
 bitflags = { version = "2", optional = true }
-# In-process FFmpeg (software x264 + VAAPI). Windows encodes through the
-# ffmpeg sidecar only (W0-W1 in docs/status-history.md).
+# In-process FFmpeg (software x264 + VAAPI), behind `inproc`. Windows encodes
+# through the ffmpeg sidecar only (W0-W1 in docs/status-history.md).
 ffmpeg-next = { workspace = true, optional = true }
 # Input injection via uinput
 evdev = { workspace = true, optional = true }

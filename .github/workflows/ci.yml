@@ -79,9 +79,10 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
-  # `core` is compiled under four different feature sets — the server default,
-  # and three the bridge/WAN/encode paths use — and a cfg mistake in one is
-  # invisible to the others, so each profile gets its own job.
+  # `core` is compiled under five different feature sets — the server default,
+  # three the bridge/WAN/encode paths use, and the portable tarball's server
+  # (no in-process encoder) — and a cfg mistake in one is invisible to the
+  # others, so each profile gets its own job.
   profiles:
     runs-on: ubuntu-latest
     strategy:
@@ -96,6 +97,8 @@ jobs:
             features: wan
           - name: encode (capture + encoder paths)
             features: encode
+          - name: server without inproc (the portable tarball)
+            features: server
     steps:
       - uses: actions/checkout@v4
 

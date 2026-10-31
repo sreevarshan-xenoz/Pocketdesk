@@ -29,9 +29,12 @@ use ffmpeg_sidecar::command::FfmpegCommand;
 use tracing::{debug, error, info, trace, warn};
 
 use super::encoder_detect::HardwareEncoder;
-#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
+#[cfg(any(
+    all(target_os = "linux", feature = "inproc"),
+    all(windows, feature = "inproc-windows")
+))]
 use super::encoder_inproc::InProcessEncoder;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "inproc"))]
 use super::encoder_vaapi::VaapiEncoder;
 use super::flv_demux::FlvDemux;
 use super::{EncodedPacket, EncoderPreset, H264Profile, StreamingConfig, VideoCodec, VideoFrame};
@@ -119,17 +122,33 @@ fn spawn_stderr_logger(stderr: ChildStderr, tail: Arc<StderrTail>) -> io::Result
 
 /// Magic bytes for H.264 NAL unit start codes. The sidecar's output is
 /// framed by FLV; these NAL scanners serve the in-process encoders.
-#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows"), test))]
+#[cfg(any(
+    all(target_os = "linux", feature = "inproc"),
+    all(windows, feature = "inproc-windows"),
+    test
+))]
 const START_CODE_4: [u8; 4] = [0x00, 0x00, 0x00, 0x01];
-#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows"), test))]
+#[cfg(any(
+    all(target_os = "linux", feature = "inproc"),
+    all(windows, feature = "inproc-windows"),
+    test
+))]
 const START_CODE_3: [u8; 3] = [0x00, 0x00, 0x01];
 
 /// NAL unit type for IDR (instantaneous decoder refresh / keyframe).
-#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows"), test))]
+#[cfg(any(
+    all(target_os = "linux", feature = "inproc"),
+    all(windows, feature = "inproc-windows"),
+    test
+))]
 const NAL_TYPE_IDR: u8 = 5;
 
 /// Mask to extract NAL unit type from the first byte.
-#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows"), test))]
+#[cfg(any(
+    all(target_os = "linux", feature = "inproc"),
+    all(windows, feature = "inproc-windows"),
+    test
+))]
 const NAL_TYPE_MASK: u8 = 0x1F;
 
 /// Video encoder facade over the FFmpeg backends.
@@ -138,10 +157,13 @@ pub enum VideoEncoder {
     Sidecar(SidecarEncoder),
     /// In-process via `ffmpeg-next`: libx264/libx265 (software path), and
     /// NVENC on Windows with `inproc-windows` (BG8).
-    #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
+    #[cfg(any(
+        all(target_os = "linux", feature = "inproc"),
+        all(windows, feature = "inproc-windows")
+    ))]
     InProcess(InProcessEncoder),
     /// In-process VAAPI (`h264_vaapi`/`hevc_vaapi`) via raw FFmpeg FFI (C4).
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "inproc"))]
     VaapiInProcess(VaapiEncoder),
 }
 
@@ -222,9 +244,12 @@ impl VideoEncoder {
     pub fn backend_name(&self) -> &'static str {
         match self {
             Self::Sidecar(e) => e.backend_name(),
-            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
+            #[cfg(any(
+                all(target_os = "linux", feature = "inproc"),
+                all(windows, feature = "inproc-windows")
+            ))]
             Self::InProcess(e) => e.backend_name(),
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", feature = "inproc"))]
             Self::VaapiInProcess(_) => "in-process-vaapi",
         }
     }
@@ -239,9 +264,12 @@ impl VideoEncoder {
                 None => e.encode_frame(frame),
             },
             // The in-process encoder takes a frame on the GPU itself.
-            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
+            #[cfg(any(
+                all(target_os = "linux", feature = "inproc"),
+                all(windows, feature = "inproc-windows")
+            ))]
             Self::InProcess(e) => Ok(e.encode_frame(frame)?.into_iter().collect()),
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", feature = "inproc"))]
             Self::VaapiInProcess(e) => Ok(e.encode_frame(frame)?.into_iter().collect()),
         }
     }
@@ -250,9 +278,12 @@ impl VideoEncoder {
     pub fn drain(&mut self) -> anyhow::Result<Vec<EncodedPacket>> {
         match self {
             Self::Sidecar(e) => e.drain(),
-            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
+            #[cfg(any(
+                all(target_os = "linux", feature = "inproc"),
+                all(windows, feature = "inproc-windows")
+            ))]
             Self::InProcess(e) => e.drain(),
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", feature = "inproc"))]
             Self::VaapiInProcess(e) => e.drain(),
         }
     }
@@ -261,12 +292,18 @@ impl VideoEncoder {
     /// `false` when this backend cannot, and the caller rebuilds.
     // Off the in-process builds only the sidecar exists, which cannot.
     #[cfg_attr(
-        not(any(target_os = "linux", all(windows, feature = "inproc-windows"))),
+        not(any(
+            all(target_os = "linux", feature = "inproc"),
+            all(windows, feature = "inproc-windows")
+        )),
         allow(unused_variables)
     )]
     pub fn set_bitrate(&mut self, bitrate_bps: u32) -> bool {
         match self {
-            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
+            #[cfg(any(
+                all(target_os = "linux", feature = "inproc"),
+                all(windows, feature = "inproc-windows")
+            ))]
             Self::InProcess(e) => e.set_bitrate(bitrate_bps),
             _ => false,
         }
@@ -276,9 +313,12 @@ impl VideoEncoder {
     pub fn request_keyframe(&mut self) {
         match self {
             Self::Sidecar(e) => e.request_keyframe(),
-            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
+            #[cfg(any(
+                all(target_os = "linux", feature = "inproc"),
+                all(windows, feature = "inproc-windows")
+            ))]
             Self::InProcess(e) => e.request_keyframe(),
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", feature = "inproc"))]
             Self::VaapiInProcess(e) => e.request_keyframe(),
         }
     }
@@ -287,9 +327,12 @@ impl VideoEncoder {
     pub fn sequence(&self) -> u64 {
         match self {
             Self::Sidecar(e) => e.sequence(),
-            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
+            #[cfg(any(
+                all(target_os = "linux", feature = "inproc"),
+                all(windows, feature = "inproc-windows")
+            ))]
             Self::InProcess(e) => e.sequence(),
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", feature = "inproc"))]
             Self::VaapiInProcess(e) => e.sequence(),
         }
     }
@@ -298,9 +341,12 @@ impl VideoEncoder {
     pub fn config(&self) -> &StreamingConfig {
         match self {
             Self::Sidecar(e) => e.config(),
-            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
+            #[cfg(any(
+                all(target_os = "linux", feature = "inproc"),
+                all(windows, feature = "inproc-windows")
+            ))]
             Self::InProcess(e) => e.config(),
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", feature = "inproc"))]
             Self::VaapiInProcess(e) => e.config(),
         }
     }
@@ -366,10 +412,11 @@ pub fn degrade_to_software(config: &mut StreamingConfig) {
     config.codec = VideoCodec::H264;
 }
 
-/// Open the software rung: in-process libx264 first (Linux), sidecar as last
-/// resort — and as the only software path where in-process FFmpeg is not built.
+/// Open the software rung: in-process libx264 first (Linux with `inproc`),
+/// sidecar as last resort — and as the only software path where in-process
+/// FFmpeg is not built (Windows, and the portable Linux tarball).
 fn open_software(config: StreamingConfig) -> anyhow::Result<VideoEncoder> {
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "inproc"))]
     match InProcessEncoder::new(config.clone()) {
         Ok(encoder) => {
             info!("Video encoder: in-process FFmpeg (software)");
@@ -422,7 +469,7 @@ fn seam_names(list: &str, encoder: HardwareEncoder) -> bool {
 /// The VAAPI rung: in-process first (C4), verified sidecar as fallback.
 fn open_vaapi_verified(config: StreamingConfig) -> anyhow::Result<VideoEncoder> {
     fail_by_seam(config.hardware_encoder)?;
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "inproc"))]
     match VaapiEncoder::new(config.clone()) {
         Ok(encoder) => return Ok(VideoEncoder::VaapiInProcess(encoder)),
         Err(e) => {
@@ -882,7 +929,11 @@ impl Drop for SidecarEncoder {
 /// Detect if the encoded data contains an IDR (keyframe) NAL unit.
 ///
 /// Scans for start codes and checks if any following NAL unit has type 5.
-#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows"), test))]
+#[cfg(any(
+    all(target_os = "linux", feature = "inproc"),
+    all(windows, feature = "inproc-windows"),
+    test
+))]
 pub(crate) fn detect_keyframe(data: &[u8]) -> bool {
     let mut pos = 0;
     while pos < data.len() {
@@ -909,7 +960,11 @@ pub(crate) fn detect_keyframe(data: &[u8]) -> bool {
 /// Returns `Some((position, length))` where position is the offset of the start
 /// code and length is either 4 (for 00 00 00 01) or 3 (for 00 00 01).
 /// Returns `None` if no start code is found.
-#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows"), test))]
+#[cfg(any(
+    all(target_os = "linux", feature = "inproc"),
+    all(windows, feature = "inproc-windows"),
+    test
+))]
 pub(crate) fn find_start_code(data: &[u8], from: usize) -> Option<(usize, usize)> {
     if from >= data.len() || from + 2 >= data.len() {
         return None;
@@ -963,9 +1018,9 @@ pub(crate) fn vbv_kbit_bounds(bitrate_bps: u32, fps: u32) -> (u64, u64) {
 /// degrade instead of killing the session (the in-process path tests each
 /// node's actual VAAPI usability).
 fn vaapi_device_node() -> String {
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "inproc"))]
     use super::encoder_vaapi::VAAPI_DEVICE_ENV;
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(all(target_os = "linux", feature = "inproc")))]
     const VAAPI_DEVICE_ENV: &str = "POCKETDESK_VAAPI_DEVICE";
     if let Ok(node) = std::env::var(VAAPI_DEVICE_ENV)
         && !node.is_empty()
