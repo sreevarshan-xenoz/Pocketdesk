@@ -39,14 +39,21 @@ jobs:
         timeout-minutes: 30
         run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod* && sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update && mkdir -p ~/apt-archives/partial && sudo apt-get -o Dir::Cache::Archives=$HOME/apt-archives install -y --no-install-recommends libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev && sudo chown -R "$USER" ~/apt-archives
 
+      # The workspace's lock, in place before the cache's key is made, so
+      # a dependency bump makes a new key (scripts/fuzz.sh copies it too).
+      - name: The fuzz crate's lock
+        run: cp Cargo.lock fuzz/Cargo.lock
+
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: fuzz -> target
           shared-key: fuzz
 
-      - name: Keep the corpus between nights
-        uses: actions/cache@v4
+      # Restored and saved apart, so a night that crashed keeps what its
+      # corpus grew too.
+      - name: The corpus of the nights before
+        uses: actions/cache/restore@v4
         with:
           path: fuzz/corpus
           key: fuzz-corpus-${{ github.run_id }}
@@ -59,6 +66,13 @@ jobs:
 
       - name: Fuzz every target for 5 minutes
         run: scripts/fuzz.sh 300
+
+      - name: Keep the corpus for the next night
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: fuzz/corpus
+          key: fuzz-corpus-${{ github.run_id }}
 
       - name: Upload the inputs that crashed
         if: failure()
