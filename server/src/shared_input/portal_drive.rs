@@ -22,17 +22,18 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use pocketdesk_core::local::shared_input::PHONE_READY;
-
 use super::awake::KeepAwake;
 use super::badge;
-use super::drive::{Action, Captured, Driver, OpenChannel, SavedLayout, layout_for, reachable};
+use super::drive::{
+    Action, Captured, Driver, LayoutFiles, OpenChannel, SavedLayout, layout_from, reachable,
+};
 use super::game_lock::Foreground;
 use super::link::{self, Channel};
 use super::pace::MovePacer;
 use super::phone::{self, PhoneChannel};
 use super::portal_glue::{Backend, Portal, PortalGlue, Standing};
 use super::quick::Nudge;
+use super::refresh::Refresher;
 use super::screens;
 use super::sound;
 use super::status;
@@ -61,7 +62,7 @@ const REOPEN_AFTER: Duration = Duration::from_secs(5);
 /// How often what is in front is looked at, for the gaming lock.
 const GAME_EVERY: Duration = Duration::from_millis(500);
 /// How long Hyprland may take to say what is in front (it answers in a
-/// millisecond or two; the loop waits on it).
+/// millisecond or two; the read off the loop's thread waits on it).
 const PROBE_WAIT: Duration = Duration::from_millis(100);
 /// How long, as a driver ends, what it just sent may take to go.
 const FLUSH_WAIT: Duration = Duration::from_millis(300);
@@ -486,62 +487,59 @@ pub(super) fn drive<B: Backend>(
         game_held: false,
         pacer: MovePacer::new(config.shared_input_low_latency),
     };
+    // The files read once here, then off this thread ([`Refresher`]).
     let mut saved = SavedLayout::default();
-    let mut read_layout = |glue: &mut Glue<B>| {
-        let file = state_dir
-            .as_deref()
-            .map(pocketdesk_core::local::shared_input::read)
-            .unwrap_or_default();
-        glue.phone_ids = file
-            .computers
-            .iter()
-            .filter(|c| c.phone.is_some() && !c.this_computer)
-            .map(|c| c.device_id.clone())
-            .collect();
-        let mut linked = link::linked();
-        linked.extend(
-            glue.phone_ids
-                .iter()
-                .filter(|id| phone::is_linked(id))
-                .cloned(),
-        );
-        let mut layout = layout_for(
-            &me.device_id,
-            &me.device_name,
-            glue.own.clone(),
-            &file,
-            &linked,
-            state_dir.as_deref().and_then(|dir| saved.get(dir)),
-        );
-        // Each named as the owner paired it, whatever it calls itself
-        // (one that only takes input never said its name): the badge
-        // never says "this computer" of another.
-        if layout.computers.len() > 1 {
-            let paired = state_dir
-                .as_deref()
-                .map(status::paired_names)
-                .unwrap_or_default();
-            layout.name_as_paired(&paired);
-        }
-        layout
-    };
+    let mut files = LayoutFiles::read(state_dir.as_deref(), &mut saved);
+    glue.phone_ids = files.phones.clone();
     let mut game_lock_on = config.shared_input_game_lock;
     // This computer's Wi-Fi kept awake toward the computer driven while the
     // link is kept quick (BK10).
     let mut quick_on = config.shared_input_low_latency;
     let mut nudge = Nudge::default();
-    let mut driver = Driver::new(&me.device_id, read_layout(&mut glue))
+    let layout = layout_from(&me.device_id, &me.device_name, glue.own.clone(), &files);
+    let mut driver = Driver::new(&me.device_id, layout)
         .with_game_lock(game_lock_on, config.shared_input_lock_programs.clone());
     driver.set_clipboard(config.shared_input_clipboard);
     let actions = driver.on(foreground_now(&runtime, game_lock_on));
     glue.apply(&mut driver, actions);
+    // The files, the settings, the screens and Hyprland's scale every two
+    // seconds, and what is in front every half second, read on threads of
+    // their own: on this one a slow disk or a busy compositor (its IPC
+    // waited on up to 100 ms) stalled the moves.
+    let mut settings = config.clone();
+    let mut desktop_screens = glue.own.clone();
+    let zones_known = Arc::new(AtomicBool::new(false));
+    let reads = Refresher::start("pd-shared-read", LAYOUT_EVERY, {
+        let (state_dir, runtime) = (state_dir.clone(), runtime.clone());
+        let zones_known = Arc::clone(&zones_known);
+        move || {
+            let config = crate::events::current_config();
+            let files = LayoutFiles::read(state_dir.as_deref(), &mut saved);
+            let fractional = fractional_now(&runtime);
+            // Asked of the desktop only until the portal said its zones.
+            let screens =
+                (!zones_known.load(Ordering::SeqCst)).then(|| runtime.block_on(screens::current()));
+            (config, files, fractional, screens)
+        }
+    });
+    // Looked at only at home: away, the desktop gives every key and click
+    // to Pocketdesk, so nothing here comes to the front.
+    let at_home = Arc::new(AtomicBool::new(true));
+    let fronts = Refresher::start("pd-shared-front", GAME_EVERY, {
+        let (runtime, at_home) = (runtime.clone(), Arc::clone(&at_home));
+        move || {
+            at_home.load(Ordering::SeqCst).then(|| {
+                let game_lock = crate::events::current_config().shared_input_game_lock;
+                foreground_now(&runtime, game_lock)
+            })
+        }
+    });
     let started = driver.start();
     glue.apply(&mut driver, started);
     tracing::info!("Shared input: this computer's keyboard and mouse may go to the others");
 
     let mut last_input = Instant::now();
-    let (mut active_at, mut link_at, mut game_at) =
-        (Instant::now(), Instant::now(), Instant::now());
+    let (mut active_at, mut link_at) = (Instant::now(), Instant::now());
     // The first layout pass at once, with the computers' screens.
     let mut layout_at: Option<Instant> = None;
     let mut greeted_at: Option<Instant> = None;
@@ -648,9 +646,12 @@ pub(super) fn drive<B: Backend>(
         // Looked at only at home: away, the desktop gives every key and
         // click to Pocketdesk, so nothing here comes to the front, and the
         // loop is not held up while it carries input.
-        if driver.away_on().is_none() && game_at.elapsed() >= GAME_EVERY {
-            game_at = Instant::now();
-            let actions = driver.on(foreground_now(&runtime, game_lock_on));
+        at_home.store(driver.away_on().is_none(), Ordering::SeqCst);
+        zones_known.store(glue.input.zones().is_some(), Ordering::SeqCst);
+        if let Some((Some(front), _)) = fronts.as_ref().and_then(Refresher::take)
+            && driver.away_on().is_none()
+        {
+            let actions = driver.on(front);
             glue.apply(&mut driver, actions);
             glue.game_held = driver.game_held();
         }
@@ -693,20 +694,32 @@ pub(super) fn drive<B: Backend>(
         }
         if layout_at.is_none_or(|at| at.elapsed() >= LAYOUT_EVERY) {
             layout_at = Some(Instant::now());
-            let config = crate::events::current_config();
+            // What the read off this thread saw last, never waited for: a
+            // read that hangs leaves the last one in use.
+            if let Some(((config, read, fractional, screens), _)) =
+                reads.as_ref().and_then(Refresher::take)
+            {
+                settings = config;
+                files = read;
+                fractional_screen = fractional;
+                if let Some(screens) = screens {
+                    desktop_screens = screens;
+                }
+            }
+            let config = &settings;
             game_lock_on = config.shared_input_game_lock;
             quick_on = config.shared_input_low_latency;
             glue.pacer.set(quick_on);
             driver.set_clipboard(config.shared_input_clipboard);
             glue.sound_on = config.shared_input_sound;
-            let actions = driver.set_game_lock(game_lock_on, config.shared_input_lock_programs);
+            let actions =
+                driver.set_game_lock(game_lock_on, config.shared_input_lock_programs.clone());
             glue.apply(&mut driver, actions);
-            fractional_screen = fractional_now(&runtime);
             // The portal's zones are this computer's screens once it said
             // them; until then, what the desktop says.
             let own = match glue.input.zones() {
                 Some(zones) => zones.to_vec(),
-                None => runtime.block_on(screens::current()),
+                None => desktop_screens.clone(),
             };
             if own != glue.own {
                 glue.own = own;
@@ -741,7 +754,8 @@ pub(super) fn drive<B: Backend>(
                 glue.channels.retain(|id, _| link::connection(id).is_some());
                 glue.phones.retain(|_, channel| !channel.is_closed());
             }
-            let layout = read_layout(&mut glue);
+            glue.phone_ids = files.phones.clone();
+            let layout = layout_from(&me.device_id, &me.device_name, glue.own.clone(), &files);
             let actions = driver.set_layout(layout.clone());
             glue.apply(&mut driver, actions);
             glue.take_refusals(&mut driver, None);
@@ -757,12 +771,7 @@ pub(super) fn drive<B: Backend>(
                 })
                 .collect();
             let mut reachable = reachable(&open, &link::screens_heard());
-            reachable.extend(
-                glue.phone_ids
-                    .iter()
-                    .filter(|id| phone::standing_now(id) == PHONE_READY)
-                    .cloned(),
-            );
+            reachable.extend(files.phones_ready.iter().cloned());
             for id in &reachable {
                 glue.refusals.clear(id);
             }

@@ -76,7 +76,7 @@ use windows::core::w;
 use super::awake::KeepAwake;
 use super::badge;
 use super::drag_files::{self, Catch, Catcher, Dropped, Outcome};
-use super::drive::{Action, Driver, OpenChannel, SavedLayout, layout_for, reachable};
+use super::drive::{Action, Driver, LayoutFiles, OpenChannel, SavedLayout, layout_from, reachable};
 pub use super::drive::{Captured, Mode};
 use super::drop_windows::{self, Caught, DropCatcher};
 use super::game_lock;
@@ -84,11 +84,11 @@ use super::link::{self, Channel};
 use super::pace::MovePacer;
 use super::phone::{self, PhoneChannel};
 use super::quick::{KeepQuick, Nudge};
+use super::refresh::Refresher;
 use super::screens::{Desktop, Motion};
 use super::sound;
 use super::status;
 use super::wire::{self, Msg};
-use pocketdesk_core::local::shared_input::PHONE_READY;
 
 /// The thread message that sets the mode (its `WPARAM`: 0 off, 1 watch,
 /// 2 away).
@@ -1049,19 +1049,41 @@ const GAME_SETTLE_FOR: Duration = Duration::from_millis(500);
 /// gaming lock off, and the services only while a game is in front (the
 /// only time the answer matters).
 fn foreground_now(game_lock: bool, lock_programs: &[String], desktop: &Desktop) -> Captured {
+    logical_foreground(foreground_physical(game_lock, lock_programs), desktop)
+}
+
+/// [`foreground_now`] with the cursor still in physical pixels: what the
+/// read off the loop's thread sees, put in logical pixels by the loop.
+fn foreground_physical(game_lock: bool, lock_programs: &[String]) -> Captured {
     if !game_lock {
         return Captured::Foreground {
             fg: game_lock::Foreground::default(),
             kernel_anti_cheat: false,
         };
     }
-    let mut fg = game_lock::foreground();
-    fg.cursor = fg.cursor.map(|at| desktop.to_logical(at));
+    let fg = game_lock::foreground();
     let kernel_anti_cheat = game_lock::in_front(&fg, lock_programs, game_lock)
         && game_lock::kernel_anti_cheat_running();
     Captured::Foreground {
         fg,
         kernel_anti_cheat,
+    }
+}
+
+/// `captured`'s cursor in logical pixels.
+fn logical_foreground(captured: Captured, desktop: &Desktop) -> Captured {
+    match captured {
+        Captured::Foreground {
+            mut fg,
+            kernel_anti_cheat,
+        } => {
+            fg.cursor = fg.cursor.map(|at| desktop.to_logical(at));
+            Captured::Foreground {
+                fg,
+                kernel_anti_cheat,
+            }
+        }
+        other => other,
     }
 }
 
@@ -1766,57 +1788,44 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
     };
     // The catcher's thread ready before a drag first needs it.
     glue.files_setting(config.shared_input_files);
-    // The owner's arrangement, read again when its file changes.
+    // The owner's arrangement, read again when its file changes; the files
+    // read once here, then off this thread ([`Refresher`]).
     let mut saved = SavedLayout::default();
-    // The owner's phones said as screens (BK5) are placed as computers
-    // are, while linked.
-    let mut read_layout = |glue: &mut Glue| {
-        let file = state_dir
-            .as_deref()
-            .map(pocketdesk_core::local::shared_input::read)
-            .unwrap_or_default();
-        glue.phone_ids = file
-            .computers
-            .iter()
-            .filter(|c| c.phone.is_some() && !c.this_computer)
-            .map(|c| c.device_id.clone())
-            .collect();
-        let mut linked = link::linked();
-        linked.extend(
-            glue.phone_ids
-                .iter()
-                .filter(|id| phone::is_linked(id))
-                .cloned(),
-        );
-        let mut layout = layout_for(
-            &me.device_id,
-            &me.device_name,
-            glue.own.clone(),
-            &file,
-            &linked,
-            state_dir.as_deref().and_then(|dir| saved.get(dir)),
-        );
-        // Each named as the owner paired it, whatever it calls itself
-        // (one that only takes input never said its name): the badge
-        // never says "this computer" of another.
-        if layout.computers.len() > 1 {
-            let paired = state_dir
-                .as_deref()
-                .map(status::paired_names)
-                .unwrap_or_default();
-            layout.name_as_paired(&paired);
-        }
-        layout
-    };
+    let mut files = LayoutFiles::read(state_dir.as_deref(), &mut saved);
+    glue.phone_ids = files.phones.clone();
     // What is in front is weighed before anything else, so a game already
     // there never sees a hook.
     let mut game_lock_on = config.shared_input_game_lock;
     let mut lock_programs = config.shared_input_lock_programs.clone();
-    let mut driver = Driver::new(&me.device_id, read_layout(&mut glue))
-        .with_game_lock(game_lock_on, lock_programs.clone());
+    let layout = layout_from(&me.device_id, &me.device_name, glue.own.clone(), &files);
+    let mut driver =
+        Driver::new(&me.device_id, layout).with_game_lock(game_lock_on, lock_programs.clone());
     driver.set_clipboard(config.shared_input_clipboard);
+    // When what is in front was last looked at on this thread: a read off
+    // it that started before is older news.
+    let mut probed_at = Some(Instant::now());
     let actions = driver.on(foreground_now(game_lock_on, &lock_programs, &glue.desktop));
     glue.apply(&mut driver, actions);
+    // The files, the settings and the monitors every two seconds, and what
+    // is in front every half second, read on threads of their own: on this
+    // one a slow disk stalled the moves.
+    let (mut settings, mut read_desktop) = (config.clone(), glue.desktop.clone());
+    let reads = Refresher::start("pd-shared-read", LAYOUT_EVERY, {
+        let state_dir = state_dir.clone();
+        move || {
+            let config = crate::events::current_config();
+            let desktop = Desktop::arrange(&crate::windows_desktop::monitors_scaled());
+            let files = LayoutFiles::read(state_dir.as_deref(), &mut saved);
+            (config, desktop, files)
+        }
+    });
+    let fronts = Refresher::start("pd-shared-front", GAME_EVERY, || {
+        let config = crate::events::current_config();
+        foreground_physical(
+            config.shared_input_game_lock,
+            &config.shared_input_lock_programs,
+        )
+    });
     let start = driver.start();
     glue.apply(&mut driver, start);
     tracing::info!("Shared input: this computer's keyboard and mouse may go to the others");
@@ -1868,6 +1877,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
                         Captured::ForegroundChanged => {
                             let actions = driver.on(Captured::ForegroundChanged);
                             glue.apply(&mut driver, actions);
+                            probed_at = Some(Instant::now());
                             let now = foreground_now(game_lock_on, &lock_programs, &glue.desktop);
                             let actions = driver.on(now);
                             glue.apply(&mut driver, actions);
@@ -1955,15 +1965,21 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         glue.follow_sound(&mut driver);
         // A game in front keeps the keyboard and mouse here with no hooks;
         // one come to the front while away brings them home.
-        let game_every = if settle_until.is_some_and(|until| Instant::now() < until) {
-            GAME_SETTLE_EVERY
-        } else {
-            GAME_EVERY
-        };
-        if game_at.elapsed() >= game_every {
-            game_at = Instant::now();
-            let now = foreground_now(game_lock_on, &lock_programs, &glue.desktop);
-            let actions = driver.on(now);
+        // Just after a window came to the front it is looked at here, often;
+        // otherwise what the read off this thread saw, unless this thread
+        // looked since that read started.
+        if settle_until.is_some_and(|until| Instant::now() < until) {
+            if game_at.elapsed() >= GAME_SETTLE_EVERY {
+                game_at = Instant::now();
+                probed_at = Some(game_at);
+                let now = foreground_now(game_lock_on, &lock_programs, &glue.desktop);
+                let actions = driver.on(now);
+                glue.apply(&mut driver, actions);
+            }
+        } else if let Some((front, started)) = fronts.as_ref().and_then(Refresher::take)
+            && probed_at.is_none_or(|at| started > at)
+        {
+            let actions = driver.on(logical_foreground(front, &glue.desktop));
             glue.apply(&mut driver, actions);
         }
         // Who is at this computer, to every computer with a channel: the
@@ -2014,10 +2030,17 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         }
         if layout_at.elapsed() >= LAYOUT_EVERY {
             layout_at = Instant::now();
+            // What the read off this thread saw last, never waited for: a
+            // read that hangs leaves the last one in use.
+            if let Some(((config, desktop, read), _)) = reads.as_ref().and_then(Refresher::take) {
+                settings = config;
+                read_desktop = desktop;
+                files = read;
+            }
+            let config = &settings;
             // The gaming lock's settings, taken without a restart.
-            let config = crate::events::current_config();
             game_lock_on = config.shared_input_game_lock;
-            lock_programs = config.shared_input_lock_programs;
+            lock_programs = config.shared_input_lock_programs.clone();
             driver.set_clipboard(config.shared_input_clipboard);
             glue.sound_on = config.shared_input_sound;
             glue.quick_on = config.shared_input_low_latency;
@@ -2027,9 +2050,8 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             }
             let actions = driver.set_game_lock(game_lock_on, lock_programs.clone());
             glue.apply(&mut driver, actions);
-            let desktop = Desktop::arrange(&crate::windows_desktop::monitors_scaled());
-            if desktop != glue.desktop {
-                glue.desktop = desktop;
+            if read_desktop != glue.desktop {
+                glue.desktop = read_desktop.clone();
                 glue.own = glue.desktop.screens();
                 let screens = Msg::Screens(glue.own.clone());
                 let to: Vec<String> = glue.channels.keys().cloned().collect();
@@ -2065,7 +2087,8 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
                 glue.channels.retain(|id, _| link::connection(id).is_some());
                 glue.phones.retain(|_, channel| !channel.is_closed());
             }
-            let layout = read_layout(&mut glue);
+            glue.phone_ids = files.phones.clone();
+            let layout = layout_from(&me.device_id, &me.device_name, glue.own.clone(), &files);
             let actions = driver.set_layout(layout);
             glue.apply(&mut driver, actions);
             // A computer that refused since its channel opened is left, and
@@ -2088,12 +2111,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             let mut reachable = reachable(&open, &link::screens_heard());
             // A phone may be crossed onto while it is linked and both it
             // and this computer allow it (BK5).
-            reachable.extend(
-                glue.phone_ids
-                    .iter()
-                    .filter(|id| phone::standing_now(id) == PHONE_READY)
-                    .cloned(),
-            );
+            reachable.extend(files.phones_ready.iter().cloned());
             // One that answers takes input: its next refusal starts the
             // wait over.
             for id in &reachable {

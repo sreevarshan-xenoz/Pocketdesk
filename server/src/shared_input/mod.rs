@@ -55,6 +55,7 @@ pub mod portal_glue;
 pub mod portal_session;
 pub mod quick;
 pub mod receive;
+pub mod refresh;
 pub mod screens;
 #[cfg(target_os = "linux")]
 pub mod screens_wayland;

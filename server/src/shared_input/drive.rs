@@ -1199,6 +1199,78 @@ pub fn layout_for(
     Layout { computers }
 }
 
+/// What a driver loop's layout pass reads from files: `shared_screens.json`,
+/// the owner's arrangement, the names the computers were paired as and
+/// which phones may be crossed onto. Read off the loop's thread
+/// ([`super::refresh`]).
+#[derive(Debug, Clone, Default)]
+pub struct LayoutFiles {
+    pub file: pocketdesk_core::local::shared_input::ScreensFile,
+    pub saved: Option<pocketdesk_core::local::shared_input::LayoutFile>,
+    /// The names the owner paired the computers as (read only once there
+    /// is another computer in the file).
+    pub paired: HashMap<String, String>,
+    /// The owner's phones in the file (BK5), and those that may be crossed
+    /// onto now (linked, and both ends allow it).
+    pub phones: HashSet<String>,
+    pub phones_ready: HashSet<String>,
+}
+
+impl LayoutFiles {
+    /// Read them now, from `state_dir` (blocking file work).
+    pub fn read(state_dir: Option<&std::path::Path>, saved: &mut SavedLayout) -> LayoutFiles {
+        let file = state_dir
+            .map(pocketdesk_core::local::shared_input::read)
+            .unwrap_or_default();
+        let phones: HashSet<String> = file
+            .computers
+            .iter()
+            .filter(|c| c.phone.is_some() && !c.this_computer)
+            .map(|c| c.device_id.clone())
+            .collect();
+        let phones_ready = phones
+            .iter()
+            .filter(|id| {
+                super::phone::standing_now(id) == pocketdesk_core::local::shared_input::PHONE_READY
+            })
+            .cloned()
+            .collect();
+        let others = file.computers.iter().any(|c| !c.this_computer);
+        let paired = match state_dir {
+            Some(dir) if others => super::status::paired_names(dir),
+            _ => HashMap::new(),
+        };
+        LayoutFiles {
+            saved: state_dir.and_then(|dir| saved.get(dir).cloned()),
+            file,
+            paired,
+            phones,
+            phones_ready,
+        }
+    }
+}
+
+/// The layout from what was read (`files`) and the links up now: this
+/// computer `this` (named `name`) with its screens `own`, and the linked
+/// computers and phones, each named as the owner paired it, whatever it
+/// calls itself (one that only takes input never said its name), so the
+/// badge never says "this computer" of another.
+pub fn layout_from(this: &str, name: &str, own: Vec<Screen>, files: &LayoutFiles) -> Layout {
+    let mut linked = super::link::linked();
+    linked.extend(
+        files
+            .phones
+            .iter()
+            .filter(|id| super::phone::is_linked(id))
+            .cloned(),
+    );
+    let mut layout = layout_for(this, name, own, &files.file, &linked, files.saved.as_ref());
+    if layout.computers.len() > 1 {
+        layout.name_as_paired(&files.paired);
+    }
+    layout
+}
+
 /// The owner's arrangement (`shared_layout.json`), read again only when
 /// the file changed.
 #[derive(Default)]
