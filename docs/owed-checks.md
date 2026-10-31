@@ -1585,10 +1585,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The hint's `nft insert` lines run by hand: the row turns green and a phone pairs. (where: linux)
 - iptables (`iptables.service` with a DROP policy): the row is red with the `iptables -I INPUT` lines. (where: linux)
 
-**247. Software encoding through OpenH264 on stock Fedora**
+**248. Software encoding through OpenH264 on stock Fedora**
 
-- A phone session against the tarball's server on a real stock Fedora machine with no working hardware encoder (or `POCKETDESK_FAIL_ENCODERS` naming its rungs) and `ffmpeg-free` plus `openh264`: the picture appears and stays, Diagnostics' last session names `ffmpeg-sidecar-openh264`, and the picture quality at the default bitrate is acceptable. (where: linux)
-- install.sh on a fresh stock Fedora: it lists `ffmpeg-free` and `openh264` and, once they are installed, `pocketdesk capabilities` names libopenh264. (where: linux)
+- A phone session against the tarball's server on a real stock Fedora machine with no working hardware encoder and `ffmpeg-free` plus `openh264`: the picture appears and stays, Diagnostics' last session names `ffmpeg-sidecar-openh264`, and the picture quality at the default bitrate is acceptable. (where: linux)
+- install.sh on a fresh stock Fedora: it lists `ffmpeg-free` and `openh264` and, once they are installed, `pocketdesk capabilities` names libopenh264; with `fedora-cisco-openh264` disabled it says how to enable it and enables nothing. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
