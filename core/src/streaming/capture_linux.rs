@@ -147,6 +147,8 @@ pub async fn start_capture(
         // Step 3: Start capture and get PipeWire node ID
         debug!("Starting capture and waiting for PipeWire stream...");
         // The owner answers the dialog here the first time: room to read it.
+        let token_sent = token.is_some();
+        let asked = std::time::Instant::now();
         let response = tokio::time::timeout(
             START_WAIT,
             screencast.start(&session, None, Default::default()),
@@ -154,6 +156,7 @@ pub async fn start_capture(
         .await
         .map_err(|_| anyhow::Error::new(NoAnswer))?
         .context("Failed to start capture")?;
+        note_slow_restore(token_sent, asked.elapsed());
 
         let streams = response
             .response()
@@ -293,6 +296,19 @@ fn after_remote_failed(e: &anyhow::Error, screen_token_saved: bool) -> AfterRemo
     }
 }
 
+/// A kept grant was sent but Start took long: the portal refused the token
+/// and asked at the desk instead (a revoked grant, or one kept under another
+/// app id, as after the update that named the server). Said once in the log,
+/// so a host that stalls with no one at it explains itself.
+fn note_slow_restore(token_sent: bool, took: Duration) {
+    if token_sent && took > Duration::from_secs(5) {
+        warn!(
+            "The kept screen-sharing grant was not taken ({}s to start): the desktop asked again",
+            took.as_secs()
+        );
+    }
+}
+
 /// What the portal is asked to do with its grant (N8).
 fn persist_mode(persist: crate::portal_grant::Persist) -> PersistMode {
     match persist {
@@ -364,6 +380,8 @@ async fn start_remote_desktop_capture(
         .map_err(|_| unavailable())?
         .context("Failed to select sources")?;
         // The owner answers the dialog here the first time: room to read it.
+        let token_sent = token.is_some();
+        let asked = std::time::Instant::now();
         let started =
             tokio::time::timeout(START_WAIT, remote.start(&session, None, Default::default()))
                 .await
@@ -371,6 +389,7 @@ async fn start_remote_desktop_capture(
                 .context("Failed to start the remote desktop session")?
                 .response()
                 .context("No response from the remote desktop start")?;
+        note_slow_restore(token_sent, asked.elapsed());
         if let (Some(dir), Some(token)) = (screen_grant.as_deref(), started.restore_token()) {
             match crate::portal_grant::write_remote(dir, token) {
                 Ok(()) => info!("Screen-sharing grant kept for the next session"),

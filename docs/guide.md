@@ -535,6 +535,14 @@ opens when it cannot open uinput: the screen with the keyboard and mouse,
 under one grant. With uinput, the screen alone is shared, which Plasma asks
 about once; "Remember the screen-sharing grant" keeps that answer.
 
+**After updating from 0.8.2 or earlier**, GNOME and KDE ask once more, even
+with "Remember the screen-sharing grant" on: the grant kept before was for an
+unnamed program, and the portal keeps grants by name. Answer the dialog at
+the computer once after the update. Until then a computer with no one at it
+waits a minute at each session and ends it ("No one answered the
+screen-sharing dialog"), and a dialog answered late leaves "The kept
+screen-sharing grant was not taken" in the server's log.
+
 ### Away From Home: Your Own Relay
 
 Away from home, a phone reaches the desktop directly when the desktop's network allows it (Diagnostics' "From outside" says whether it does), and through a relay when it does not. By default that relay is n0's free public service. To keep only your own machines in the path, run the relay yourself:
