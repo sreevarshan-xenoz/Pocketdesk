@@ -269,7 +269,9 @@ curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/s
 curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh | bash -s -- --dry-run
 ```
 
-The script installs the release's `linux-x86_64` tarball, which runs on any distro with glibc 2.39 or newer. It encodes video through the system `ffmpeg` program, so it works with whichever FFmpeg version your distro has. With apt, pacman, apk or dnf the script installs FFmpeg if it is missing; with another package manager, install it yourself. The software encoder needs an FFmpeg with libx264: on Fedora that is RPM Fusion's `ffmpeg`, not `ffmpeg-free`, which the script installs and which leaves hardware (VAAPI) encoding only.
+The script installs the release's `linux-x86_64` tarball, which needs glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40, Arch and later); on an older system the script stops and says so. The tarball encodes video through the system `ffmpeg` program, so it works with whichever FFmpeg version your distro has. If `ffmpeg` is missing, the script lists it with the other missing packages and asks before installing them, with apt, pacman (`pacman -S --needed`, never a bare `-Sy`; if pacman's database is stale, run `sudo pacman -Syu` first), dnf or apk. With `--yes` it installs nothing and only lists what is missing; with another package manager, install FFmpeg yourself.
+
+On Fedora the script installs `ffmpeg-free`. Fedora 44's has the VAAPI and NVENC encoders (`h264_vaapi`, `hevc_vaapi`, `h264_nvenc`, `hevc_nvenc`) but not libx264, the software encoder Pocketdesk falls back to. VAAPI also needs a VA driver that encodes H.264, and Fedora's own Mesa (AMD) leaves that out. So unless you have an NVIDIA card, install RPM Fusion's `ffmpeg` (`sudo dnf swap ffmpeg-free ffmpeg --allowerasing`) for the software encoder, and its freeworld VA drivers for hardware encoding.
 
 ### Debian and Ubuntu: the .deb
 

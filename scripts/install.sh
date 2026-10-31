@@ -864,7 +864,8 @@ _build_dep_list() {
       apt|pacman|apk) _deps+=("ffmpeg") ;;
       dnf)
         _deps+=("ffmpeg-free")
-        warn "Fedora's ffmpeg-free has no libx264: Pocketdesk encodes in hardware (VAAPI) only. RPM Fusion's ffmpeg adds the software encoder."
+        warn "Fedora's ffmpeg-free has the VAAPI and NVENC encoders but no libx264, Pocketdesk's software encoder, and Fedora's own Mesa (AMD) does not encode H.264 through VAAPI."
+        warn "Without an NVIDIA card, add RPM Fusion's ffmpeg ('sudo dnf swap ffmpeg-free ffmpeg --allowerasing') or its freeworld VA drivers."
         ;;
       *) warn "Install FFmpeg (the ffmpeg program): the server encodes video with it." ;;
     esac
