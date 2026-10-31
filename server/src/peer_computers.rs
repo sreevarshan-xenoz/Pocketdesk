@@ -2913,15 +2913,18 @@ mod tests {
         );
         drop(crate::plugins::privacy::LinkGrab("pc8-link-desk".into()));
         // Released on the blocking pool (it joins the input hook's thread on
-        // Windows), which a loaded test run can keep busy past a second.
+        // Windows), which a loaded test run can keep busy past a second:
+        // up to 5 s.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let mut released = false;
-        for _ in 0..250 {
+        while std::time::Instant::now() < deadline {
             if !crate::plugins::privacy::held_by_test("pc8-link-desk") {
                 released = true;
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
+        released = released || !crate::plugins::privacy::held_by_test("pc8-link-desk");
         assert!(released, "its own link's end lets it go");
         let _ = std::fs::remove_dir_all(&dir);
     }
