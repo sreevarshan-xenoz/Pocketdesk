@@ -2,13 +2,20 @@
 //!
 //! Probes the system for available hardware-accelerated encoders (VAAPI and
 //! NVENC on Linux; NVENC, AMF, Quick Sync and Media Foundation on Windows) and
-//! falls back to software encoding (libx264). A hardware encoder only counts
+//! falls back to software encoding (libx264, or libopenh264 where FFmpeg has
+//! no libx264: [`software_h264`]). A hardware encoder only counts
 //! as available once a throwaway one-frame encode through it succeeds: FFmpeg
 //! lists every encoder it was *built* with, whether or not this machine's GPU
 //! and driver can run it.
 
+use super::ffmpeg_flags::{Stamp, binary_stamp, listed_encoders, one_frame_encodes, still_fresh};
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeSet, HashMap};
+use std::ffi::{OsStr, OsString};
+use std::path::PathBuf;
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 /// Available hardware encoder backends.
@@ -28,7 +35,8 @@ pub enum HardwareEncoder {
     /// Windows Media Foundation: whichever encoder MFT the system offers (any
     /// vendor). The last hardware rung on Windows.
     MediaFoundation,
-    /// Software encoding via libx264
+    /// Software encoding via libx264 (libopenh264 on an FFmpeg without it,
+    /// on the sidecar)
     Software,
 }
 
@@ -127,47 +135,27 @@ const WINDOWS_ENCODERS: [(HardwareEncoder, &str); 3] = [
 
 /// Probe the system for available hardware encoders.
 ///
-/// Runs `ffmpeg -encoders` and parses the output to check for
-/// VAAPI and NVENC encoders (both H.264 and HEVC variants).
-/// Always reports software as available.
+/// Reads the sidecar's `ffmpeg -encoders` (remembered, see
+/// [`listed_encoders`]) for VAAPI and NVENC encoders (both H.264 and HEVC
+/// variants) and the Windows rungs. Always reports software as available.
 pub fn probe_encoders() -> AvailableEncoders {
     let mut available = AvailableEncoders::software_only();
 
-    // Run ffmpeg -encoders to enumerate available encoders
-    let output = match Command::new("ffmpeg")
-        .args(["-hide_banner", "-encoders"])
-        .output()
-    {
-        Ok(output) => output,
-        Err(e) => {
-            warn!("Failed to run ffmpeg -encoders: {e}");
-            info!("Assuming software encoding only");
-            return available;
-        }
+    let Some(listed) = listed_encoders(sidecar_ffmpeg()) else {
+        warn!("Could not list ffmpeg's encoders; assuming software encoding only");
+        return available;
     };
+    let lists = |name: &str| listed.contains(name);
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    let mut nvenc_listed = false;
-    let mut windows_listed = [false; WINDOWS_ENCODERS.len()];
-    for line in stdout.lines() {
-        let trimmed = line.trim();
-        // VAAPI encoders
-        if trimmed.contains("h264_vaapi") || trimmed.contains("hevc_vaapi") {
-            available.vaapi = true;
-            debug!("Detected VAAPI encoder: {trimmed}");
-        }
-        // NVENC encoders
-        if trimmed.contains("h264_nvenc") || trimmed.contains("hevc_nvenc") {
-            nvenc_listed = true;
-            debug!("Detected NVENC encoder: {trimmed}");
-        }
-        for (listed, (_, name)) in windows_listed.iter_mut().zip(WINDOWS_ENCODERS) {
-            if trimmed.split_whitespace().nth(1) == Some(name) {
-                *listed = true;
-            }
-        }
+    if lists("h264_vaapi") || lists("hevc_vaapi") {
+        available.vaapi = true;
+        debug!("Detected VAAPI encoder");
     }
+    let nvenc_listed = lists("h264_nvenc") || lists("hevc_nvenc");
+    if nvenc_listed {
+        debug!("Detected NVENC encoder");
+    }
+    let windows_listed = WINDOWS_ENCODERS.map(|(_, name)| lists(name));
 
     // FFmpeg lists VAAPI whenever it was built with it, Windows builds and
     // GPU-less machines included. It can only run on Linux with a render
@@ -230,7 +218,7 @@ pub fn probe_encoders() -> AvailableEncoders {
 /// Quick Sync encoder without an Intel GPU, and every other "built but cannot
 /// run" case exits non-zero.
 fn encoder_runtime_ok(encoder: &str) -> bool {
-    match Command::new("ffmpeg")
+    match Command::new(sidecar_ffmpeg())
         .args([
             "-hide_banner",
             "-loglevel",
@@ -254,6 +242,20 @@ fn encoder_runtime_ok(encoder: &str) -> bool {
     }
 }
 
+/// The ffmpeg program the sidecar runs: `ffmpeg-sidecar`'s pick (a binary
+/// beside this one, else `ffmpeg` on PATH), so detection and the encoder ask
+/// the same binary. A build without the encoder asks `ffmpeg`.
+pub fn sidecar_ffmpeg() -> PathBuf {
+    #[cfg(feature = "encode")]
+    {
+        ffmpeg_sidecar::paths::ffmpeg_path()
+    }
+    #[cfg(not(feature = "encode"))]
+    {
+        PathBuf::from("ffmpeg")
+    }
+}
+
 /// Whether VAAPI can run here: on Linux, with a render node to open.
 fn vaapi_usable(linux: bool, render_nodes: usize) -> bool {
     linux && render_nodes > 0
@@ -269,6 +271,119 @@ fn render_node_count() -> usize {
                 .count()
         })
         .unwrap_or(0)
+}
+
+/// The software H.264 encoders the sidecar can run, best first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum SoftwareH264 {
+    /// libx264: the software rung wherever FFmpeg has it.
+    X264,
+    /// Cisco's OpenH264, for an FFmpeg built without libx264 (Fedora's
+    /// `ffmpeg-free`). Constrained Baseline only, and lower quality per bit
+    /// than x264, but every phone decodes it.
+    OpenH264,
+}
+
+impl SoftwareH264 {
+    /// The FFmpeg encoder name.
+    pub fn ffmpeg_encoder(self) -> &'static str {
+        match self {
+            SoftwareH264::X264 => "libx264",
+            SoftwareH264::OpenH264 => "libopenh264",
+        }
+    }
+}
+
+/// The software H.264 encoder an FFmpeg that lists `listed` offers: libx264
+/// when it has it, else libopenh264, else none.
+pub fn pick_software_h264(listed: &BTreeSet<String>) -> Option<SoftwareH264> {
+    [SoftwareH264::X264, SoftwareH264::OpenH264]
+        .into_iter()
+        .find(|encoder| listed.contains(encoder.ffmpeg_encoder()))
+}
+
+/// What the software rung says when the system ffmpeg has no software H.264
+/// encoder at all.
+pub const NO_SOFTWARE_H264: &str = "the system ffmpeg has no software H.264 encoder (neither libx264 nor libopenh264); install an FFmpeg built with one (on Fedora, RPM Fusion's ffmpeg: sudo dnf swap ffmpeg-free ffmpeg --allowerasing)";
+
+/// What the software rung says when ffmpeg lists libopenh264 but cannot open
+/// it: Fedora ships a stub library in its place until Cisco's is installed.
+pub const OPENH264_UNUSABLE: &str = "the system ffmpeg lists libopenh264 but cannot open it (on Fedora the library may be the noopenh264 stub: sudo dnf install openh264, from the fedora-cisco-openh264 repository) and has no libx264";
+
+/// The software H.264 encoder an ffmpeg offers, from its listing (`None`
+/// when it could not be listed) and, asked only when libopenh264 is the one
+/// left, whether a one-frame encode through it works.
+///
+/// libx264 when listed. libopenh264 when only it is and it encodes (Fedora's
+/// `noopenh264` stub is listed but cannot). An ffmpeg whose encoders could not
+/// be listed is taken to have libx264, the historical default, so the error
+/// that reaches the user is the spawn's own.
+pub fn software_h264_from(
+    listed: Option<&BTreeSet<String>>,
+    openh264_encodes: impl FnOnce() -> bool,
+) -> Result<SoftwareH264, &'static str> {
+    let Some(listed) = listed else {
+        return Ok(SoftwareH264::X264);
+    };
+    match pick_software_h264(listed) {
+        Some(SoftwareH264::X264) => Ok(SoftwareH264::X264),
+        Some(SoftwareH264::OpenH264) if openh264_encodes() => Ok(SoftwareH264::OpenH264),
+        Some(SoftwareH264::OpenH264) => Err(OPENH264_UNUSABLE),
+        None => Err(NO_SOFTWARE_H264),
+    }
+}
+
+/// [`software_h264_from`] for the ffmpeg at `program`.
+pub fn software_h264(program: &OsStr) -> Result<SoftwareH264, &'static str> {
+    software_h264_from(listed_encoders(program).as_deref(), || {
+        openh264_encodes(program)
+    })
+}
+
+/// How long a failed libopenh264 check is believed before it is run again:
+/// long enough that a session's rebuilds do not each spawn ffmpeg, short
+/// enough that installing Cisco's library helps without a restart.
+pub const OPENH264_FAILURE_TTL: Duration = Duration::from_secs(5 * 60);
+
+/// How long a passed libopenh264 check is believed while the binary is
+/// unchanged (the library under it can still be swapped back to the stub).
+pub const OPENH264_SUCCESS_TTL: Duration = Duration::from_secs(60 * 60);
+
+/// Whether a one-frame encode through libopenh264 works in the ffmpeg at
+/// `program` (bounded by the probe deadline, killed past it). The answer is
+/// remembered for [`OPENH264_SUCCESS_TTL`] or [`OPENH264_FAILURE_TTL`], and
+/// forgotten when the binary changes on disk.
+pub fn openh264_encodes(program: &OsStr) -> bool {
+    type Entry = (Stamp, Instant, bool);
+    static KNOWN: OnceLock<Mutex<HashMap<OsString, Entry>>> = OnceLock::new();
+    let known = KNOWN.get_or_init(Default::default);
+    let stamp = binary_stamp(program);
+    if let Some((was, then, works)) = known.lock().unwrap_or_else(|e| e.into_inner()).get(program)
+        && still_fresh(was, *then, &stamp, Instant::now(), openh264_ttl(*works))
+    {
+        return *works;
+    }
+    let works = one_frame_encodes(program, SoftwareH264::OpenH264.ffmpeg_encoder());
+    known
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(program.to_os_string(), (stamp, Instant::now(), works));
+    works
+}
+
+/// How long a libopenh264 check that came out `works` is believed.
+fn openh264_ttl(works: bool) -> Duration {
+    if works {
+        OPENH264_SUCCESS_TTL
+    } else {
+        OPENH264_FAILURE_TTL
+    }
+}
+
+/// Whether an ffmpeg that lists `listed` has libx265; `true` when it could
+/// not be listed (the historical assumption).
+pub fn lists_libx265(listed: Option<&BTreeSet<String>>) -> bool {
+    listed.is_none_or(|listed| listed.contains("libx265"))
 }
 
 /// Resolve the `HardwareEncoder` selection to the actual encoder to use,
@@ -520,6 +635,84 @@ mod tests {
         let args = encoder_args(&HardwareEncoder::Nvenc, 1280, 720);
         assert!(args.contains(&"h264_nvenc".to_string()));
         assert!(args.contains(&"p1".to_string()));
+    }
+
+    fn names(list: &[&str]) -> BTreeSet<String> {
+        list.iter().map(|n| n.to_string()).collect()
+    }
+
+    #[test]
+    fn the_software_ladder_is_x264_then_openh264_then_nothing() {
+        assert_eq!(
+            pick_software_h264(&names(&["libx264", "libopenh264", "h264_vaapi"])),
+            Some(SoftwareH264::X264)
+        );
+        // Fedora's ffmpeg-free.
+        assert_eq!(
+            pick_software_h264(&names(&["libopenh264", "h264_vaapi", "h264_nvenc"])),
+            Some(SoftwareH264::OpenH264)
+        );
+        assert_eq!(
+            pick_software_h264(&names(&["h264_vaapi", "h264_nvenc", "libx265"])),
+            None
+        );
+        // libx264rgb encodes RGB, which no phone decodes: not the rung.
+        assert_eq!(pick_software_h264(&names(&["libx264rgb"])), None);
+        assert_eq!(SoftwareH264::OpenH264.ffmpeg_encoder(), "libopenh264");
+        assert_eq!(SoftwareH264::X264.ffmpeg_encoder(), "libx264");
+    }
+
+    #[test]
+    fn the_openh264_check_is_asked_only_when_it_is_the_one_left() {
+        let asked = std::cell::Cell::new(0);
+        let encodes = |works: bool| {
+            let asked = &asked;
+            move || {
+                asked.set(asked.get() + 1);
+                works
+            }
+        };
+        let x264 = names(&["libx264", "libopenh264"]);
+        assert_eq!(
+            software_h264_from(Some(&x264), encodes(false)),
+            Ok(SoftwareH264::X264)
+        );
+        assert_eq!(asked.get(), 0, "libx264 needs no check");
+        let fedora = names(&["libopenh264", "h264_vaapi"]);
+        assert_eq!(
+            software_h264_from(Some(&fedora), encodes(true)),
+            Ok(SoftwareH264::OpenH264)
+        );
+        // Fedora's noopenh264 stub: listed, but the encode fails.
+        assert_eq!(
+            software_h264_from(Some(&fedora), encodes(false)),
+            Err(OPENH264_UNUSABLE)
+        );
+        assert_eq!(asked.get(), 2);
+        assert_eq!(
+            software_h264_from(Some(&names(&["h264_vaapi"])), encodes(true)),
+            Err(NO_SOFTWARE_H264)
+        );
+        assert_eq!(asked.get(), 2, "nothing to check without libopenh264");
+    }
+
+    #[test]
+    fn an_ffmpeg_that_cannot_be_listed_keeps_the_historical_software_rung() {
+        assert_eq!(software_h264_from(None, || false), Ok(SoftwareH264::X264));
+        assert!(lists_libx265(None));
+        assert!(!lists_libx265(Some(&names(&["libopenh264"]))));
+        assert!(lists_libx265(Some(&names(&["libx265"]))));
+        // The real path agrees for a program that does not exist.
+        let missing = OsStr::new("no-such-program-pocketdesk");
+        assert_eq!(software_h264(missing), Ok(SoftwareH264::X264));
+    }
+
+    #[test]
+    fn a_failed_openh264_check_is_believed_for_minutes_not_for_good() {
+        assert_eq!(openh264_ttl(false), OPENH264_FAILURE_TTL);
+        assert_eq!(openh264_ttl(true), OPENH264_SUCCESS_TTL);
+        assert!(OPENH264_FAILURE_TTL <= Duration::from_secs(5 * 60));
+        assert!(OPENH264_FAILURE_TTL >= Duration::from_secs(60));
     }
 
     #[test]

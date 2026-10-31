@@ -142,6 +142,12 @@ pub struct Capabilities {
     /// The R4 C1 caps-stream marker bytes, so the report is readable without
     /// knowing where to look.
     pub codec_caps_stream_marker: Vec<u8>,
+    /// The software H.264 encoder the system `ffmpeg` gives the sidecar
+    /// (libx264, else libopenh264), read from this machine rather than the
+    /// build, so absent until [`Capabilities::with_sidecar_software_h264`]
+    /// adds it (`pocketdesk capabilities` does; the generated doc does not).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sidecar_software_h264: Option<String>,
 }
 
 impl Capabilities {
@@ -246,7 +252,14 @@ impl Capabilities {
                 ]
             },
             codec_caps_stream_marker: CODEC_CAPS_MARKER.to_vec(),
+            sidecar_software_h264: None,
         }
+    }
+
+    /// Add what this machine's `ffmpeg` gives the sidecar's software rung.
+    pub fn with_sidecar_software_h264(mut self, encoder: String) -> Self {
+        self.sidecar_software_h264 = Some(encoder);
+        self
     }
 
     #[cfg(feature = "capture")]
@@ -412,6 +425,10 @@ impl Capabilities {
                     .unwrap_or_else(|| "assumed".to_string()),
                 codec.mime_type
             ));
+        }
+
+        if let Some(encoder) = &self.sidecar_software_h264 {
+            out.push_str(&format!("  software H.264 (system ffmpeg): {encoder}\n"));
         }
 
         out.push_str("\nAudio\n");
@@ -678,6 +695,21 @@ mod tests {
         assert_eq!(parsed["protocol"]["v2_max_version"], V2_MAX_VERSION);
         assert!(caps.render_text().contains("Transports"));
         assert!(caps.render_markdown().contains("## Capture backends"));
+    }
+
+    #[test]
+    fn the_software_encoder_is_reported_only_once_read() {
+        let caps = Capabilities::collect();
+        assert!(!caps.render_json().contains("sidecar_software_h264"));
+        assert!(!caps.render_text().contains("software H.264"));
+        let caps = caps.with_sidecar_software_h264("libopenh264".to_string());
+        let parsed: serde_json::Value = serde_json::from_str(&caps.render_json()).unwrap();
+        assert_eq!(parsed["sidecar_software_h264"], "libopenh264");
+        assert!(
+            caps.render_text()
+                .contains("software H.264 (system ffmpeg): libopenh264")
+        );
+        assert!(!caps.render_markdown().contains("libopenh264"));
     }
 
     #[test]
