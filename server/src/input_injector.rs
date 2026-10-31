@@ -273,6 +273,10 @@ pub struct InputInjector {
     /// server for it, a round trip, so it is not asked on every absolute
     /// move ([`DISPLAY_SIZE_FOR`], [`InputInjector::forget_display_size`]).
     display_size: Option<((i32, i32), std::time::Instant)>,
+    /// Whether the display size is kept at all: only for shared input,
+    /// whose receiver tells a screen change; the phone's absolute moves
+    /// ask each time, as before.
+    keep_display_size: bool,
     /// Button mask of the previous `Gamepad` packet. That packet is a state
     /// snapshot, so every bit must be treated as an edge (see 2063).
     gamepad_buttons: u16,
@@ -529,6 +533,13 @@ impl InputInjector {
         self.display_size = None;
     }
 
+    /// Keep the display size between absolute moves (shared input, whose
+    /// receiver calls [`InputInjector::forget_display_size`] when the
+    /// screens change).
+    pub fn keep_display_size(&mut self) {
+        self.keep_display_size = true;
+    }
+
     /// Create a new input injector.
     ///
     /// Under a Wayland compositor uinput is tried first: enigo's XTEST only
@@ -544,6 +555,7 @@ impl InputInjector {
                 backend: InputBackend::SendInput(crate::input_sendinput::SendInputBackend::new()),
                 gamepad_buttons: 0,
                 display_size: None,
+                keep_display_size: false,
                 #[cfg(target_os = "linux")]
                 pad: PadSlot::Untried,
                 pen: PenState::default(),
@@ -572,6 +584,7 @@ impl InputInjector {
                                 backend: InputBackend::Wlr(wlr),
                                 gamepad_buttons: 0,
                                 display_size: None,
+                                keep_display_size: false,
                                 #[cfg(target_os = "linux")]
                                 pad: PadSlot::Untried,
                                 pen: PenState::default(),
@@ -590,6 +603,7 @@ impl InputInjector {
                                 backend: InputBackend::Portal,
                                 gamepad_buttons: 0,
                                 display_size: None,
+                                keep_display_size: false,
                                 #[cfg(target_os = "linux")]
                                 pad: PadSlot::Untried,
                                 pen: PenState::default(),
@@ -613,6 +627,7 @@ impl InputInjector {
                     backend: InputBackend::Enigo(Box::new(Mutex::new(enigo))),
                     gamepad_buttons: 0,
                     display_size: None,
+                    keep_display_size: false,
                     #[cfg(target_os = "linux")]
                     pad: PadSlot::Untried,
                     pen: PenState::default(),
@@ -669,6 +684,7 @@ impl InputInjector {
             })),
             gamepad_buttons: 0,
             display_size: None,
+            keep_display_size: false,
             #[cfg(target_os = "linux")]
             pad: PadSlot::Untried,
             pen: PenState::default(),
@@ -718,10 +734,12 @@ impl InputInjector {
             InputBackend::SendInput(backend) => backend.move_absolute(x_norm, y_norm),
             InputBackend::Enigo(enigo) => {
                 let e = enigo.get_mut().unwrap();
-                let (w, h) =
-                    display_size(&mut self.display_size, std::time::Instant::now(), || {
-                        e.main_display().context("enigo main_display failed")
-                    })?;
+                let read = || e.main_display().context("enigo main_display failed");
+                let (w, h) = if self.keep_display_size {
+                    display_size(&mut self.display_size, std::time::Instant::now(), read)?
+                } else {
+                    read()?
+                };
                 // Over one past the largest value, so 65535 is the last
                 // pixel, not one past it.
                 let span = |norm: u16, len: i32| {

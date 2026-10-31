@@ -563,7 +563,11 @@ impl LazyInjector {
             .is_some_and(|at| at.elapsed() < INJECTOR_RETRY);
         if self.injector.is_none() && !waiting {
             match InputInjector::new() {
-                Ok(injector) => self.injector = Some(injector),
+                Ok(mut injector) => {
+                    // The screens' changes are told here (`screens_changed`).
+                    injector.keep_display_size();
+                    self.injector = Some(injector);
+                }
                 Err(e) => {
                     tracing::warn!("Shared input: nothing to inject with here: {e:#}");
                     self.failed_at = Some(Instant::now());
