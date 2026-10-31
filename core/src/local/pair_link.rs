@@ -24,10 +24,8 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 const PREFIX: &str = "pocketdesk://pair?";
 const VERSION: &str = "1";
 
-/// The longest link read, in bytes, before anything in it is decoded. A
-/// link this desktop makes is a few hundred bytes (its endpoint and a
-/// handful of addresses); a QR code holds under 3 KB.
-pub const MAX_LINK_BYTES: usize = 8 * 1024;
+/// The longest link read, in bytes, before anything in it is decoded.
+pub use crate::protocol::MAX_PAIR_LINK_BYTES as MAX_LINK_BYTES;
 
 /// The most addresses a link's reader keeps, and its writer names: the
 /// first, which are the best (a link from a desktop before this limit may
@@ -392,7 +390,6 @@ mod tests {
         );
         assert!(PairLink::from_uri("pocketdesk://pair?v=1&a=1.2.3.4&pin=123456&cp=x").is_err());
         // Too long is refused before anything is decoded.
-        assert_eq!(crate::protocol::introductions::MAX_LINK, MAX_LINK_BYTES);
         let long = format!(
             "pocketdesk://pair?v=1&a=192.0.2.1&pin=123456&name={}",
             "a".repeat(MAX_LINK_BYTES)

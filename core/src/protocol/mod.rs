@@ -78,3 +78,9 @@ pub const HANDSHAKE_TLS_REQUIRED: &str = "POCKETDESK_ERR 1 tls-required";
 /// What the control channel over the internet (T10a) answers a phone it
 /// does not admit, in place of the desktop's identity.
 pub const HANDSHAKE_REFUSED: &str = "POCKETDESK_ERR 1 refused";
+
+/// The longest `pocketdesk://pair` link read, in bytes, wherever one
+/// arrives: pasted or scanned (`local::pair_link`), or in an introduction's
+/// answer. A link a desktop makes is a few hundred bytes; a QR code holds
+/// under 3 KB.
+pub const MAX_PAIR_LINK_BYTES: usize = 8 * 1024;

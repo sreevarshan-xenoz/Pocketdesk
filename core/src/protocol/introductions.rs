@@ -69,9 +69,9 @@ pub const MAX_OFFERS: usize = 64;
 /// The longest name an offer, or an id an answer, may carry, in bytes.
 const MAX_FIELD: usize = 256;
 
-/// The longest pairing link an answer may carry, in bytes: the pairing
-/// link's own limit (`local::pair_link::MAX_LINK_BYTES`).
-pub const MAX_LINK: usize = 8 * 1024;
+// The longest pairing link an answer may carry, in bytes: the pairing
+// link's own limit.
+use super::MAX_PAIR_LINK_BYTES as MAX_LINK;
 
 /// Whether `request` is a request id this protocol takes: 1 to 64
 /// printable ASCII characters.
