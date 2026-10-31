@@ -636,6 +636,11 @@ const SCREENS_EVERY: Duration = Duration::from_secs(5);
 /// How long the setting and a computer's standing are taken as read.
 const RECHECK: Duration = Duration::from_secs(1);
 
+/// A standing this old whose read again is still under way (a wedged
+/// disk) no longer counts: the computer may not drive this one until the
+/// read comes back.
+const STANDING_MOST: Duration = Duration::from_secs(10);
+
 /// What a computer may do here.
 #[derive(Debug, Clone, Copy, Default)]
 struct Standing {
@@ -812,6 +817,9 @@ impl Gate {
             if at.elapsed() >= RECHECK && !self.reading.contains_key(device_id) {
                 let reading = start(self);
                 self.reading.insert(device_id.to_string(), reading);
+            }
+            if at.elapsed() >= STANDING_MOST {
+                return Standing::default();
             }
             return standing;
         }
@@ -1746,6 +1754,30 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         assert_eq!(STANDINGS.load(Ordering::SeqCst), 2);
+        // A read again that never comes back (a wedged disk): the old
+        // standing stops counting once it is STANDING_MOST old.
+        ALLOWED.store(true, Ordering::SeqCst);
+        let mut hung = Gate::with(
+            || (true, false, true),
+            |_| {
+                if SLOW.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_secs(3));
+                }
+                Standing {
+                    computer: true,
+                    allowed: true,
+                }
+            },
+        );
+        SLOW.store(false, Ordering::SeqCst);
+        assert!(hung.standing("bbbb").await.allowed);
+        SLOW.store(true, Ordering::SeqCst);
+        let old = Instant::now().checked_sub(STANDING_MOST).unwrap();
+        for (_, at) in hung.standings.values_mut() {
+            *at = old;
+        }
+        assert!(!hung.standing("bbbb").await.allowed, "too old, read hung");
+        SLOW.store(false, Ordering::SeqCst);
     }
 
     #[derive(Debug, Clone, PartialEq)]
