@@ -410,7 +410,9 @@ struct Chain {
     /// The table it is in, which a jump names chains within.
     table: String,
     rules: Vec<Rule>,
-    /// A filter chain on the input hook.
+    /// A filter chain a packet for this computer passes and may be dropped
+    /// in: the input hook, and (PR #594 review I2) prerouting and ingress,
+    /// or iptables' raw and mangle PREROUTING.
     input: bool,
     /// A base chain's policy; true when it accepts (nftables' default).
     policy_accept: bool,
@@ -426,11 +428,11 @@ enum Flow {
     Unsure,
 }
 
-/// The steps one packet may take through the rules before the answer is
-/// "unsure" (every rule not understood doubles the paths).
-const BUDGET: usize = 20_000;
-/// The jumps deep a packet may go.
-const DEPTH: usize = 16;
+/// The rules one packet may be checked against before the answer is
+/// "unsure" (PR #594 review I3: a blocklist of thousands of addresses).
+const MAX_RULES: usize = 10_000;
+/// The jumps deep a packet may go before the answer is "unsure".
+const MAX_DEPTH: usize = 64;
 
 /// A ruleset as read: its chains, by table and name.
 #[derive(Debug, Clone, Default)]
@@ -471,98 +473,178 @@ impl Ruleset {
         }
     }
 
-    /// The first input chain that does not let `p` in, as `nft` names it
-    /// (`inet filter input`), for the line that opens it.
-    pub fn stopping_chain(&self, p: Packet) -> Option<String> {
+    /// Every base chain that does not let `p` in, as `nft` names it
+    /// (`inet filter input`), for the lines that open it: each must take
+    /// them (PR #594 review I4).
+    pub fn stopping_chains(&self, p: Packet) -> Vec<String> {
         self.inputs
             .iter()
-            .find(|key| self.base_verdict(key, p) != Verdict::Open)
+            .filter(|key| self.base_verdict(key, p) != Verdict::Open)
             .cloned()
+            .collect()
     }
 
+    /// One base chain's verdict, walked without recursion (PR #594 review
+    /// I3): a stack of the chains jumped to, at most [`MAX_DEPTH`] deep,
+    /// and at most [`MAX_RULES`] rules checked.
+    ///
+    /// A rule that may or may not hold leaves the answer known only if
+    /// every way ends alike, so each chain keeps the one ending its
+    /// may-hold rules all agree on (`common`); one that differs is unsure.
     fn base_verdict(&self, key: &str, p: Packet) -> Verdict {
         let Some(chain) = self.chains.get(key) else {
             return Verdict::Unsure;
         };
-        let mut budget = BUDGET;
         let policy = if chain.policy_accept {
             Flow::Accept
         } else {
             Flow::Drop
         };
-        match self.run_from(chain, 0, p, 0, policy, &mut budget) {
+        let flow = self.walk(chain, p, policy);
+        match flow {
             Flow::Accept => Verdict::Open,
             Flow::Drop => Verdict::Shut,
             Flow::Return | Flow::Unsure => Verdict::Unsure,
         }
     }
 
-    /// A chain jumped or gone to; `end` is what falling off it means.
-    fn run_named(
-        &self,
-        table: &str,
-        name: &str,
-        p: Packet,
-        depth: usize,
-        end: Flow,
-        budget: &mut usize,
-    ) -> Flow {
-        match self.chains.get(&chain_key(table, name)) {
-            Some(chain) if depth < DEPTH => self.run_from(chain, 0, p, depth, end, budget),
-            _ => Flow::Unsure,
+    fn walk(&self, base: &Chain, p: Packet, policy: Flow) -> Flow {
+        let mut stack = vec![Frame::new(base, policy)];
+        let mut checked = 0usize;
+        // What the frame just finished came to, for the one under it.
+        let mut finished: Option<Flow> = None;
+        loop {
+            let Some(top) = stack.last_mut() else {
+                return Flow::Unsure;
+            };
+            if let Some(child) = finished.take() {
+                // Back from a jump or goto made by the rule before `at`.
+                let (holds, jumped) = top.waiting.take().unwrap_or((Tri::Yes, true));
+                let taken = match child {
+                    Flow::Return if jumped => None,
+                    flow => Some(flow),
+                };
+                if let Some(flow) = taken
+                    && let Some(done) = top.take(holds, flow)
+                {
+                    stack.pop();
+                    if stack.is_empty() {
+                        return done;
+                    }
+                    finished = Some(done);
+                    continue;
+                }
+            }
+            // Run the top chain until it ends or calls another.
+            let mut call: Option<(&Chain, Flow, Tri, bool)> = None;
+            let mut done: Option<Flow> = None;
+            let chain = top.chain;
+            while let Some(rule) = chain.rules.get(top.at) {
+                top.at += 1;
+                checked += 1;
+                if checked > MAX_RULES {
+                    return Flow::Unsure;
+                }
+                let holds = rule.holds(p);
+                if holds == Tri::No {
+                    continue;
+                }
+                let flow = match &rule.action {
+                    Action::Next => continue,
+                    Action::Accept => Flow::Accept,
+                    Action::Drop => Flow::Drop,
+                    Action::Return => top.end,
+                    Action::Unknown => Flow::Unsure,
+                    Action::Jump(name) | Action::Goto(name) => {
+                        let jump = matches!(rule.action, Action::Jump(_));
+                        match self.chains.get(&chain_key(&chain.table, name)) {
+                            Some(next) if stack_len_ok(top.depth) => {
+                                let end = if jump { Flow::Return } else { top.end };
+                                call = Some((next, end, holds, jump));
+                                break;
+                            }
+                            _ => Flow::Unsure,
+                        }
+                    }
+                };
+                if let Some(result) = top.take(holds, flow) {
+                    done = Some(result);
+                    break;
+                }
+            }
+            if let Some((next, end, holds, jump)) = call {
+                top.waiting = Some((holds, jump));
+                let depth = top.depth + 1;
+                let mut frame = Frame::new(next, end);
+                frame.depth = depth;
+                stack.push(frame);
+                continue;
+            }
+            let result = done.unwrap_or_else(|| top.finish(top.end));
+            stack.pop();
+            if stack.is_empty() {
+                return result;
+            }
+            finished = Some(result);
+        }
+    }
+}
+
+fn stack_len_ok(depth: usize) -> bool {
+    depth + 1 < MAX_DEPTH
+}
+
+/// One chain being walked.
+struct Frame<'a> {
+    chain: &'a Chain,
+    /// The next rule.
+    at: usize,
+    /// What falling off it (or `return`) means: a base chain's policy,
+    /// back to the chain that jumped here, or (gone to) whatever ends the
+    /// chain that went.
+    end: Flow,
+    /// The ending its may-hold rules so far all agree on.
+    common: Option<Flow>,
+    /// The rule that called the chain above: whether it holds, and whether
+    /// it jumped (or went).
+    waiting: Option<(Tri, bool)>,
+    depth: usize,
+}
+
+impl<'a> Frame<'a> {
+    fn new(chain: &'a Chain, end: Flow) -> Self {
+        Frame {
+            chain,
+            at: 0,
+            end,
+            common: None,
+            waiting: None,
+            depth: 0,
         }
     }
 
-    /// `chain` from its rule `at`. `end` is what falling off it (or
-    /// `return`) means: a base chain's policy, back to the chain that
-    /// jumped here, or (gone to) whatever ends the chain that went.
-    fn run_from(
-        &self,
-        chain: &Chain,
-        at: usize,
-        p: Packet,
-        depth: usize,
-        end: Flow,
-        budget: &mut usize,
-    ) -> Flow {
-        for (i, rule) in chain.rules.iter().enumerate().skip(at) {
-            if *budget == 0 {
-                return Flow::Unsure;
-            }
-            *budget -= 1;
-            let holds = rule.holds(p);
-            if holds == Tri::No {
-                continue;
-            }
-            // What the rule does when it holds; None: on to the next rule.
-            let taken = match &rule.action {
-                Action::Next => None,
-                Action::Accept => Some(Flow::Accept),
-                Action::Drop => Some(Flow::Drop),
-                Action::Return => Some(end),
-                Action::Unknown => Some(Flow::Unsure),
-                Action::Jump(name) => {
-                    match self.run_named(&chain.table, name, p, depth + 1, Flow::Return, budget) {
-                        Flow::Return => None,
-                        flow => Some(flow),
-                    }
-                }
-                Action::Goto(name) => {
-                    Some(self.run_named(&chain.table, name, p, depth + 1, end, budget))
-                }
-            };
-            match (holds, taken) {
-                (_, None) => continue,
-                (Tri::Yes, Some(flow)) => return flow,
-                // It may or may not hold: the answer is known only when
-                // both ways end alike.
-                (_, Some(flow)) => {
-                    let rest = self.run_from(chain, i + 1, p, depth, end, budget);
-                    return if rest == flow { flow } else { Flow::Unsure };
-                }
+    /// The chain's ending when this is its last word.
+    fn finish(&self, flow: Flow) -> Flow {
+        match self.common {
+            Some(c) if c != flow => Flow::Unsure,
+            _ => flow,
+        }
+    }
+
+    /// A rule that would end the chain with `flow`: the chain's ending if
+    /// it surely holds (or the may-hold rules already disagree), else None
+    /// and on to the next rule.
+    fn take(&mut self, holds: Tri, flow: Flow) -> Option<Flow> {
+        if holds == Tri::Yes {
+            return Some(self.finish(flow));
+        }
+        match self.common {
+            Some(c) if c != flow => Some(Flow::Unsure),
+            _ => {
+                self.common = Some(flow);
+                None
             }
         }
-        end
     }
 }
 
@@ -816,9 +898,9 @@ impl NftReader {
             policy_accept: true,
             ..Chain::default()
         };
-        // Only IPv4 traffic is judged: `ip` and `inet` tables.
+        // Only IPv4 traffic is judged: `ip` and `inet` tables, and `netdev`
+        // ingress, which sees every packet.
         let family = table.split(' ').next().unwrap_or("");
-        let ipv4 = matches!(family, "ip" | "inet");
         for st in body {
             let words: Vec<&str> = st.iter().filter_map(|t| word(Some(t))).collect();
             match words.first().copied() {
@@ -826,8 +908,17 @@ impl NftReader {
                     let hook = words
                         .iter()
                         .position(|w| *w == "hook")
-                        .and_then(|i| words.get(i + 1));
-                    chain.input = ipv4 && words.get(1) == Some(&"filter") && hook == Some(&"input");
+                        .and_then(|i| words.get(i + 1))
+                        .copied();
+                    // A drop in prerouting or ingress is as final as one in
+                    // input (PR #594 review I2); an accept there only
+                    // passes the packet on.
+                    let passes = matches!(
+                        (family, hook),
+                        ("ip" | "inet", Some("input" | "prerouting" | "ingress"))
+                            | ("netdev", Some("ingress"))
+                    );
+                    chain.input = passes && matches!(words.get(1), Some(&"filter"));
                     if let Some(i) = words.iter().position(|w| *w == "policy") {
                         chain.policy_accept = words.get(i + 1) != Some(&"drop");
                     }
@@ -851,6 +942,11 @@ impl NftReader {
     /// set, a named `@set` or a `$define`. None when it names a set or
     /// define not found.
     fn values(&self, st: &[Tok], i: &mut usize, table: &str) -> Option<Vec<String>> {
+        // A verdict map or a map is no value (PR #594 review C1): left
+        // unread for the rule to see.
+        if matches!(word(st.get(*i)), Some("vmap" | "map")) {
+            return None;
+        }
         match st.get(*i) {
             Some(Tok::Open) => {
                 *i += 1;
@@ -944,7 +1040,11 @@ impl NftReader {
         while let Some(t) = st.get(i) {
             let Tok::Word(w) = t else {
                 if *t == Tok::Open {
-                    // A set where none was expected.
+                    // A set where none was expected; after `vmap` or `map`
+                    // (left by `values`), its verdicts are not read.
+                    if matches!(word(i.checked_sub(1).and_then(|j| st.get(j))), Some("vmap")) {
+                        action = Action::Unknown;
+                    }
                     conds.push(Cond::Unknown);
                     let mut depth = 0;
                     while let Some(t) = st.get(i) {
@@ -991,12 +1091,15 @@ impl NftReader {
                     let _ = self.values(st, &mut i, table);
                 }
                 "limit" => {
+                    // Over the rate, packets go on to the next rule, so a
+                    // limit holds for some packets only (PR #594 review
+                    // N1), either way round.
+                    conds.push(Cond::Unknown);
                     if word(st.get(i)) == Some("rate") {
                         i += 1;
                     }
                     if word(st.get(i)) == Some("over") {
                         i += 1;
-                        conds.push(Cond::Unknown);
                     }
                     i += 1; // N/second
                     if word(st.get(i)) == Some("burst") {
@@ -1015,6 +1118,19 @@ impl NftReader {
                     if word(st.get(i)) == Some("set") {
                         i += 1;
                         let _ = self.values(st, &mut i, table);
+                        continue;
+                    }
+                    if key == "state"
+                        && word(st.get(i + 1)).is_none()
+                        && word(st.get(i)) == Some("vmap")
+                    {
+                        // `ct state vmap { established : accept, new : drop }`:
+                        // a new packet takes the verdict of `new`, if any.
+                        i += 1;
+                        action = match self.values(st, &mut i, table) {
+                            Some(elements) => ct_state_vmap(&elements),
+                            None => Action::Unknown,
+                        };
                         continue;
                     }
                     let n = neg(st, &mut i);
@@ -1156,6 +1272,31 @@ impl NftReader {
     }
 }
 
+/// The verdict a new packet takes from `ct state vmap`'s elements
+/// (`established : accept`, `new : jump x`; a key may list several
+/// states): its `new` element's, or none (on to the next rule) without one.
+fn ct_state_vmap(elements: &[String]) -> Action {
+    for element in elements {
+        let Some((keys, verdict)) = element.split_once(" : ") else {
+            return Action::Unknown;
+        };
+        if !keys.split_whitespace().any(|k| k == "new") {
+            continue;
+        }
+        let words: Vec<&str> = verdict.split_whitespace().collect();
+        return match words.as_slice() {
+            ["accept"] => Action::Accept,
+            ["drop"] | ["reject", ..] => Action::Drop,
+            ["return"] => Action::Return,
+            ["continue"] => Action::Next,
+            ["jump", chain] => Action::Jump((*chain).to_string()),
+            ["goto", chain] => Action::Goto((*chain).to_string()),
+            _ => Action::Unknown,
+        };
+    }
+    Action::Next
+}
+
 // ---------------------------------------------------------------- iptables
 
 /// Words of an `iptables-save` line, with quotes taken off.
@@ -1188,28 +1329,36 @@ fn shell_words(line: &str) -> Vec<String> {
 }
 
 /// Read iptables rules in `iptables-save`'s form (its output, or the file
-/// `iptables.service` restores): the filter table's INPUT chain.
+/// `iptables.service` restores): the filter table's INPUT chain, and the
+/// raw and mangle tables' PREROUTING (and mangle's INPUT), where a drop
+/// is as final (PR #594 review I2). Chains are keyed `ip <table> <chain>`.
 pub fn parse_iptables(text: &str) -> Ruleset {
     let mut rs = Ruleset::default();
-    let table = "ip filter";
-    let mut in_filter = false;
-    let mut rules: Vec<(String, Vec<String>)> = Vec::new();
+    let mut table: Option<String> = None;
+    let mut rules: Vec<(String, String, Vec<String>)> = Vec::new();
     for line in text.lines().map(str::trim) {
         if line.is_empty() || line.starts_with('#') || line == "COMMIT" {
             continue;
         }
         if let Some(name) = line.strip_prefix('*') {
-            in_filter = name.trim() == "filter";
+            let name = name.trim();
+            table = matches!(name, "filter" | "raw" | "mangle").then(|| format!("ip {name}"));
             continue;
         }
-        if !in_filter {
+        let Some(table) = table.as_deref() else {
             continue;
-        }
+        };
         if let Some(rest) = line.strip_prefix(':') {
             let mut words = rest.split_whitespace();
             let name = words.next().unwrap_or("").to_string();
             let policy = words.next().unwrap_or("-");
-            let input = name == "INPUT";
+            let input = matches!(
+                (table, name.as_str()),
+                ("ip filter", "INPUT")
+                    | ("ip raw", "PREROUTING")
+                    | ("ip mangle", "PREROUTING")
+                    | ("ip mangle", "INPUT")
+            );
             rs.chains.insert(
                 chain_key(table, &name),
                 Chain {
@@ -1227,20 +1376,25 @@ pub fn parse_iptables(text: &str) -> Ruleset {
         let words = shell_words(line);
         match words.first().map(String::as_str) {
             Some("-A") | Some("--append") if words.len() > 1 => {
-                rules.push((words[1].clone(), words[2..].to_vec()));
+                rules.push((table.to_string(), words[1].clone(), words[2..].to_vec()));
             }
             // `-I`, `-N`, `-P` in a hand-written file: not read here.
             _ => rs.partial = true,
         }
     }
-    for (chain, args) in rules {
+    for (table, chain, args) in rules {
         let rule = iptables_rule(&args, |name| {
-            rs.chains.contains_key(&chain_key(table, name))
+            rs.chains.contains_key(&chain_key(&table, name))
         });
-        match rs.chains.get_mut(&chain_key(table, &chain)) {
+        match rs.chains.get_mut(&chain_key(&table, &chain)) {
             Some(c) => c.rules.push(rule),
             None => rs.partial = true,
         }
+    }
+    // A filter table with no INPUT filters nothing coming in; raw or
+    // mangle alone (Docker's) do not make a firewall.
+    if !rs.inputs.iter().any(|k| k == "ip filter INPUT") {
+        rs.inputs.clear();
     }
     rs
 }
@@ -1286,9 +1440,30 @@ fn iptables_rule(args: &[String], is_chain: impl Fn(&str) -> bool) -> Rule {
                     neg: n,
                 });
             }
-            "-m" | "--match" | "--comment" | "--limit" | "--limit-burst" | "--log-prefix"
-            | "--log-level" | "--reject-with" | "--icmp-type" | "--sport" | "--source-port"
-            | "--sports" | "--source-ports" => {
+            "-m" | "--match" => {
+                // A match whose options are read here adds its conditions
+                // by them; any other (`socket`, `hashlimit`, `limit`, which
+                // holds only under its rate) is a condition not understood
+                // (PR #594 review I5, N1).
+                let module = value(&mut i);
+                if !matches!(
+                    module.as_str(),
+                    "tcp"
+                        | "udp"
+                        | "multiport"
+                        | "conntrack"
+                        | "state"
+                        | "comment"
+                        | "addrtype"
+                        | "pkttype"
+                        | "icmp"
+                ) {
+                    conds.push(Cond::Unknown);
+                }
+            }
+            "--comment" | "--limit" | "--limit-burst" | "--log-prefix" | "--log-level"
+            | "--reject-with" | "--icmp-type" | "--sport" | "--source-port" | "--sports"
+            | "--source-ports" => {
                 let _ = value(&mut i);
                 if opt.contains("sport") || opt.contains("source-port") {
                     conds.push(Cond::Unknown);
@@ -1328,9 +1503,10 @@ fn iptables_rule(args: &[String], is_chain: impl Fn(&str) -> bool) -> Rule {
                     "ACCEPT" => Action::Accept,
                     "DROP" | "REJECT" => Action::Drop,
                     "RETURN" => Action::Return,
-                    "LOG" | "NFLOG" | "ULOG" | "MARK" | "CONNMARK" | "CT" | "TRACE" | "AUDIT" => {
-                        Action::Next
-                    }
+                    // Targets that let the packet go on (raw and mangle's).
+                    "LOG" | "NFLOG" | "ULOG" | "MARK" | "CONNMARK" | "CT" | "TRACE" | "AUDIT"
+                    | "NOTRACK" | "TOS" | "DSCP" | "TTL" | "HL" | "TCPMSS" | "CLASSIFY"
+                    | "CHECKSUM" | "SECMARK" | "CONNSECMARK" => Action::Next,
                     t if is_chain(t) && matches!(opt.as_str(), "-g" | "--goto") => {
                         Action::Goto(t.to_string())
                     }
@@ -1410,10 +1586,7 @@ table inet filter {
         assert_eq!(rs.verdict(udp(4716)), Verdict::Shut);
         let open = PortsOpen::from_check(1716, 4716, |p| rs.verdict(p));
         assert_eq!(open, PortsOpen::all(Verdict::Shut));
-        assert_eq!(
-            rs.stopping_chain(tcp(1716)).as_deref(),
-            Some("inet filter input")
-        );
+        assert_eq!(rs.stopping_chains(tcp(1716)), vec!["inet filter input"]);
     }
 
     /// `nft list ruleset`'s own form of the same rules (semicolons, counters).
@@ -1522,6 +1695,115 @@ table inet filter {
         let rs = parse_nft(conf);
         assert_eq!(rs.verdict(udp(4716)), Verdict::Shut);
         assert_eq!(rs.verdict(tcp(1716)), Verdict::Open);
+    }
+
+    /// PR #594 review C1: a verdict map on any key may decide, so its rule
+    /// is never passed over as "no verdict".
+    #[test]
+    fn a_verdict_map_is_never_passed_over() {
+        let chain = |rules: &str| {
+            format!(
+                "table inet f {{\n chain input {{\n  type filter hook input priority 0; policy drop;\n{rules}\n }}\n chain t {{\n  accept\n }}\n}}\n"
+            )
+        };
+        let after = "  udp dport 4716 accept\n  tcp dport 1716 accept";
+        for vmap in [
+            "  ip protocol vmap { tcp : jump t, udp : drop }",
+            "  meta l4proto vmap { udp : drop }",
+            "  iifname vmap { \"eth0\" : drop }",
+            "  th dport vmap { 4716 : drop }",
+            "  meta mark vmap { 1 : drop }",
+        ] {
+            let rs = parse_nft(&chain(&format!("{vmap}\n{after}")));
+            assert_ne!(rs.verdict(udp(4716)), Verdict::Open, "{vmap}");
+        }
+        // ct state's is read: a new packet takes `new`'s verdict.
+        let ct = |m: &str| parse_nft(&chain(&format!("  ct state vmap {{ {m} }}\n{after}")));
+        let rs = ct("established : accept, related : accept, invalid : drop");
+        assert_eq!(
+            rs.verdict(udp(4716)),
+            Verdict::Open,
+            "no `new`: on to the next rule"
+        );
+        let rs = ct("established : accept, new : drop");
+        assert_eq!(rs.verdict(udp(4716)), Verdict::Shut);
+        let rs = ct("new : jump t");
+        assert_eq!(rs.verdict(tcp(9999)), Verdict::Open);
+    }
+
+    /// PR #594 review I2: a drop in prerouting or ingress stops the packet
+    /// before input lets it in.
+    #[test]
+    fn a_drop_before_input_counts() {
+        let open_input = "table inet f {\n chain input {\n  type filter hook input priority 0; policy accept;\n }\n}\n";
+        assert_eq!(parse_nft(open_input).verdict(udp(4716)), Verdict::Open);
+        let pre = format!(
+            "{open_input}table inet r {{\n chain pre {{\n  type filter hook prerouting priority raw; policy accept;\n  udp dport 4716 drop\n }}\n}}\n"
+        );
+        assert_eq!(parse_nft(&pre).verdict(udp(4716)), Verdict::Shut);
+        assert_eq!(parse_nft(&pre).verdict(tcp(1716)), Verdict::Open);
+        let ingress = format!(
+            "{open_input}table netdev n {{\n chain ing {{\n  type filter hook ingress device \"eth0\" priority -500; policy accept;\n  ip saddr 192.0.2.0/24 drop\n }}\n}}\n"
+        );
+        assert_eq!(parse_nft(&ingress).verdict(tcp(1716)), Verdict::Unsure);
+        let raw = "*raw\n:PREROUTING ACCEPT [0:0]\n:OUTPUT ACCEPT [0:0]\n-A PREROUTING -p udp --dport 4716 -j DROP\nCOMMIT\n*filter\n:INPUT ACCEPT [0:0]\nCOMMIT\n";
+        assert_eq!(parse_iptables(raw).verdict(udp(4716)), Verdict::Shut);
+        assert_eq!(
+            parse_iptables(raw).stopping_chains(udp(4716)),
+            vec!["ip raw PREROUTING"]
+        );
+        let docker_only = "*raw\n:PREROUTING ACCEPT [0:0]\nCOMMIT\n";
+        assert!(parse_iptables(docker_only).filters_nothing());
+    }
+
+    /// PR #594 review I3: a blocklist of 50 000 addresses is walked without
+    /// recursion, and past the bound is "unsure", never "open".
+    #[test]
+    fn a_huge_blocklist_is_unsure_not_a_crash() {
+        let mut conf = String::from(
+            "table inet f {\n chain input {\n  type filter hook input priority 0; policy accept;\n",
+        );
+        for n in 0..50_000u32 {
+            conf.push_str(&format!(
+                "  ip saddr 198.51.{}.{} drop\n",
+                (n / 256) % 256,
+                n % 256
+            ));
+        }
+        conf.push_str(" }\n}\n");
+        let rs = parse_nft(&conf);
+        assert_eq!(rs.verdict(tcp(1716)), Verdict::Unsure);
+        // Within the bound, may-hold drops before a sure accept: unsure.
+        let few = "table inet f {\n chain input {\n  type filter hook input priority 0; policy drop;\n  ip saddr 198.51.100.1 drop\n  ip saddr 198.51.100.2 drop\n  tcp dport 1716 accept\n }\n}\n";
+        assert_eq!(parse_nft(few).verdict(tcp(1716)), Verdict::Unsure);
+        assert_eq!(parse_nft(few).verdict(udp(4716)), Verdict::Shut);
+        // A chain of jumps deeper than the bound.
+        let mut deep = String::from(
+            "table inet f {\n chain input {\n  type filter hook input priority 0; policy drop;\n  jump c0\n }\n",
+        );
+        for n in 0..100 {
+            deep.push_str(&format!(" chain c{n} {{\n  jump c{}\n }}\n", n + 1));
+        }
+        deep.push_str(" chain c100 {\n  accept\n }\n}\n");
+        assert_eq!(parse_nft(&deep).verdict(tcp(1716)), Verdict::Unsure);
+    }
+
+    /// PR #594 review N1: a rate limit holds for some packets only.
+    #[test]
+    fn a_rate_limited_accept_is_not_open() {
+        let conf = "table inet f {\n chain input {\n  type filter hook input priority 0; policy drop;\n  tcp dport 1716 limit rate 10/second accept\n }\n}\n";
+        assert_eq!(parse_nft(conf).verdict(tcp(1716)), Verdict::Unsure);
+        let ipt = "*filter\n:INPUT DROP [0:0]\n-A INPUT -p tcp --dport 1716 -m limit --limit 10/sec -j ACCEPT\nCOMMIT\n";
+        assert_eq!(parse_iptables(ipt).verdict(tcp(1716)), Verdict::Unsure);
+    }
+
+    /// PR #594 review I5: a match module not read here is a condition.
+    #[test]
+    fn an_iptables_match_not_read_is_a_condition() {
+        let ipt = "*filter\n:INPUT DROP [0:0]\n-A INPUT -m socket -j ACCEPT\nCOMMIT\n";
+        assert_eq!(parse_iptables(ipt).verdict(tcp(1716)), Verdict::Unsure);
+        let known = "*filter\n:INPUT DROP [0:0]\n-A INPUT -p tcp -m tcp --dport 1716 -m comment --comment \"pd\" -j ACCEPT\nCOMMIT\n";
+        assert_eq!(parse_iptables(known).verdict(tcp(1716)), Verdict::Open);
     }
 
     pub const IPTABLES_DROP: &str = "# Generated by iptables-save v1.8.11\n*filter\n:INPUT DROP [0:0]\n:FORWARD DROP [0:0]\n:OUTPUT ACCEPT [0:0]\n:TCP - [0:0]\n-A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT\n-A INPUT -i lo -j ACCEPT\n-A INPUT -m conntrack --ctstate INVALID -j DROP\n-A INPUT -p icmp -m icmp --icmp-type 8 -m conntrack --ctstate NEW -j ACCEPT\n-A INPUT -p tcp --tcp-flags FIN,SYN,RST,ACK SYN -m conntrack --ctstate NEW -j TCP\n-A INPUT -p tcp -j REJECT --reject-with tcp-reset\n-A INPUT -p udp -j REJECT --reject-with icmp-port-unreachable\n-A INPUT -j REJECT --reject-with icmp-proto-unreachable\n-A TCP -p tcp -m tcp --dport 22 -m comment --comment \"allow ssh\" -j ACCEPT\nCOMMIT\n";

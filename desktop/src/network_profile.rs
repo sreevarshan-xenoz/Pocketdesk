@@ -178,15 +178,32 @@ fn current() -> Option<String> {
 
 /// What to say now: the firewall keeping other devices from the ports the
 /// server listens on.
+///
+/// One reading serves both pages for 20 s (PR #594 review N4: each page
+/// asks on its own every [`EVERY`]).
 #[cfg(all(target_os = "linux", not(test)))]
 fn current() -> Option<String> {
     use pocketdesk_core::local::{config::Config, diagnostics, listening, paths};
+    type Kept = Option<(Instant, (u16, u16), Option<String>)>;
+    static KEPT: Mutex<Kept> = Mutex::new(None);
     let config = Config::load().unwrap_or_default();
     let control_port = paths::state_dir()
         .map(|dir| listening::control_port(&dir, config.control_port))
         .unwrap_or(config.control_port);
+    let ports = (control_port, config.streaming_port);
+    if let Ok(kept) = KEPT.lock()
+        && let Some((at, for_ports, said)) = kept.as_ref()
+        && *for_ports == ports
+        && at.elapsed() < Duration::from_secs(20)
+    {
+        return said.clone();
+    }
     let firewall = crate::diagnostics_view::linux_firewall(control_port, config.streaming_port);
-    diagnostics::firewall_pairing_notice(&firewall, control_port, config.streaming_port)
+    let said = diagnostics::firewall_pairing_notice(&firewall, control_port, config.streaming_port);
+    if let Ok(mut kept) = KEPT.lock() {
+        *kept = Some((Instant::now(), ports, said.clone()));
+    }
+    said
 }
 
 /// The networks this computer is connected to now, from Windows' Network

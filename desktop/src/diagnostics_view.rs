@@ -407,46 +407,46 @@ fn firewall_state(_state_dir: &Path) -> Option<Result<diagnostics::FirewallState
 /// ([`crate::network_profile`]).
 #[cfg(target_os = "linux")]
 pub(crate) fn linux_firewall(control_port: u16, stream_port: u16) -> diagnostics::LinuxFirewall {
-    use diagnostics::LinuxFirewall;
-    let running =
-        |fw: &LinuxFirewall| !matches!(fw, LinuxFirewall::None | LinuxFirewall::Off { .. });
-    let ufw = linux_ufw(control_port, stream_port);
-    // A ufw that is off does not hide a firewalld that runs (O9 review).
-    if running(&ufw) {
-        return ufw;
-    }
-    let firewalld = linux_firewalld(control_port, stream_port);
-    if running(&firewalld) {
-        return firewalld;
-    }
-    let nftables = linux_nftables(control_port, stream_port);
-    if nftables != LinuxFirewall::None {
-        return nftables;
-    }
-    let iptables = linux_iptables(control_port, stream_port);
-    if iptables != LinuxFirewall::None {
-        return iptables;
-    }
-    // An installed tool that is off says more than none.
-    if ufw != LinuxFirewall::None {
-        ufw
-    } else {
-        firewalld
-    }
+    // A ufw that is off does not hide a firewalld that runs (O9 review);
+    // each next tool is asked only when needed.
+    diagnostics::choose_linux_firewall(
+        linux_ufw(control_port, stream_port),
+        || linux_firewalld(control_port, stream_port),
+        || linux_nftables(control_port, stream_port),
+        || linux_iptables(control_port, stream_port),
+    )
 }
 
 /// Whether a systemd unit loads its rules: active, or enabled (asked
 /// without root). Arch's `nftables.service` is a oneshot without
 /// `RemainAfterExit`, so once it has loaded the rules at boot it reads
 /// "inactive" (the owner's laptop, 2026-10-31).
+/// Kept for a minute (PR #594 review N4): the Pair page and Other
+/// computers ask every 30 s.
 #[cfg(target_os = "linux")]
 fn unit_on(unit: &str) -> bool {
-    installed(&["/usr/bin/systemctl", "/bin/systemctl"]).is_some_and(|systemctl| {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static KEPT: Mutex<Option<HashMap<String, (Instant, bool)>>> = Mutex::new(None);
+    const FOR: Duration = Duration::from_secs(60);
+    if let Ok(kept) = KEPT.lock()
+        && let Some((at, on)) = kept.as_ref().and_then(|k| k.get(unit))
+        && at.elapsed() < FOR
+    {
+        return *on;
+    }
+    let on = installed(&["/usr/bin/systemctl", "/bin/systemctl"]).is_some_and(|systemctl| {
         ["is-active", "is-enabled"].iter().any(|ask| {
             pocketdesk_core::local::network::output_within(systemctl, &[ask, unit], FIREWALL_WAIT)
                 .is_some()
         })
-    })
+    });
+    if let Ok(mut kept) = KEPT.lock() {
+        kept.get_or_insert_with(HashMap::new)
+            .insert(unit.to_string(), (Instant::now(), on));
+    }
+    on
 }
 
 /// nftables: `nft list ruleset` needs root; without it, the file
@@ -467,8 +467,10 @@ fn linux_nftables(control_port: u16, stream_port: u16) -> diagnostics::LinuxFire
             stream_port,
         );
     }
+    // Not read without root, and nothing loads rules at boot: not known,
+    // rather than none found (PR #594 review N4).
     if !unit_on("nftables.service") {
-        return diagnostics::LinuxFirewall::None;
+        return diagnostics::LinuxFirewall::Unchecked { tool: "nftables" };
     }
     for file in ["/etc/nftables.conf", "/etc/sysconfig/nftables.conf"] {
         if let Ok(text) = std::fs::read_to_string(file) {
@@ -499,7 +501,7 @@ fn linux_iptables(control_port: u16, stream_port: u16) -> diagnostics::LinuxFire
         );
     }
     if !unit_on("iptables.service") && !unit_on("netfilter-persistent.service") {
-        return diagnostics::LinuxFirewall::None;
+        return diagnostics::LinuxFirewall::Unchecked { tool: "iptables" };
     }
     for file in [
         "/etc/iptables/iptables.rules",

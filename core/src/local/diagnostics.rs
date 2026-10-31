@@ -673,6 +673,10 @@ pub enum LinuxFirewall {
     Off { tool: &'static str },
     /// `tool` runs, and its rules could not be read (ufw needs root).
     Unreadable { tool: &'static str },
+    /// `tool` is installed, its rules running could not be read without
+    /// root, and no service loads them at boot: not known, rather than
+    /// none found (PR #594 review N4).
+    Unchecked { tool: &'static str },
     /// `tool` runs: whether it lets in the control port (TCP), the stream
     /// port (UDP), KDE Connect's ports and mDNS.
     On {
@@ -689,9 +693,10 @@ pub struct RulesRead {
     /// The file read in place of the rules running (reading those needs
     /// root).
     pub file: Option<&'static str>,
-    /// The nftables chain that keeps them out, as `nft` names it (`inet
-    /// filter input`).
-    pub chain: Option<String>,
+    /// The chains found keeping them out, as `nft` names them (`inet
+    /// filter input`; iptables' as `ip <table> <chain>`). Empty when none
+    /// was found in the rules: the hint then says what it assumes.
+    pub chains: Vec<String>,
     /// Arch's stock nftables rules, which let in ssh only.
     pub stock_arch: bool,
 }
@@ -815,7 +820,15 @@ pub fn parse_ufw(status: &str, control_port: u16, stream_port: u16) -> LinuxFire
             super::netfilter::Proto::Tcp => "tcp",
             super::netfilter::Proto::Udp => "udp",
         };
-        Verdict::from_open(every || port_rules.iter().any(|r| rule_takes(r, p.port, proto)))
+        let open = every || port_rules.iter().any(|r| rule_takes(r, p.port, proto));
+        // ufw's stock before.rules accepts mDNS ahead of the rules shown,
+        // which `ufw status` does not list (PR #594 review N3): not open
+        // for sure, but not shut either.
+        if !open && p.cast == super::netfilter::Cast::Multicast {
+            Verdict::Unsure
+        } else {
+            Verdict::from_open(open)
+        }
     });
     LinuxFirewall::On {
         tool,
@@ -933,23 +946,86 @@ fn from_ruleset(
     stream_port: u16,
 ) -> LinuxFirewall {
     use super::netfilter::{Cast, Packet, Proto};
-    let packet = |proto, port| Packet {
-        proto,
-        port,
+    // Every chain that keeps out any packet asked (PR #594 review I4).
+    let chains = std::cell::RefCell::new(Vec::<String>::new());
+    let ports = PortsOpen::from_check(control_port, stream_port, |p| {
+        let v = rules.verdict(p);
+        if v != Verdict::Open {
+            let mut found = chains.borrow_mut();
+            for chain in rules.stopping_chains(p) {
+                if !found.contains(&chain) {
+                    found.push(chain);
+                }
+            }
+        }
+        v
+    });
+    // The stock name only where the stock behaviour shows: ssh in, the
+    // two ports shut (PR #594 review N2: a kept header on edited rules).
+    let ssh = rules.verdict(Packet {
+        proto: Proto::Tcp,
+        port: 22,
         cast: Cast::Unicast,
-    };
-    let chain = rules
-        .stopping_chain(packet(Proto::Tcp, control_port))
-        .or_else(|| rules.stopping_chain(packet(Proto::Udp, stream_port)));
+    });
+    let stock_arch = rules.stock_arch
+        && ssh == Verdict::Open
+        && ports.control == Verdict::Shut
+        && ports.stream == Verdict::Shut;
     LinuxFirewall::On {
         tool,
-        ports: PortsOpen::from_check(control_port, stream_port, |p| rules.verdict(p)),
+        ports,
         rules: RulesRead {
             file,
-            chain,
-            stock_arch: rules.stock_arch,
+            chains: chains.into_inner(),
+            stock_arch,
         },
     }
+}
+
+/// O9: which firewall to judge, from ufw's reading and the others asked
+/// in turn (only as far as needed): a ufw or firewalld that runs; else
+/// nftables' rules; else iptables' (legacy rules beside an nftables that
+/// gave no verdict, PR #594 review N4). Without a verdict, rules that
+/// could not be read say more than a tool that is off, and that more
+/// than none.
+pub fn choose_linux_firewall(
+    ufw: LinuxFirewall,
+    firewalld: impl FnOnce() -> LinuxFirewall,
+    nftables: impl FnOnce() -> LinuxFirewall,
+    iptables: impl FnOnce() -> LinuxFirewall,
+) -> LinuxFirewall {
+    let runs = |fw: &LinuxFirewall| {
+        matches!(
+            fw,
+            LinuxFirewall::On { .. } | LinuxFirewall::Unreadable { .. }
+        )
+    };
+    if runs(&ufw) {
+        return ufw;
+    }
+    let firewalld = firewalld();
+    if runs(&firewalld) {
+        return firewalld;
+    }
+    let nftables = nftables();
+    if matches!(nftables, LinuxFirewall::On { .. }) {
+        return nftables;
+    }
+    let iptables = iptables();
+    if matches!(iptables, LinuxFirewall::On { .. }) {
+        return iptables;
+    }
+    let rank = |fw: &LinuxFirewall| match fw {
+        LinuxFirewall::On { .. } => 0,
+        LinuxFirewall::Unreadable { .. } => 1,
+        LinuxFirewall::Unchecked { .. } => 2,
+        LinuxFirewall::Off { .. } => 3,
+        LinuxFirewall::None => 4,
+    };
+    [nftables, iptables, ufw, firewalld]
+        .into_iter()
+        .min_by_key(rank)
+        .unwrap_or(LinuxFirewall::None)
 }
 
 /// O9: the firewall on Linux; never a failure without one. A port shut
@@ -967,6 +1043,23 @@ pub fn check_linux_firewall(firewall: &LinuxFirewall, needs: &FirewallNeeds) -> 
         LinuxFirewall::Off { tool } => {
             finding(check, Status::Good, format!("{tool} is installed but off"))
         }
+        LinuxFirewall::Unchecked { tool } => with_hint(
+            finding(
+                check,
+                Status::Info,
+                format!(
+                    "{tool} is installed; its rules running need root to read, and no service loads any at boot"
+                ),
+            ),
+            match *tool {
+                "iptables" => format!(
+                    "Run `sudo iptables -S` and check that nothing drops {control_port}/tcp or {stream_port}/udp."
+                ),
+                _ => format!(
+                    "Run `sudo nft list ruleset` and check that nothing drops {control_port}/tcp or {stream_port}/udp."
+                ),
+            },
+        ),
         LinuxFirewall::Unreadable { tool } => with_hint(
             finding(
                 check,
@@ -1001,6 +1094,24 @@ pub fn check_linux_firewall(firewall: &LinuxFirewall, needs: &FirewallNeeds) -> 
                 .map(|(n, v, _)| (*n, *v))
                 .collect();
             if not_open.is_empty() {
+                // A file is not what is loaded: other programs (Docker,
+                // fail2ban, libvirt) add rules it does not show, so it is
+                // never green (PR #594 review I1).
+                if let Some(file) = rules.file {
+                    return with_hint(
+                        finding(
+                            check,
+                            Status::Warn,
+                            format!(
+                                "{tool}: the rules file ({file}) lets phones in on {control_port}/tcp and {stream_port}/udp; the running rules need root to read"
+                            ),
+                        ),
+                        match *tool {
+                            "iptables" => "Run `sudo iptables -S` to see the rules running.",
+                            _ => "Run `sudo nft list ruleset` to see the rules running.",
+                        },
+                    );
+                }
                 return finding(
                     check,
                     Status::Good,
@@ -1054,7 +1165,7 @@ pub fn check_linux_firewall(firewall: &LinuxFirewall, needs: &FirewallNeeds) -> 
                     },
                     detail,
                 ),
-                open_hint(tool, rules.chain.as_deref(), &open, needs),
+                open_hint(tool, &rules.chains, &open, needs),
             )
         }
     }
@@ -1082,7 +1193,7 @@ impl Need {
 
 /// The exact line that lets `open` in with `tool`. The app never changes
 /// the firewall itself.
-fn open_hint(tool: &str, chain: Option<&str>, open: &[Need], needs: &FirewallNeeds) -> String {
+fn open_hint(tool: &str, chains: &[String], open: &[Need], needs: &FirewallNeeds) -> String {
     let has = |n: Need| open.contains(&n);
     let (kde_lo, kde_hi) = super::netfilter::KDE_PORTS;
     let in_kde = |port: u16| has(Need::Kde) && (kde_lo..=kde_hi).contains(&port);
@@ -1141,24 +1252,47 @@ fn open_hint(tool: &str, chain: Option<&str>, open: &[Need], needs: &FirewallNee
             )
         }
         "iptables" => {
-            let rule = |proto: &str, ports: &[String]| {
+            // Each chain found keeping them out (`ip raw PREROUTING`), else
+            // filter's INPUT.
+            let found: Vec<(String, String)> = chains
+                .iter()
+                .filter_map(|key| {
+                    let mut words = key.split_whitespace().skip(1);
+                    Some((words.next()?.to_string(), words.next()?.to_string()))
+                })
+                .collect();
+            let found = if found.is_empty() {
+                vec![("filter".to_string(), "INPUT".to_string())]
+            } else {
+                found
+            };
+            let rule = |table: &str, chain: &str, proto: &str, ports: &[String]| {
                 let ports: Vec<String> = ports.iter().map(|p| p.replace('-', ":")).collect();
+                let table = if table == "filter" {
+                    String::new()
+                } else {
+                    format!("-t {table} ")
+                };
                 if ports.len() == 1 && !ports[0].contains(':') {
                     format!(
-                        "sudo iptables -I INPUT -p {proto} --dport {} -j ACCEPT",
+                        "sudo iptables {table}-I {chain} -p {proto} --dport {} -j ACCEPT",
                         ports[0]
                     )
                 } else {
                     format!(
-                        "sudo iptables -I INPUT -p {proto} -m multiport --dports {} -j ACCEPT",
+                        "sudo iptables {table}-I {chain} -p {proto} -m multiport --dports {} -j ACCEPT",
                         ports.join(",")
                     )
                 }
             };
-            let cmds = [("tcp", &tcp), ("udp", &udp)]
-                .into_iter()
-                .filter(|(_, ports)| !ports.is_empty())
-                .map(|(proto, ports)| rule(proto, ports))
+            let cmds = found
+                .iter()
+                .flat_map(|(table, chain)| {
+                    [("tcp", &tcp), ("udp", &udp)]
+                        .into_iter()
+                        .filter(|(_, ports)| !ports.is_empty())
+                        .map(move |(proto, ports)| rule(table, chain, proto, ports))
+                })
                 .collect();
             format!(
                 "Run {}, then save them where your system loads them from (on Arch, `sudo iptables-save -f /etc/iptables/iptables.rules`).",
@@ -1167,7 +1301,12 @@ fn open_hint(tool: &str, chain: Option<&str>, open: &[Need], needs: &FirewallNee
         }
         // nftables.
         _ => {
-            let chain = chain.unwrap_or("inet filter input");
+            let assumed = chains.is_empty();
+            let chains: Vec<&str> = if assumed {
+                vec!["inet filter input"]
+            } else {
+                chains.iter().map(String::as_str).collect()
+            };
             let line = |proto: &str, ports: &[String]| {
                 if ports.len() == 1 {
                     format!("{proto} dport {} accept", ports[0])
@@ -1180,15 +1319,30 @@ fn open_hint(tool: &str, chain: Option<&str>, open: &[Need], needs: &FirewallNee
                 .filter(|(_, ports)| !ports.is_empty())
                 .map(|(proto, ports)| line(proto, ports))
                 .collect();
-            let cmds = lines
+            let cmds = chains
                 .iter()
-                .map(|l| format!("sudo nft 'insert rule {chain} {l}'"))
+                .flat_map(|chain| {
+                    lines
+                        .iter()
+                        .map(move |l| format!("sudo nft 'insert rule {chain} {l}'"))
+                })
                 .collect();
-            format!(
-                "Run {}. They last until a restart: to keep them, add {} to that chain in /etc/nftables.conf, above its reject or drop line.",
+            let which = if chains.len() > 1 {
+                "each of those chains"
+            } else {
+                "that chain"
+            };
+            let mut hint = format!(
+                "Run {}. They last until a restart: to keep them, add {} to {which} in /etc/nftables.conf, above its reject or drop line.",
                 quote(cmds),
                 quote(lines)
-            )
+            );
+            if assumed {
+                hint.push_str(
+                    " These assume the `inet filter` table's `input` chain: `sudo nft list chains` shows yours; put its family, table and chain in their place.",
+                );
+            }
+            hint
         }
     }
 }
@@ -1839,13 +1993,33 @@ mod tests {
                  Diagnostics shows the command that opens them."
             )
         );
-        // Live rules that filter nothing are no firewall; the same read from
-        // the file is nftables letting everything in.
+        // Live rules that filter nothing are no firewall.
         assert_eq!(parse_nftables("", None, 1716, 4716), LinuxFirewall::None);
         let open = "table inet filter {\n chain input {\n  type filter hook input priority filter;\n }\n}\n";
         let f = check_linux_firewall(&parse_nftables(open, None, 1716, 4716), &all);
         assert_eq!(f.status, Status::Good);
         assert_eq!(f.detail, "nftables lets phones in on 1716/tcp and 4716/udp");
+        // PR #594 review I1: the same read from the file is never green.
+        let f = check_linux_firewall(
+            &parse_nftables(open, Some("/etc/nftables.conf"), 1716, 4716),
+            &all,
+        );
+        assert_eq!(f.status, Status::Warn);
+        assert_eq!(
+            f.detail,
+            "nftables: the rules file (/etc/nftables.conf) lets phones in on 1716/tcp and 4716/udp; the running rules need root to read"
+        );
+        // PR #594 review N2: the stock header on rules that let the ports
+        // in names nothing.
+        let edited = super::super::netfilter::tests::ARCH_STOCK.replace(
+            "tcp dport ssh",
+            "tcp dport { ssh, 1716 } accept\n    udp dport 4716",
+        );
+        let RulesRead { stock_arch, .. } = match parse_nftables(&edited, None, 1716, 4716) {
+            LinuxFirewall::On { rules, .. } => rules,
+            other => panic!("{other:?}"),
+        };
+        assert!(!stock_arch);
     }
 
     /// nftables with Pocketdesk's ports opened by the hint's own lines.
@@ -1881,6 +2055,90 @@ mod tests {
                 .unwrap()
                 .contains("may be keeping other devices out on 1716/tcp and 4716/udp")
         );
+    }
+
+    /// PR #594 review I4: the hint names every chain found keeping them
+    /// out, and says what it assumes when none was found.
+    #[test]
+    fn the_nft_hint_names_the_chains_found() {
+        let two = "table ip filter {\n chain INPUT {\n  type filter hook input priority 0; policy drop;\n }\n}\ntable inet pd {\n chain pre {\n  type filter hook prerouting priority -300; policy accept;\n  tcp dport 1716 drop\n }\n}\n";
+        let f = check_linux_firewall(&parse_nftables(two, None, 1716, 4716), &NEEDS);
+        let hint = f.hint.unwrap();
+        assert!(
+            hint.starts_with(
+                "Run `sudo nft 'insert rule ip filter INPUT tcp dport 1716 accept'` and `sudo nft 'insert rule ip filter INPUT udp dport 4716 accept'` and `sudo nft 'insert rule inet pd pre tcp dport 1716 accept'` and"
+            ),
+            "{hint}"
+        );
+        assert!(hint.contains("each of those chains"), "{hint}");
+        assert!(!hint.contains("assume"), "{hint}");
+        // Not found in the rules (a partial ruleset): the assumption said.
+        let partial = format!(
+            "include \"/etc/nft.d/*\"\n{}",
+            "table inet filter {\n chain input {\n  type filter hook input priority 0;\n }\n}\n"
+        );
+        let f = check_linux_firewall(&parse_nftables(&partial, None, 1716, 4716), &NEEDS);
+        assert_eq!(f.status, Status::Warn);
+        assert!(
+            f.hint
+                .unwrap()
+                .ends_with("These assume the `inet filter` table's `input` chain: `sudo nft list chains` shows yours; put its family, table and chain in their place.")
+        );
+        // iptables: the raw table's chain by name.
+        let raw = "*raw\n:PREROUTING ACCEPT [0:0]\n-A PREROUTING -p udp --dport 4716 -j DROP\nCOMMIT\n*filter\n:INPUT ACCEPT [0:0]\nCOMMIT\n";
+        let f = check_linux_firewall(&parse_iptables(raw, None, 1716, 4716), &NEEDS);
+        assert!(
+            f.hint.unwrap().starts_with(
+                "Run `sudo iptables -t raw -I PREROUTING -p udp --dport 4716 -j ACCEPT`"
+            )
+        );
+    }
+
+    /// PR #594 review N4/N6: which reading is judged, hermetically.
+    #[test]
+    fn the_firewall_judged_is_chosen_in_order() {
+        use LinuxFirewall as F;
+        let on = |tool| on(tool, Verdict::Shut, Verdict::Shut);
+        let never = || -> F { panic!("not asked") };
+        assert_eq!(
+            choose_linux_firewall(on("ufw"), never, never, never),
+            on("ufw")
+        );
+        assert_eq!(
+            choose_linux_firewall(F::Off { tool: "ufw" }, || on("firewalld"), never, never),
+            on("firewalld")
+        );
+        assert_eq!(
+            choose_linux_firewall(F::None, || F::None, || on("nftables"), never),
+            on("nftables")
+        );
+        // nftables without a verdict: iptables is asked.
+        assert_eq!(
+            choose_linux_firewall(
+                F::None,
+                || F::None,
+                || F::Unchecked { tool: "nftables" },
+                || on("iptables")
+            ),
+            on("iptables")
+        );
+        // Could not read beats off, which beats none.
+        assert_eq!(
+            choose_linux_firewall(
+                F::Off { tool: "ufw" },
+                || F::None,
+                || F::Unchecked { tool: "nftables" },
+                || F::None
+            ),
+            F::Unchecked { tool: "nftables" }
+        );
+        assert_eq!(
+            choose_linux_firewall(F::Off { tool: "ufw" }, || F::None, || F::None, || F::None),
+            F::Off { tool: "ufw" }
+        );
+        let f = check_linux_firewall(&F::Unchecked { tool: "nftables" }, &NEEDS);
+        assert_eq!(f.status, Status::Info);
+        assert!(f.hint.unwrap().contains("sudo nft list ruleset"));
     }
 
     #[test]
@@ -1920,9 +2178,10 @@ mod tests {
         };
         let f = check_linux_firewall(&fw, &all);
         assert_eq!(f.status, Status::Warn);
+        // ufw's stock before.rules may let mDNS in (PR #594 review N3).
         assert_eq!(
             f.detail,
-            "ufw does not let phones in on 1714-1764 (KDE Connect) or 5353/udp (mDNS)"
+            "ufw does not let phones in on 1714-1764 (KDE Connect), and may block 5353/udp (mDNS)"
         );
         assert_eq!(
             f.hint.as_deref(),
