@@ -23,6 +23,9 @@ seconds="${1:-30}"
 shift || true
 sanitizer="${FUZZ_SANITIZER:-none}"
 toolchain="${FUZZ_TOOLCHAIN:-nightly}"
+# The toolchain's own host: a prebuilt cargo-fuzz (CI's is a static musl
+# build) would otherwise build for the triple it was built for.
+host="$(rustc +"$toolchain" -vV | sed -n 's/^host: //p')"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root/fuzz"
 
@@ -34,13 +37,13 @@ if [ ${#targets[@]} -eq 0 ]; then
     mapfile -t targets < <(cargo +"$toolchain" fuzz list)
 fi
 
-cargo +"$toolchain" fuzz build --sanitizer "$sanitizer" --debug-assertions
+cargo +"$toolchain" fuzz build --target "$host" --sanitizer "$sanitizer" --debug-assertions
 
 failed=()
 for target in "${targets[@]}"; do
     mkdir -p "corpus/$target"
     echo "== $target: ${seconds}s"
-    if ! cargo +"$toolchain" fuzz run --sanitizer "$sanitizer" --debug-assertions "$target" \
+    if ! cargo +"$toolchain" fuzz run --target "$host" --sanitizer "$sanitizer" --debug-assertions "$target" \
         "corpus/$target" "seeds/$target" -- \
         -max_total_time="$seconds" -max_len=20000 -timeout=10 -print_final_stats=1; then
         failed+=("$target")
