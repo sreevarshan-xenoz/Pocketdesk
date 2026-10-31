@@ -253,6 +253,9 @@ async fn the_driver_loop_bench() {
             moves_at.push(link::now_us());
             script.send(Portal::Motion { dx: 0.0, dy }).unwrap();
         }
+        // Keys only on the stream from here: each key's write is the next.
+        *link::KEY_PROBE.lock().unwrap() = Some(Vec::new());
+        *link::WRITE_PROBE.lock().unwrap() = Some(Vec::new());
         let t1 = Instant::now();
         for i in 0..keys {
             sleep_until(t1 + Duration::from_millis(u64::from(i)));
@@ -280,6 +283,17 @@ async fn the_driver_loop_bench() {
 
     let noted = noted.lock().unwrap().clone();
     let sent = link::SENT_PROBE.lock().unwrap().take().unwrap_or_default();
+    let keys_sent = link::KEY_PROBE.lock().unwrap().take().unwrap_or_default();
+    let keys_written = link::WRITE_PROBE.lock().unwrap().take().unwrap_or_default();
+    let key_stage = |at: &[u64]| -> Vec<u64> {
+        at.iter()
+            .zip(&keys_at)
+            .map(|(at, taken)| at.saturating_sub(*taken))
+            .collect()
+    };
+    let (key_to_link, key_written) = (key_stage(&keys_sent), key_stage(&keys_written));
+    let mut slow_written: Vec<(u64, usize)> = key_written.iter().copied().zip(0..).collect();
+    slow_written.sort_unstable_by(|x, y| y.cmp(x));
     let mut to_link = Vec::new();
     let mut slow_send: Vec<(u64, u64)> = Vec::new();
     for (seq, sent_us) in &sent {
@@ -328,6 +342,12 @@ async fn the_driver_loop_bench() {
     stage("move: captured to off the link", move_lat.clone());
     stage("key: captured to off the link", key_lat);
     stage("move: captured to handed to the link", to_link);
+    stage("key: captured to handed to the link", key_to_link);
+    stage("key: captured to written on its stream", key_written);
+    println!(
+        "slowest key writes: {:?}",
+        &slow_written[..slow_written.len().min(6)]
+    );
     slow_send.sort_unstable_by(|x, y| y.cmp(x));
     let listed: Vec<String> = slow_send
         .iter()

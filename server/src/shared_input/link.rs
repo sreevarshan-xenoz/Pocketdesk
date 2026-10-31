@@ -43,6 +43,13 @@ const STREAM_PRIORITY: i32 = 1;
 #[cfg(test)]
 pub(crate) static SENT_PROBE: Mutex<Option<Vec<(u32, u64)>>> = Mutex::new(None);
 
+/// For the driver bench: when each key was handed to the link, and when
+/// each frame on a stream was written to it, while they are `Some`.
+#[cfg(test)]
+pub(crate) static KEY_PROBE: Mutex<Option<Vec<u64>>> = Mutex::new(None);
+#[cfg(test)]
+pub(crate) static WRITE_PROBE: Mutex<Option<Vec<u64>>> = Mutex::new(None);
+
 /// The computers' connections registered now, by the other computer's id.
 static LINKS: LazyLock<Mutex<HashMap<String, Registered>>> = LazyLock::new(Default::default);
 
@@ -696,6 +703,12 @@ impl Channel {
         {
             sent.push((*seq, now_us()));
         }
+        #[cfg(test)]
+        if let Msg::Key { .. } = msg
+            && let Some(sent) = lock(&KEY_PROBE).as_mut()
+        {
+            sent.push(now_us());
+        }
         let ahead = self.order.before(msg);
         if rides_datagram(msg) {
             // A move, a ping or an activity note encoded on the stack and
@@ -825,14 +838,24 @@ async fn write_stream(
         out.push(wire::VERSION);
         while let Some(frame) = frames.recv().await {
             out.extend_from_slice(&frame);
+            #[cfg(test)]
+            let mut count = 1;
             // Whatever else is waiting goes in the same write.
             while let Ok(frame) = frames.try_recv() {
                 out.extend_from_slice(&frame);
+                #[cfg(test)]
+                {
+                    count += 1;
+                }
             }
             stream
                 .write_all(&out)
                 .await
                 .map_err(|e| format!("the shared-input stream broke: {e}"))?;
+            #[cfg(test)]
+            if let Some(written) = lock(&WRITE_PROBE).as_mut() {
+                written.extend(std::iter::repeat_n(now_us(), count));
+            }
             out.clear();
         }
         let _ = stream.finish();
