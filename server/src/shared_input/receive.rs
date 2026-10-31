@@ -1633,6 +1633,27 @@ mod tests {
         );
     }
 
+    /// A click's move sent again on the stream ahead of it (link's
+    /// `ClickOrder`) is injected before the click, and the datagram copy
+    /// coming late after is dropped by its count: the click lands where
+    /// the pointer was, and nothing moves after it.
+    #[test]
+    fn a_clicks_move_on_the_stream_puts_the_pointer_first() {
+        let a = "aaaa";
+        let fake = Fake::default();
+        let mut r = Receiver::new(Box::new(fake.clone()));
+        r.handle(a, Msg::Enter { x: 0, y: 0 }, true);
+        fake.take();
+        let click = Msg::Button {
+            button: 0,
+            pressed: true,
+        };
+        for msg in [mv(5), click, mv(5)] {
+            r.handle(a, msg, true);
+        }
+        assert_eq!(fake.take(), [Call::Move(1, 2), Call::Button(0, true)]);
+    }
+
     /// A move late on the way (older by its count) never drops the newer
     /// one before it: the newer is kept, and the receiver drops the late
     /// one by its count.

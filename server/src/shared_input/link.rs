@@ -497,6 +497,39 @@ fn rides_datagram(msg: &Msg) -> bool {
     )
 }
 
+/// Keeps a click where the pointer was: moves go as datagrams and buttons
+/// on the stream, so a button could overtake the move before it (a
+/// datagram lost or late) and land where the pointer was a moment earlier.
+/// The last move sent as a datagram is sent again on the stream ahead of
+/// the next button or wheel turn, once; the computer driven injects
+/// whichever copy comes first and drops the other by its `seq`, as every
+/// build does.
+#[derive(Debug, Default)]
+struct ClickOrder {
+    /// The last move sent as a datagram, not yet on the stream.
+    unsettled: Option<Msg>,
+}
+
+impl ClickOrder {
+    /// What goes on the stream ahead of `msg`: the last move, when `msg`
+    /// is a button or wheel turn and the stream has not carried it.
+    fn before(&mut self, msg: &Msg) -> Option<Msg> {
+        match msg {
+            Msg::Move { .. } => {
+                self.unsettled = Some(msg.clone());
+                None
+            }
+            // The pointer is put where it arrives on the stream.
+            Msg::Enter { .. } | Msg::Leave => {
+                self.unsettled = None;
+                None
+            }
+            Msg::Button { .. } | Msg::Wheel { .. } => self.unsettled.take(),
+            _ => None,
+        }
+    }
+}
+
 /// Sending shared input to one computer on its link.
 pub struct Channel {
     device_id: String,
@@ -516,6 +549,8 @@ pub struct Channel {
     /// The timings the other computer sends back, and the way into them.
     timings: mpsc::UnboundedReceiver<Vec<wire::Timing>>,
     timings_in: TimingsIn,
+    /// The last move, sent again on the stream ahead of a click.
+    order: ClickOrder,
 }
 
 impl Channel {
@@ -560,6 +595,7 @@ impl Channel {
             pongs_in,
             timings,
             timings_in,
+            order: ClickOrder::default(),
         })
     }
 
@@ -606,12 +642,21 @@ impl Channel {
             }
             _ => {}
         }
+        let ahead = self.order.before(msg);
         if rides_datagram(msg) {
             return self
                 .conn
                 .send_datagram(wire::encode(msg).into())
                 .map_err(|e| format!("not sent: {e}"));
         }
+        if let Some(ahead) = ahead {
+            self.frame(&ahead)?;
+        }
+        self.frame(msg)
+    }
+
+    /// Put `msg` on this channel's stream, opening it with the first.
+    fn frame(&mut self, msg: &Msg) -> Result<(), String> {
         let frames = match &self.stream {
             Some(frames) => frames,
             None => {
@@ -727,6 +772,44 @@ async fn write_stream(
 pub(crate) mod tests {
     use super::*;
     use pocketdesk_core::protocol::ALPN_CONTROL;
+
+    /// A button or wheel turn after a move sends that move on the stream
+    /// first, once; nothing else does, and a crossing settles it.
+    #[test]
+    fn a_click_sends_the_last_move_on_the_stream_first() {
+        let mv = |seq| Msg::Move { seq, x: 7, y: 9 };
+        let click = Msg::Button {
+            button: 0,
+            pressed: true,
+        };
+        let mut order = ClickOrder::default();
+        assert_eq!(order.before(&click), None, "no move yet");
+        assert_eq!(order.before(&mv(1)), None);
+        assert_eq!(order.before(&mv(2)), None);
+        let key = Msg::Key {
+            code: 30,
+            pressed: true,
+        };
+        assert_eq!(order.before(&key), None, "a key does not move it");
+        assert_eq!(order.before(&click), Some(mv(2)), "the last move first");
+        let release = Msg::Button {
+            button: 0,
+            pressed: false,
+        };
+        assert_eq!(order.before(&release), None, "once");
+        assert_eq!(order.before(&mv(3)), None);
+        assert_eq!(
+            order.before(&Msg::Wheel { dx: 0, dy: 1 }),
+            Some(mv(3)),
+            "a wheel turn too"
+        );
+        assert_eq!(order.before(&mv(4)), None);
+        assert_eq!(order.before(&Msg::Leave), None);
+        assert_eq!(order.before(&click), None, "a leave settles it");
+        assert_eq!(order.before(&mv(5)), None);
+        assert_eq!(order.before(&Msg::Enter { x: 0, y: 0 }), None);
+        assert_eq!(order.before(&click), None, "an arrival puts it");
+    }
 
     async fn endpoint() -> iroh::Endpoint {
         iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
