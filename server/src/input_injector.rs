@@ -311,6 +311,14 @@ const ABS_MAX_COORD: i32 = 65535;
 /// uinput works on ALL compositors but requires /dev/uinput access (root or uinput group).
 pub struct InputInjector {
     backend: InputBackend,
+    /// enigo's main display size, and when it was read: X11 asks the X
+    /// server for it, a round trip, so it is not asked on every absolute
+    /// move ([`DISPLAY_SIZE_FOR`], [`InputInjector::forget_display_size`]).
+    display_size: Option<((i32, i32), std::time::Instant)>,
+    /// Whether the display size is kept at all: only for shared input,
+    /// whose receiver tells a screen change; the phone's absolute moves
+    /// ask each time, as before.
+    keep_display_size: bool,
     /// Button mask of the previous `Gamepad` packet. That packet is a state
     /// snapshot, so every bit must be treated as an edge (see 2063).
     gamepad_buttons: u16,
@@ -539,7 +547,41 @@ impl Drop for InputInjector {
     }
 }
 
+/// How long enigo's display size is taken as read: a screen change is
+/// also told ([`InputInjector::forget_display_size`]), and this bounds a
+/// change nothing told.
+const DISPLAY_SIZE_FOR: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The display size `cache` holds at `now`, else `read` (kept).
+fn display_size(
+    cache: &mut Option<((i32, i32), std::time::Instant)>,
+    now: std::time::Instant,
+    read: impl FnOnce() -> Result<(i32, i32)>,
+) -> Result<(i32, i32)> {
+    if let Some((size, at)) = *cache
+        && now.saturating_duration_since(at) < DISPLAY_SIZE_FOR
+    {
+        return Ok(size);
+    }
+    let size = read()?;
+    *cache = Some((size, now));
+    Ok(size)
+}
+
 impl InputInjector {
+    /// The screens changed: the display size is read again at the next
+    /// absolute move.
+    pub fn forget_display_size(&mut self) {
+        self.display_size = None;
+    }
+
+    /// Keep the display size between absolute moves (shared input, whose
+    /// receiver calls [`InputInjector::forget_display_size`] when the
+    /// screens change).
+    pub fn keep_display_size(&mut self) {
+        self.keep_display_size = true;
+    }
+
     /// Create a new input injector.
     ///
     /// Under a Wayland compositor uinput is tried first: enigo's XTEST only
@@ -554,6 +596,8 @@ impl InputInjector {
             Ok(Self {
                 backend: InputBackend::SendInput(crate::input_sendinput::SendInputBackend::new()),
                 gamepad_buttons: 0,
+                display_size: None,
+                keep_display_size: false,
                 #[cfg(target_os = "linux")]
                 pad: PadSlot::Untried,
                 pen: PenState::default(),
@@ -587,6 +631,8 @@ impl InputInjector {
                             return Ok(Self {
                                 backend: InputBackend::Wlr(wlr),
                                 gamepad_buttons: 0,
+                                display_size: None,
+                                keep_display_size: false,
                                 #[cfg(target_os = "linux")]
                                 pad: PadSlot::Untried,
                                 pen: PenState::default(),
@@ -604,6 +650,8 @@ impl InputInjector {
                             return Ok(Self {
                                 backend: InputBackend::Portal,
                                 gamepad_buttons: 0,
+                                display_size: None,
+                                keep_display_size: false,
                                 #[cfg(target_os = "linux")]
                                 pad: PadSlot::Untried,
                                 pen: PenState::default(),
@@ -626,6 +674,8 @@ impl InputInjector {
                 return Ok(Self {
                     backend: InputBackend::Enigo(Box::new(Mutex::new(enigo))),
                     gamepad_buttons: 0,
+                    display_size: None,
+                    keep_display_size: false,
                     #[cfg(target_os = "linux")]
                     pad: PadSlot::Untried,
                     pen: PenState::default(),
@@ -681,6 +731,8 @@ impl InputInjector {
                     .ok(),
             })),
             gamepad_buttons: 0,
+            display_size: None,
+            keep_display_size: false,
             #[cfg(target_os = "linux")]
             pad: PadSlot::Untried,
             pen: PenState::default(),
@@ -730,7 +782,12 @@ impl InputInjector {
             InputBackend::SendInput(backend) => backend.move_absolute(x_norm, y_norm),
             InputBackend::Enigo(enigo) => {
                 let e = enigo.get_mut().unwrap();
-                let (w, h) = e.main_display().context("enigo main_display failed")?;
+                let read = || e.main_display().context("enigo main_display failed");
+                let (w, h) = if self.keep_display_size {
+                    display_size(&mut self.display_size, std::time::Instant::now(), read)?
+                } else {
+                    read()?
+                };
                 // Over one past the largest value, so 65535 is the last
                 // pixel, not one past it.
                 let span = |norm: u16, len: i32| {
@@ -1342,9 +1399,10 @@ fn emit_uinput(
     if device_mut(state, which).is_none() {
         set_device(state, which, build_uinput(which)?);
     }
-    let first = device_mut(state, which)
-        .expect("an absent device was just built")
-        .emit(events);
+    let first = write_frames(
+        device_mut(state, which).expect("an absent device was just built"),
+        events,
+    );
     match first {
         Ok(()) => Ok(()),
         Err(e) => {
@@ -1355,12 +1413,56 @@ fn emit_uinput(
                 "uinput emit failed, rebuilding the device and retrying"
             );
             set_device(state, which, build_uinput(which)?);
-            device_mut(state, which)
-                .expect("the device was just rebuilt")
-                .emit(events)
-                .with_context(|| format!("uinput {what} failed again after its device was rebuilt"))
+            write_frames(
+                device_mut(state, which).expect("the device was just rebuilt"),
+                events,
+            )
+            .with_context(|| format!("uinput {what} failed again after its device was rebuilt"))
         }
     }
+}
+
+/// Write `events` to a uinput device in one `write(2)`, each frame ending
+/// in the SYN_REPORT its caller put there (one is added when the last
+/// event is not one). evdev 0.13's `emit` adds a SYN_REPORT of its own
+/// after the events, an empty frame after ours, and writes each part with
+/// a trailing empty write: four system calls a move instead of one.
+#[cfg(target_os = "linux")]
+fn write_frames(device: &impl std::os::fd::AsFd, events: &[InputEvent]) -> std::io::Result<()> {
+    let ends_in_syn = events
+        .last()
+        .is_some_and(|e| e.event_type().0 == EV_SYN && e.code() == SYN_REPORT);
+    let synced;
+    let events = if ends_in_syn {
+        events
+    } else {
+        synced = [events, &[InputEvent::new(EV_SYN, SYN_REPORT, 0)]].concat();
+        &synced
+    };
+    // SAFETY: `InputEvent` is `repr(transparent)` over the kernel's plain
+    // `input_event`, which uinput reads as these bytes, as evdev's own
+    // `emit` writes them.
+    let bytes = unsafe {
+        std::slice::from_raw_parts(events.as_ptr().cast::<u8>(), std::mem::size_of_val(events))
+    };
+    let fd = std::os::fd::AsRawFd::as_raw_fd(&device.as_fd());
+    let mut rest = bytes;
+    while !rest.is_empty() {
+        // SAFETY: `rest` is valid for its length; `fd` is the device's
+        // own, open while it is borrowed.
+        let n = unsafe { libc::write(fd, rest.as_ptr().cast(), rest.len()) };
+        match usize::try_from(n) {
+            Ok(0) => return Err(std::io::ErrorKind::WriteZero.into()),
+            Ok(n) => rest = &rest[n.min(rest.len())..],
+            Err(_) => {
+                let e = std::io::Error::last_os_error();
+                if e.kind() != std::io::ErrorKind::Interrupted {
+                    return Err(e);
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The device `which` names, if built.
@@ -1517,7 +1619,7 @@ impl InputInjector {
             return true;
         }
         events.push(InputEvent::new(EV_SYN, SYN_REPORT, 0));
-        if let Err(e) = device.emit(&events) {
+        if let Err(e) = write_frames(device, &events) {
             // Made again at the next packet; this one types keys.
             warn!("The game controller did not take the phone's gamepad ({e}); making it again");
             self.pad = PadSlot::Untried;
@@ -1559,7 +1661,7 @@ impl InputInjector {
                 return;
             }
             events.push(InputEvent::new(EV_SYN, SYN_REPORT, 0));
-            if device.emit(&events).is_ok() {
+            if write_frames(device, &events).is_ok() {
                 *last = Some(rest);
             }
         }
@@ -2521,5 +2623,96 @@ mod tests {
             Some(libc::EBADF),
             "the injected fault was not the one the rebuild path handles"
         );
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod frame_tests {
+    use super::*;
+    use std::io::Read;
+
+    fn read_events(reader: &mut std::io::PipeReader, count: usize) -> Vec<(u16, u16, i32)> {
+        let size = std::mem::size_of::<InputEvent>();
+        let mut bytes = vec![0u8; size * count];
+        reader.read_exact(&mut bytes).unwrap();
+        bytes
+            .chunks(size)
+            .map(|chunk| {
+                // SAFETY: a whole `input_event` as written.
+                let e: InputEvent = unsafe { std::ptr::read_unaligned(chunk.as_ptr().cast()) };
+                (e.event_type().0, e.code(), e.value())
+            })
+            .collect()
+    }
+
+    /// A move is its two axes and one SYN_REPORT, in one write: never the
+    /// empty frame evdev's `emit` adds after the caller's own SYN_REPORT.
+    #[test]
+    fn a_frame_is_written_whole_with_one_syn() {
+        let (mut reader, writer) = std::io::pipe().unwrap();
+        let events = [
+            InputEvent::new(EV_ABS, AbsoluteAxisCode::ABS_X.0, 10),
+            InputEvent::new(EV_ABS, AbsoluteAxisCode::ABS_Y.0, 20),
+            InputEvent::new(EV_SYN, SYN_REPORT, 0),
+        ];
+        write_frames(&writer, &events).unwrap();
+        // Events without a SYN_REPORT last get one.
+        write_frames(&writer, &[InputEvent::new(EV_KEY, 30, 1)]).unwrap();
+        drop(writer);
+        assert_eq!(
+            read_events(&mut reader, 5),
+            [
+                (EV_ABS, AbsoluteAxisCode::ABS_X.0, 10),
+                (EV_ABS, AbsoluteAxisCode::ABS_Y.0, 20),
+                (EV_SYN, SYN_REPORT, 0),
+                (EV_KEY, 30, 1),
+                (EV_SYN, SYN_REPORT, 0),
+            ]
+        );
+        let mut rest = Vec::new();
+        reader.read_to_end(&mut rest).unwrap();
+        assert!(
+            rest.is_empty(),
+            "no empty frame after: {} bytes",
+            rest.len()
+        );
+    }
+}
+
+#[cfg(test)]
+mod display_size_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// The display size is read once, then taken from the cache until it
+    /// is stale or forgotten; a failed read is not kept.
+    #[test]
+    fn the_display_size_is_read_once_and_kept() {
+        let mut cache = None;
+        let mut reads = 0;
+        let t0 = Instant::now();
+        let mut read_at =
+            |cache: &mut Option<((i32, i32), Instant)>, now: Instant, size: (i32, i32)| {
+                display_size(cache, now, || {
+                    reads += 1;
+                    Ok(size)
+                })
+                .unwrap()
+            };
+        assert_eq!(read_at(&mut cache, t0, (1920, 1080)), (1920, 1080));
+        // Within its time: the cached size, however the screen changed.
+        let soon = t0 + Duration::from_millis(500);
+        assert_eq!(read_at(&mut cache, soon, (1280, 720)), (1920, 1080));
+        // Stale: read again.
+        let later = t0 + DISPLAY_SIZE_FOR;
+        assert_eq!(read_at(&mut cache, later, (1280, 720)), (1280, 720));
+        // Forgotten (a screen change told): read again.
+        cache = None;
+        assert_eq!(read_at(&mut cache, later, (800, 600)), (800, 600));
+        assert_eq!(reads, 3);
+        // A failed read is an error, and nothing is kept.
+        let mut empty = None;
+        assert!(display_size(&mut empty, t0, || anyhow::bail!("no display")).is_err());
+        assert!(empty.is_none());
     }
 }

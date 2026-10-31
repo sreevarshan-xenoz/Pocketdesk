@@ -3352,6 +3352,13 @@ Built 2026-10-31. Diagnostics' Firewall row reads plain nftables and iptables ru
 - [ ] Arch's stock `/etc/nftables.conf` loaded: the row names "Arch's stock rules, which let in ssh only". (where: linux)
 - [ ] The hint's `nft insert` lines run by hand: the row turns green and a phone pairs. (where: linux)
 - [ ] iptables (`iptables.service` with a DROP policy): the row is red with the `iptables -I INPUT` lines. (where: linux)
+## 247. Shared input A: the receiving end, measured end to end
+
+Built 2026-10-31. `share-test` stamps each key and move as the script captures it and prints each stage end to end at p50, p95, p99 and the most (captured to the link, the network one way, off the link to injected), with how many moves were injected. The computer driven no longer waits on a file read before injecting (the settings, each computer's standing and the status are read and written in the background), injects only the newest of moves queued behind each other, writes each uinput frame in one `write(2)` with one SYN_REPORT, keeps the X11 display size, and takes a click's last move on the stream ahead of the click.
+
+- [x] Two throwaway servers on the Linux laptop's loopback, the receiver injecting into a headless sway (its virtual pointer, and its Xwayland through enigo), `share-test --keys 500 --moves 2000`, before and after each change (2026-10-31; numbers in the status history).
+- [ ] Windows driving the Linux laptop for real (the owner's mouse and keyboard, not the script): `share-test --keys 500 --moves 2000` from Windows to the laptop, before and after this build, and a feel check that the pointer keeps up and clicks land where it is. (where: second computer)
+- [ ] The uinput path on a Linux computer where `/dev/uinput` is writable: the same run, the receiver's write calls per move a quarter of before. (where: linux)
 
 ## 248. Software encoding through OpenH264 on stock Fedora
 
