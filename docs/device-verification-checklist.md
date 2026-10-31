@@ -3360,6 +3360,15 @@ Built 2026-10-31. `share-test` stamps each key and move as the script captures i
 - [ ] Windows driving the Linux laptop for real (the owner's mouse and keyboard, not the script): `share-test --keys 500 --moves 2000` from Windows to the laptop, before and after this build, and a feel check that the pointer keeps up and clicks land where it is. (where: second computer)
 - [ ] The uinput path on a Linux computer where `/dev/uinput` is writable: the same run, the receiver's write calls per move a quarter of before. (where: linux)
 
+## 248. Shared input B: the driver loop, batched and kept light
+
+Built 2026-10-31. The computer driving sends its moves at most every 2 ms with "Keep the connection quick" on (the newest kept, never a key, click or wheel turn), takes queued input in one turn with the rest on a timer, reads its files, settings, monitors, Hyprland and what is in front on threads of its own, sends a move with no allocation or link lookup, and at rest wakes at its next deadline (the receive loop once a second while nobody drives this computer).
+
+- [x] The Linux driver loop through a scripted portal on the laptop (`driver_bench`), before and after each change (2026-10-31; numbers in the status history).
+- [ ] Windows driving the Linux laptop for real with this build (its hook loop has the same changes and builds on CI only): a 1 kHz mouse keeps up and feels smooth, clicks and drags land where the pointer is, keys typed during a fast move arrive in order, and the gaming lock still takes the hooks out within about half a second of a game coming to the front. (where: second computer)
+- [ ] The Linux portal driver for real (the owner's Hyprland driving another computer): the same feel check, and the edge still crosses after a screen is plugged in or rescaled. (where: second computer)
+- [ ] A running server at rest with driving on: the `pd-shared*` threads wake about 7 times a second at home (`/proc/<pid>/task/*/status`), and its receive loop about once a second while nobody drives this computer. (where: linux)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

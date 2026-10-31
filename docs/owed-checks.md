@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1080 open items.
+1083 open items.
 
 | Where | Items |
 |---|---|
@@ -12,8 +12,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 147 |
-| A Linux desktop (the Azure VM serves for some) | 179 |
+| A second computer | 149 |
+| A Linux desktop (the Azure VM serves for some) | 180 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
 
@@ -1106,6 +1106,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Windows driving the Linux laptop for real (the owner's mouse and keyboard, not the script): `share-test --keys 500 --moves 2000` from Windows to the laptop, before and after this build, and a feel check that the pointer keeps up and clicks land where it is. (where: second computer)
 
+**248. Shared input B: the driver loop, batched and kept light**
+
+- Windows driving the Linux laptop for real with this build (its hook loop has the same changes and builds on CI only): a 1 kHz mouse keeps up and feels smooth, clicks and drags land where the pointer is, keys typed during a fast move arrive in order, and the gaming lock still takes the hooks out within about half a second of a game coming to the front. (where: second computer)
+- The Linux portal driver for real (the owner's Hyprland driving another computer): the same feel check, and the edge still crosses after a screen is plugged in or rescaled. (where: second computer)
+
 ## A Linux desktop (the Azure VM serves for some)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1592,6 +1597,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **247. Shared input A: the receiving end, measured end to end**
 
 - The uinput path on a Linux computer where `/dev/uinput` is writable: the same run, the receiver's write calls per move a quarter of before. (where: linux)
+
+**248. Shared input B: the driver loop, batched and kept light**
+
+- A running server at rest with driving on: the `pd-shared*` threads wake about 7 times a second at home (`/proc/<pid>/task/*/status`), and its receive loop about once a second while nobody drives this computer. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
