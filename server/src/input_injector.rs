@@ -554,6 +554,21 @@ fn uinput_wheel_events(x: i32, y: i32, nx: i32, ny: i32) -> Vec<InputEvent> {
     events
 }
 
+/// Wheel notches (`x` right, `y` up) as enigo's scrolls: one click a
+/// notch, and enigo's positive is down, or right. It used to drop the sign
+/// and divide by ten, so every turn went down or right, one click for up
+/// to 19 notches.
+fn enigo_scroll(x: i32, y: i32) -> Vec<(i32, enigo::Axis)> {
+    let mut out = Vec::new();
+    if y != 0 {
+        out.push((y.saturating_neg(), enigo::Axis::Vertical));
+    }
+    if x != 0 {
+        out.push((x, enigo::Axis::Horizontal));
+    }
+    out
+}
+
 /// The wheel notches one gamepad packet's right stick gives (E4): none
 /// within a third of its travel, one from there, two from two thirds (the
 /// phone's edge is 32767); up scrolls up.
@@ -969,13 +984,8 @@ impl InputInjector {
             InputBackend::SendInput(backend) => backend.scroll(x, y),
             InputBackend::Enigo(enigo) => {
                 let e = enigo.get_mut().unwrap();
-                if y != 0 {
-                    e.scroll((y.abs() / 10).max(1), enigo::Axis::Vertical)
-                        .context("enigo vertical scroll failed")?;
-                }
-                if x != 0 {
-                    e.scroll((x.abs() / 10).max(1), enigo::Axis::Horizontal)
-                        .context("enigo horizontal scroll failed")?;
+                for (clicks, axis) in enigo_scroll(x, y) {
+                    e.scroll(clicks, axis).context("enigo scroll failed")?;
                 }
                 Ok(())
             }
@@ -2543,6 +2553,22 @@ mod tests {
                 RelativeAxisCode::REL_HWHEEL_HI_RES.0
             );
         }
+    }
+
+    #[test]
+    fn enigo_scrolls_each_notch_the_right_way() {
+        let words = |x, y| {
+            enigo_scroll(x, y)
+                .into_iter()
+                .map(|(n, axis)| (n, axis == enigo::Axis::Vertical))
+                .collect::<Vec<_>>()
+        };
+        // Up is enigo's negative; two notches are two clicks.
+        assert_eq!(words(0, 2), [(-2, true)]);
+        assert_eq!(words(0, -1), [(1, true)]);
+        assert_eq!(words(-3, 0), [(-3, false)]);
+        assert_eq!(words(1, 1), [(-1, true), (1, false)]);
+        assert!(words(0, 0).is_empty());
     }
 
     #[test]
