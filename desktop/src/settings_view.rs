@@ -806,6 +806,8 @@ pub struct SettingsForm {
     picking_downloads: Option<std::thread::JoinHandle<Option<std::path::PathBuf>>>,
     /// A file being picked for notes from phones (BF4).
     picking_notes: Option<std::thread::JoinHandle<Option<std::path::PathBuf>>>,
+    /// Approve with my phone's set-up and Test.
+    approve: crate::approve_view::ApproveUi,
     /// The paired phones, id and name, for the phone commands' pickers
     /// (M9); the window sets it each frame.
     pub phones: Vec<(String, String)>,
@@ -841,6 +843,7 @@ impl SettingsForm {
             home_assistant: None,
             picking_downloads: None,
             picking_notes: None,
+            approve: Default::default(),
             phones: Vec::new(),
         }
     }
@@ -1502,6 +1505,55 @@ impl SettingsForm {
                                 "Only where this computer can tell how long it has been idle (GNOME, KDE, Sway, Hyprland, X11 with xprintidle); elsewhere it never locks.",
                             );
                         }
+                    });
+                }
+                // Approve with my phone (Linux): sudo, polkit, the lock screen.
+                let approve = &mut self.approve;
+                let phones = &self.phones;
+                row(ui, "phone_approves", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_approves,
+                        "approve sudo and administrator prompts on my phone",
+                    );
+                    note(
+                        ui,
+                        "Through PAM, with your fingerprint or screen lock on the phone. The password always still works: when no phone is linked the password prompt comes at once, and otherwise after the wait below. Off by default.",
+                    );
+                    if e.phone_approves {
+                        approve.show(ui, &mut e.phone_approves_phones, phones);
+                    }
+                });
+                if e.phone_approves {
+                    row(ui, "phone_approves_lock_screen", |ui| {
+                        ui.checkbox(
+                            &mut e.phone_approves_lock_screen,
+                            "unlock the lock screen from the phone (hyprlock, swaylock, KDE, GNOME)",
+                        );
+                        note(
+                            ui,
+                            "Its own switch, off by default, and its own PAM line. The phone is asked when the lock screen starts checking; the password works as before.",
+                        );
+                    });
+                    row(ui, "phone_approves_local_only", |ui| {
+                        ui.checkbox(
+                            &mut e.phone_approves_local_only,
+                            "refuse requests from an ssh session",
+                        );
+                        note(
+                            ui,
+                            "On by default: sudo typed over ssh asks for the password, not the phone.",
+                        );
+                    });
+                    row(ui, "phone_approves_timeout_secs", |ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut e.phone_approves_timeout_secs)
+                                .range(5..=60)
+                                .suffix(" s"),
+                        );
+                        note(
+                            ui,
+                            "How long a request waits for the phone before the password prompt.",
+                        );
                     });
                 }
                 row(ui, "open_links", |ui| {
@@ -2699,7 +2751,7 @@ fn quiet_problem(config: &Config) -> Option<&'static str> {
 }
 
 /// A row's note, small and quiet.
-fn note(ui: &mut egui::Ui, text: impl Into<String>) {
+pub(crate) fn note(ui: &mut egui::Ui, text: impl Into<String>) {
     ui.label(RichText::new(text.into()).small().weak());
 }
 
