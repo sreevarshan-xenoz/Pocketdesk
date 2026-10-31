@@ -110,7 +110,7 @@ video_quality = "balanced"
 # browser, or, false, shown as a notification. Each phone's Links
 # permission (desktop app, Devices) still applies.
 # open_links = true
-# Let a phone with Input add a screen of its own shape (Sway only).
+# Let a phone with Input add a screen of its own shape (Sway and Hyprland).
 # virtual_screens = true
 # Let a phone with the Peek permission (off for every phone until turned
 # on in the desktop app, Devices) see this screen as one still, from its

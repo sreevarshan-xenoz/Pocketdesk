@@ -1388,7 +1388,7 @@ On the Azure VM (headless Sway, no XWayland) from the A71 over the internet, 202
 - [x] After the phone left, the server removed the screen and its record; the window went back to the desktop's output.
 
 Owed:
-- [ ] "Phones may add a screen" off: refused with its reason; on Windows and Hyprland: "only Sway can for now".
+- [ ] "Phones may add a screen" off: refused with its reason; on Windows, GNOME or KDE: "only Sway and Hyprland can for now" (Hyprland: §245).
 
 ## 76. Hotspot and tethering in Check connection
 
@@ -3326,6 +3326,16 @@ Built 2026-10-31. A phone paired with one computer's own code is offered the own
 - [ ] An older server on one side (the last release): the phone says the computer did not answer, and nothing is added. (where: second computer)
 - [ ] On the laptop, turn Control off for the Windows throwaway on its Devices page, then introduce the OPPO: the OPPO's entry there has Control off. Unpair the Windows throwaway on the laptop: within seconds the laptop says the OPPO is no longer treated as yours, `pocketdesk devices --json` keeps it with `"owner": false`. (where: second computer)
 - [ ] With the OPPO paired with the laptop through the Windows throwaway, its card for the laptop offers nothing under Pair with my other computers… (an introduced phone is not introduced onward). (where: second computer)
+
+## 245. A second screen at the phone's shape on Hyprland
+
+Built 2026-10-31. On Hyprland 0.56 a phone's screen is a headless output named `PD-<tag>-<n>` (the tag from the server's state folder), its rule set first with `eval hl.monitor({…, position = "auto-right"})`, then made with `output create headless` (it comes up at the rule's size) and removed with `output remove`; a server that starts removes its own tagged outputs that its record does not list.
+
+- [x] Spike on the Linux laptop (Hyprland 0.56.2, one monitor), 2026-10-31: `output create headless` and `output remove` work over socket1 (not caught by hyprwm/Hyprland#16224); the output shows in `j/monitors`; `eval hl.monitor` sets its mode, which shows a frame later, and a rule set before `output create` is honoured at once; grim (screencopy) captured it at the asked size; a fixed position moved the laptop's own monitor (its rule is `auto`) and `auto-right` did not; the monitor list ended as it began.
+- [x] `live_hyprland_screen_is_added_captured_and_removed` on the laptop, 2026-10-31, re-run on the final code (the rule set before `output create`, 8-digit tags, the time-limited socket): a 1080x2400 screen added through the plugin's answer, screencopy's first frame 1080x2400, asked again the same screen, removed, the monitor list back to the laptop's own.
+- [x] A throwaway server started with an output of its tag left from a crash: it removed it within a second, logged it, and was listening a second later. Checked 2026-10-31 on the laptop, re-run on the final code (8-digit tag, start-up waiting at most 5 s for the sweep).
+- [ ] From a phone on the laptop: "Add a screen for this phone" in the picker, the session switches to it and a window dragged onto it shows on the phone; the screen goes about 10 s after the phone leaves. (where: linux)
+- [ ] A Hyprland whose config has a monitor rule for every output (`output = ""` with a fixed position): the phone's screen still lands right of the others. (where: linux)
 
 ## Recording results
 

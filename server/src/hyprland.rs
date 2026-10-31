@@ -10,11 +10,12 @@
 //! active window geometry for capture cropping, and follow window
 //! activations/moves via socket2 events.
 //!
-//! Only the read side is implemented: the *write* grammar of socket1
-//! (`dispatch`, `keyword`, `setoption`) has been broken upstream since the
-//! Lua IPC rewrite in 0.56 — plain `hyprctl dispatch workspace 3` errors on a
-//! stock 0.56.2 compositor (hyprwm/Hyprland discussion #16224) — so no action
-//! dispatchers live here. Workspace switching already works through injected
+//! No `dispatch`/`keyword`/`setoption` writes live here: that grammar of
+//! socket1 has been broken upstream since the Lua IPC rewrite in 0.56 — plain
+//! `hyprctl dispatch workspace 3` errors on a stock 0.56.2 compositor
+//! (hyprwm/Hyprland discussion #16224). [`HyprlandIpc::request_blocking`]
+//! carries the `output create`/`output remove` and `eval` (real Lua) writes
+//! that 0.56 still accepts, for the phone's second screen. Workspace switching already works through injected
 //! keybinds (ShortcutBar), and window focus can ride the input-injection path
 //! if the picker needs it.
 
@@ -170,7 +171,7 @@ impl HyprlandIpc {
         Self::from_env().is_ok_and(|ipc| ipc.request_socket().is_some())
     }
 
-    fn request_socket(&self) -> Option<PathBuf> {
+    pub(crate) fn request_socket(&self) -> Option<PathBuf> {
         // Newer Hyprland renamed socket1; try both.
         for name in [".socket.sock", ".socket1.sock"] {
             let p = self.socket_dir.join(name);
@@ -203,6 +204,21 @@ impl HyprlandIpc {
             .await
             .context("read Hyprland reply")?;
         String::from_utf8(buf).context("non-UTF8 Hyprland reply")
+    }
+
+    /// [`Self::request`] for blocking code: it waits at most 5 s to connect,
+    /// 5 s to write and 5 s to read.
+    #[cfg(unix)]
+    pub fn request_blocking(&self, req: &str) -> std::io::Result<String> {
+        let path = self
+            .request_socket()
+            .ok_or_else(|| std::io::Error::other("no Hyprland request socket found"))?;
+        request_at(&path, req, std::time::Duration::from_secs(5))
+    }
+
+    #[cfg(not(unix))]
+    pub fn request_blocking(&self, _req: &str) -> std::io::Result<String> {
+        Err(std::io::Error::other("Hyprland IPC needs Unix sockets"))
     }
 
     async fn json<T: serde::de::DeserializeOwned>(&self, req: &str) -> Result<T> {
@@ -284,6 +300,40 @@ impl HyprlandIpc {
     }
 }
 
+/// Connect to the Unix socket at `path`, waiting at most `wait`: a
+/// compositor that has stopped accepting lets its backlog fill, and a plain
+/// connect then waits for ever (or, on Linux, a non-blocking one is refused
+/// at once, which is as good).
+#[cfg(unix)]
+pub(crate) fn connect_within(
+    path: &Path,
+    wait: std::time::Duration,
+) -> std::io::Result<std::os::unix::net::UnixStream> {
+    let socket = socket2::Socket::new(socket2::Domain::UNIX, socket2::Type::STREAM, None)?;
+    socket.connect_timeout(&socket2::SockAddr::unix(path)?, wait)?;
+    socket.set_nonblocking(false)?;
+    Ok(socket.into())
+}
+
+/// One request to the socket at `path` and its whole reply, each of the
+/// connect, the write and the read waiting at most `wait`.
+#[cfg(unix)]
+pub(crate) fn request_at(
+    path: &Path,
+    req: &str,
+    wait: std::time::Duration,
+) -> std::io::Result<String> {
+    use std::io::{Read, Write};
+    let mut stream = connect_within(path, wait)?;
+    stream.set_read_timeout(Some(wait))?;
+    stream.set_write_timeout(Some(wait))?;
+    stream.write_all(req.as_bytes())?;
+    let mut buf = Vec::new();
+    // Hyprland answers and closes; a reply this large is no answer.
+    stream.take(4 * 1024 * 1024).read_to_end(&mut buf)?;
+    String::from_utf8(buf).map_err(std::io::Error::other)
+}
+
 fn reply_trunc(reply: &str) -> String {
     let mut s: String = reply.chars().take(200).collect();
     if s.len() < reply.len() {
@@ -354,6 +404,59 @@ mod tests {
         assert!(ws[0].active);
         assert_eq!(ws[1].name, "2:web");
         assert!(!ws[1].active);
+    }
+
+    /// A socket whose listener never accepts and whose backlog is full: a
+    /// connect gives up within its wait instead of waiting for ever.
+    #[cfg(unix)]
+    #[test]
+    fn a_connect_to_a_socket_that_stopped_accepting_gives_up() {
+        let dir = std::env::temp_dir().join(format!("pd-hypr-full-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.sock");
+        let _ = std::fs::remove_file(&path);
+        let listener =
+            socket2::Socket::new(socket2::Domain::UNIX, socket2::Type::STREAM, None).unwrap();
+        listener
+            .bind(&socket2::SockAddr::unix(&path).unwrap())
+            .unwrap();
+        listener.listen(0).unwrap();
+        let wait = std::time::Duration::from_millis(200);
+        let mut held = Vec::new();
+        let mut refused = false;
+        for _ in 0..16 {
+            let at = std::time::Instant::now();
+            match connect_within(&path, wait) {
+                Ok(s) => held.push(s),
+                Err(_) => refused = true,
+            }
+            assert!(
+                at.elapsed() < std::time::Duration::from_secs(2),
+                "a connect waited"
+            );
+            if refused {
+                break;
+            }
+        }
+        assert!(refused, "the backlog never filled");
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A socket that takes the request and never answers: the read gives up.
+    #[cfg(unix)]
+    #[test]
+    fn a_request_to_a_socket_that_never_answers_gives_up() {
+        let dir = std::env::temp_dir().join(format!("pd-hypr-mute-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.sock");
+        let _ = std::fs::remove_file(&path);
+        let _listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let at = std::time::Instant::now();
+        let reply = request_at(&path, "j/monitors", std::time::Duration::from_millis(200));
+        assert!(reply.is_err());
+        assert!(at.elapsed() < std::time::Duration::from_secs(2));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // Live-IPC tests run only on a Hyprland session (skipped silently
