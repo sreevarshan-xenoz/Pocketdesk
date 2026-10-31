@@ -1233,6 +1233,9 @@ const BATCH_MOST: usize = 256;
 /// between them keeps the move before it: a click lands where the pointer
 /// was when it was made. A move older by its `seq` (a datagram late on
 /// the way) never drops a newer one before it; the receiver drops it.
+/// Dropping a move loses nothing only because every `Msg::Move` is an
+/// absolute position: a relative move must never be coalesced this way
+/// (a new variant falls to the arm that breaks a run).
 fn stale_moves<'a>(batch: impl DoubleEndedIterator<Item = (&'a str, &'a Msg)>) -> Vec<bool> {
     let mut newest_after: HashMap<&str, u32> = HashMap::new();
     let mut stale: Vec<bool> = batch
