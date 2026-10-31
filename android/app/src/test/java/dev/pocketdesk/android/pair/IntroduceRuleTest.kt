@@ -81,4 +81,50 @@ class IntroduceRuleTest {
         assertNull(IntroduceRule.decode("NOPE\n\nx"))
         assertNull(IntroduceRule.decode("PAIRED"))
     }
+
+    @Test
+    fun notNowKeepsAComputersOwnOfferQuietForTheCoolDown() {
+        val gate = IntroduceRule.Gate(quietMs = 1_000)
+        assertTrue(gate.mayOfferByItself("192.0.2.1", now = 0))
+        gate.notNow("192.0.2.1", now = 100)
+        assertFalse("just passed", gate.mayOfferByItself("192.0.2.1", now = 100))
+        assertFalse(gate.mayOfferByItself("192.0.2.1", now = 1_099))
+        assertTrue("another computer is not quieted", gate.mayOfferByItself("192.0.2.2", now = 200))
+        assertTrue("after the cool-down", gate.mayOfferByItself("192.0.2.1", now = 1_100))
+        // A clock set back does not quiet it for ever.
+        assertTrue(gate.mayOfferByItself("192.0.2.1", now = 50))
+    }
+
+    @Test
+    fun anOfferThatMustWaitIsKeptNotLost() {
+        assertEquals(IntroduceRule.Pending.Now, IntroduceRule.pendingStep(offerOn = true, sheetOpen = false, quietLeftMs = 0))
+        assertEquals(IntroduceRule.Pending.Hold, IntroduceRule.pendingStep(offerOn = true, sheetOpen = true, quietLeftMs = 0))
+        assertEquals(IntroduceRule.Pending.Hold, IntroduceRule.pendingStep(offerOn = true, sheetOpen = true, quietLeftMs = 5))
+        assertEquals(IntroduceRule.Pending.After(5), IntroduceRule.pendingStep(offerOn = true, sheetOpen = false, quietLeftMs = 5))
+        assertEquals(IntroduceRule.Pending.Drop, IntroduceRule.pendingStep(offerOn = false, sheetOpen = true, quietLeftMs = 5))
+    }
+
+    @Test
+    fun quietLeftCountsDownFromNotNow() {
+        val gate = IntroduceRule.Gate(quietMs = 1_000)
+        assertEquals(0L, gate.quietLeftMs("192.0.2.1", now = 0))
+        gate.notNow("192.0.2.1", now = 100)
+        assertEquals(1_000L, gate.quietLeftMs("192.0.2.1", now = 100))
+        assertEquals(400L, gate.quietLeftMs("192.0.2.1", now = 700))
+        assertEquals(0L, gate.quietLeftMs("192.0.2.1", now = 1_100))
+        assertEquals("a clock set back", 0L, gate.quietLeftMs("192.0.2.1", now = 50))
+    }
+
+    @Test
+    fun twoSheetsNeverStack() {
+        val gate = IntroduceRule.Gate()
+        assertTrue(gate.open("192.0.2.1"))
+        assertFalse("a second computer's sheet waits", gate.open("192.0.2.2"))
+        assertFalse("no offer by itself over an open sheet", gate.mayOfferByItself("192.0.2.2", now = 0))
+        assertTrue("the same sheet composed again keeps its place", gate.open("192.0.2.1"))
+        gate.closed("192.0.2.2")
+        assertFalse("only the open sheet's close frees it", gate.open("192.0.2.2"))
+        gate.closed("192.0.2.1")
+        assertTrue(gate.open("192.0.2.2"))
+    }
 }

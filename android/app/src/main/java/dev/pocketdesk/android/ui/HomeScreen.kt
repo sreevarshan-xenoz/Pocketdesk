@@ -73,6 +73,7 @@ import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.discovery.FoundComputer
 import dev.pocketdesk.android.discovery.FoundComputers
 import dev.pocketdesk.android.discovery.rememberFoundComputers
+import dev.pocketdesk.android.pair.IntroduceRule
 import dev.pocketdesk.android.doctor.BackgroundLimit
 import dev.pocketdesk.android.doctor.Health
 import dev.pocketdesk.android.doctor.HealthCheck
@@ -205,13 +206,36 @@ fun HomeScreen(
     var peekFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var allowedFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var devicesFor by remember { mutableStateOf<HostStore.Host?>(null) }
+    // The computer that unpaired this phone, being paired again by PIN.
+    var pairingFor by remember { mutableStateOf<HostStore.Host?>(null) }
     // Ecosystem phase 4: the computer whose other computers are offered,
     // and whether it was offered by itself after pairing.
     var introduceFor by remember { mutableStateOf<Pair<HostStore.Host, Boolean>?>(null) }
-    LaunchedEffect(hosts) {
-        val pending = Prefs.takeIntroducePending(context) ?: return@LaunchedEffect
-        if (!Prefs.offerMyComputers(context)) return@LaunchedEffect
-        hosts.firstOrNull { it.address == pending }?.let { introduceFor = it to true }
+    // Never over a sheet already open, nor again soon after Not now: such
+    // an offer waits, kept, and shows once it may (PR #585 review I2).
+    LaunchedEffect(hosts, introduceFor) {
+        while (true) {
+            val pending = Prefs.peekIntroducePending(context) ?: return@LaunchedEffect
+            val step = IntroduceRule.pendingStep(
+                offerOn = Prefs.offerMyComputers(context),
+                sheetOpen = introduceFor != null,
+                quietLeftMs = IntroduceRule.gate.quietLeftMs(pending, System.currentTimeMillis()),
+            )
+            when (step) {
+                IntroduceRule.Pending.Drop -> {
+                    Prefs.takeIntroducePending(context)
+                    return@LaunchedEffect
+                }
+                // Started again as the open sheet closes.
+                IntroduceRule.Pending.Hold -> return@LaunchedEffect
+                is IntroduceRule.Pending.After -> delay(step.ms)
+                IntroduceRule.Pending.Now -> {
+                    Prefs.takeIntroducePending(context)
+                    hosts.firstOrNull { it.address == pending }?.let { introduceFor = it to true }
+                    return@LaunchedEffect
+                }
+            }
+        }
     }
     var names by remember { mutableIntStateOf(0) }
     // Item 4: this app's release, to set each computer's beside.
@@ -616,7 +640,8 @@ fun HomeScreen(
                         onPeek = { peekFor = host },
                         onAllowed = { allowedFor = host },
                         onDevices = { devicesFor = host },
-                        onIntroduce = { introduceFor = host to false },
+                        onIntroduce = { if (introduceFor == null) introduceFor = host to false },
+                        onPairAgain = { pairingFor = host },
                     )
                 }
                 item {
@@ -743,6 +768,24 @@ fun HomeScreen(
             },
             dismissButton = {
                 TextButton(onClick = { rescanning = null }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
+
+    pairingFor?.let { host ->
+        PairingSheet(
+            address = host.address,
+            controlPort = host.controlPort,
+            message = null,
+            onDismiss = { pairingFor = null },
+            onPaired = {
+                // The sheet saved the computer's id; Home reads its word
+                // again now rather than at the next 3 s pass.
+                scope.launch {
+                    refusers = withContext(Dispatchers.IO) {
+                        hosts.filter { RustCore.unpairedBy(it.address) }.map { it.address }.toSet()
+                    }
+                }
             },
         )
     }
@@ -1015,6 +1058,8 @@ private fun HostCard(
     onAllowed: () -> Unit,
     onDevices: () -> Unit,
     onIntroduce: () -> Unit,
+    /** The PIN sheet for this address, once the computer unpaired the phone. */
+    onPairAgain: () -> Unit,
 ) {
     val context = LocalContext.current
     val title = name ?: host.address
@@ -1161,8 +1206,16 @@ private fun HostCard(
                         .padding(top = 4.dp, end = 12.dp),
                 )
             }
-            val remoteLabel = stringResource(R.string.remote_button)
-            val castLabel = stringResource(R.string.cast_button)
+            val buttons = HostStatus.buttons(paired, unpairedByIt)
+            val labels = buttons.map { button ->
+                when (button) {
+                    HostStatus.Button.CONNECT -> connectLabel
+                    HostStatus.Button.REMOTE -> stringResource(R.string.remote_button)
+                    HostStatus.Button.CAST -> stringResource(R.string.cast_button)
+                    HostStatus.Button.PAIR_AGAIN -> stringResource(R.string.repair_pairing)
+                    HostStatus.Button.REMOVE -> stringResource(R.string.remove_host)
+                }
+            }
             val measurer = rememberTextMeasurer()
             val labelStyle = MaterialTheme.typography.labelLarge
             val density = LocalDensity.current
@@ -1175,8 +1228,8 @@ private fun HostCard(
                 // on a 360 dp phone (UX1: at 16 dp "Show screen" wrapped to a
                 // second row, cut off at the fold), and narrower still when
                 // only that fits (review N7: Spanish's wrapped at 12 dp).
-                val side = remember(connectLabel, remoteLabel, castLabel, labelStyle, maxWidth, density) {
-                    val widths = listOf(connectLabel, remoteLabel, castLabel).map {
+                val side = remember(labels, labelStyle, maxWidth, density) {
+                    val widths = labels.map {
                         with(density) { measurer.measure(it, labelStyle).size.width.toDp().value }
                     }
                     CardButtonFit.sideDp(widths, maxWidth.value)
@@ -1186,11 +1239,19 @@ private fun HostCard(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Button(onClick = onConnect, contentPadding = pad) { Text(connectLabel) }
-                    // The phone as a remote (T10i): trackpad and keys, no picture.
-                    OutlinedButton(onClick = onRemote, contentPadding = pad) { Text(remoteLabel) }
-                    // This phone's screen on the computer (T10k).
-                    OutlinedButton(onClick = onCast, contentPadding = pad) { Text(castLabel) }
+                    buttons.forEachIndexed { i, button ->
+                        val label = labels[i]
+                        when (button) {
+                            HostStatus.Button.CONNECT -> Button(onClick = onConnect, contentPadding = pad) { Text(label) }
+                            // The phone as a remote (T10i): trackpad and keys, no picture.
+                            HostStatus.Button.REMOTE -> OutlinedButton(onClick = onRemote, contentPadding = pad) { Text(label) }
+                            // This phone's screen on the computer (T10k).
+                            HostStatus.Button.CAST -> OutlinedButton(onClick = onCast, contentPadding = pad) { Text(label) }
+                            // The computer unpaired this phone: its next steps on the card.
+                            HostStatus.Button.PAIR_AGAIN -> Button(onClick = onPairAgain, contentPadding = pad) { Text(label) }
+                            HostStatus.Button.REMOVE -> OutlinedButton(onClick = onRemove, contentPadding = pad) { Text(label) }
+                        }
+                    }
                 }
             }
         }

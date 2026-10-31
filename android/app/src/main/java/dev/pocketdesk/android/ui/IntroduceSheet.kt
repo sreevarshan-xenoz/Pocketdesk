@@ -15,6 +15,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -58,6 +59,24 @@ fun IntroduceSheet(
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current.applicationContext
+    // One sheet at a time (IntroduceRule.Gate): another already open keeps
+    // this one from showing at all.
+    // Taken in an effect, so only a sheet that was really shown holds the
+    // slot, and it is freed as the sheet goes (PR #585 review I1).
+    var mine by remember(address) { mutableStateOf<Boolean?>(null) }
+    DisposableEffect(address) {
+        val took = IntroduceRule.gate.open(address)
+        mine = took
+        onDispose { if (took) IntroduceRule.gate.closed(address) }
+    }
+    when (mine) {
+        null -> return
+        false -> {
+            LaunchedEffect(address) { onDismiss() }
+            return
+        }
+        true -> {}
+    }
     var offers by remember { mutableStateOf<List<IntroduceRule.Offer>?>(null) }
     var at by remember { mutableIntStateOf(0) }
     // A string resource: why there is nothing to offer.
@@ -93,6 +112,14 @@ fun IntroduceSheet(
             }
         // Offered by itself: nothing to say, nothing shown.
         if (auto && (failure != null || offers.isNullOrEmpty())) onDismiss()
+    }
+
+    // Not now is heard: this computer offers nothing more by itself for a
+    // while, and passing its last offer closes the sheet rather than
+    // saying there is nothing to offer.
+    fun notNow(list: List<IntroduceRule.Offer>) {
+        IntroduceRule.gate.notNow(address, System.currentTimeMillis())
+        if (at + 1 >= list.size && said == null) onDismiss() else at++
     }
 
     fun record(outcome: IntroduceRule.Outcome) {
@@ -146,7 +173,15 @@ fun IntroduceSheet(
         }
     }
 
-    ModalBottomSheet(onDismissRequest = { if (!working) onDismiss() }) {
+    ModalBottomSheet(
+        onDismissRequest = {
+            if (!working) {
+                // Closed with an offer on it: as Not now.
+                if (offers?.getOrNull(at) != null) IntroduceRule.gate.notNow(address, System.currentTimeMillis())
+                onDismiss()
+            }
+        },
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -178,7 +213,7 @@ fun IntroduceSheet(
                     Text(stringResource(R.string.introduce_body, computer, name))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { pair(offer) }) { Text(stringResource(R.string.introduce_pair)) }
-                        TextButton(onClick = { at++ }) { Text(stringResource(R.string.introduce_not_now)) }
+                        TextButton(onClick = { notNow(list.orEmpty()) }) { Text(stringResource(R.string.introduce_not_now)) }
                     }
                 }
                 said == null -> Text(stringResource(R.string.introduce_none, computer))

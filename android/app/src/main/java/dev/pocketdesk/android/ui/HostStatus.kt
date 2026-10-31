@@ -50,6 +50,22 @@ object HostStatus {
         if (lastUsed != null) add(Part.LastUsed(lastUsed))
     }
 
+    /** A button along the foot of a saved computer's card. */
+    enum class Button { CONNECT, REMOTE, CAST, PAIR_AGAIN, REMOVE }
+
+    /**
+     * The card's buttons: Connect, Remote and Show screen; or, once the
+     * computer said it no longer pairs with this phone (BB3), its next
+     * steps, Pair again (the PIN sheet for its address) and Remove, as
+     * every session there would only be turned down.
+     */
+    fun buttons(paired: Boolean, unpairedByIt: Boolean): List<Button> =
+        if (paired && unpairedByIt) {
+            listOf(Button.PAIR_AGAIN, Button.REMOVE)
+        } else {
+            listOf(Button.CONNECT, Button.REMOTE, Button.CAST)
+        }
+
     /**
      * How long ago [at] was, as the card says it (PR #575 review I1: from
      * the app's own plurals, so its language holds; Android's relative
