@@ -37,9 +37,7 @@ use ffmpeg_next as ffmpeg;
 
 static FFMPEG_INIT: Once = Once::new();
 
-/// Environment override for the VAAPI render node (e.g. an operator pinning
-/// `/dev/dri/renderD130`). When set, only that node is attempted.
-pub const VAAPI_DEVICE_ENV: &str = "POCKETDESK_VAAPI_DEVICE";
+pub use super::encoder::VAAPI_DEVICE_ENV;
 
 /// First DRM render node index on Linux; subsequent ones are probed for
 /// multi-GPU boxes.

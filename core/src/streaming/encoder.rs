@@ -1008,6 +1008,11 @@ pub(crate) fn vbv_kbit_bounds(bitrate_bps: u32, fps: u32) -> (u64, u64) {
     (maxrate_kbps, bufsize_kbits)
 }
 
+/// Environment override for the VAAPI render node (e.g. an operator pinning
+/// `/dev/dri/renderD130`). When set, only that node is attempted, by the
+/// sidecar and by the in-process encoder alike.
+pub const VAAPI_DEVICE_ENV: &str = "POCKETDESK_VAAPI_DEVICE";
+
 /// The DRM render node the VAAPI sidecar should bind to. Honours the
 /// `POCKETDESK_VAAPI_DEVICE` override, else the existing `/dev/dri/renderD*`
 /// whose kernel driver has a VA-API encoder ([`pick_vaapi_node`]). On
@@ -1016,12 +1021,9 @@ pub(crate) fn vbv_kbit_bounds(bitrate_bps: u32, fps: u32) -> (u64, u64) {
 /// node is not enough; a wrong pick still degrades through the C2 startup
 /// verify instead of killing the session. Where `inproc` is built, the
 /// in-process path tries each node itself; the sidecar is the only VAAPI path
-/// in the portable Linux tarball.
+/// in the portable Linux tarball, and the fallback after a failed in-process
+/// VAAPI in the .deb and AUR builds, so the pick matters there too.
 fn vaapi_device_node() -> String {
-    #[cfg(all(target_os = "linux", feature = "inproc"))]
-    use super::encoder_vaapi::VAAPI_DEVICE_ENV;
-    #[cfg(not(all(target_os = "linux", feature = "inproc")))]
-    const VAAPI_DEVICE_ENV: &str = "POCKETDESK_VAAPI_DEVICE";
     if let Ok(node) = std::env::var(VAAPI_DEVICE_ENV)
         && !node.is_empty()
     {
