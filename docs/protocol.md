@@ -178,6 +178,8 @@ From `core/src/local/pair_link.rs`. Values are percent-encoded.
 | `fp` | Hex SHA-256 of the desktop's certificate | absent before the server has made one |
 | `ep` | The iroh endpoint JSON (`endpointId`, `relayUrls`, `directAddrs`, `dht`), base64url | absent until the server has recorded it |
 
+A link is at most 8 KiB; of its addresses, the first 32 (the best) are kept (§6).
+
 Anyone who sees the code while it is valid holds everything needed to pair within the PIN's 300 s. `directAddrs` can include the desktop's LAN and public addresses.
 
 ### 2.7 Pairing a computer nearby (the matching code)
@@ -577,6 +579,11 @@ All of these are inside the app's private storage unless noted. None of it is ba
 | WAN (iroh) connections in all | 128, no per-address limit | `server/src/iroh_endpoint.rs` |
 | Control handshake | 8 s for TLS and HELLO, 5 s for the identity, 64 KiB per handshake line | `server/src/service.rs` |
 | Control packet | 4 MiB per line (TCP), 4 MiB per frame (v2) | `service.rs` (`MAX_PACKET_LINE`), `core/src/protocol/v2.rs` |
+| Computer link (2f) | 4 MiB per line; a clipboard text over 256 KiB (`MAX_PUSH`, more than any computer pushes) is dropped. The owner is told, with a desktop notification and the Activity event `clipboard_too_big`, at most once a minute per computer, and so is the sender, when a copy it holds is over the limit for the computers it shares the clipboard with | `server/src/peer_computers.rs`, `server/src/clipboard_push.rs` |
+| KDE Connect device (3a) | 8192 bytes per line until paired (the identity), 4 MiB once paired; a longer line ends the connection | `server/src/kdeconnect_compat/handshake.rs`, `link.rs` |
+| Shared input's wire | a frame of at most 65,535 bytes (its `u16` length); in it a name at most 255 bytes, 64 screens, 3,500 timings and an Opus packet of 1000 bytes, as the encoder clips them: a longer one is refused before it is copied, which ends a stream (a datagram is dropped) | `server/src/shared_input/wire.rs` |
+| Pairing link (§2.6) | 8 KiB, refused before it is decoded; its first (best) 32 addresses kept, and a link the desktop makes names only its best 32 | `core/src/local/pair_link.rs` |
+| Owner answers (introductions, remote revoke) | a request id of 1 to 64 printable ASCII characters; at most 64 computers offered or 512 devices listed, counted before any is read, each id and name at most 256 bytes; a pairing link at most 8 KiB. An answer over them is dropped whole | `core/src/protocol/introductions.rs`, `core/src/protocol/remote_devices.rs` |
 | File transfers | 4 at once on the desktop, 2 per phone; refused, not queued | `server/src/plugins/share.rs` |
 | File size, name | 8 GiB; names cut to 200 bytes | same, `server/src/offers.rs` |
 | Transfer pace | 10 s to connect, 30 s idle, at least 32 KiB/s | `share.rs` |
@@ -590,6 +597,8 @@ All of these are inside the app's private storage unless noted. None of it is ba
 | Text replies from the phone | 5 a minute; at most 2000 characters | `android/app/.../notify/SmsReplyRule.kt`, `core/src/local/sms.rs` |
 | QUIC idle and keepalive | 45 s idle, 15 s keepalive | `core/src/streaming/transport.rs` |
 | PIN | 300 s; 5 wrong guesses; one new PIN per 10 s | §2.5 |
+
+Every parser above has a fuzz target (`fuzz/`, run by `scripts/fuzz.sh`): each runs 30 s on every pull request and 5 minutes a night in CI.
 
 `SECURITY.md` covers the rest: approval holds, permission changes applied within a second, file-browse confinement, and the known limits.
 
