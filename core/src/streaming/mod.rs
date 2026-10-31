@@ -108,7 +108,10 @@ pub use connection::{
 };
 #[cfg(feature = "wan")]
 pub use dht::{DhtAddressLookup, dht_resolver};
-pub use encoder_detect::{AvailableEncoders, HardwareEncoder, probe_encoders, resolve_encoder};
+pub use encoder_detect::{
+    AvailableEncoders, HardwareEncoder, SoftwareH264, probe_encoders, resolve_encoder,
+    software_h264,
+};
 pub use input_packet::{
     InputPacket, MAX_SAMPLES_PER_FRAME, PEN_BARREL, PEN_CONTACT, PEN_ERASER, PEN_IN_RANGE,
     PenSample, SAMPLE_DECODE, SAMPLE_E2E, SAMPLE_RENDER, SampleBatch,
