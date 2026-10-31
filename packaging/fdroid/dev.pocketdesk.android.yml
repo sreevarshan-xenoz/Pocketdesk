@@ -22,9 +22,9 @@ Repo: https://github.com/sreevarshan-xenoz/Pocketdesk.git
 Binaries: https://github.com/sreevarshan-xenoz/Pocketdesk/releases/download/v%v/pocketdesk-v%v-android-arm64.apk
 
 Builds:
-  - versionName: 0.8.2
-    versionCode: 10
-    commit: e3937c410994d757eaf8d4e82800203711efc16b
+  - versionName: 0.8.3
+    versionCode: 11
+    commit: 0591dbe6ec0e0c357951a3061cec6b535a234b76
     subdir: android/app
     # Rust from Debian's rustup, as fdroiddata asks (MR !54623): the
     # toolchain pinned in the repo, the Android target, cargo-ndk 4.1.2,
@@ -51,5 +51,5 @@ AllowedAPKSigningKeys: 3a2452b38b4be5ac8493b330a91ed5a43e8490e6c74b8a7934599bc5e
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[0-9]+\.[0-9]+\.[0-9]+$
-CurrentVersion: 0.8.2
-CurrentVersionCode: 10
+CurrentVersion: 0.8.3
+CurrentVersionCode: 11
