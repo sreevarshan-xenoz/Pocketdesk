@@ -29,9 +29,12 @@ use ffmpeg_sidecar::command::FfmpegCommand;
 use tracing::{debug, error, info, trace, warn};
 
 use super::encoder_detect::HardwareEncoder;
-#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
+#[cfg(any(
+    all(target_os = "linux", feature = "inproc"),
+    all(windows, feature = "inproc-windows")
+))]
 use super::encoder_inproc::InProcessEncoder;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "inproc"))]
 use super::encoder_vaapi::VaapiEncoder;
 use super::flv_demux::FlvDemux;
 use super::{EncodedPacket, EncoderPreset, H264Profile, StreamingConfig, VideoCodec, VideoFrame};
@@ -119,17 +122,33 @@ fn spawn_stderr_logger(stderr: ChildStderr, tail: Arc<StderrTail>) -> io::Result
 
 /// Magic bytes for H.264 NAL unit start codes. The sidecar's output is
 /// framed by FLV; these NAL scanners serve the in-process encoders.
-#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows"), test))]
+#[cfg(any(
+    all(target_os = "linux", feature = "inproc"),
+    all(windows, feature = "inproc-windows"),
+    test
+))]
 const START_CODE_4: [u8; 4] = [0x00, 0x00, 0x00, 0x01];
-#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows"), test))]
+#[cfg(any(
+    all(target_os = "linux", feature = "inproc"),
+    all(windows, feature = "inproc-windows"),
+    test
+))]
 const START_CODE_3: [u8; 3] = [0x00, 0x00, 0x01];
 
 /// NAL unit type for IDR (instantaneous decoder refresh / keyframe).
-#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows"), test))]
+#[cfg(any(
+    all(target_os = "linux", feature = "inproc"),
+    all(windows, feature = "inproc-windows"),
+    test
+))]
 const NAL_TYPE_IDR: u8 = 5;
 
 /// Mask to extract NAL unit type from the first byte.
-#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows"), test))]
+#[cfg(any(
+    all(target_os = "linux", feature = "inproc"),
+    all(windows, feature = "inproc-windows"),
+    test
+))]
 const NAL_TYPE_MASK: u8 = 0x1F;
 
 /// Video encoder facade over the FFmpeg backends.
@@ -138,10 +157,13 @@ pub enum VideoEncoder {
     Sidecar(SidecarEncoder),
     /// In-process via `ffmpeg-next`: libx264/libx265 (software path), and
     /// NVENC on Windows with `inproc-windows` (BG8).
-    #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
+    #[cfg(any(
+        all(target_os = "linux", feature = "inproc"),
+        all(windows, feature = "inproc-windows")
+    ))]
     InProcess(InProcessEncoder),
     /// In-process VAAPI (`h264_vaapi`/`hevc_vaapi`) via raw FFmpeg FFI (C4).
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "inproc"))]
     VaapiInProcess(VaapiEncoder),
 }
 
@@ -222,9 +244,12 @@ impl VideoEncoder {
     pub fn backend_name(&self) -> &'static str {
         match self {
             Self::Sidecar(e) => e.backend_name(),
-            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
+            #[cfg(any(
+                all(target_os = "linux", feature = "inproc"),
+                all(windows, feature = "inproc-windows")
+            ))]
             Self::InProcess(e) => e.backend_name(),
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", feature = "inproc"))]
             Self::VaapiInProcess(_) => "in-process-vaapi",
         }
     }
@@ -239,9 +264,12 @@ impl VideoEncoder {
                 None => e.encode_frame(frame),
             },
             // The in-process encoder takes a frame on the GPU itself.
-            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
+            #[cfg(any(
+                all(target_os = "linux", feature = "inproc"),
+                all(windows, feature = "inproc-windows")
+            ))]
             Self::InProcess(e) => Ok(e.encode_frame(frame)?.into_iter().collect()),
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", feature = "inproc"))]
             Self::VaapiInProcess(e) => Ok(e.encode_frame(frame)?.into_iter().collect()),
         }
     }
@@ -250,9 +278,12 @@ impl VideoEncoder {
     pub fn drain(&mut self) -> anyhow::Result<Vec<EncodedPacket>> {
         match self {
             Self::Sidecar(e) => e.drain(),
-            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
+            #[cfg(any(
+                all(target_os = "linux", feature = "inproc"),
+                all(windows, feature = "inproc-windows")
+            ))]
             Self::InProcess(e) => e.drain(),
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", feature = "inproc"))]
             Self::VaapiInProcess(e) => e.drain(),
         }
     }
@@ -261,12 +292,18 @@ impl VideoEncoder {
     /// `false` when this backend cannot, and the caller rebuilds.
     // Off the in-process builds only the sidecar exists, which cannot.
     #[cfg_attr(
-        not(any(target_os = "linux", all(windows, feature = "inproc-windows"))),
+        not(any(
+            all(target_os = "linux", feature = "inproc"),
+            all(windows, feature = "inproc-windows")
+        )),
         allow(unused_variables)
     )]
     pub fn set_bitrate(&mut self, bitrate_bps: u32) -> bool {
         match self {
-            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
+            #[cfg(any(
+                all(target_os = "linux", feature = "inproc"),
+                all(windows, feature = "inproc-windows")
+            ))]
             Self::InProcess(e) => e.set_bitrate(bitrate_bps),
             _ => false,
         }
@@ -276,9 +313,12 @@ impl VideoEncoder {
     pub fn request_keyframe(&mut self) {
         match self {
             Self::Sidecar(e) => e.request_keyframe(),
-            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
+            #[cfg(any(
+                all(target_os = "linux", feature = "inproc"),
+                all(windows, feature = "inproc-windows")
+            ))]
             Self::InProcess(e) => e.request_keyframe(),
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", feature = "inproc"))]
             Self::VaapiInProcess(e) => e.request_keyframe(),
         }
     }
@@ -287,9 +327,12 @@ impl VideoEncoder {
     pub fn sequence(&self) -> u64 {
         match self {
             Self::Sidecar(e) => e.sequence(),
-            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
+            #[cfg(any(
+                all(target_os = "linux", feature = "inproc"),
+                all(windows, feature = "inproc-windows")
+            ))]
             Self::InProcess(e) => e.sequence(),
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", feature = "inproc"))]
             Self::VaapiInProcess(e) => e.sequence(),
         }
     }
@@ -298,9 +341,12 @@ impl VideoEncoder {
     pub fn config(&self) -> &StreamingConfig {
         match self {
             Self::Sidecar(e) => e.config(),
-            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
+            #[cfg(any(
+                all(target_os = "linux", feature = "inproc"),
+                all(windows, feature = "inproc-windows")
+            ))]
             Self::InProcess(e) => e.config(),
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", feature = "inproc"))]
             Self::VaapiInProcess(e) => e.config(),
         }
     }
@@ -366,10 +412,11 @@ pub fn degrade_to_software(config: &mut StreamingConfig) {
     config.codec = VideoCodec::H264;
 }
 
-/// Open the software rung: in-process libx264 first (Linux), sidecar as last
-/// resort — and as the only software path where in-process FFmpeg is not built.
+/// Open the software rung: in-process libx264 first (Linux with `inproc`),
+/// sidecar as last resort — and as the only software path where in-process
+/// FFmpeg is not built (Windows, and the portable Linux tarball).
 fn open_software(config: StreamingConfig) -> anyhow::Result<VideoEncoder> {
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "inproc"))]
     match InProcessEncoder::new(config.clone()) {
         Ok(encoder) => {
             info!("Video encoder: in-process FFmpeg (software)");
@@ -422,7 +469,7 @@ fn seam_names(list: &str, encoder: HardwareEncoder) -> bool {
 /// The VAAPI rung: in-process first (C4), verified sidecar as fallback.
 fn open_vaapi_verified(config: StreamingConfig) -> anyhow::Result<VideoEncoder> {
     fail_by_seam(config.hardware_encoder)?;
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "inproc"))]
     match VaapiEncoder::new(config.clone()) {
         Ok(encoder) => return Ok(VideoEncoder::VaapiInProcess(encoder)),
         Err(e) => {
@@ -882,7 +929,11 @@ impl Drop for SidecarEncoder {
 /// Detect if the encoded data contains an IDR (keyframe) NAL unit.
 ///
 /// Scans for start codes and checks if any following NAL unit has type 5.
-#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows"), test))]
+#[cfg(any(
+    all(target_os = "linux", feature = "inproc"),
+    all(windows, feature = "inproc-windows"),
+    test
+))]
 pub(crate) fn detect_keyframe(data: &[u8]) -> bool {
     let mut pos = 0;
     while pos < data.len() {
@@ -909,7 +960,11 @@ pub(crate) fn detect_keyframe(data: &[u8]) -> bool {
 /// Returns `Some((position, length))` where position is the offset of the start
 /// code and length is either 4 (for 00 00 00 01) or 3 (for 00 00 01).
 /// Returns `None` if no start code is found.
-#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows"), test))]
+#[cfg(any(
+    all(target_os = "linux", feature = "inproc"),
+    all(windows, feature = "inproc-windows"),
+    test
+))]
 pub(crate) fn find_start_code(data: &[u8], from: usize) -> Option<(usize, usize)> {
     if from >= data.len() || from + 2 >= data.len() {
         return None;
@@ -953,49 +1008,78 @@ pub(crate) fn vbv_kbit_bounds(bitrate_bps: u32, fps: u32) -> (u64, u64) {
     (maxrate_kbps, bufsize_kbits)
 }
 
-/// Build the FFmpeg command-line arguments for encoding.
-///
+/// Environment override for the VAAPI render node (e.g. an operator pinning
+/// `/dev/dri/renderD130`). When set, only that node is attempted, by the
+/// sidecar and by the in-process encoder alike.
+pub const VAAPI_DEVICE_ENV: &str = "POCKETDESK_VAAPI_DEVICE";
+
 /// The DRM render node the VAAPI sidecar should bind to. Honours the
-/// `POCKETDESK_VAAPI_DEVICE` override, else the lowest existing
-/// `/dev/dri/renderD*`. On hybrid-GPU laptops the first node (`renderD128`)
-/// is often the discrete NVIDIA card with no VA driver, so hardcoding it
-/// fails; picking a present node + the C2 startup verify lets a broken pick
-/// degrade instead of killing the session (the in-process path tests each
-/// node's actual VAAPI usability).
+/// `POCKETDESK_VAAPI_DEVICE` override, else the existing `/dev/dri/renderD*`
+/// whose kernel driver has a VA-API encoder ([`pick_vaapi_node`]). On
+/// hybrid-GPU laptops either node can be the discrete NVIDIA card, whose
+/// driver has none, and the numbering changes between boots, so the lowest
+/// node is not enough; a wrong pick still degrades through the C2 startup
+/// verify instead of killing the session. Where `inproc` is built, the
+/// in-process path tries each node itself; the sidecar is the only VAAPI path
+/// in the portable Linux tarball, and the fallback after a failed in-process
+/// VAAPI in the .deb and AUR builds, so the pick matters there too.
 fn vaapi_device_node() -> String {
-    #[cfg(target_os = "linux")]
-    use super::encoder_vaapi::VAAPI_DEVICE_ENV;
-    #[cfg(not(target_os = "linux"))]
-    const VAAPI_DEVICE_ENV: &str = "POCKETDESK_VAAPI_DEVICE";
     if let Ok(node) = std::env::var(VAAPI_DEVICE_ENV)
         && !node.is_empty()
     {
         return node;
     }
-    let mut nodes: Vec<u32> = (128..136)
-        .filter(|n| std::path::Path::new(&format!("/dev/dri/renderD{n}")).exists())
-        .collect();
-    if nodes.is_empty()
-        && let Ok(entries) = std::fs::read_dir("/dev/dri")
-    {
+    let mut nodes: Vec<u32> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir("/dev/dri") {
         for entry in entries.flatten() {
             let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if let Some(tail) = name.strip_prefix("renderD")
-                && let Ok(n) = tail.parse::<u32>()
+            if let Some(n) = name
+                .to_string_lossy()
+                .strip_prefix("renderD")
+                .and_then(|tail| tail.parse::<u32>().ok())
             {
                 nodes.push(n);
             }
         }
-        nodes.sort_unstable();
-        nodes.dedup();
     }
-    nodes
-        .first()
+    let with_drivers: Vec<(u32, Option<String>)> = nodes
+        .into_iter()
+        .map(|n| {
+            let driver = std::fs::read_link(format!("/sys/class/drm/renderD{n}/device/driver"))
+                .ok()
+                .and_then(|link| link.file_name().map(|f| f.to_string_lossy().into_owned()));
+            (n, driver)
+        })
+        .collect();
+    pick_vaapi_node(&with_drivers)
         .map(|n| format!("/dev/dri/renderD{n}"))
         .unwrap_or_else(|| "/dev/dri/renderD128".to_string())
 }
 
+/// Kernel drivers whose GPUs have a VA-API encoder: Intel (`i915`, `xe`,
+/// through iHD or i965) and AMD (`amdgpu`, `radeon`, through Mesa).
+const VA_ENCODE_DRIVERS: &[&str] = &["i915", "xe", "amdgpu", "radeon"];
+
+/// Pick the render node for VAAPI from `(renderD number, kernel driver)`
+/// pairs: a driver in [`VA_ENCODE_DRIVERS`] first, then any other or unknown
+/// driver, and NVIDIA's own driver last (it has no VA-API encoder); the lowest
+/// number within each group. `None` when there are no nodes.
+fn pick_vaapi_node(nodes: &[(u32, Option<String>)]) -> Option<u32> {
+    nodes
+        .iter()
+        .min_by_key(|(n, driver)| {
+            let rank = match driver.as_deref() {
+                Some(d) if VA_ENCODE_DRIVERS.contains(&d) => 0,
+                Some("nvidia") => 2,
+                _ => 1,
+            };
+            (rank, *n)
+        })
+        .map(|(n, _)| *n)
+}
+
+/// Build the FFmpeg command-line arguments for encoding.
+///
 /// Input: raw BGRA frames via stdin (pipe:0)
 /// Output: H.264/H.265 access units in FLV tags via stdout (pipe:1)
 fn build_ffmpeg_args(
@@ -1334,6 +1418,44 @@ mod tests {
 
     use super::super::ffmpeg_flags::{FPS_MODE, VSYNC};
     use super::*;
+
+    fn nodes(list: &[(u32, Option<&str>)]) -> Vec<(u32, Option<String>)> {
+        list.iter()
+            .map(|(n, d)| (*n, d.map(str::to_string)))
+            .collect()
+    }
+
+    #[test]
+    fn vaapi_picks_the_intel_node_whatever_its_number() {
+        // A hybrid laptop, in both of the orders it boots in.
+        let nvidia_first = nodes(&[(128, Some("nvidia")), (129, Some("i915"))]);
+        assert_eq!(pick_vaapi_node(&nvidia_first), Some(129));
+        let intel_first = nodes(&[(128, Some("i915")), (129, Some("nouveau"))]);
+        assert_eq!(pick_vaapi_node(&intel_first), Some(128));
+        let amd_second = nodes(&[(128, Some("nouveau")), (129, Some("amdgpu"))]);
+        assert_eq!(pick_vaapi_node(&amd_second), Some(129));
+        let xe = nodes(&[(128, Some("nvidia")), (130, Some("xe"))]);
+        assert_eq!(pick_vaapi_node(&xe), Some(130));
+    }
+
+    #[test]
+    fn vaapi_puts_nvidias_driver_last_and_unknowns_before_it() {
+        let unknown = nodes(&[(128, Some("nvidia")), (129, None)]);
+        assert_eq!(pick_vaapi_node(&unknown), Some(129));
+        let only_nvidia = nodes(&[(128, Some("nvidia"))]);
+        assert_eq!(
+            pick_vaapi_node(&only_nvidia),
+            Some(128),
+            "still a node to try"
+        );
+        let unread = nodes(&[(129, None), (128, None)]);
+        assert_eq!(
+            pick_vaapi_node(&unread),
+            Some(128),
+            "the lowest when nothing is known"
+        );
+        assert_eq!(pick_vaapi_node(&[]), None);
+    }
 
     /// The frame-rate flag is the one the probe chose: FFmpeg 9 has no
     /// `-vsync`, FFmpeg 4.4 no `-fps_mode`.

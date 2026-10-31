@@ -599,7 +599,14 @@ mod tests {
     #[ignore = "runs a real 60-frame encode; CI cannot promise a runner idle enough for its timings"]
     fn run_produces_a_record_from_a_real_encode() {
         let record = run(BenchTarget::Software, 60).unwrap();
-        assert_eq!(record.backend, "in-process", "software rung is in-process");
+        // In-process where `inproc` builds it; the sidecar elsewhere
+        // (Windows, and the portable Linux tarball).
+        let expected = if cfg!(all(target_os = "linux", feature = "inproc")) {
+            "in-process"
+        } else {
+            "ffmpeg-sidecar"
+        };
+        assert_eq!(record.backend, expected, "the software rung's backend");
         assert_eq!(record.frames, 60);
         assert_eq!(record.encode_ms.count, 30, "60 frames less the warm-up");
         assert!(record.output_bytes > 0);
