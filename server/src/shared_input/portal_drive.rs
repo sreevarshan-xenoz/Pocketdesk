@@ -39,8 +39,11 @@ use super::status;
 use super::wire::{self, Msg};
 use crate::hyprland::HyprWindow;
 
-/// The longest the loop waits for input before it looks at the rest.
+/// How often the loop looks at the rest (pings, sound, status, the link,
+/// the layout), whatever input comes.
 const TICK: Duration = Duration::from_millis(50);
+/// The most events taken in one turn before the rest is looked at.
+const BATCH_MOST: usize = 256;
 /// How often what the owner does is told to every computer with a channel.
 const ACTIVE_EVERY: Duration = Duration::from_millis(200);
 /// How often, while away, the link is looked at.
@@ -543,40 +546,53 @@ pub(super) fn drive<B: Backend>(
     let mut layout_at: Option<Instant> = None;
     let mut greeted_at: Option<Instant> = None;
     let mut fractional_screen = false;
+    // When the rest (pings, sound, status, the link, the layout) was last
+    // looked at.
+    let mut housekept = Instant::now();
     while !stop.load(Ordering::SeqCst) && !STOPPING.load(Ordering::SeqCst) {
-        glue.follow_driven(
-            &mut driver,
-            last_input.elapsed() < super::receive::DRIVEN_FOR,
-        );
-        // At most the loop's tick, less while a move waits its turn.
-        let wait = glue.pacer.deadline().map_or(TICK, |at| {
-            at.saturating_duration_since(Instant::now()).min(TICK)
-        });
-        match events.recv_timeout(wait) {
-            Ok(event) => {
-                // Looked at again as the event comes: a barrier hit by the
-                // pointer of a computer that just arrived is let go of.
+        // At most until the next look at the rest, less while a move waits
+        // its turn.
+        let next = housekept + TICK;
+        let next = glue.pacer.deadline().map_or(next, |at| at.min(next));
+        match events.recv_timeout(next.saturating_duration_since(Instant::now())) {
+            Ok(first) => {
+                // Looked at again as input comes, once for this event and
+                // what queued behind it (up to a batch): a barrier hit by
+                // the pointer of a computer that just arrived is let go of.
                 glue.follow_driven(
                     &mut driver,
                     last_input.elapsed() < super::receive::DRIVEN_FOR,
                 );
-                if matches!(
-                    event,
-                    Portal::Motion { .. }
-                        | Portal::Button { .. }
-                        | Portal::Scroll { .. }
-                        | Portal::Key { .. }
-                        | Portal::Activated { .. }
-                ) {
-                    last_input = Instant::now();
+                let mut event = first;
+                let mut taken = 0;
+                loop {
+                    if matches!(
+                        event,
+                        Portal::Motion { .. }
+                            | Portal::Button { .. }
+                            | Portal::Scroll { .. }
+                            | Portal::Key { .. }
+                            | Portal::Activated { .. }
+                    ) {
+                        last_input = Instant::now();
+                    }
+                    // New zones: this computer's screens, said and laid out
+                    // again at once.
+                    if matches!(event, Portal::Zones(_)) {
+                        layout_at = None;
+                    }
+                    let actions = glue.input.portal(event, &mut driver, Instant::now());
+                    glue.apply(&mut driver, actions);
+                    taken += 1;
+                    // Past a batch, the rest waits for the next turn.
+                    if taken >= BATCH_MOST {
+                        break;
+                    }
+                    match events.try_recv() {
+                        Ok(next) => event = next,
+                        Err(_) => break,
+                    }
                 }
-                // New zones: this computer's screens, said and laid out
-                // again at once.
-                if matches!(event, Portal::Zones(_)) {
-                    layout_at = None;
-                }
-                let actions = glue.input.portal(event, &mut driver, Instant::now());
-                glue.apply(&mut driver, actions);
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
@@ -588,6 +604,16 @@ pub(super) fn drive<B: Backend>(
             );
             break;
         }
+        // The rest is looked at on a timer, never per event: at 1 kHz it
+        // ran a thousand times a second. New zones are laid out at once.
+        if housekept.elapsed() < TICK && layout_at.is_some() {
+            continue;
+        }
+        housekept = Instant::now();
+        glue.follow_driven(
+            &mut driver,
+            last_input.elapsed() < super::receive::DRIVEN_FOR,
+        );
         let now = Instant::now();
         let answered: Vec<String> = glue
             .channels

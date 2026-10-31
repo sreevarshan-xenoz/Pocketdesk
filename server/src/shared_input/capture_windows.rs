@@ -1017,8 +1017,11 @@ fn idle_ms() -> u32 {
     }
 }
 
-/// The longest the loop waits for input before it looks at the rest.
+/// How often the loop looks at the rest (pings, sound, status, the link,
+/// the layout), whatever input comes.
 const TICK: Duration = Duration::from_millis(50);
+/// The most events taken in one turn before the rest is looked at.
+const BATCH_MOST: usize = 256;
 /// How often what the owner does is told to every computer with a channel.
 const ACTIVE_EVERY: Duration = Duration::from_millis(200);
 /// How often, while away, the link is looked at.
@@ -1829,6 +1832,9 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
     // Until when what is in front is looked at every 50 ms, after a window
     // came to the front.
     let mut settle_until: Option<Instant> = None;
+    // When the rest (pings, sound, status, the link, the layout) was last
+    // looked at.
+    let mut housekept = Instant::now();
     while !stop.load(Ordering::SeqCst) && !STOPPING.load(Ordering::SeqCst) {
         if !glue.input.is_alive() {
             tracing::warn!(
@@ -1843,42 +1849,68 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             // fresh driver after a pause.
             return;
         }
-        glue.follow_driven(
-            &mut driver,
-            last_input.elapsed() < super::receive::DRIVEN_FOR,
-        );
-        // At most the loop's tick, less while a move waits its turn.
-        let wait = glue.pacer.deadline().map_or(TICK, |at| {
-            at.saturating_duration_since(Instant::now()).min(TICK)
-        });
-        match captured.recv_timeout(wait) {
-            // Looked at at once (and again for a while), before any move
-            // queued behind it can cross an edge.
-            Ok(Captured::ForegroundChanged) => {
-                let actions = driver.on(Captured::ForegroundChanged);
-                glue.apply(&mut driver, actions);
-                let now = foreground_now(game_lock_on, &lock_programs, &glue.desktop);
-                let actions = driver.on(now);
-                glue.apply(&mut driver, actions);
-                game_at = Instant::now();
-                settle_until = Some(game_at + GAME_SETTLE_FOR);
-            }
-            Ok(event) => {
-                last_input = Instant::now();
-                // A move queued as another computer arrived crosses nowhere.
-                glue.follow_driven(
-                    &mut driver,
-                    last_input.elapsed() < super::receive::DRIVEN_FOR,
-                );
-                if let Some(event) = glue.logical(&driver, event) {
-                    let actions = driver.on(event);
-                    glue.apply(&mut driver, actions);
+        // At most until the next look at the rest, less while a move waits
+        // its turn.
+        let next = housekept + TICK;
+        let next = glue.pacer.deadline().map_or(next, |at| at.min(next));
+        match captured.recv_timeout(next.saturating_duration_since(Instant::now())) {
+            Ok(first) => {
+                // This one and what queued behind it (up to a batch), with
+                // who drives this computer looked at once for them all: a
+                // move queued as another computer arrived crosses nowhere.
+                let mut event = first;
+                let mut taken = 0;
+                let mut looked = false;
+                loop {
+                    match event {
+                        // Looked at at once (and again for a while), before
+                        // any move queued behind it can cross an edge.
+                        Captured::ForegroundChanged => {
+                            let actions = driver.on(Captured::ForegroundChanged);
+                            glue.apply(&mut driver, actions);
+                            let now = foreground_now(game_lock_on, &lock_programs, &glue.desktop);
+                            let actions = driver.on(now);
+                            glue.apply(&mut driver, actions);
+                            game_at = Instant::now();
+                            settle_until = Some(game_at + GAME_SETTLE_FOR);
+                        }
+                        event => {
+                            last_input = Instant::now();
+                            if !looked {
+                                looked = true;
+                                glue.follow_driven(&mut driver, true);
+                            }
+                            if let Some(event) = glue.logical(&driver, event) {
+                                let actions = driver.on(event);
+                                glue.apply(&mut driver, actions);
+                            }
+                        }
+                    }
+                    taken += 1;
+                    // Past a batch, the rest waits for the next turn.
+                    if taken >= BATCH_MOST {
+                        break;
+                    }
+                    match captured.try_recv() {
+                        Ok(next) => event = next,
+                        Err(_) => break,
+                    }
                 }
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
         glue.send_due(&mut driver);
+        // The rest is looked at on a timer, never per event: at 1 kHz it
+        // ran a thousand times a second.
+        if housekept.elapsed() < TICK {
+            continue;
+        }
+        housekept = Instant::now();
+        glue.follow_driven(
+            &mut driver,
+            last_input.elapsed() < super::receive::DRIVEN_FOR,
+        );
         // Files dragged across: the catcher looked at, its drops sent.
         glue.files_dropped(&driver);
         // The computer driven answering its pings, or not: one silent for
