@@ -403,9 +403,10 @@ fn firewall_state(_state_dir: &Path) -> Option<Result<diagnostics::FirewallState
 /// O9: the firewall's rules for Pocketdesk's ports: ufw's, else
 /// firewalld's, else plain nftables or iptables rules (Arch's stock
 /// nftables lets in ssh only), each tool asked within 3 s. Only read, never
-/// changed.
+/// changed. Also asked by the Pair page and Other computers
+/// ([`crate::network_profile`]).
 #[cfg(target_os = "linux")]
-fn linux_firewall(control_port: u16, stream_port: u16) -> diagnostics::LinuxFirewall {
+pub(crate) fn linux_firewall(control_port: u16, stream_port: u16) -> diagnostics::LinuxFirewall {
     use diagnostics::LinuxFirewall;
     let running =
         |fw: &LinuxFirewall| !matches!(fw, LinuxFirewall::None | LinuxFirewall::Off { .. });
@@ -639,7 +640,7 @@ mod tests {
         );
     }
 
-    /// This computer's firewall, read as Diagnostics reads
+    /// This computer's firewall, read as Diagnostics and the Pair page read
     /// it (only read: `nft list ruleset`, `systemctl is-active`, the rules
     /// files). Prints the words only, which name no address. With
     /// `POCKETDESK_NFT_RULESET` naming a saved `nft list ruleset`, that is
@@ -659,6 +660,10 @@ mod tests {
             let f = diagnostics::check_linux_firewall(firewall, &needs);
             println!("{what}: [{:?}] {}: {}", f.status, f.check, f.detail);
             println!("  hint: {:?}", f.hint);
+            println!(
+                "  pair page: {:?}",
+                diagnostics::firewall_pairing_notice(firewall, 1716, 4716)
+            );
         };
         say("as this user", &super::linux_firewall(1716, 4716));
         if let Ok(path) = std::env::var("POCKETDESK_NFT_RULESET") {

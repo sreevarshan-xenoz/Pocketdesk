@@ -1193,6 +1193,50 @@ fn open_hint(tool: &str, chain: Option<&str>, open: &[Need], needs: &FirewallNee
     }
 }
 
+/// What the Pair page and Other computers say while this computer's
+/// firewall keeps other devices from pairing: nothing unless the control
+/// or the stream port is shut, or may be.
+pub fn firewall_pairing_notice(
+    firewall: &LinuxFirewall,
+    control_port: u16,
+    stream_port: u16,
+) -> Option<String> {
+    let LinuxFirewall::On { tool, ports, rules } = firewall else {
+        return None;
+    };
+    let pick = |v: Verdict| {
+        [
+            (ports.control == v).then(|| format!("{control_port}/tcp")),
+            (ports.stream == v).then(|| format!("{stream_port}/udp")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+    };
+    let who = if rules.stock_arch {
+        format!("{tool}, Arch's stock rules that let in ssh only")
+    } else {
+        tool.to_string()
+    };
+    let shut = pick(Verdict::Shut);
+    if !shut.is_empty() {
+        return Some(format!(
+            "This computer's firewall ({who}) does not let other devices in on {}, so pairing \
+             will time out. Diagnostics shows the command that opens {}.",
+            shut.join(" and "),
+            if shut.len() > 1 { "them" } else { "it" }
+        ));
+    }
+    let unsure = pick(Verdict::Unsure);
+    (!unsure.is_empty()).then(|| {
+        format!(
+            "This computer's firewall ({who}) may be keeping other devices out on {}. \
+             Diagnostics says more.",
+            unsure.join(" and ")
+        )
+    })
+}
+
 /// The newest session record that reads, if any (a torn last line does not
 /// hide the ones before it).
 pub fn last_session(state_dir: &Path) -> Option<LastSession> {
@@ -1787,6 +1831,14 @@ mod tests {
             ),
             "{f:?}"
         );
+        assert_eq!(
+            firewall_pairing_notice(&fw, 1716, 4716).as_deref(),
+            Some(
+                "This computer's firewall (nftables, Arch's stock rules that let in ssh only) does \
+                 not let other devices in on 1716/tcp and 4716/udp, so pairing will time out. \
+                 Diagnostics shows the command that opens them."
+            )
+        );
         // Live rules that filter nothing are no firewall; the same read from
         // the file is nftables letting everything in.
         assert_eq!(parse_nftables("", None, 1716, 4716), LinuxFirewall::None);
@@ -1810,6 +1862,7 @@ mod tests {
             ..NEEDS
         };
         assert_eq!(check_linux_firewall(&fw, &all).status, Status::Good);
+        assert_eq!(firewall_pairing_notice(&fw, 1716, 4716), None);
     }
 
     /// A rule not understood: a warning that it may block, never "open".
@@ -1822,6 +1875,11 @@ mod tests {
         assert_eq!(
             f.detail,
             "nftables may be blocking phones on 1716/tcp or 4716/udp: some of its rules could not be judged"
+        );
+        assert!(
+            firewall_pairing_notice(&fw, 1716, 4716)
+                .unwrap()
+                .contains("may be keeping other devices out on 1716/tcp and 4716/udp")
         );
     }
 
@@ -1872,6 +1930,7 @@ mod tests {
                 "Run `sudo ufw allow 1714:1764/tcp` and `sudo ufw allow 1714:1764/udp` and `sudo ufw allow 5353/udp`."
             )
         );
+        assert_eq!(firewall_pairing_notice(&fw, 1716, 4716), None);
         let kde = parse_ufw(
             &format!("{status}KDE Connect ALLOW IN Anywhere\n5353/udp ALLOW IN Anywhere\n"),
             1716,

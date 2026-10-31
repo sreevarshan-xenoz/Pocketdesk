@@ -441,6 +441,8 @@ sudo nft 'insert rule inet filter input udp dport { 4716, 1714-1764, 5353 } acce
 
 To keep the nftables lines, add `tcp dport 1714-1764 accept` and `udp dport { 4716, 1714-1764, 5353 } accept` to the input chain in `/etc/nftables.conf`, above its reject or drop line. With iptables, `sudo iptables -I INPUT -p tcp --dport 1716 -j ACCEPT` and `sudo iptables -I INPUT -p udp --dport 4716 -j ACCEPT`, then save them where your system loads them from (on Arch, `sudo iptables-save -f /etc/iptables/iptables.rules`).
 
+While the firewall shuts (or may shut) the control or stream port, the desktop app's Pair page (Phone and Computer) and Settings → Other computers say so too, as they say a Windows Public network: "This computer's firewall (nftables) does not let other devices in on 1716/tcp and 4716/udp, so pairing will time out." The firewall is read again every 30 seconds while either page shows.
+
 ## Usage
 
 ### Start the Server
