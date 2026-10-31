@@ -519,7 +519,12 @@ The server names itself to the desktop portal as `dev.pocketdesk.Pocketdesk`,
 the desktop file the .deb and the AUR package install (run from a source
 build without it, Plasma's dialog calls it "an unidentifiable application").
 Plasma 6 can then allow it ahead, as it allows KRdp, so its screen-sharing
-dialog never shows:
+dialog never shows.
+
+**Before you do:** this lets any program running as you share your screen and
+control the keyboard and mouse without asking, since the portal takes any
+program's word for its name. Prefer "Remember the screen-sharing grant",
+which asks once at the desk, unless no one is ever at the computer.
 
 ```bash
 flatpak permission-set kde-authorized remote-desktop dev.pocketdesk.Pocketdesk yes
@@ -528,9 +533,11 @@ gdbus call --session --dest org.freedesktop.impl.portal.PermissionStore \
   --object-path /org/freedesktop/impl/portal/PermissionStore \
   --method org.freedesktop.impl.portal.PermissionStore.SetPermission \
   kde-authorized true remote-desktop dev.pocketdesk.Pocketdesk "['yes']"
+# to take it back:
+flatpak permission-remove kde-authorized remote-desktop dev.pocketdesk.Pocketdesk
 ```
 
-`no` in place of `yes` takes it back. This covers the session the server
+(Without flatpak, the same `gdbus` call with `"['no']"` takes it back.) This covers the session the server
 opens when it cannot open uinput: the screen with the keyboard and mouse,
 under one grant. With uinput, the screen alone is shared, which Plasma asks
 about once; "Remember the screen-sharing grant" keeps that answer.
