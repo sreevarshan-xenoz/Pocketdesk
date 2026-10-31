@@ -68,8 +68,8 @@ pub async fn start_capture(
     // N8: input goes through the portal here, so the screen and the input
     // come from one RemoteDesktop session, under one grant.
     // A desktop without RemoteDesktop, or one that refused it, still gets
-    // its picture (N8 review); a dialog the owner cancelled, or left
-    // unanswered, is not asked again.
+    // its picture (N8 review); a dialog the owner cancelled is not asked
+    // again, nor one left unanswered unless a kept grant restores the screen.
     if crate::streaming::portal_input::wanted() {
         match start_remote_desktop_capture(
             config.clone(),
@@ -80,8 +80,18 @@ pub async fn start_capture(
         .await
         {
             Ok(session) => return Ok(session),
-            Err(e) if asked_already(&e) => return Err(e),
-            Err(e) => warn!("No remote desktop session ({e:#}): the screen alone, with no input"),
+            Err(e) => {
+                let screen_token_saved = screen_grant
+                    .as_deref()
+                    .and_then(crate::portal_grant::read)
+                    .is_some();
+                match after_remote_failed(&e, screen_token_saved) {
+                    AfterRemote::GiveUp => return Err(e),
+                    AfterRemote::ScreenAlone => {
+                        warn!("No remote desktop session ({e:#}): the screen alone, with no input")
+                    }
+                }
+            }
         }
     }
 
@@ -242,26 +252,45 @@ struct NoAnswer;
 
 impl std::fmt::Display for NoAnswer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("No answer to the screen-sharing dialog within a minute")
+        f.write_str(
+            "No one answered the screen-sharing dialog at the computer within a minute: \
+             someone there must allow it once (\"Remember the screen-sharing grant\" keeps it)",
+        )
     }
 }
 
 impl std::error::Error for NoAnswer {}
 
-/// Whether `e` is the owner cancelling the portal's dialog, or no one
-/// answering it, which is not asked again in another form: with no one at
-/// the desk a second dialog only doubled the wait, to two minutes (KDE
-/// Plasma 6.8, 2026-10-31).
-fn asked_already(e: &anyhow::Error) -> bool {
-    e.chain().any(|cause| {
-        cause.is::<NoAnswer>()
-            || matches!(
-                cause.downcast_ref::<ashpd::Error>(),
-                Some(ashpd::Error::Response(
-                    ashpd::desktop::ResponseError::Cancelled
-                ))
-            )
-    })
+/// What follows a RemoteDesktop session that did not start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AfterRemote {
+    /// End the session with the error: no second dialog.
+    GiveUp,
+    /// Share the screen alone, with no input.
+    ScreenAlone,
+}
+
+/// Whether to fall back to the screen alone after the RemoteDesktop session
+/// failed with `e`. A cancelled dialog is never asked again. An unanswered
+/// one (no one at the desk) falls back only when a kept ScreenCast grant
+/// should restore with no dialog; without one, a second dialog would only
+/// double the wait to two minutes (KDE Plasma 6.8, 2026-10-31). A desktop
+/// without RemoteDesktop, or one that failed, still gets its picture.
+fn after_remote_failed(e: &anyhow::Error, screen_token_saved: bool) -> AfterRemote {
+    let cancelled = e.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<ashpd::Error>(),
+            Some(ashpd::Error::Response(
+                ashpd::desktop::ResponseError::Cancelled
+            ))
+        )
+    });
+    let unanswered = e.chain().any(|cause| cause.is::<NoAnswer>());
+    if cancelled || (unanswered && !screen_token_saved) {
+        AfterRemote::GiveUp
+    } else {
+        AfterRemote::ScreenAlone
+    }
 }
 
 /// What the portal is asked to do with its grant (N8).
@@ -1110,19 +1139,27 @@ mod tests {
     }
 
     #[test]
-    fn a_dialog_cancelled_or_unanswered_is_not_asked_again() {
+    fn after_a_failed_remote_session_the_screen_alone_only_when_it_asks_no_one() {
+        use AfterRemote::{GiveUp, ScreenAlone};
         let unanswered = anyhow::Error::new(NoAnswer).context("Failed to start");
-        assert!(asked_already(&unanswered));
+        // No one at the desk and no kept screen grant: a second dialog
+        // would only double the wait.
+        assert_eq!(after_remote_failed(&unanswered, false), GiveUp);
+        // A kept ScreenCast grant restores with no dialog: the picture.
+        assert_eq!(after_remote_failed(&unanswered, true), ScreenAlone);
+        // The owner cancelled: never asked again, kept grant or not.
         let cancelled = anyhow::Error::new(ashpd::Error::Response(
             ashpd::desktop::ResponseError::Cancelled,
         ))
         .context("Failed to start");
-        assert!(asked_already(&cancelled));
+        assert_eq!(after_remote_failed(&cancelled, false), GiveUp);
+        assert_eq!(after_remote_failed(&cancelled, true), GiveUp);
         // No RemoteDesktop portal, or one that failed: the screen alone.
         let failed =
             anyhow::Error::new(ashpd::Error::Response(ashpd::desktop::ResponseError::Other));
-        assert!(!asked_already(&failed));
-        assert!(!asked_already(&anyhow::anyhow!("Portal request timed out")));
+        assert_eq!(after_remote_failed(&failed, false), ScreenAlone);
+        let timed_out = anyhow::anyhow!("Portal request timed out");
+        assert_eq!(after_remote_failed(&timed_out, false), ScreenAlone);
     }
 
     #[test]
