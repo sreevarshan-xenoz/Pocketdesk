@@ -44,6 +44,20 @@ pub fn wheel(axis_vertical: bool, notches: i32) -> (f64, i32) {
     (f64::from(steps) * NOTCH, steps)
 }
 
+/// A fine turn of `v120` 120ths of a notch (uinput's sign), with the whole
+/// `notches` it completes, as the axis value and discrete steps Wayland
+/// expects (positive is down, or right). The virtual pointer's
+/// `axis_discrete` takes whole steps only (wlroots makes each one a
+/// `value120` of 120), so a turn that completes none goes as `axis` alone,
+/// in pixels.
+pub fn fine_wheel(axis_vertical: bool, v120: i32, notches: i32) -> (f64, i32) {
+    let sign = if axis_vertical { -1 } else { 1 };
+    (
+        crate::streaming::wheel::pixels(v120.saturating_mul(sign)),
+        notches.saturating_mul(sign),
+    )
+}
+
 /// One connection's virtual pointer and keyboard.
 struct Link {
     conn: Connection,
@@ -300,6 +314,30 @@ impl WlrInput {
         })
     }
 
+    /// Turn the wheel `x` and `y` 120ths of a notch (right, and up), with
+    /// the whole notches `nx`, `ny` the turns have completed now: smooth
+    /// for clients that read pixels, a step for ones that read only steps.
+    pub fn scroll_fine(&mut self, x: i32, y: i32, nx: i32, ny: i32) -> std::io::Result<()> {
+        let time = monotonic_ms();
+        self.send(|l| {
+            for (axis, v120, notches, vertical) in [
+                (Axis::VerticalScroll, y, ny, true),
+                (Axis::HorizontalScroll, x, nx, false),
+            ] {
+                if v120 == 0 {
+                    continue;
+                }
+                let (value, steps) = fine_wheel(vertical, v120, notches);
+                if steps != 0 {
+                    l.pointer.axis_discrete(time, axis, value, steps);
+                } else {
+                    l.pointer.axis(time, axis, value);
+                }
+            }
+            l.pointer.frame();
+        })
+    }
+
     /// Press or release the evdev key `code`, and say the modifier state
     /// when it changes.
     pub fn key(&mut self, code: u16, pressed: bool) -> std::io::Result<()> {
@@ -331,6 +369,16 @@ wayland_client::delegate_noop!(State: ZwlrVirtualPointerV1);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fine_turn_is_pixels_and_its_notches_steps_in_waylands_signs() {
+        // A quarter notch up: 3.75 px up, no step.
+        assert_eq!(fine_wheel(true, 30, 0), (-3.75, 0));
+        // The turn that completes a notch down carries its step.
+        assert_eq!(fine_wheel(true, -40, -1), (5.0, 1));
+        assert_eq!(fine_wheel(false, 60, 0), (7.5, 0));
+        assert_eq!(fine_wheel(false, -120, -1), (-NOTCH, -1));
+    }
 
     #[test]
     fn a_wheel_notch_up_is_a_negative_wayland_step() {

@@ -97,10 +97,12 @@ pub enum Captured {
         button: u8,
         down: bool,
     },
-    /// Notches, positive down and to the right.
+    /// A wheel turn in 120ths of a notch, positive down and to the right:
+    /// sent fine to a computer that takes that, else as the notches it adds
+    /// up to (`link::fit_wheel`).
     Wheel {
-        dx: i16,
-        dy: i16,
+        dx: i32,
+        dy: i32,
     },
     /// The switch key was pressed.
     Hotkey,
@@ -529,7 +531,12 @@ impl Driver {
                 if let Some(away) = &self.away
                     && (dx != 0 || dy != 0)
                 {
-                    out.push(Action::Send(away.to.clone(), Msg::Wheel { dx, dy }));
+                    use pocketdesk_core::streaming::wheel::clamp16;
+                    let msg = Msg::WheelFine {
+                        dx: clamp16(dx),
+                        dy: clamp16(dy),
+                    };
+                    out.push(Action::Send(away.to.clone(), msg));
                 }
             }
             Captured::Hotkey => self.hotkey(&mut out),
@@ -1547,8 +1554,8 @@ mod tests {
             )]
         );
         assert_eq!(
-            sends(&d.on(Captured::Wheel { dx: 0, dy: 2 })),
-            vec![sent("L", Msg::Wheel { dx: 0, dy: 2 })]
+            sends(&d.on(Captured::Wheel { dx: 0, dy: 240 })),
+            vec![sent("L", Msg::WheelFine { dx: 0, dy: 240 })]
         );
         // A key Windows names but the wire does not is dropped.
         assert_eq!(sends(&d.on(key(0x7F, true))), vec![]);

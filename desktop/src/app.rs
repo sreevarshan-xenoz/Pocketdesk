@@ -1031,6 +1031,8 @@ impl PocketdeskApp {
                 .as_ref()
                 .is_some_and(|c| c.computer_view_lock_on_close),
         );
+        // Fine scrolling: "Smooth scrolling" too.
+        view.set_smooth_scrolling(self.config.as_ref().is_none_or(|c| c.smooth_scrolling));
         if let Err(e) = view.open(device_id, name, 0, preset, view_only, stats) {
             self.notice = crate::notice::Notice::error(e);
         }
@@ -3415,6 +3417,7 @@ impl PocketdeskApp {
                             #[cfg(windows)]
                             view.set_grab_keys(form.saved_computer_view_grab_keys());
                             view.set_lock_on_close(form.saved_computer_view_lock_on_close());
+                            view.set_smooth_scrolling(form.saved_smooth_scrolling());
                         }
                         self.notice = crate::notice::Notice::done("Saved.");
                     }

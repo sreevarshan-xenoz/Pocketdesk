@@ -4020,6 +4020,7 @@ pub async fn send_mouse_event(
             InputPacket::MouseScroll {
                 dx: x as i16,
                 dy: y as i16,
+                fine: None,
             }
         } else if button != 0 {
             InputPacket::MouseClick {

@@ -120,9 +120,6 @@ const PBT_APMSUSPEND: usize = 0x4;
 const PBT_APMRESUMESUSPEND: usize = 0x7;
 const PBT_APMRESUMEAUTOMATIC: usize = 0x12;
 
-/// One notch of a wheel.
-const WHEEL_DELTA: i32 = 120;
-
 /// The input thread: its hooks, the switch key and the hidden window. The
 /// system cursors are restored when it starts (a crash while away must not
 /// leave the owner without a cursor) and when it is dropped.
@@ -278,13 +275,19 @@ pub(crate) fn hotkey_hit(mods: u32, vk: u32, hotkey: &Hotkey) -> bool {
     vk == hotkey.key && mods & (MOD_ALT | MOD_CONTROL | MOD_SHIFT | MOD_WIN) == wanted
 }
 
-/// A wheel's turn (`WHEEL_DELTA` units, as the hook has them) added to what
-/// was left of the last, as whole notches; the rest is kept.
-pub(crate) fn notches(rest: &mut i32, delta: i32) -> i16 {
-    *rest = rest.saturating_add(delta);
-    let whole = *rest / WHEEL_DELTA;
-    *rest -= whole * WHEEL_DELTA;
-    whole.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16
+/// A wheel's turn (`WHEEL_DELTA` units, 120ths of a notch, as the hook has
+/// them; a precision touchpad's are less than a notch) as the driver takes
+/// it: in the same units, positive down and to the right. Windows' forward
+/// turn is up.
+pub(crate) fn wheel_turn(horizontal: bool, delta: i32) -> Option<Captured> {
+    match (horizontal, delta) {
+        (_, 0) => None,
+        (true, d) => Some(Captured::Wheel { dx: d, dy: 0 }),
+        (false, d) => Some(Captured::Wheel {
+            dx: 0,
+            dy: d.saturating_neg(),
+        }),
+    }
 }
 
 /// What the hooks and the hidden window need, on the input thread.
@@ -302,7 +305,6 @@ struct ThreadState {
     mods: u32,
     /// The switch key was taken by the hook: its key-up is swallowed too.
     hotkey_down: bool,
-    wheel: (i32, i32),
     /// The session is locked; the computer is going to sleep.
     locked: bool,
     asleep: bool,
@@ -436,18 +438,8 @@ fn on_mouse(
             }),
             _ => None,
         },
-        // Windows' forward turn is up; the wire's positive is down.
-        WM_MOUSEWHEEL => match notches(&mut s.wheel.1, wheel_delta) {
-            0 => None,
-            n => Some(Captured::Wheel {
-                dx: 0,
-                dy: n.saturating_neg(),
-            }),
-        },
-        WM_MOUSEHWHEEL => match notches(&mut s.wheel.0, wheel_delta) {
-            0 => None,
-            n => Some(Captured::Wheel { dx: n, dy: 0 }),
-        },
+        WM_MOUSEWHEEL => wheel_turn(false, wheel_delta),
+        WM_MOUSEHWHEEL => wheel_turn(true, wheel_delta),
         _ => None,
     };
     // A button held here when the mouse went away (a drag) comes up here
@@ -643,9 +635,6 @@ fn apply_mode(s: &mut ThreadState, mode: Mode) {
         // SAFETY: a hook this thread set.
         let _ = unsafe { UnhookWinEvent(hook) };
     }
-    if mode != Mode::Away {
-        s.wheel = (0, 0);
-    }
     // The driver brings the keyboard and mouse home, the cursor shown.
     if hooks_missing(mode, s.mouse.is_some(), s.keyboard.is_some()) {
         let _ = s.events.send(Captured::HookFailed);
@@ -766,7 +755,6 @@ fn spawn_input_thread(events: Sender<Captured>, hotkey: Option<Hotkey>) -> Optio
                 instance,
                 mods: 0,
                 hotkey_down: false,
-                wheel: (0, 0),
                 locked: false,
                 asleep: false,
                 park: None,
@@ -2226,7 +2214,6 @@ mod tests {
             instance: HINSTANCE::default(),
             mods: 0,
             hotkey_down: false,
-            wheel: (0, 0),
             locked: false,
             asleep: false,
             park: None,
@@ -2278,16 +2265,21 @@ mod tests {
     }
 
     #[test]
-    fn a_fine_wheel_turns_by_whole_notches() {
-        let mut rest = 0;
-        assert_eq!(notches(&mut rest, 120), 1);
-        assert_eq!(notches(&mut rest, 40), 0);
-        assert_eq!(notches(&mut rest, 40), 0);
-        assert_eq!(notches(&mut rest, 40), 1);
-        assert_eq!(rest, 0);
-        assert_eq!(notches(&mut rest, -240), -2);
-        assert_eq!(notches(&mut rest, -60), 0);
-        assert_eq!(notches(&mut rest, 60), 0);
-        assert_eq!(rest, 0);
+    fn a_wheel_turn_goes_in_120ths_down_and_right() {
+        // A notch forward is up: negative on the wire.
+        assert!(matches!(
+            wheel_turn(false, 120),
+            Some(Captured::Wheel { dx: 0, dy: -120 })
+        ));
+        // A touchpad's part of a notch goes as it is.
+        assert!(matches!(
+            wheel_turn(false, -40),
+            Some(Captured::Wheel { dx: 0, dy: 40 })
+        ));
+        assert!(matches!(
+            wheel_turn(true, 30),
+            Some(Captured::Wheel { dx: 30, dy: 0 })
+        ));
+        assert!(wheel_turn(true, 0).is_none());
     }
 }

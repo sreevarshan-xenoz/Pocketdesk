@@ -211,22 +211,20 @@ pub(crate) fn absolute_move_input(x_norm: u16, y_norm: u16) -> INPUT {
 /// Wheel notches, vertical (`y`, positive = away from the user, as on Linux)
 /// then horizontal (`x`, positive = right).
 pub(crate) fn scroll_inputs(x: i32, y: i32) -> Vec<INPUT> {
+    let delta = WHEEL_DELTA as i32;
+    fine_scroll_inputs(x.saturating_mul(delta), y.saturating_mul(delta))
+}
+
+/// A fine wheel turn in 120ths of a notch, signs as [`scroll_inputs`]:
+/// Windows' own unit, so it goes as it is; a turn below `WHEEL_DELTA` is
+/// what a precision touchpad sends, and applications add those up.
+pub(crate) fn fine_scroll_inputs(x: i32, y: i32) -> Vec<INPUT> {
     let mut inputs = Vec::new();
     if y != 0 {
-        inputs.push(mouse(
-            0,
-            0,
-            (y * WHEEL_DELTA as i32) as u32,
-            MOUSEEVENTF_WHEEL,
-        ));
+        inputs.push(mouse(0, 0, y as u32, MOUSEEVENTF_WHEEL));
     }
     if x != 0 {
-        inputs.push(mouse(
-            0,
-            0,
-            (x * WHEEL_DELTA as i32) as u32,
-            MOUSEEVENTF_HWHEEL,
-        ));
+        inputs.push(mouse(0, 0, x as u32, MOUSEEVENTF_HWHEEL));
     }
     inputs
 }
@@ -306,6 +304,10 @@ impl SendInputBackend {
 
     pub(crate) fn scroll(&mut self, x: i32, y: i32) -> Result<()> {
         self.send(&scroll_inputs(x, y), "scroll")
+    }
+
+    pub(crate) fn scroll_fine(&mut self, x: i32, y: i32) -> Result<()> {
+        self.send(&fine_scroll_inputs(x, y), "scroll")
     }
 }
 
@@ -507,6 +509,19 @@ mod tests {
         assert_eq!(hwheel.mouseData as i32, -120);
         assert_eq!(hwheel.dwFlags, MOUSEEVENTF_HWHEEL);
         assert!(scroll_inputs(0, 0).is_empty());
+    }
+
+    #[test]
+    fn a_fine_turn_goes_in_wheel_delta_units_as_it_is() {
+        let inputs = fine_scroll_inputs(-30, 45);
+        let wheel = unsafe { inputs[0].Anonymous.mi };
+        assert_eq!(wheel.mouseData as i32, 45);
+        assert_eq!(wheel.dwFlags, MOUSEEVENTF_WHEEL);
+        let hwheel = unsafe { inputs[1].Anonymous.mi };
+        assert_eq!(hwheel.mouseData as i32, -30);
+        assert_eq!(hwheel.dwFlags, MOUSEEVENTF_HWHEEL);
+        assert!(fine_scroll_inputs(0, 0).is_empty());
+        assert_eq!(fine_scroll_inputs(0, 7).len(), 1);
     }
 
     #[test]

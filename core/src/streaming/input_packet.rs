@@ -211,10 +211,22 @@ pub enum InputPacket {
         button: u8, // 0=Left, 1=Middle, 2=Right, 3=Back, 4=Forward
         pressed: bool,
     },
-    /// Scroll wheel movement.
+    /// Scroll wheel movement, in whole notches: `dx` positive right, `dy`
+    /// positive up (away from the user).
+    ///
+    /// `fine` is the same turn in 120ths of a notch (`wheel120`, as the
+    /// kernel's `REL_WHEEL_HI_RES` and Windows' `WHEEL_DELTA` count it), in
+    /// the same signs, from a sender with finer turns than notches (a
+    /// touchpad). It travels after the notches, so an older receiver, which
+    /// reads the first five bytes only, still scrolls by them: such a sender
+    /// puts in `dx`/`dy` the whole notches its fine turns have added up to
+    /// so far ([`super::wheel::WheelSender`]), often none. A receiver that
+    /// knows `fine` scrolls by it and ignores the notches; without it, by
+    /// the notches, as before.
     MouseScroll {
-        dx: i16, // horizontal scroll
-        dy: i16, // vertical scroll
+        dx: i16,
+        dy: i16,
+        fine: Option<(i16, i16)>,
     },
     /// Keyboard key press or release.
     KeyEvent {
@@ -327,10 +339,15 @@ impl InputPacket {
                 buf.push(if *pressed { 1 } else { 0 });
                 buf
             }
-            InputPacket::MouseScroll { dx, dy } => {
-                let mut buf = vec![TAG_MOUSE_SCROLL];
+            InputPacket::MouseScroll { dx, dy, fine } => {
+                let mut buf = Vec::with_capacity(9);
+                buf.push(TAG_MOUSE_SCROLL);
                 buf.extend_from_slice(&dx.to_le_bytes());
                 buf.extend_from_slice(&dy.to_le_bytes());
+                if let Some((x120, y120)) = fine {
+                    buf.extend_from_slice(&x120.to_le_bytes());
+                    buf.extend_from_slice(&y120.to_le_bytes());
+                }
                 buf
             }
             InputPacket::KeyEvent { key, pressed } => {
@@ -491,7 +508,15 @@ impl InputPacket {
                 anyhow::ensure!(data.len() >= 5, "MouseScroll packet too short");
                 let dx = i16::from_le_bytes(data[1..3].try_into().unwrap());
                 let dy = i16::from_le_bytes(data[3..5].try_into().unwrap());
-                Ok(InputPacket::MouseScroll { dx, dy })
+                // Five bytes from a sender before fine scrolling; anything
+                // short of nine past them is read as it was then.
+                let fine = (data.len() >= 9).then(|| {
+                    (
+                        i16::from_le_bytes(data[5..7].try_into().unwrap()),
+                        i16::from_le_bytes(data[7..9].try_into().unwrap()),
+                    )
+                });
+                Ok(InputPacket::MouseScroll { dx, dy, fine })
             }
             TAG_KEY_EVENT => {
                 anyhow::ensure!(data.len() >= 4, "KeyEvent packet too short");
@@ -1222,6 +1247,48 @@ mod tests {
         tight.clear();
         assert!(tight.is_empty());
         assert!(tight.take_chunk().is_none());
+    }
+
+    #[test]
+    fn test_mouse_scroll_fine_is_optional_and_after_the_notches() {
+        // Before fine scrolling: five bytes, read as they always were.
+        let old = InputPacket::MouseScroll {
+            dx: -1,
+            dy: 2,
+            fine: None,
+        }
+        .encode();
+        assert_eq!(old, vec![2, 0xff, 0xff, 2, 0]);
+        match InputPacket::decode(&old).unwrap() {
+            InputPacket::MouseScroll { dx, dy, fine } => assert_eq!((dx, dy, fine), (-1, 2, None)),
+            other => panic!("{other:?}"),
+        }
+        // With it: the notches first, as an older receiver reads them, then
+        // the 120ths.
+        let new = InputPacket::MouseScroll {
+            dx: 0,
+            dy: 1,
+            fine: Some((-30, 45)),
+        }
+        .encode();
+        assert_eq!(new, vec![2, 0, 0, 1, 0, 0xe2, 0xff, 45, 0]);
+        assert_eq!(
+            i16::from_le_bytes(new[3..5].try_into().unwrap()),
+            1,
+            "an old reader's dy"
+        );
+        match InputPacket::decode(&new).unwrap() {
+            InputPacket::MouseScroll { dx, dy, fine } => {
+                assert_eq!((dx, dy, fine), (0, 1, Some((-30, 45))))
+            }
+            other => panic!("{other:?}"),
+        }
+        // A cut-short tail is read as notches alone, as before.
+        match InputPacket::decode(&new[..7]).unwrap() {
+            InputPacket::MouseScroll { fine, .. } => assert_eq!(fine, None),
+            other => panic!("{other:?}"),
+        }
+        assert!(InputPacket::decode(&new[..4]).is_err());
     }
 
     #[test]

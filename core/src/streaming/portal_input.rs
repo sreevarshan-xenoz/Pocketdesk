@@ -21,6 +21,9 @@ pub enum PortalEvent {
     /// Wheel notches: `axis` 0 vertical, 1 horizontal; positive is down,
     /// or right. How the portal is told them is [`wheel_call`]'s choice.
     Scroll { axis: u32, steps: i32 },
+    /// A fine wheel turn, in 120ths of a notch (`axis` and signs as
+    /// [`PortalEvent::Scroll`]): [`fine_wheel_call`] says how it goes.
+    FineScroll { axis: u32, v120: i32 },
     /// A key by evdev code.
     Key { code: i32, pressed: bool },
     /// A key by X keysym, for text.
@@ -128,21 +131,54 @@ pub fn wheel_call(style: WheelStyle, axis: u32, steps: i32) -> Option<WheelCall>
     }
     Some(match style {
         WheelStyle::Discrete => WheelCall::Discrete { axis, steps },
-        WheelStyle::Smooth => {
-            let pixels = f64::from(steps) * SMOOTH_NOTCH;
-            if axis == 0 {
-                WheelCall::Smooth {
-                    dx: 0.0,
-                    dy: -pixels,
-                }
-            } else {
-                WheelCall::Smooth {
-                    dx: pixels,
-                    dy: 0.0,
-                }
-            }
-        }
+        WheelStyle::Smooth => smooth_call(axis, f64::from(steps) * SMOOTH_NOTCH),
     })
+}
+
+/// `pixels` down (or right) on `axis` as `NotifyPointerAxis` takes them on
+/// KDE, whose backend turns `dy` over.
+fn smooth_call(axis: u32, pixels: f64) -> WheelCall {
+    if axis == 0 {
+        WheelCall::Smooth {
+            dx: 0.0,
+            dy: -pixels,
+        }
+    } else {
+        WheelCall::Smooth {
+            dx: pixels,
+            dy: 0.0,
+        }
+    }
+}
+
+/// A fine turn of `v120` 120ths of a notch on `axis` (signs as
+/// [`wheel_call`]) as the call `style` takes, if any.
+///
+/// KDE takes it as it comes, in pixels ([`SMOOTH_NOTCH`] a notch), so a
+/// touchpad scrolls as finely there as it does here. GNOME is told whole
+/// steps: what is not yet a notch waits in `rest` until it is, so slow
+/// scrolling adds up instead of being lost (mutter makes each step a real
+/// wheel click; its smooth call's scale was not checked headless).
+pub fn fine_wheel_call(
+    style: WheelStyle,
+    axis: u32,
+    v120: i32,
+    rest: &mut crate::streaming::wheel::Notches,
+) -> Option<WheelCall> {
+    if v120 == 0 {
+        return None;
+    }
+    match style {
+        WheelStyle::Smooth => Some(smooth_call(axis, crate::streaming::wheel::pixels(v120))),
+        WheelStyle::Discrete => {
+            let steps = if axis == 0 {
+                rest.add(0, v120).1
+            } else {
+                rest.add(v120, 0).0
+            };
+            wheel_call(style, axis, steps)
+        }
+    }
 }
 
 /// Where a normalized position falls on a stream of `size`, in its pixels.
@@ -324,6 +360,41 @@ mod tests {
             WheelStyle::Discrete,
             "the spec's call"
         );
+    }
+
+    #[test]
+    fn a_fine_turn_is_pixels_on_kde_and_added_up_steps_elsewhere() {
+        use crate::streaming::wheel::Notches;
+        let mut rest = Notches::default();
+        // KDE: every turn, in its signs; a quarter notch down is 3.75 px.
+        assert_eq!(
+            fine_wheel_call(WheelStyle::Smooth, 0, 30, &mut rest),
+            Some(WheelCall::Smooth { dx: 0.0, dy: -3.75 })
+        );
+        assert_eq!(
+            fine_wheel_call(WheelStyle::Smooth, 1, -60, &mut rest),
+            Some(WheelCall::Smooth { dx: -7.5, dy: 0.0 })
+        );
+        assert_eq!(rest, Notches::default(), "KDE keeps nothing back");
+        assert_eq!(fine_wheel_call(WheelStyle::Smooth, 0, 0, &mut rest), None);
+        // GNOME: a step once the turns make a notch, on each axis apart.
+        let calls: Vec<_> = (0..4)
+            .map(|_| fine_wheel_call(WheelStyle::Discrete, 0, 40, &mut rest))
+            .collect();
+        assert_eq!(
+            calls,
+            [
+                None,
+                None,
+                Some(WheelCall::Discrete { axis: 0, steps: 1 }),
+                None
+            ]
+        );
+        assert_eq!(
+            fine_wheel_call(WheelStyle::Discrete, 1, -250, &mut rest),
+            Some(WheelCall::Discrete { axis: 1, steps: -2 })
+        );
+        assert_eq!(rest.rest(), (-10, 40));
     }
 
     #[test]

@@ -48,6 +48,8 @@ const TAG_SOUND_WANTED: u8 = 16;
 const TAG_SOUND_UNAVAILABLE: u8 = 17;
 const TAG_SOUND: u8 = 18;
 const TAG_NAME: u8 = 19;
+const TAG_WHEEL_FINE: u8 = 20;
+const TAG_TAKES_FINE_WHEEL: u8 = 21;
 
 /// The longest Opus packet a [`Msg::Sound`] carries, in bytes (a longer
 /// one is cut short when encoded; the sender never makes one): with its
@@ -189,6 +191,18 @@ pub enum Msg {
     Name {
         name: String,
     },
+    /// A wheel turn in 120ths of a notch (fine scrolling), positive down
+    /// and to the right as [`Msg::Wheel`]. Sent only to a computer that
+    /// said [`Msg::TakesFineWheel`]; any other is sent the whole notches
+    /// the turns add up to, as a [`Msg::Wheel`].
+    WheelFine {
+        dx: i16,
+        dy: i16,
+    },
+    /// The sender takes [`Msg::WheelFine`]: a computer answering a hello
+    /// says it after its name. A build that does not know it skips it, and
+    /// is never sent a fine turn.
+    TakesFineWheel,
 }
 
 /// Why bytes are not a message.
@@ -319,6 +333,12 @@ pub fn encode(msg: &Msg) -> Vec<u8> {
             out.push(TAG_NAME);
             put_str(&mut out, name);
         }
+        Msg::WheelFine { dx, dy } => {
+            out.push(TAG_WHEEL_FINE);
+            out.extend_from_slice(&dx.to_be_bytes());
+            out.extend_from_slice(&dy.to_be_bytes());
+        }
+        Msg::TakesFineWheel => out.push(TAG_TAKES_FINE_WHEEL),
     }
     out
 }
@@ -373,6 +393,11 @@ pub fn decode(bytes: &[u8]) -> Result<Msg, WireError> {
             opus: r.bytes()?,
         },
         TAG_NAME => Msg::Name { name: r.string()? },
+        TAG_WHEEL_FINE => Msg::WheelFine {
+            dx: r.i16()?,
+            dy: r.i16()?,
+        },
+        TAG_TAKES_FINE_WHEEL => Msg::TakesFineWheel,
         tag => return Err(WireError::UnknownTag(tag)),
     };
     if r.rest.is_empty() {
@@ -658,7 +683,25 @@ mod tests {
             Msg::Name {
                 name: String::new(),
             },
+            Msg::WheelFine {
+                dx: i16::MIN,
+                dy: 30,
+            },
+            Msg::TakesFineWheel,
         ]
+    }
+
+    /// Fine scrolling: a fine turn is its tag and two `i16`s, as a wheel
+    /// turn is; the word that a computer takes them is its tag alone.
+    #[test]
+    fn a_fine_wheel_turn_is_its_tag_and_two_values() {
+        assert_eq!(
+            encode(&Msg::WheelFine { dx: -2, dy: 30 }),
+            [20, 0xff, 0xfe, 0, 30]
+        );
+        assert_eq!(encode(&Msg::TakesFineWheel), [21]);
+        assert_eq!(decode(&[20, 0, 1, 0]), Err(WireError::Truncated));
+        assert_eq!(decode(&[21, 0]), Err(WireError::TrailingBytes));
     }
 
     /// BK8 live: a computer that only takes input says its name with its

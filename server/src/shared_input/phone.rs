@@ -269,6 +269,8 @@ pub struct ToPhone {
     caps: bool,
     /// The key held now, repeated by [`ToPhone::repeats`].
     held: Option<Held>,
+    /// Fine wheel turns not yet a notch.
+    wheel: pocketdesk_core::streaming::wheel::Notches,
 }
 
 impl ToPhone {
@@ -348,6 +350,14 @@ impl ToPhone {
                 PhoneEvent::Button { button, action }
             }
             Msg::Wheel { dx, dy } => PhoneEvent::Wheel { dx, dy },
+            // The phone scrolls by notches: fine turns add up to them.
+            Msg::WheelFine { dx, dy } => match self.wheel.add(i32::from(dx), i32::from(dy)) {
+                (0, 0) => return Vec::new(),
+                (x, y) => PhoneEvent::Wheel {
+                    dx: pocketdesk_core::streaming::wheel::clamp16(x),
+                    dy: pocketdesk_core::streaming::wheel::clamp16(y),
+                },
+            },
             Msg::Ping { t_us } => PhoneEvent::Ping { t: t_us },
             Msg::Key { code, pressed } => {
                 let event = self.key(code, pressed);
@@ -600,6 +610,12 @@ mod tests {
         assert_eq!(
             to.events(&Msg::Wheel { dx: 0, dy: 3 }),
             vec![PhoneEvent::Wheel { dx: 0, dy: 3 }]
+        );
+        // Fine turns go once they make a notch.
+        assert_eq!(to.events(&Msg::WheelFine { dx: 0, dy: 60 }), vec![]);
+        assert_eq!(
+            to.events(&Msg::WheelFine { dx: 0, dy: 70 }),
+            vec![PhoneEvent::Wheel { dx: 0, dy: 1 }]
         );
         assert_eq!(
             to.events(&Msg::Ping { t_us: 9 }),
