@@ -52,6 +52,9 @@ pub trait Inject: Send {
     /// at the first event misses it (libinput opens new devices a moment
     /// after they appear).
     fn prepare(&mut self) {}
+    /// This computer's screens changed: whatever was read of them for
+    /// absolute moves is read again.
+    fn screens_changed(&mut self) {}
     /// Flash `badge` on this computer's screens for `how_long` (which
     /// computer has the keyboard and mouse, Identify); on Windows, never
     /// over a full-screen program or a game holding the cursor in front,
@@ -188,6 +191,7 @@ impl Receiver {
     pub fn set_screens(&mut self, screens: &[Screen]) {
         if self.screens != screens {
             self.screens = screens.to_vec();
+            self.inject.screens_changed();
         }
     }
 
@@ -559,7 +563,11 @@ impl LazyInjector {
             .is_some_and(|at| at.elapsed() < INJECTOR_RETRY);
         if self.injector.is_none() && !waiting {
             match InputInjector::new() {
-                Ok(injector) => self.injector = Some(injector),
+                Ok(mut injector) => {
+                    // The screens' changes are told here (`screens_changed`).
+                    injector.keep_display_size();
+                    self.injector = Some(injector);
+                }
                 Err(e) => {
                     tracing::warn!("Shared input: nothing to inject with here: {e:#}");
                     self.failed_at = Some(Instant::now());
@@ -573,6 +581,12 @@ impl LazyInjector {
 impl Inject for LazyInjector {
     fn prepare(&mut self) {
         self.get();
+    }
+
+    fn screens_changed(&mut self) {
+        if let Some(injector) = self.injector.as_mut() {
+            injector.forget_display_size();
+        }
     }
 
     fn key(&mut self, code: u16, pressed: bool) {
@@ -623,8 +637,31 @@ const TICK: Duration = Duration::from_millis(100);
 /// How often this computer's own screens are looked at.
 const SCREENS_EVERY: Duration = Duration::from_secs(5);
 
-/// How long the setting and a computer's standing are taken as read.
+/// How long the setting and a computer's standing are taken as read,
+/// counted from when their read started: past it a read again starts.
 const RECHECK: Duration = Duration::from_secs(1);
+
+/// With no read come back for this long, the gate fails closed (sharing
+/// off, no computer allowed) until one does: a wedged disk. Above the
+/// slowest disk that still works (steady 2.5 s reads come back about every
+/// 2.5 s and stay open), so a true hang closes within this.
+const FAIL_AFTER: Duration = Duration::from_millis(3500);
+
+/// How long ago a value's read may have started for it to let input in
+/// without a fresh read, on a healthy disk: a computer's first message
+/// after a quiet spell (a permission taken away meanwhile) waits for a
+/// fresh read instead of riding an old one.
+const ADMIT_FRESH: Duration = Duration::from_millis(1500);
+
+/// The most that may be on a slow disk (steady 2.5 s reads), and the
+/// oldest read a fresh one waited for may have started to let in (a read
+/// hung for minutes that lands lets nothing in).
+const ADMIT_MOST: Duration = Duration::from_secs(6);
+
+/// How long the first read of a value (nothing to go on yet, or the last
+/// value is past [`FAIL_AFTER`] with no read under way) is waited for
+/// before the gate refuses.
+const FIRST_WAIT: Duration = Duration::from_secs(2);
 
 /// What a computer may do here.
 #[derive(Debug, Clone, Copy, Default)]
@@ -682,35 +719,187 @@ pub(crate) fn may_drive_here(device_id: &str) -> bool {
     crate::events::current_config().shared_input && standing_now(device_id).allowed
 }
 
-/// The setting and each computer's standing, read again at most once a
-/// [`RECHECK`] (they are files: config.toml and the trust store).
-#[derive(Default)]
+/// `shared_input`, `shared_input_clipboard` and `shared_input_low_latency`.
+type Settings = (bool, bool, bool);
+
+/// The settings as read now (a file: blocking).
+fn settings_now() -> Settings {
+    let config = crate::events::current_config();
+    (
+        config.shared_input,
+        config.shared_input_clipboard,
+        config.shared_input_low_latency,
+    )
+}
+
+/// A value read from files on a blocking thread: the latest that came back,
+/// with when its read started and when it really finished (stamped by the
+/// read's own task, not when the gate took it in), and the one read under
+/// way (never more than one, and never let go of).
+struct Fresh<T> {
+    value: Option<(T, tokio::time::Instant, tokio::time::Instant)>,
+    reading: Option<(Reading<T>, tokio::time::Instant)>,
+}
+
+/// A read under way: its value, and when it finished.
+type Reading<T> =
+    tokio::task::JoinHandle<(Result<T, tokio::task::JoinError>, tokio::time::Instant)>;
+
+impl<T> Default for Fresh<T> {
+    fn default() -> Self {
+        Fresh {
+            value: None,
+            reading: None,
+        }
+    }
+}
+
+/// How long ago a value's read may have started for the value to let
+/// input in without a fresh read: [`ADMIT_FRESH`], or on a slow disk twice
+/// its last read and a second, at most [`ADMIT_MOST`].
+fn admit_within(read_took: Duration) -> Duration {
+    (read_took * 2 + Duration::from_secs(1)).clamp(ADMIT_FRESH, ADMIT_MOST)
+}
+
+impl<T: Copy + Send + 'static> Fresh<T> {
+    /// The value now. A value that refuses (`admits` false) is used at
+    /// once. One that lets in is used at once only while it is current: a
+    /// read finished within [`FAIL_AFTER`], and that read started within
+    /// [`admit_within`] (about 1.5 s on a healthy disk). Otherwise only a
+    /// fresh read may let in: one is started if none is under way and
+    /// waited for until it is [`FIRST_WAIT`] old, then `closed`. A read
+    /// again starts once the value's read is [`RECHECK`] old. With values
+    /// before and none finished for [`FAIL_AFTER`] while a read started
+    /// earlier is still under way (a hang), `closed` with no wait; so too
+    /// a value that lets in but is not current while a read started before
+    /// this call is under way.
+    async fn get(
+        &mut self,
+        closed: T,
+        admits: impl Fn(&T) -> bool,
+        start: impl FnOnce() -> tokio::task::JoinHandle<T>,
+    ) -> T {
+        let now = tokio::time::Instant::now();
+        self.take_done().await;
+        let mut started_here = false;
+        let current = self
+            .value
+            .filter(|(_, _, done)| now.saturating_duration_since(*done) < FAIL_AFTER);
+        let stale =
+            current.is_none_or(|(_, started, _)| now.saturating_duration_since(started) >= RECHECK);
+        if self.reading.is_none() && stale {
+            self.reading = Some((stamped(start()), now));
+            started_here = true;
+        }
+        match current {
+            Some((value, started, done)) => {
+                let trusted = now.saturating_duration_since(started)
+                    < admit_within(done.saturating_duration_since(started));
+                if !admits(&value) || trusted {
+                    return value;
+                }
+                // A read already under way (a slow or hung one): refusing
+                // early is safe, and nothing is waited for.
+                if !started_here {
+                    return closed;
+                }
+            }
+            None if self.value.is_some() && !started_here => return closed,
+            None => {}
+        }
+        // Only a fresh read lets in: the one under way, waited for until it
+        // is FIRST_WAIT old.
+        let Some((reading, started)) = self.reading.as_mut() else {
+            return closed;
+        };
+        let started = *started;
+        let left = FIRST_WAIT.saturating_sub(now.saturating_duration_since(started));
+        if let Ok(done) = tokio::time::timeout(left, reading).await {
+            self.reading = None;
+            if let Ok((Ok(value), at)) = done {
+                self.value = Some((value, started, at));
+                let fresh =
+                    tokio::time::Instant::now().saturating_duration_since(started) < ADMIT_MOST;
+                if !admits(&value) || fresh {
+                    return value;
+                }
+            }
+        }
+        closed
+    }
+
+    /// Take the read under way's value once it is done.
+    async fn take_done(&mut self) {
+        if self.reading.as_ref().is_some_and(|(r, _)| r.is_finished())
+            && let Some((reading, started)) = self.reading.take()
+            && let Ok((Ok(value), done)) = reading.await
+        {
+            self.value = Some((value, started, done));
+        }
+    }
+}
+
+/// A read, stamped with when it really finished by a task of its own.
+fn stamped<T: Send + 'static>(read: tokio::task::JoinHandle<T>) -> Reading<T> {
+    tokio::spawn(async move {
+        let value = read.await;
+        (value, tokio::time::Instant::now())
+    })
+}
+
+/// Starts a read of the settings.
+type ReadSettings = std::sync::Arc<dyn Fn() -> tokio::task::JoinHandle<Settings> + Send + Sync>;
+/// Starts a read of a computer's standing.
+type ReadStanding = std::sync::Arc<dyn Fn(&str) -> tokio::task::JoinHandle<Standing> + Send + Sync>;
+
+/// The setting and each computer's standing (they are files: config.toml,
+/// the trust store and `computers.json`), read on a blocking thread, one
+/// read at a time each, so a disk never holds up an injection while the
+/// gate has a value to go on ([`Fresh::get`]). A read again starts once a
+/// value's read is [`RECHECK`] old, so on a healthy disk a permission
+/// taken away or sharing turned off stops input within about a second
+/// and a read; on a slow disk, when the read after it comes back. With no
+/// read come back for [`FAIL_AFTER`] the gate fails closed until one does,
+/// and sharing last read as off stays off meanwhile.
 struct Gate {
-    /// `shared_input`, `shared_input_clipboard` and
-    /// `shared_input_low_latency`, and when read.
-    on: Option<((bool, bool, bool), Instant)>,
-    standings: HashMap<String, (Standing, Instant)>,
+    on: Fresh<Settings>,
+    standings: HashMap<String, Fresh<Standing>>,
+    read_on: ReadSettings,
+    read_standing: ReadStanding,
+}
+
+impl Default for Gate {
+    fn default() -> Gate {
+        Gate::with(
+            || tokio::task::spawn_blocking(settings_now),
+            |id| {
+                let id = id.to_string();
+                tokio::task::spawn_blocking(move || standing_now(&id))
+            },
+        )
+    }
 }
 
 impl Gate {
-    async fn settings(&mut self) -> (bool, bool, bool) {
-        if let Some((on, at)) = self.on
-            && at.elapsed() < RECHECK
-        {
-            return on;
+    /// A gate whose reads `read_on` and `read_standing` start (seams for
+    /// the tests).
+    fn with(
+        read_on: impl Fn() -> tokio::task::JoinHandle<Settings> + Send + Sync + 'static,
+        read_standing: impl Fn(&str) -> tokio::task::JoinHandle<Standing> + Send + Sync + 'static,
+    ) -> Gate {
+        Gate {
+            on: Fresh::default(),
+            standings: HashMap::new(),
+            read_on: std::sync::Arc::new(read_on),
+            read_standing: std::sync::Arc::new(read_standing),
         }
-        let on = tokio::task::spawn_blocking(|| {
-            let config = crate::events::current_config();
-            (
-                config.shared_input,
-                config.shared_input_clipboard,
-                config.shared_input_low_latency,
-            )
-        })
-        .await
-        .unwrap_or((false, false, false));
-        self.on = Some((on, Instant::now()));
-        on
+    }
+
+    async fn settings(&mut self) -> Settings {
+        let read = std::sync::Arc::clone(&self.read_on);
+        self.on
+            .get((false, false, false), |on| on.0, move || read())
+            .await
     }
 
     async fn on(&mut self) -> bool {
@@ -740,18 +929,13 @@ impl Gate {
         if !self.on().await {
             return Standing::default();
         }
-        if let Some((standing, at)) = self.standings.get(device_id)
-            && at.elapsed() < RECHECK
-        {
-            return *standing;
-        }
+        let read = std::sync::Arc::clone(&self.read_standing);
         let id = device_id.to_string();
-        let standing = tokio::task::spawn_blocking(move || standing_now(&id))
-            .await
-            .unwrap_or_default();
         self.standings
-            .insert(device_id.to_string(), (standing, Instant::now()));
-        standing
+            .entry(device_id.to_string())
+            .or_default()
+            .get(Standing::default(), |s| s.allowed, move || read(&id))
+            .await
     }
 }
 
@@ -1091,6 +1275,48 @@ fn drives_now(msg: &Msg, from: &str, allowed: bool, driver: Option<&str>) -> boo
         }
 }
 
+/// The most messages taken off the link at once, for [`stale_moves`].
+const BATCH_MOST: usize = 256;
+
+/// Which of `batch` (each message with the computer it came from, in the
+/// order they came off the link) are moves to drop: a newer move from the
+/// same computer comes after it with nothing from that computer between
+/// but moves, activity notes and pings. The receive loop takes what queued
+/// while it was busy and injects only the newest of such a run, so a loop
+/// held up a moment catches up at once instead of replaying the pointer's
+/// path. A key, button, wheel turn or anything else from that computer
+/// between them keeps the move before it: a click lands where the pointer
+/// was when it was made. A move older by its `seq` (a datagram late on
+/// the way) never drops a newer one before it; the receiver drops it.
+/// Dropping a move loses nothing only because every `Msg::Move` is an
+/// absolute position: a relative move must never be coalesced this way
+/// (a new variant falls to the arm that breaks a run).
+fn stale_moves<'a>(batch: impl DoubleEndedIterator<Item = (&'a str, &'a Msg)>) -> Vec<bool> {
+    let mut newest_after: HashMap<&str, u32> = HashMap::new();
+    let mut stale: Vec<bool> = batch
+        .rev()
+        .map(|(from, msg)| match msg {
+            Msg::Move { seq, .. } => {
+                // Newer by the count, which may wrap.
+                let newer = |a: u32, b: u32| (a.wrapping_sub(b) as i32) > 0;
+                let after = newest_after.get(from).copied();
+                let dropped = after.is_some_and(|after| newer(after, *seq));
+                if !dropped {
+                    newest_after.insert(from, *seq);
+                }
+                dropped
+            }
+            Msg::Active { .. } | Msg::Ping { .. } | Msg::Pong { .. } => false,
+            _ => {
+                newest_after.remove(from);
+                false
+            }
+        })
+        .collect();
+    stale.reverse();
+    stale
+}
+
 /// The receiving side, for the server's life: take what other computers
 /// send ([`link::incoming`]) and act on it, keep this computer awake while
 /// someone drives it, and keep `shared_screens.json`. Not run with
@@ -1119,6 +1345,8 @@ pub async fn run() {
     let mut status_every = tokio::time::interval(STATUS_EVERY);
     status_every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_status: Option<shared_input::StatusFile> = None;
+    let mut status_writing: Option<tokio::task::JoinHandle<Option<shared_input::StatusFile>>> =
+        None;
     // The link the driving computer's cursor arrived on.
     let mut driver_link: Option<usize> = None;
     // Whether sharing was on when the status was last kept, and when.
@@ -1138,103 +1366,117 @@ pub async fn run() {
         set_driven_by(receiver.driven_by(Instant::now()));
         tokio::select! {
             arrival = arriving.recv() => {
-                let Some((from, msg, arrived_us, link_id)) = arrival else { break };
-                if let Msg::Refuse { reason } = msg {
-                    // Its answer to this computer driving it.
-                    if heard_refusals.note(&from, reason) {
-                        tracing::info!(
-                            from,
-                            reason,
-                            "Shared input: another computer won't take this one's input"
-                        );
-                    } else {
-                        tracing::debug!(from, reason, "Shared input: refused again");
+                let Some(first) = arrival else { break };
+                // What queued behind it is taken too, and a move that a newer
+                // one from the same computer follows is dropped: only the
+                // newest is injected ([`stale_moves`]).
+                let mut batch = vec![first];
+                while batch.len() < BATCH_MOST {
+                    let Ok(next) = arriving.try_recv() else { break };
+                    batch.push(next);
+                }
+                let stale = stale_moves(batch.iter().map(|(from, msg, ..)| (from.as_str(), msg)));
+                for ((from, msg, arrived_us, link_id), stale) in batch.into_iter().zip(stale) {
+                    if stale {
+                        continue;
                     }
-                    link::note_refused(&from, reason);
-                    continue;
-                }
-                let standing = gate.standing(&from).await;
-                if !standing.allowed && refuses(&msg, receiver.driver() == Some(from.as_str())) {
-                    let reason = gate.refusal(&from).await.unwrap_or(wire::REFUSE_NOT_ALLOWED);
-                    refuse(&from, reason, &mut told_refusals);
-                    channels.remove(&from);
-                }
-                if standing.allowed {
-                    told_refusals.clear(&from);
-                }
-                // Its cursor arriving over a relay is refused, and it comes
-                // home: the keyboard and mouse go over a direct link only.
-                if standing.allowed && arrives_relayed(&msg, || link::direct_on(link_id) == Some(true)) {
-                    tracing::info!(
-                        from,
-                        "Shared input: another computer's cursor came over a relay; refused"
-                    );
-                    refuse(&from, wire::REFUSE_RELAYED, &mut told_refusals);
-                    receiver.link_lost(&from);
-                    continue;
-                }
-                // Its screens are the answer the driving side waits for
-                // before it treats this computer as one to cross onto (a
-                // hello from its own driver is not).
-                if standing.computer
-                    && super::drive::is_answer(&msg)
-                    && link::note_screens(&from, link_id)
-                {
-                    heard_refusals.clear(&from);
-                }
-                match &msg {
-                    Msg::Hello { version, name, screens } if standing.computer => {
-                        note_heard(&mut heard, &from, Some(name), screens);
-                        if standing.allowed && *version == wire::VERSION {
-                            // Not looked at since sharing came on: a look
-                            // is asked for, and its screens go to every
-                            // computer told when it comes. This answer
-                            // says what is known now.
-                            if own.is_unread() {
-                                looks.ask();
-                            }
-                            let name = crate::kde::host_device_name();
-                            answer_hello(&mut channels, &from, own.get(), &name);
+                    if let Msg::Refuse { reason } = msg {
+                        // Its answer to this computer driving it.
+                        if heard_refusals.note(&from, reason) {
+                            tracing::info!(
+                                from,
+                                reason,
+                                "Shared input: another computer won't take this one's input"
+                            );
+                        } else {
+                            tracing::debug!(from, reason, "Shared input: refused again");
                         }
+                        link::note_refused(&from, reason);
+                        continue;
                     }
-                    Msg::Screens(screens) if standing.computer => {
-                        note_heard(&mut heard, &from, None, screens);
+                    let standing = gate.standing(&from).await;
+                    if !standing.allowed && refuses(&msg, receiver.driver() == Some(from.as_str())) {
+                        let reason = gate.refusal(&from).await.unwrap_or(wire::REFUSE_NOT_ALLOWED);
+                        refuse(&from, reason, &mut told_refusals);
+                        channels.remove(&from);
                     }
-                    Msg::Name { name } if standing.computer => {
-                        note_name(&mut heard, &from, name);
+                    if standing.allowed {
+                        told_refusals.clear(&from);
                     }
-                    Msg::Identify { name } if standing.allowed => {
-                        // Shown on screen by the receiver, below.
+                    // Its cursor arriving over a relay is refused, and it comes
+                    // home: the keyboard and mouse go over a direct link only.
+                    if standing.allowed && arrives_relayed(&msg, || link::direct_on(link_id) == Some(true)) {
                         tracing::info!(
                             from,
-                            name,
-                            "Shared input: another computer asks this one to show who it is"
+                            "Shared input: another computer's cursor came over a relay; refused"
                         );
+                        refuse(&from, wire::REFUSE_RELAYED, &mut told_refusals);
+                        receiver.link_lost(&from);
+                        continue;
                     }
-                    _ => {}
-                }
-                if standing.allowed && matches!(msg, Msg::Enter { .. }) {
-                    tracing::info!(from, "Shared input: another computer drives this one");
-                    driver_link = Some(link_id);
-                }
-                // Said before its pointer is put here or moved, so no edge
-                // it lands on is watched.
-                if drives_now(&msg, &from, standing.allowed, receiver.driver()) {
-                    set_driven_by(Some(&from));
-                }
-                if standing.allowed && matches!(msg, Msg::AskTimings) {
-                    let timings = receiver.timings_for(&from).unwrap_or_default().to_vec();
-                    send_to(&mut channels, &from, &Msg::Timings(timings));
-                    continue;
-                }
-                // The cursor going home from here: this computer's
-                // clipboard goes with it, when it follows the mouse here.
-                let follows = matches!(msg, Msg::Leave) && gate.clipboard_follows().await;
-                let back = pushes_back(&msg, &from, standing.allowed, receiver.driver(), follows);
-                receiver.handle_arrived(&from, msg, standing.allowed, arrived_us);
-                if back {
-                    let to = from.clone();
-                    tokio::spawn(async move { crate::clipboard_push::push_now(&to).await });
+                    // Its screens are the answer the driving side waits for
+                    // before it treats this computer as one to cross onto (a
+                    // hello from its own driver is not).
+                    if standing.computer
+                        && super::drive::is_answer(&msg)
+                        && link::note_screens(&from, link_id)
+                    {
+                        heard_refusals.clear(&from);
+                    }
+                    match &msg {
+                        Msg::Hello { version, name, screens } if standing.computer => {
+                            note_heard(&mut heard, &from, Some(name), screens);
+                            if standing.allowed && *version == wire::VERSION {
+                                // Not looked at since sharing came on: a look
+                                // is asked for, and its screens go to every
+                                // computer told when it comes. This answer
+                                // says what is known now.
+                                if own.is_unread() {
+                                    looks.ask();
+                                }
+                                let name = crate::kde::host_device_name();
+                                answer_hello(&mut channels, &from, own.get(), &name);
+                            }
+                        }
+                        Msg::Screens(screens) if standing.computer => {
+                            note_heard(&mut heard, &from, None, screens);
+                        }
+                        Msg::Name { name } if standing.computer => {
+                            note_name(&mut heard, &from, name);
+                        }
+                        Msg::Identify { name } if standing.allowed => {
+                            // Shown on screen by the receiver, below.
+                            tracing::info!(
+                                from,
+                                name,
+                                "Shared input: another computer asks this one to show who it is"
+                            );
+                        }
+                        _ => {}
+                    }
+                    if standing.allowed && matches!(msg, Msg::Enter { .. }) {
+                        tracing::info!(from, "Shared input: another computer drives this one");
+                        driver_link = Some(link_id);
+                    }
+                    // Said before its pointer is put here or moved, so no edge
+                    // it lands on is watched.
+                    if drives_now(&msg, &from, standing.allowed, receiver.driver()) {
+                        set_driven_by(Some(&from));
+                    }
+                    if standing.allowed && matches!(msg, Msg::AskTimings) {
+                        let timings = receiver.timings_for(&from).unwrap_or_default().to_vec();
+                        send_to(&mut channels, &from, &Msg::Timings(timings));
+                        continue;
+                    }
+                    // The cursor going home from here: this computer's
+                    // clipboard goes with it, when it follows the mouse here.
+                    let follows = matches!(msg, Msg::Leave) && gate.clipboard_follows().await;
+                    let back = pushes_back(&msg, &from, standing.allowed, receiver.driver(), follows);
+                    receiver.handle_arrived(&from, msg, standing.allowed, arrived_us);
+                    if back {
+                        let to = from.clone();
+                        tokio::spawn(async move { crate::clipboard_push::push_now(&to).await });
+                    }
                 }
             }
             _ = tick.tick() => {
@@ -1346,6 +1588,14 @@ pub async fn run() {
                 let linked = link::linked();
                 heard_refusals.keep_linked(&linked);
                 told_refusals.keep_linked(&linked);
+                // The last one kept, once its write is done; while it is
+                // still going this tick is skipped, never waited for.
+                if let Some(writing) = status_writing.take_if(|w| w.is_finished()) {
+                    last_status = writing.await.unwrap_or(None);
+                }
+                if status_writing.is_some() {
+                    continue;
+                }
                 let Some(dir) = state_dir.clone() else { continue };
                 let sharing_on = gate.on().await;
                 let due = status_due(
@@ -1358,7 +1608,11 @@ pub async fn run() {
                 }
                 status_kept = Some((sharing_on, Instant::now()));
                 let mut last = last_status.take();
-                last_status = tokio::task::spawn_blocking(move || {
+                // Kept on a blocking thread the loop does not wait for: it
+                // read the computers, the trust store and the screens file
+                // every second while sharing was on, holding up whatever
+                // input came meanwhile.
+                status_writing = Some(tokio::task::spawn_blocking(move || {
                     let paired = status::paired_computers(&dir);
                     let mut now = status::now(paired.as_ref().unwrap_or(&BTreeSet::new()));
                     // BK5: each phone said as a screen, and whether it
@@ -1379,9 +1633,7 @@ pub async fn run() {
                     });
                     status::write_if_changed(&dir, now, kept.as_ref(), sharing_on, &mut last);
                     last
-                })
-                .await
-                .unwrap_or(None);
+                }));
             }
         }
     }
@@ -1392,6 +1644,478 @@ pub async fn run() {
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+
+    fn mv(seq: u32) -> Msg {
+        Msg::Move { seq, x: 1, y: 2 }
+    }
+
+    fn stale_of(batch: &[(&str, Msg)]) -> Vec<bool> {
+        stale_moves(batch.iter().map(|(from, msg)| (*from, msg)))
+    }
+
+    /// A run of moves queued behind each other: only the newest is
+    /// injected; pings and activity notes between do not break the run.
+    #[test]
+    fn only_the_newest_of_a_run_of_moves_is_kept() {
+        let a = "aaaa";
+        assert_eq!(
+            stale_of(&[(a, mv(1)), (a, mv(2)), (a, mv(3))]),
+            [true, true, false]
+        );
+        assert_eq!(
+            stale_of(&[
+                (a, mv(1)),
+                (a, Msg::Ping { t_us: 5 }),
+                (a, Msg::Active { idle_ms: 0 }),
+                (a, mv(2)),
+            ]),
+            [true, false, false, false]
+        );
+        // One move alone, and none at all.
+        assert_eq!(stale_of(&[(a, mv(1))]), [false]);
+        assert!(stale_of(&[]).is_empty());
+        // The count wraps: 0 is newer than u32::MAX.
+        assert_eq!(stale_of(&[(a, mv(u32::MAX)), (a, mv(0))]), [true, false]);
+    }
+
+    /// A key, button or wheel turn between two moves keeps the move before
+    /// it, so a click lands where the pointer was; nothing but a stale
+    /// move is ever dropped.
+    #[test]
+    fn a_click_or_key_keeps_the_move_before_it() {
+        let a = "aaaa";
+        for between in [
+            Msg::Button {
+                button: 0,
+                pressed: true,
+            },
+            Msg::Key {
+                code: 30,
+                pressed: true,
+            },
+            Msg::Wheel { dx: 0, dy: 1 },
+            Msg::ReleaseAll,
+            Msg::Leave,
+        ] {
+            assert_eq!(
+                stale_of(&[(a, mv(1)), (a, between.clone()), (a, mv(2))]),
+                [false, false, false],
+                "{between:?}"
+            );
+        }
+        // Moves on both sides of a click: those before it collapse to the
+        // last one before it, those after to the newest.
+        assert_eq!(
+            stale_of(&[
+                (a, mv(1)),
+                (a, mv(2)),
+                (
+                    a,
+                    Msg::Button {
+                        button: 0,
+                        pressed: true
+                    }
+                ),
+                (a, mv(3)),
+                (a, mv(4)),
+            ]),
+            [true, false, false, true, false]
+        );
+    }
+
+    /// Each computer's moves are its own: another's queued between does
+    /// not drop them, nor does another's click keep them.
+    #[test]
+    fn moves_are_coalesced_per_computer() {
+        let (a, b) = ("aaaa", "bbbb");
+        assert_eq!(
+            stale_of(&[(a, mv(1)), (b, mv(7)), (a, mv(2)), (b, mv(8))]),
+            [true, true, false, false]
+        );
+        assert_eq!(
+            stale_of(&[
+                (a, mv(1)),
+                (
+                    b,
+                    Msg::Button {
+                        button: 0,
+                        pressed: true
+                    }
+                ),
+                (a, mv(2)),
+            ]),
+            [true, false, false]
+        );
+    }
+
+    fn mvp(seq: u32, x: u16) -> Msg {
+        Msg::Move { seq, x, y: 2 }
+    }
+
+    /// What a receiver injects for `arrivals` from one computer taken off
+    /// the link as one batch: the stale moves dropped as the loop drops
+    /// them, the rest handled.
+    fn injected(arrivals: &[Msg]) -> Vec<Call> {
+        let a = "aaaa";
+        let fake = Fake::default();
+        let mut r = Receiver::new(Box::new(fake.clone()));
+        r.handle(a, Msg::Enter { x: 0, y: 0 }, true);
+        fake.take();
+        let batch: Vec<(&str, Msg)> = arrivals.iter().map(|m| (a, m.clone())).collect();
+        for ((_, msg), stale) in batch.iter().cloned().zip(stale_of(&batch)) {
+            if !stale {
+                r.handle(a, msg, true);
+            }
+        }
+        fake.take()
+    }
+
+    /// A click's move, sent again on the stream ahead of it (link's
+    /// `ClickOrder`), puts the pointer before the click whichever copy
+    /// comes first, and a datagram copy late after the click moves
+    /// nothing.
+    #[test]
+    fn a_click_lands_where_its_move_put_the_pointer() {
+        let click = Msg::Button {
+            button: 0,
+            pressed: true,
+        };
+        // The datagram first, its stream copy, the click, a late copy.
+        assert_eq!(
+            injected(&[mvp(5, 50), mvp(5, 50), click.clone(), mvp(5, 50)]),
+            [Call::Move(50, 2), Call::Button(0, true)]
+        );
+        // The datagrams late: the stream copy, the click, then an older
+        // move and the move's own datagram.
+        assert_eq!(
+            injected(&[mvp(6, 60), click, mvp(5, 50), mvp(6, 60)]),
+            [Call::Move(60, 2), Call::Button(0, true)]
+        );
+    }
+
+    /// A move late on the way (older by its count) never drops the newer
+    /// one before it; the older ones before the newest are dropped, and
+    /// the late one is dropped by its count.
+    #[test]
+    fn a_late_move_never_drops_a_newer_one() {
+        assert_eq!(
+            injected(&[mvp(8, 80), mvp(10, 100), mvp(9, 90)]),
+            [Call::Move(100, 2)]
+        );
+        assert_eq!(injected(&[mvp(10, 100), mvp(9, 90)]), [Call::Move(100, 2)]);
+    }
+
+    /// The reads behind a test gate: what they say, how long a read takes,
+    /// whether reads hang (until let go of), how many were started and the
+    /// most under way at once.
+    #[derive(Default)]
+    struct Disk {
+        sharing: bool,
+        allowed: bool,
+        read_time: Duration,
+        hang_config: bool,
+        hang_trust: bool,
+        settings_reads: usize,
+        standing_reads: usize,
+        under_way: [usize; 2],
+        most_under_way: [usize; 2],
+    }
+
+    /// One read as a test task: counted, `read_time` long (or hung until
+    /// let go of), saying what the disk said as it started.
+    async fn read_on_disk<T>(d: Arc<Mutex<Disk>>, which: usize, say: impl Fn(&mut Disk) -> T) -> T {
+        let (time, value) = {
+            let mut d = d.lock().unwrap();
+            d.under_way[which] += 1;
+            d.most_under_way[which] = d.most_under_way[which].max(d.under_way[which]);
+            let time = d.read_time;
+            (time, say(&mut d))
+        };
+        let hung = |d: &Disk| {
+            if which == 0 {
+                d.hang_config
+            } else {
+                d.hang_trust
+            }
+        };
+        tokio::time::sleep(time).await;
+        while hung(&d.lock().unwrap()) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        d.lock().unwrap().under_way[which] -= 1;
+        value
+    }
+
+    fn test_gate(disk: &Arc<Mutex<Disk>>) -> Gate {
+        let (d1, d2) = (Arc::clone(disk), Arc::clone(disk));
+        Gate::with(
+            move || {
+                tokio::spawn(read_on_disk(Arc::clone(&d1), 0, |d| {
+                    d.settings_reads += 1;
+                    (d.sharing, false, true)
+                }))
+            },
+            move |_| {
+                tokio::spawn(read_on_disk(Arc::clone(&d2), 1, |d| {
+                    d.standing_reads += 1;
+                    Standing {
+                        computer: true,
+                        allowed: d.allowed,
+                    }
+                }))
+            },
+        )
+    }
+
+    fn disk(sharing: bool, allowed: bool, read_ms: u64) -> Arc<Mutex<Disk>> {
+        Arc::new(Mutex::new(Disk {
+            sharing,
+            allowed,
+            read_time: Duration::from_millis(read_ms),
+            ..Disk::default()
+        }))
+    }
+
+    /// Let the reads that are done finish (they are tasks on this runtime).
+    async fn settle() {
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    /// Run the gate as the loop does, a call every 100 ms (the tick's), for
+    /// `for_ms`: each call's answer, and that no call waited.
+    async fn drive(gate: &mut Gate, for_ms: u64) -> Vec<bool> {
+        let mut seen = Vec::new();
+        for _ in 0..for_ms / 100 {
+            let asked = tokio::time::Instant::now();
+            seen.push(gate.standing("aaaa").await.allowed);
+            assert_eq!(asked.elapsed(), Duration::ZERO, "a call waited");
+            tokio::time::advance(Duration::from_millis(100)).await;
+            settle().await;
+        }
+        seen
+    }
+
+    /// Run the gate as the loop does for `for_ms` while the first reads
+    /// come in (those may wait).
+    async fn warm(gate: &mut Gate, for_ms: u64) {
+        let until = tokio::time::Instant::now() + Duration::from_millis(for_ms);
+        while tokio::time::Instant::now() < until {
+            gate.standing("aaaa").await;
+            tokio::time::advance(Duration::from_millis(100)).await;
+            settle().await;
+        }
+    }
+
+    /// The first read is waited for; then nothing is waited for, a read
+    /// again starts once a second, and a permission taken away on a
+    /// healthy disk (50 ms reads) stops input within about 1.5 s.
+    #[tokio::test(start_paused = true)]
+    async fn a_revoke_on_a_healthy_disk_lands_within_a_second_and_a_half() {
+        let d = disk(true, true, 50);
+        let mut gate = test_gate(&d);
+        assert!(gate.standing("aaaa").await.allowed, "the first read");
+        assert!(drive(&mut gate, 3_000).await.iter().all(|a| *a));
+        d.lock().unwrap().allowed = false;
+        let seen = drive(&mut gate, 3_000).await;
+        let lag = seen.iter().position(|a| !a).expect("revoked") as u64 * 100;
+        assert!(lag <= 1_500, "revoked after {lag} ms");
+        assert!(seen[lag as usize / 100..].iter().all(|a| !a));
+        let d = d.lock().unwrap();
+        assert_eq!(d.most_under_way, [1, 1], "one read at a time");
+        assert!(d.standing_reads <= 8, "{} reads in 6 s", d.standing_reads);
+    }
+
+    /// A slow disk that works (1.6 s and 2.5 s reads): once the first read
+    /// is in, never waited for and never closed.
+    #[tokio::test(start_paused = true)]
+    async fn steady_slow_reads_never_stall_or_close() {
+        for read_ms in [1_600, 2_500] {
+            let d = disk(true, true, read_ms);
+            let mut gate = test_gate(&d);
+            // A first read past FIRST_WAIT is refused; open once it is in.
+            warm(&mut gate, 8_000).await;
+            assert!(
+                drive(&mut gate, 20_000).await.iter().all(|a| *a),
+                "{read_ms} ms reads stay open"
+            );
+            assert_eq!(d.lock().unwrap().most_under_way, [1, 1]);
+        }
+    }
+
+    /// On a 2.5 s disk a revoke lands when the read after it comes back:
+    /// within two reads, and closed from then on.
+    #[tokio::test(start_paused = true)]
+    async fn on_a_slow_disk_a_revoke_lands_after_a_read() {
+        let d = disk(true, true, 2_500);
+        let mut gate = test_gate(&d);
+        warm(&mut gate, 8_000).await;
+        assert!(gate.standing("aaaa").await.allowed, "open once read");
+        d.lock().unwrap().allowed = false;
+        let seen = drive(&mut gate, 8_000).await;
+        let lag = seen.iter().position(|a| !a).expect("revoked") as u64 * 100;
+        assert!(lag <= 5_200, "revoked after {lag} ms");
+        assert!(seen[lag as usize / 100..].iter().all(|a| !a));
+    }
+
+    /// A trust store that hangs: closed within FAIL_AFTER of the last read
+    /// that came back, no call waiting and no read started again while it
+    /// hangs (one thread at most); open again as soon as it comes back.
+    #[tokio::test(start_paused = true)]
+    async fn a_hung_read_closes_then_reopens_when_it_comes_back() {
+        let d = disk(true, true, 50);
+        let mut gate = test_gate(&d);
+        assert!(gate.standing("aaaa").await.allowed);
+        drive(&mut gate, 2_000).await;
+        d.lock().unwrap().hang_trust = true;
+        let seen = drive(&mut gate, 10_000).await;
+        let closed = seen.iter().position(|a| !a).expect("closed") as u64 * 100;
+        assert!(closed <= 3_600, "closed after {closed} ms");
+        assert!(seen[closed as usize / 100..].iter().all(|a| !a));
+        let reads = d.lock().unwrap().standing_reads;
+        drive(&mut gate, 10_000).await;
+        assert_eq!(
+            d.lock().unwrap().standing_reads,
+            reads,
+            "none started again"
+        );
+        assert_eq!(d.lock().unwrap().most_under_way[1], 1);
+        // The disk answers: the read under way comes back, and the very
+        // next call is open.
+        d.lock().unwrap().hang_trust = false;
+        tokio::time::advance(Duration::from_millis(20)).await;
+        settle().await;
+        assert!(gate.standing("aaaa").await.allowed, "open again");
+    }
+
+    /// The first read hanging is waited for FIRST_WAIT, then refused, and
+    /// not waited for again; a computer quiet a while is read afresh and
+    /// allowed at once.
+    #[tokio::test(start_paused = true)]
+    async fn a_first_read_is_waited_for_a_bounded_time() {
+        let d = disk(true, true, 50);
+        let mut gate = test_gate(&d);
+        assert!(gate.on().await);
+        d.lock().unwrap().hang_trust = true;
+        let asked = tokio::time::Instant::now();
+        assert!(!gate.standing("aaaa").await.allowed);
+        assert_eq!(asked.elapsed(), FIRST_WAIT);
+        let asked = tokio::time::Instant::now();
+        assert!(!gate.standing("aaaa").await.allowed);
+        // The hung read is not waited for again (only a fresh settings read,
+        // whose value is now past ADMIT_FRESH, is).
+        assert!(
+            asked.elapsed() < Duration::from_millis(100),
+            "not waited for again: {:?}",
+            asked.elapsed()
+        );
+        d.lock().unwrap().hang_trust = false;
+        tokio::time::advance(Duration::from_millis(20)).await;
+        settle().await;
+        assert!(gate.standing("aaaa").await.allowed);
+        // Quiet 30 s, the permission given meanwhile: read afresh.
+        let d = disk(true, false, 50);
+        let mut gate = test_gate(&d);
+        assert!(!gate.standing("aaaa").await.allowed);
+        d.lock().unwrap().allowed = true;
+        tokio::time::advance(Duration::from_secs(30)).await;
+        assert!(gate.standing("aaaa").await.allowed, "the fresh read");
+    }
+
+    /// I4: a read that finished while the computer was quiet, the
+    /// permission taken away meanwhile, lets none of its first messages in;
+    /// the same after a quiet spell shorter than FAIL_AFTER.
+    #[tokio::test(start_paused = true)]
+    async fn a_revoke_in_a_quiet_spell_refuses_the_first_message() {
+        for quiet_ms in [30_000, 2_000] {
+            let d = disk(true, true, 50);
+            let mut gate = test_gate(&d);
+            assert!(gate.standing("aaaa").await.allowed);
+            // Past the recheck: a read starts, and finishes unasked.
+            drive(&mut gate, 1_000).await;
+            assert!(gate.standing("aaaa").await.allowed);
+            // It runs (50 ms) and finishes, with nobody asking.
+            for _ in 0..2 {
+                tokio::time::advance(Duration::from_millis(100)).await;
+                settle().await;
+            }
+            d.lock().unwrap().allowed = false;
+            tokio::time::advance(Duration::from_millis(quiet_ms)).await;
+            settle().await;
+            // Its Hello, Enter and keys: each asks the gate.
+            for _ in 0..3 {
+                assert!(
+                    !gate.standing("aaaa").await.allowed,
+                    "{quiet_ms} ms quiet: refused"
+                );
+            }
+        }
+    }
+
+    /// A read hung for minutes that lands is not trusted to let in: a
+    /// fresh read decides.
+    #[tokio::test(start_paused = true)]
+    async fn a_read_hung_for_minutes_is_not_trusted() {
+        let d = disk(true, true, 50);
+        let mut gate = test_gate(&d);
+        assert!(gate.standing("aaaa").await.allowed);
+        d.lock().unwrap().hang_trust = true;
+        drive(&mut gate, 5_000).await;
+        tokio::time::advance(Duration::from_secs(180)).await;
+        d.lock().unwrap().allowed = false;
+        // The hung read (which read "allowed") lands now.
+        d.lock().unwrap().hang_trust = false;
+        tokio::time::advance(Duration::from_millis(20)).await;
+        settle().await;
+        assert!(
+            !gate.standing("aaaa").await.allowed,
+            "the fresh read decides"
+        );
+    }
+
+    /// A config read that hangs turns sharing off within FAIL_AFTER, so
+    /// every computer is refused; sharing last read as off stays off
+    /// through a hang; turning it off lands within about 1.5 s.
+    #[tokio::test(start_paused = true)]
+    async fn a_hung_config_read_turns_sharing_off() {
+        let d = disk(true, true, 50);
+        let mut gate = test_gate(&d);
+        assert!(gate.on().await);
+        d.lock().unwrap().hang_config = true;
+        let mut off_after = None;
+        for i in 0..60 {
+            tokio::time::advance(Duration::from_millis(100)).await;
+            settle().await;
+            if !gate.on().await {
+                off_after = Some(i * 100 + 100);
+                break;
+            }
+        }
+        assert!(off_after.is_some_and(|ms| ms <= 3_600), "{off_after:?}");
+        assert_eq!(gate.refusal("aaaa").await, Some(wire::REFUSE_SHARING_OFF));
+        // Off, then a hang: still off.
+        let d = disk(false, true, 50);
+        let mut gate = test_gate(&d);
+        assert!(!gate.on().await);
+        d.lock().unwrap().hang_config = true;
+        for _ in 0..60 {
+            tokio::time::advance(Duration::from_millis(100)).await;
+            settle().await;
+            assert!(!gate.on().await, "off stays off");
+        }
+        // Turned off, reads healthy: off within about 1.5 s.
+        let d = disk(true, true, 50);
+        let mut gate = test_gate(&d);
+        assert!(gate.on().await);
+        d.lock().unwrap().sharing = false;
+        let turned = tokio::time::Instant::now();
+        while gate.on().await {
+            tokio::time::advance(Duration::from_millis(100)).await;
+            settle().await;
+        }
+        assert!(turned.elapsed() <= Duration::from_millis(1_500));
+    }
 
     #[derive(Debug, Clone, PartialEq)]
     enum Call {
