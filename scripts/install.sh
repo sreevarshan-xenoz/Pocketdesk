@@ -875,11 +875,15 @@ _build_dep_list() {
   # ffmpeg-free has no libx264, so its libopenh264 is the software encoder,
   # and it encodes only once Cisco's OpenH264 replaces Fedora's noopenh264
   # stub. The library comes from Fedora's fedora-cisco-openh264 repository,
-  # asked for only where that repository is enabled.
+  # asked for only where that repository is enabled (read from the local
+  # cache, no network); the script never enables a repository itself.
   if [[ "$fedora_ffmpeg_free" == 1 ]]; then
-    if ! rpm -q openh264 &>/dev/null \
-      && dnf repolist --enabled 2>/dev/null | grep -q 'cisco-openh264'; then
-      _deps+=("openh264")
+    if ! rpm -q openh264 &>/dev/null; then
+      if dnf -C repolist --enabled 2>/dev/null | grep -q 'fedora-cisco-openh264'; then
+        _deps+=("openh264")
+      else
+        warn "Fedora's fedora-cisco-openh264 repository is off, so Cisco's OpenH264 is not installed: enable it ('sudo dnf config-manager setopt fedora-cisco-openh264.enabled=1'), then 'sudo dnf install openh264'."
+      fi
     fi
     warn "Fedora's ffmpeg-free has no libx264: software encoding goes through libopenh264 (Cisco's OpenH264, 'sudo dnf install openh264'), at lower quality per bitrate than libx264. Its VAAPI and NVENC encoders work in hardware, but Fedora's own Mesa (AMD) does not encode H.264 through VAAPI."
     warn "For libx264, add RPM Fusion's ffmpeg ('sudo dnf swap ffmpeg-free ffmpeg --allowerasing'); for AMD hardware encoding, its freeworld VA drivers."
