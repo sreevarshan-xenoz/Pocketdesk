@@ -18,7 +18,8 @@ pub enum PortalEvent {
     Absolute { x_norm: u16, y_norm: u16 },
     /// A pointer button by evdev code (`BTN_LEFT` 0x110 ...).
     Button { code: i32, pressed: bool },
-    /// Wheel notches: `axis` 0 vertical, 1 horizontal.
+    /// Wheel notches: `axis` 0 vertical, 1 horizontal; positive is down,
+    /// or right. How the portal is told them is [`wheel_call`]'s choice.
     Scroll { axis: u32, steps: i32 },
     /// A key by evdev code.
     Key { code: i32, pressed: bool },
@@ -59,6 +60,89 @@ pub fn text_events(text: &str) -> Vec<PortalEvent> {
             ]
         })
         .collect()
+}
+
+/// One wheel notch as smooth scroll, in the axis units a compositor gets
+/// from a mouse: libinput's 15 degrees a notch, which KWin hands on as 15.0,
+/// and what the wlroots path (`wlr_input::NOTCH`) and a
+/// uinput `REL_WHEEL` notch scroll by.
+pub const SMOOTH_NOTCH: f64 = 15.0;
+
+/// How the portal's backend has to be told a wheel notch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WheelStyle {
+    /// `NotifyPointerAxisDiscrete` steps: GNOME (mutter makes each step a
+    /// real wheel click) and the portal's own meaning of the call.
+    Discrete,
+    /// `NotifyPointerAxis` in pixels: KDE, whose backend hands
+    /// `NotifyPointerAxisDiscrete`'s steps to KWin's fake input as pixels,
+    /// so a notch scrolled by one (checked headless on Plasma 6.8.2).
+    Smooth,
+}
+
+/// The style for the desktop named by `XDG_CURRENT_DESKTOP` (colon
+/// separated, as `KDE` or `ubuntu:GNOME`) or, without one, by
+/// `KDE_FULL_SESSION`.
+pub fn wheel_style(current_desktop: Option<&str>, kde_full_session: bool) -> WheelStyle {
+    let kde = match current_desktop {
+        Some(names) if !names.trim().is_empty() => names
+            .split(':')
+            .any(|name| name.trim().eq_ignore_ascii_case("KDE")),
+        _ => kde_full_session,
+    };
+    if kde {
+        WheelStyle::Smooth
+    } else {
+        WheelStyle::Discrete
+    }
+}
+
+/// [`wheel_style`] for this process's session.
+pub fn session_wheel_style() -> WheelStyle {
+    wheel_style(
+        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+        std::env::var_os("KDE_FULL_SESSION").is_some(),
+    )
+}
+
+/// A portal call that turns the wheel.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WheelCall {
+    /// `NotifyPointerAxisDiscrete(axis, steps)`.
+    Discrete { axis: u32, steps: i32 },
+    /// `NotifyPointerAxis(dx, dy)` with `finish` set: one notch is a whole
+    /// scroll, so nothing kinetic carries on after it.
+    Smooth { dx: f64, dy: f64 },
+}
+
+/// `steps` notches on `axis` (0 vertical, 1 horizontal; positive is down,
+/// or right) as the call `style` takes, none for no notches.
+///
+/// KDE's backend turns `NotifyPointerAxis`'s `dy` over before KWin sees it
+/// (it sends `-dy` as the vertical axis value, and `dx` as it is), so a
+/// notch down is a negative `dy` there and its axis value comes out as
+/// [`SMOOTH_NOTCH`] down, as a mouse's would.
+pub fn wheel_call(style: WheelStyle, axis: u32, steps: i32) -> Option<WheelCall> {
+    if steps == 0 {
+        return None;
+    }
+    Some(match style {
+        WheelStyle::Discrete => WheelCall::Discrete { axis, steps },
+        WheelStyle::Smooth => {
+            let pixels = f64::from(steps) * SMOOTH_NOTCH;
+            if axis == 0 {
+                WheelCall::Smooth {
+                    dx: 0.0,
+                    dy: -pixels,
+                }
+            } else {
+                WheelCall::Smooth {
+                    dx: pixels,
+                    dy: 0.0,
+                }
+            }
+        }
+    })
 }
 
 /// Where a normalized position falls on a stream of `size`, in its pixels.
@@ -203,6 +287,78 @@ mod tests {
                 pressed: true
             }),
             "none left"
+        );
+    }
+
+    #[test]
+    fn kde_scrolls_smooth_and_the_rest_by_steps() {
+        assert_eq!(wheel_style(Some("KDE"), false), WheelStyle::Smooth);
+        assert_eq!(wheel_style(Some("kde"), false), WheelStyle::Smooth);
+        assert_eq!(
+            wheel_style(Some("X-Generic:KDE"), false),
+            WheelStyle::Smooth
+        );
+        assert_eq!(wheel_style(Some("GNOME"), false), WheelStyle::Discrete);
+        assert_eq!(
+            wheel_style(Some("ubuntu:GNOME"), false),
+            WheelStyle::Discrete
+        );
+        assert_eq!(
+            wheel_style(Some("KDEish"), false),
+            WheelStyle::Discrete,
+            "a whole name only"
+        );
+        assert_eq!(
+            wheel_style(Some("GNOME"), true),
+            WheelStyle::Discrete,
+            "the named desktop wins"
+        );
+        assert_eq!(
+            wheel_style(None, true),
+            WheelStyle::Smooth,
+            "no name: KDE's own"
+        );
+        assert_eq!(wheel_style(Some(""), true), WheelStyle::Smooth);
+        assert_eq!(
+            wheel_style(None, false),
+            WheelStyle::Discrete,
+            "the spec's call"
+        );
+    }
+
+    #[test]
+    fn a_notch_is_one_step_or_fifteen_pixels_in_kdes_signs() {
+        assert_eq!(wheel_call(WheelStyle::Discrete, 0, 0), None);
+        assert_eq!(wheel_call(WheelStyle::Smooth, 1, 0), None);
+        assert_eq!(
+            wheel_call(WheelStyle::Discrete, 0, -2),
+            Some(WheelCall::Discrete { axis: 0, steps: -2 }),
+            "steps pass as they are"
+        );
+        assert_eq!(
+            wheel_call(WheelStyle::Discrete, 1, 3),
+            Some(WheelCall::Discrete { axis: 1, steps: 3 })
+        );
+        // KDE sends -dy to KWin: a notch down is dy -15, an axis value of 15.
+        assert_eq!(
+            wheel_call(WheelStyle::Smooth, 0, 1),
+            Some(WheelCall::Smooth { dx: 0.0, dy: -15.0 }),
+            "down"
+        );
+        assert_eq!(
+            wheel_call(WheelStyle::Smooth, 0, -2),
+            Some(WheelCall::Smooth { dx: 0.0, dy: 30.0 }),
+            "two up"
+        );
+        assert_eq!(
+            wheel_call(WheelStyle::Smooth, 1, 1),
+            Some(WheelCall::Smooth { dx: 15.0, dy: 0.0 }),
+            "right, as it is"
+        );
+        assert_eq!(
+            wheel_call(WheelStyle::Smooth, 1, -1),
+            Some(WheelCall::Smooth { dx: -15.0, dy: 0.0 }),
+            "left"
         );
     }
 }

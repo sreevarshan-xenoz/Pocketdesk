@@ -11,7 +11,7 @@
 //!
 //! `PD_PORTAL_PROBE_ACTIONS` replaces the default input with a list, comma
 //! separated: `click:X:Y` (0 to 1 across the screen), `key:CODE` (evdev),
-//! `scroll:STEPS`, `wait:MS` and `snap:NAME` (the newest frame as a PPM, written only as
+//! `scroll:STEPS` (positive down), `hscroll:STEPS` (positive right), `wait:MS` and `snap:NAME` (the newest frame as a PPM, written only as
 //! NAME in `PD_PORTAL_PROBE_DIR`, the throwaway folder).
 //!
 //! `PD_PORTAL_PROBE_DIR="$XDG_RUNTIME_DIR/pd-grant" cargo test -p pocketdesk-core --test
@@ -81,6 +81,7 @@ async fn the_portal_shares_the_screen_and_takes_input() {
     }
     let input = std::env::var_os("PD_PORTAL_PROBE_INPUT").is_some();
     portal_input::want(input);
+    println!("WHEEL {:?}", portal_input::session_wheel_style());
     println!(
         "TOKENS_BEFORE screen={} remote={}",
         portal_grant::read(&dir).is_some(),
@@ -132,6 +133,10 @@ async fn the_portal_shares_the_screen_and_takes_input() {
                 ],
                 ["scroll", steps] => vec![PortalEvent::Scroll {
                     axis: 0,
+                    steps: steps.parse().unwrap(),
+                }],
+                ["hscroll", steps] => vec![PortalEvent::Scroll {
+                    axis: 1,
                     steps: steps.parse().unwrap(),
                 }],
                 ["key", code] => {
