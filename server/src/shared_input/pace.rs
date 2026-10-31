@@ -1,8 +1,13 @@
 //! Moves paced at the driver (plan item 3a): a 1 kHz mouse made about a
 //! thousand datagrams a second, each a send on the link and an injection
 //! there. A move to the computer driven goes at most every
-//! [`MOVE_EVERY`]; one that comes sooner waits, and a newer move replaces
-//! it. That is safe because a [`Msg::Move`] is where the virtual cursor is
+//! [`MOVE_EVERY`], and goes the moment it comes when its slot is open
+//! (the first move of a burst, slow motion, and in a fast burst the first
+//! move after each slot opens), so pacing adds no wait to those. One that
+//! comes sooner waits, a newer move in its place; a newer move once the
+//! slot is open goes at once in its place, and only when none comes
+//! within [`TRAIL_GRACE`] of the slot (the mouse stopped) does the waiting
+//! one go by the clock. That is safe because a [`Msg::Move`] is where the virtual cursor is
 //! (normalised over that computer's screens), not how far it went: the
 //! driver still carries every captured move onto its cursor, and only the
 //! sends between are left out. Anything else that goes to another
@@ -19,6 +24,12 @@ use super::wire::Msg;
 /// The least time between two moves sent: 500 a second, still finer than
 /// a 240 Hz screen draws.
 pub const MOVE_EVERY: Duration = Duration::from_millis(2);
+
+/// How long past its slot a waiting move waits for a newer one to go in
+/// its place, on arrival, before it goes by the clock: more than a 1 kHz
+/// mouse's gap, so a steady stream is sent as it comes and only the last
+/// position before the mouse stops waits (at most this past its slot).
+pub const TRAIL_GRACE: Duration = Duration::from_micros(1500);
 
 /// Holds back moves sent sooner than [`MOVE_EVERY`] after the last.
 #[derive(Debug, Default)]
@@ -60,12 +71,17 @@ impl MovePacer {
                     if self.held.as_ref().is_some_and(|(held, _)| *held != to) {
                         self.release(now, &mut out);
                     }
-                    if let Some((_, waiting)) = self.held.as_mut() {
-                        *waiting = msg;
-                        self.folded += 1;
-                    } else if self.may_send(now) {
+                    if self.may_send(now) {
+                        // Its slot is open: it goes now, in place of any
+                        // older one waiting.
+                        if self.held.take().is_some() {
+                            self.folded += 1;
+                        }
                         self.sent_at = Some(now);
                         out.push(Action::Send(to, msg));
+                    } else if let Some((_, waiting)) = self.held.as_mut() {
+                        *waiting = msg;
+                        self.folded += 1;
                     } else {
                         self.held = Some((to, msg));
                     }
@@ -91,9 +107,10 @@ impl MovePacer {
         out
     }
 
-    /// The move waiting, once its time came.
+    /// The move waiting, once no newer one came to take its slot
+    /// ([`TRAIL_GRACE`] past it).
     pub fn due(&mut self, now: Instant) -> Option<Action> {
-        if self.held.is_some() && self.may_send(now) {
+        if self.deadline().is_some_and(|at| now >= at) {
             let mut out = Vec::with_capacity(1);
             self.release(now, &mut out);
             return out.pop();
@@ -101,10 +118,19 @@ impl MovePacer {
         None
     }
 
-    /// When the move waiting may go, if one waits.
+    /// When the move waiting goes by the clock, if one waits: at once with
+    /// pacing off.
     pub fn deadline(&self) -> Option<Instant> {
         self.held.as_ref()?;
-        Some(self.sent_at.map_or_else(Instant::now, |at| at + self.every))
+        let grace = if self.every.is_zero() {
+            Duration::ZERO
+        } else {
+            TRAIL_GRACE
+        };
+        Some(
+            self.sent_at
+                .map_or_else(Instant::now, |at| at + self.every + grace),
+        )
     }
 
     /// A send to `to` failed: its move waiting goes nowhere.
@@ -155,7 +181,8 @@ mod tests {
     }
 
     /// The first move goes at once; those within 2 ms wait, the newest
-    /// replacing the rest, and go when the time comes.
+    /// replacing the rest, and go by the clock once no newer one came to
+    /// take the slot.
     #[test]
     fn moves_go_every_two_ms_the_newest_kept() {
         let t = Instant::now();
@@ -163,14 +190,37 @@ mod tests {
         assert_eq!(pacer.pace(vec![mv("b", 1)], t), vec![mv("b", 1)]);
         assert!(pacer.pace(vec![mv("b", 2)], t + ms(1)).is_empty());
         assert!(pacer.pace(vec![mv("b", 3)], t + ms(1)).is_empty());
-        assert_eq!(pacer.deadline(), Some(t + ms(2)));
-        assert_eq!(pacer.due(t + ms(1)), None, "not yet");
-        assert_eq!(pacer.due(t + ms(2)), Some(mv("b", 3)));
+        assert_eq!(pacer.deadline(), Some(t + ms(2) + TRAIL_GRACE));
+        assert_eq!(pacer.due(t + ms(2)), None, "a newer one may take the slot");
+        assert_eq!(pacer.due(t + ms(2) + TRAIL_GRACE), Some(mv("b", 3)));
         assert_eq!(pacer.due(t + ms(9)), None, "nothing waits");
         assert_eq!(pacer.deadline(), None);
         assert_eq!(pacer.folded(), 1);
         // A move after a pause goes at once.
         assert_eq!(pacer.pace(vec![mv("b", 4)], t + ms(9)), vec![mv("b", 4)]);
+    }
+
+    /// In a steady stream each move that finds its slot open goes the
+    /// moment it comes, in place of the one waiting: no wait added.
+    #[test]
+    fn a_move_finding_its_slot_open_goes_at_once() {
+        let t = Instant::now();
+        let us = Duration::from_micros;
+        let mut pacer = MovePacer::new(true);
+        let mut sent = Vec::new();
+        for i in 0..20u32 {
+            let at = t + us(u64::from(i) * 1000);
+            sent.extend(pacer.pace(vec![mv("b", i)], at));
+            assert_eq!(pacer.due(at), None, "nothing by the clock mid-stream");
+        }
+        assert_eq!(sent.len(), 10, "every other one, as each came");
+        assert_eq!(sent[1], mv("b", 2));
+        assert_eq!(pacer.due(t + us(19_000) + TRAIL_GRACE), None);
+        assert_eq!(
+            pacer.due(t + us(18_000) + ms(2) + TRAIL_GRACE),
+            Some(mv("b", 19)),
+            "the last before the mouse stopped goes by the clock"
+        );
     }
 
     /// A key, button, wheel turn or crossing never overtakes a move before
@@ -214,7 +264,7 @@ mod tests {
         pacer.pace(vec![mv("b", 2)], t + ms(1));
         let out = pacer.pace(vec![mv("c", 1)], t + ms(1));
         assert_eq!(out, vec![mv("b", 2)], "c's waits its turn");
-        assert_eq!(pacer.due(t + ms(3)), Some(mv("c", 1)));
+        assert_eq!(pacer.due(t + ms(5)), Some(mv("c", 1)));
     }
 
     /// Off, every move goes as it comes; turned off with one waiting, it
