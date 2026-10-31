@@ -18,15 +18,127 @@ use tokio::sync::Mutex;
 ///
 /// Resolves to `$XDG_STATE_HOME/pocketdesk` (or equivalent on the current OS).
 pub fn state_dir() -> Result<PathBuf> {
+    #[cfg(test)]
+    test_dirs_first();
     // The shared resolver, which also moves a folder from before the rename.
     pocketdesk_core::local::paths::state_dir().context("unable to determine local state directory")
 }
 
 /// For tests: this process's throwaway state and config folders
-/// ([`pocketdesk_core::local::paths::use_test_dirs`]); returns the state one.
+/// ([`pocketdesk_core::local::paths::use_test_dirs`]), held by the calling
+/// test alone until the guard drops. The folders are one for the process
+/// (the trust store, the pairing PIN, device keys, the peer list), and
+/// tests that changed them side by side lost each other's changes; each
+/// test that reaches them takes the guard in its own body and keeps it to
+/// the end (a helper that makes something for the test returns the guard
+/// with it, or asserts the caller's with [`assert_test_turn`]). The turn is
+/// the test thread's: taken again on that thread it nests, but work the
+/// test moves to another thread (the blocking pool, a `std::thread`, a
+/// multi-thread runtime's workers) is covered only while the test still
+/// holds it, and must never take it itself. A test that waits more than
+/// [`TEST_TURN_WAIT`] for it fails, naming the test that holds it. Derefs
+/// to the state folder.
 #[cfg(test)]
-pub(crate) fn use_test_dirs() -> &'static std::path::Path {
-    pocketdesk_core::local::paths::use_test_dirs("server-tests")
+pub(crate) fn use_test_dirs() -> TestState {
+    let dir = pocketdesk_core::local::paths::use_test_dirs("server-tests");
+    let me = std::thread::current();
+    let deadline = std::time::Instant::now() + TEST_TURN_WAIT;
+    let mut turn = TEST_TURN.lock().unwrap_or_else(|e| e.into_inner());
+    while let Some((holder, name)) = turn.holder.as_ref() {
+        if *holder == me.id() {
+            break;
+        }
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            panic!(
+                "waited {}s for the state folder: test {name} still holds it",
+                TEST_TURN_WAIT.as_secs()
+            );
+        }
+        turn = TEST_TURN_FREED
+            .wait_timeout(turn, left)
+            .unwrap_or_else(|e| e.into_inner())
+            .0;
+    }
+    turn.holder = Some((me.id(), me.name().unwrap_or("?").to_string()));
+    turn.depth += 1;
+    TestState {
+        dir,
+        _not_send: std::marker::PhantomData,
+    }
+}
+
+/// For a test helper that reaches the state folder: the test calling it
+/// must hold its turn ([`use_test_dirs`]).
+#[cfg(test)]
+pub(crate) fn assert_test_turn() {
+    let me = std::thread::current().id();
+    let turn = TEST_TURN.lock().unwrap_or_else(|e| e.into_inner());
+    assert!(
+        turn.holder
+            .as_ref()
+            .is_some_and(|(holder, _)| *holder == me),
+        "take crate::state::use_test_dirs() in the test before this helper"
+    );
+}
+
+/// How long a test waits for another to let the state folder go: far past
+/// any test's run, so only a test that never lets go reaches it.
+#[cfg(test)]
+const TEST_TURN_WAIT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Which test thread holds the shared state folder (its id and name), and
+/// how many times.
+#[cfg(test)]
+struct TestTurn {
+    holder: Option<(std::thread::ThreadId, String)>,
+    depth: usize,
+}
+
+#[cfg(test)]
+static TEST_TURN: std::sync::Mutex<TestTurn> = std::sync::Mutex::new(TestTurn {
+    holder: None,
+    depth: 0,
+});
+
+#[cfg(test)]
+static TEST_TURN_FREED: std::sync::Condvar = std::sync::Condvar::new();
+
+/// A test's hold on the shared state folder ([`use_test_dirs`]). It stays
+/// on the thread that took it, as the turn is that thread's.
+#[cfg(test)]
+#[must_use = "the state folder is this test's only while the guard lives"]
+pub(crate) struct TestState {
+    dir: &'static std::path::Path,
+    _not_send: std::marker::PhantomData<*const ()>,
+}
+
+#[cfg(test)]
+impl std::ops::Deref for TestState {
+    type Target = std::path::Path;
+
+    fn deref(&self) -> &std::path::Path {
+        self.dir
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestState {
+    fn drop(&mut self) {
+        let mut turn = TEST_TURN.lock().unwrap_or_else(|e| e.into_inner());
+        turn.depth -= 1;
+        if turn.depth == 0 {
+            turn.holder = None;
+            TEST_TURN_FREED.notify_all();
+        }
+    }
+}
+
+/// In tests, every path below resolves inside the throwaway folders, never
+/// the owner's, even for a test that reaches one before taking its turn.
+#[cfg(test)]
+fn test_dirs_first() {
+    pocketdesk_core::local::paths::use_test_dirs("server-tests");
 }
 
 /// Where this session keeps the screen-sharing portal's grant (N8), read
@@ -335,5 +447,61 @@ mod tests {
         assert_eq!(ids(&answers), ["l8b-copies"]);
         unregister_client("l8b-copies").await;
         assert!(!is_copy_link(&Conn("phone", "l8b-copies")));
+    }
+}
+
+#[cfg(test)]
+mod turn_tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    /// Another thread's take, sent once it holds the turn (and let go).
+    fn take_elsewhere() -> mpsc::Receiver<()> {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _state = use_test_dirs();
+            let _ = tx.send(());
+        });
+        rx
+    }
+
+    /// The turn nests on its own thread, holds another thread off until
+    /// the outer guard goes, and a helper sees it held.
+    #[test]
+    fn the_turn_nests_and_holds_other_threads_off() {
+        let outer = use_test_dirs();
+        let inner = use_test_dirs();
+        assert_test_turn();
+        drop(inner);
+        let other = take_elsewhere();
+        assert!(
+            other.recv_timeout(Duration::from_millis(200)).is_err(),
+            "still held by the outer guard"
+        );
+        drop(outer);
+        other
+            .recv_timeout(Duration::from_secs(130))
+            .expect("free once the outer guard went");
+    }
+
+    /// A test that panics while holding the turn lets it go.
+    #[test]
+    fn a_panicking_holder_lets_the_turn_go() {
+        let panicked = std::panic::catch_unwind(|| {
+            let _state = use_test_dirs();
+            panic!("the test failed");
+        });
+        assert!(panicked.is_err());
+        take_elsewhere()
+            .recv_timeout(Duration::from_secs(130))
+            .expect("free after the panic");
+    }
+
+    /// A helper called with no turn held says so.
+    #[test]
+    fn a_helper_without_the_turn_fails() {
+        let asked = std::thread::spawn(assert_test_turn).join();
+        assert!(asked.is_err());
     }
 }

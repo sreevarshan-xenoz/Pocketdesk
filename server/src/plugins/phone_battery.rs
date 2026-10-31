@@ -599,7 +599,8 @@ mod tests {
     /// and raise warnings under made-up ids. Nothing is answered.
     #[tokio::test]
     async fn only_a_paired_phones_report_is_kept_and_none_is_answered() {
-        let dir = crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
+        let dir: &std::path::Path = &_state;
         std::fs::create_dir_all(dir).unwrap();
         pocketdesk_core::protocol::kdeconnect::TrustStore::update(
             dir.join("trusted_devices.json"),

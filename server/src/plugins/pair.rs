@@ -1865,7 +1865,7 @@ mod tests {
     /// phone not paired leaves nothing in the store.
     #[test]
     fn a_paired_phones_name_is_kept_and_an_unpaired_ones_is_not() {
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         let path = state::trust_store_path().unwrap();
         TrustStore::update(&path, |store| store.trust_device("names-paired-phone")).unwrap();
         note_claimed_name("names-paired-phone", "Galaxy\u{202E} A71");
@@ -1881,7 +1881,7 @@ mod tests {
     /// none, or with a word that is no version, clears it.
     #[test]
     fn a_paired_devices_release_is_kept_and_an_unpaired_ones_is_not() {
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         let path = state::trust_store_path().unwrap();
         TrustStore::update(&path, |store| store.trust_device("versions-paired-phone")).unwrap();
         note_claimed_version("versions-paired-phone", Some("0.8.1 "));
@@ -2649,7 +2649,7 @@ forged log line"
 
     #[test]
     fn unknown_device_is_not_paired() {
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         // QUIC paths lean on this being a strict deny-by-default lookup.
         assert!(!is_paired_device("00000000-0000-0000-0000-00000000dead"));
     }
@@ -2740,7 +2740,8 @@ mod owner_mark_tests {
     /// never do.
     #[tokio::test]
     async fn only_the_computers_own_code_makes_an_owner_phone() {
-        let dir = state::use_test_dirs().to_path_buf();
+        let _state = state::use_test_dirs();
+        let dir = _state.to_path_buf();
         let now = local_pin::now_unix();
         let id = |n: u8| format!("0d7c3a52-91e4-4b6f-8a2e-0000000000{n:02x}");
 
@@ -2812,7 +2813,8 @@ mod owner_mark_tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         crate::introductions::PINS.lock().unwrap().clear();
-        let dir = state::use_test_dirs().to_path_buf();
+        let _state = state::use_test_dirs();
+        let dir = _state.to_path_buf();
         let introducer = "0d7c3a52-91e4-4b6f-8a2e-0000000a1a01";
         let id = |n: u8| format!("0d7c3a52-91e4-4b6f-8a2e-0000000a1b{n:02x}");
         let hex_of = |k: u8| format!("{k:02x}").repeat(32);

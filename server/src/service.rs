@@ -2435,7 +2435,7 @@ mod control_tls_tests {
     async fn a_kde_connect_devices_packet_goes_to_the_bridge_not_the_refusal() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         // The bridge makes its identity in a throwaway state folder.
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         let addr = control_port().await;
         let mut tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
         let hello = serde_json::json!({
@@ -2492,8 +2492,9 @@ mod control_tls_tests {
     async fn counting_port(
         pairing_required: bool,
     ) -> (std::net::SocketAddr, Arc<std::sync::atomic::AtomicUsize>) {
-        // The gates read a throwaway state folder, never the user's.
-        crate::state::use_test_dirs();
+        // The gates read a throwaway state folder, never the user's: the
+        // calling test holds its turn on it.
+        crate::state::assert_test_turn();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let desktop = CertManager::new().unwrap();
@@ -2547,6 +2548,7 @@ mod control_tls_tests {
 
     #[tokio::test]
     async fn an_unpaired_phones_packets_are_never_dispatched() {
+        let _state = crate::state::use_test_dirs();
         let (addr, count) = counting_port(true).await;
         assert_eq!(ping(addr, &count).await, 0, "refused before any plugin");
         // The same packet with pairing off reaches the plugin: the refusal
@@ -2920,7 +2922,7 @@ mod internet_control_tests {
     }
 
     fn paired_with_iroh_key(device_id: &str, key: Option<&iroh::SecretKey>) {
-        crate::state::use_test_dirs();
+        crate::state::assert_test_turn();
         let dir = state::state_dir().unwrap();
         std::fs::create_dir_all(&dir).unwrap();
         TrustStore::update(state::trust_store_path().unwrap(), |store| {
@@ -2936,6 +2938,7 @@ mod internet_control_tests {
 
     #[tokio::test]
     async fn a_paired_phone_with_its_iroh_key_reaches_the_plugins() {
+        let _state = crate::state::use_test_dirs();
         let id = format!("internet-{}", uuid::Uuid::new_v4().simple());
         let key = iroh::SecretKey::generate();
         paired_with_iroh_key(&id, Some(&key));
@@ -2951,6 +2954,7 @@ mod internet_control_tests {
 
     #[test]
     fn a_phone_on_the_internet_road_receives_pushes_only_with_its_key() {
+        let _state = crate::state::use_test_dirs();
         let id = format!("internet-{}", uuid::Uuid::new_v4().simple());
         let key = iroh::SecretKey::generate();
         paired_with_iroh_key(&id, Some(&key));
@@ -2968,6 +2972,7 @@ mod internet_control_tests {
 
     #[tokio::test]
     async fn another_key_or_no_registered_key_is_refused_before_the_desktop_names_itself() {
+        let _state = crate::state::use_test_dirs();
         let refused = |outcome: &std::result::Result<usize, String>| matches!(outcome, Err(e) if e.contains(pocketdesk_core::protocol::HANDSHAKE_REFUSED));
         let id = format!("internet-{}", uuid::Uuid::new_v4().simple());
         paired_with_iroh_key(&id, Some(&iroh::SecretKey::generate()));
@@ -3003,7 +3008,7 @@ mod vector_tests {
     /// A control port served by the real handler, the real plugins and the
     /// computer's real identity packet, over a throwaway state folder.
     async fn real_port() -> std::net::SocketAddr {
-        crate::state::use_test_dirs();
+        crate::state::assert_test_turn();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let desktop = CertManager::new().unwrap();
@@ -3187,42 +3192,34 @@ mod vector_tests {
 
     #[tokio::test]
     async fn a_second_identity_naming_a_paired_phone_borrows_nothing() {
+        let _state = crate::state::use_test_dirs();
         let addr = real_port().await;
         // A phone paired in the throwaway state folder, whose id a stranger
-        // names after its own handshake.
-        let pair = || {
-            pocketdesk_core::protocol::kdeconnect::TrustStore::load_or_create(
-                crate::state::trust_store_path().unwrap(),
-            )
-            .unwrap()
-            .trust_device("vector-paired-phone")
-            .unwrap();
-        };
+        // names after its own handshake. The folder is this test's while it
+        // holds its turn, so one try each is the test: nothing else unpairs
+        // the phone meanwhile.
+        pocketdesk_core::protocol::kdeconnect::TrustStore::update(
+            crate::state::trust_store_path().unwrap(),
+            |store| store.trust_device("vector-paired-phone"),
+        )
+        .unwrap();
         let request = serde_json::json!({
             "type": "kdeconnect.pocketdesk.monitors",
             "body": { "request": true }
         });
-        // The control: the paired phone itself is answered. The lib tests
-        // share one throwaway state folder, so another may rewrite the trust
-        // store meanwhile: pair again and retry before calling it a failure.
+        // The control: the paired phone itself is answered.
         let mut answered = false;
-        for _ in 0..3 {
-            pair();
-            let mut paired = open_as(addr, true, true, "vector-paired-phone").await;
-            write_line(&mut paired, &request.to_string()).await;
-            // Its seed pushes come first; then the answer.
-            for _ in 0..10 {
-                match read_line(&mut paired, 5000).await {
-                    Some(line) if line.contains("\"kdeconnect.pocketdesk.monitors\"") => {
-                        answered = true;
-                        break;
-                    }
-                    Some(line) if line != CLOSED => continue,
-                    _ => break,
+        let mut paired = open_as(addr, true, true, "vector-paired-phone").await;
+        write_line(&mut paired, &request.to_string()).await;
+        // Its seed pushes come first; then the answer.
+        for _ in 0..10 {
+            match read_line(&mut paired, 5000).await {
+                Some(line) if line.contains("\"kdeconnect.pocketdesk.monitors\"") => {
+                    answered = true;
+                    break;
                 }
-            }
-            if answered {
-                break;
+                Some(line) if line != CLOSED => continue,
+                _ => break,
             }
         }
         assert!(answered, "the paired phone is answered");
@@ -3230,42 +3227,31 @@ mod vector_tests {
             "type": "kdeconnect.identity",
             "body": { "deviceId": "vector-paired-phone", "deviceName": "Borrowed" }
         });
-        // The stranger's silence counts only while the phone it names stayed
-        // paired throughout: otherwise it would be unanswered for the wrong
-        // reason, so try again.
-        let still_paired = || {
-            pocketdesk_core::protocol::kdeconnect::TrustStore::load_or_create(
-                crate::state::trust_store_path().unwrap(),
+        let mut stream = open(addr, true, true).await;
+        write_line(&mut stream, &identity.to_string()).await;
+        write_line(&mut stream, &request.to_string()).await;
+        let reply = read_line(&mut stream, 1000).await;
+        assert!(
+            pocketdesk_core::protocol::kdeconnect::TrustStore::read(
+                crate::state::trust_store_path().unwrap()
             )
             .unwrap()
-            .is_trusted("vector-paired-phone")
-        };
-        let mut judged = false;
-        for _ in 0..3 {
-            pair();
-            let mut stream = open(addr, true, true).await;
-            write_line(&mut stream, &identity.to_string()).await;
-            write_line(&mut stream, &request.to_string()).await;
-            let reply = read_line(&mut stream, 1000).await;
-            if !still_paired() {
-                continue;
-            }
-            // Told it is not paired (BB1), never answered.
-            let answered = reply.as_deref().is_some_and(|line| {
-                !line.contains(pocketdesk_core::protocol::connection::NOT_PAIRED)
-            });
-            assert!(
-                !answered,
-                "still the stranger it opened as: a paired phone's request would be answered"
-            );
-            judged = true;
-            break;
-        }
-        assert!(judged, "the phone stayed paired through none of the tries");
+            .is_trusted("vector-paired-phone"),
+            "the phone it names stayed paired"
+        );
+        // Told it is not paired (BB1), never answered.
+        let answered = reply
+            .as_deref()
+            .is_some_and(|line| !line.contains(pocketdesk_core::protocol::connection::NOT_PAIRED));
+        assert!(
+            !answered,
+            "still the stranger it opened as: a paired phone's request would be answered"
+        );
     }
 
     #[tokio::test]
     async fn every_control_vector_holds_against_the_real_handler() {
+        let _state = crate::state::use_test_dirs();
         let vectors: Value = serde_json::from_str(VECTORS).unwrap();
         assert_eq!(vectors["version"], 1);
         let addr = real_port().await;
@@ -3379,7 +3365,7 @@ mod close_tests {
     /// another packet.
     #[tokio::test]
     async fn a_removed_device_s_connection_closes_at_once_saying_not_paired() {
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         let device = "0d7c3a52-91e4-4b6f-8a2e-00000000c105";
         let (client, server) = tokio::io::duplex(64 * 1024);
         let registry = Arc::new(PluginRegistry::new());
