@@ -781,7 +781,6 @@ impl<T: Copy + Send + 'static> Fresh<T> {
     ) -> T {
         let now = tokio::time::Instant::now();
         self.take_done().await;
-        let mut start = Some(start);
         let mut started_here = false;
         let current = self
             .value
@@ -789,10 +788,8 @@ impl<T: Copy + Send + 'static> Fresh<T> {
         let stale =
             current.is_none_or(|(_, started, _)| now.saturating_duration_since(started) >= RECHECK);
         if self.reading.is_none() && stale {
-            if let Some(start) = start.take() {
-                self.reading = Some((stamped(start()), now));
-                started_here = true;
-            }
+            self.reading = Some((stamped(start()), now));
+            started_here = true;
         }
         match current {
             Some((value, started, done)) => {
