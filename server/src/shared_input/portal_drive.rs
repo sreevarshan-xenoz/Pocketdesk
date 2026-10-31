@@ -29,6 +29,7 @@ use super::badge;
 use super::drive::{Action, Captured, Driver, OpenChannel, SavedLayout, layout_for, reachable};
 use super::game_lock::Foreground;
 use super::link::{self, Channel};
+use super::pace::MovePacer;
 use super::phone::{self, PhoneChannel};
 use super::portal_glue::{Backend, Portal, PortalGlue, Standing};
 use super::quick::Nudge;
@@ -38,6 +39,8 @@ use super::status;
 use super::wire::{self, Msg};
 use crate::hyprland::HyprWindow;
 
+/// The longest the loop waits for input before it looks at the rest.
+const TICK: Duration = Duration::from_millis(50);
 /// How often what the owner does is told to every computer with a channel.
 const ACTIVE_EVERY: Duration = Duration::from_millis(200);
 /// How often, while away, the link is looked at.
@@ -154,6 +157,9 @@ struct Glue<B: Backend> {
     told_unavailable: sound::Unavailable,
     /// A game holds the keyboard and mouse here: no badge over it.
     game_held: bool,
+    /// Moves sent at most every 2 ms (plan item 3a), behind the quick
+    /// link's switch.
+    pacer: MovePacer,
 }
 
 impl<B: Backend> Glue<B> {
@@ -222,9 +228,22 @@ impl<B: Backend> Glue<B> {
         }
     }
 
-    /// Do what the driver wants: this computer's input through the
-    /// portal's glue, the rest here.
+    /// Do what the driver wants, its moves paced ([`MovePacer`]).
     fn apply(&mut self, driver: &mut Driver, actions: Vec<Action>) {
+        let actions = self.pacer.pace(actions, Instant::now());
+        self.act(driver, actions);
+    }
+
+    /// The move the pacer held back, once its time came.
+    fn send_due(&mut self, driver: &mut Driver) {
+        if let Some(due) = self.pacer.due(Instant::now()) {
+            self.act(driver, vec![due]);
+        }
+    }
+
+    /// Do `actions`, already paced: this computer's input through the
+    /// portal's glue, the rest here.
+    fn act(&mut self, driver: &mut Driver, actions: Vec<Action>) {
         let mut queue = std::collections::VecDeque::from(actions);
         while let Some(action) = queue.pop_front() {
             if matches!(action, Action::WarpHome(..)) {
@@ -242,6 +261,7 @@ impl<B: Backend> Glue<B> {
                         if let Err(e) = channel.send(&msg) {
                             tracing::debug!("Shared input: not sent to the phone: {e}");
                             self.phones.remove(&to);
+                            self.pacer.forget(&to);
                             if driver.away_on() == Some(to.as_str()) {
                                 queue.retain(|a| not_for(a, &to));
                                 queue.extend(driver.on_send_error());
@@ -262,6 +282,7 @@ impl<B: Backend> Glue<B> {
                         if let Err(e) = sent {
                             tracing::debug!(to, "Shared input: not sent: {e}");
                             self.channels.remove(&to);
+                            self.pacer.forget(&to);
                             if driver.away_on() == Some(to.as_str()) {
                                 queue.retain(|a| not_for(a, &to));
                                 queue.extend(driver.on_send_error());
@@ -460,6 +481,7 @@ pub(super) fn drive<B: Backend>(
         listening: None,
         told_unavailable: sound::Unavailable::default(),
         game_held: false,
+        pacer: MovePacer::new(config.shared_input_low_latency),
     };
     let mut saved = SavedLayout::default();
     let mut read_layout = |glue: &mut Glue<B>| {
@@ -526,7 +548,11 @@ pub(super) fn drive<B: Backend>(
             &mut driver,
             last_input.elapsed() < super::receive::DRIVEN_FOR,
         );
-        match events.recv_timeout(Duration::from_millis(50)) {
+        // At most the loop's tick, less while a move waits its turn.
+        let wait = glue.pacer.deadline().map_or(TICK, |at| {
+            at.saturating_duration_since(Instant::now()).min(TICK)
+        });
+        match events.recv_timeout(wait) {
             Ok(event) => {
                 // Looked at again as the event comes: a barrier hit by the
                 // pointer of a computer that just arrived is let go of.
@@ -555,6 +581,7 @@ pub(super) fn drive<B: Backend>(
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
+        glue.send_due(&mut driver);
         if let Some(why) = glue.input.closed() {
             tracing::warn!(
                 "Shared input: input capture ended ({why}); the keyboard and mouse stay here"
@@ -643,6 +670,7 @@ pub(super) fn drive<B: Backend>(
             let config = crate::events::current_config();
             game_lock_on = config.shared_input_game_lock;
             quick_on = config.shared_input_low_latency;
+            glue.pacer.set(quick_on);
             driver.set_clipboard(config.shared_input_clipboard);
             glue.sound_on = config.shared_input_sound;
             let actions = driver.set_game_lock(game_lock_on, config.shared_input_lock_programs);

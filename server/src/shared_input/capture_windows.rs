@@ -81,6 +81,7 @@ pub use super::drive::{Captured, Mode};
 use super::drop_windows::{self, Caught, DropCatcher};
 use super::game_lock;
 use super::link::{self, Channel};
+use super::pace::MovePacer;
 use super::phone::{self, PhoneChannel};
 use super::quick::{KeepQuick, Nudge};
 use super::screens::{Desktop, Motion};
@@ -1016,6 +1017,8 @@ fn idle_ms() -> u32 {
     }
 }
 
+/// The longest the loop waits for input before it looks at the rest.
+const TICK: Duration = Duration::from_millis(50);
 /// How often what the owner does is told to every computer with a channel.
 const ACTIVE_EVERY: Duration = Duration::from_millis(200);
 /// How often, while away, the link is looked at.
@@ -1105,6 +1108,9 @@ struct Glue {
     phone_ids: HashSet<String>,
     phones: HashMap<String, PhoneChannel>,
     pongs_seen: HashMap<String, u64>,
+    /// Moves sent at most every 2 ms (plan item 3a), behind the quick
+    /// link's switch.
+    pacer: MovePacer,
     /// The sound of the computer driven (BK6): the setting, what was asked
     /// for, and its playing while asked.
     sound_on: bool,
@@ -1191,8 +1197,21 @@ impl Glue {
         }
     }
 
-    /// Do what the driver wants.
+    /// Do what the driver wants, its moves paced ([`MovePacer`]).
     fn apply(&mut self, driver: &mut Driver, actions: Vec<Action>) {
+        let actions = self.pacer.pace(actions, Instant::now());
+        self.act(driver, actions);
+    }
+
+    /// The move the pacer held back, once its time came.
+    fn send_due(&mut self, driver: &mut Driver) {
+        if let Some(due) = self.pacer.due(Instant::now()) {
+            self.act(driver, vec![due]);
+        }
+    }
+
+    /// Do `actions`, already paced.
+    fn act(&mut self, driver: &mut Driver, actions: Vec<Action>) {
         let mut queue = std::collections::VecDeque::from(actions);
         while let Some(action) = queue.pop_front() {
             match action {
@@ -1210,6 +1229,7 @@ impl Glue {
                     if let Err(e) = channel.send(&msg) {
                         tracing::debug!("Shared input: not sent to the phone: {e}");
                         self.phones.remove(&to);
+                        self.pacer.forget(&to);
                         if driver.away_on() == Some(to.as_str()) {
                             queue.retain(|a| match a {
                                 Action::Send(t, _) | Action::PushClipboard(t) => *t != to,
@@ -1239,6 +1259,7 @@ impl Glue {
                     if let Err(e) = sent {
                         tracing::debug!(to, "Shared input: not sent: {e}");
                         self.channels.remove(&to);
+                        self.pacer.forget(&to);
                         if driver.away_on() == Some(to.as_str()) {
                             // Home now; the rest queued for it is dropped.
                             queue.retain(|a| match a {
@@ -1727,6 +1748,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         quick: KeepQuick::default(),
         quick_on: config.shared_input_low_latency,
         nudge: Nudge::default(),
+        pacer: MovePacer::new(config.shared_input_low_latency),
         files_on: false,
         catcher: Catcher::default(),
         drop_catcher: None,
@@ -1825,7 +1847,11 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             &mut driver,
             last_input.elapsed() < super::receive::DRIVEN_FOR,
         );
-        match captured.recv_timeout(Duration::from_millis(50)) {
+        // At most the loop's tick, less while a move waits its turn.
+        let wait = glue.pacer.deadline().map_or(TICK, |at| {
+            at.saturating_duration_since(Instant::now()).min(TICK)
+        });
+        match captured.recv_timeout(wait) {
             // Looked at at once (and again for a while), before any move
             // queued behind it can cross an edge.
             Ok(Captured::ForegroundChanged) => {
@@ -1852,6 +1878,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
+        glue.send_due(&mut driver);
         // Files dragged across: the catcher looked at, its drops sent.
         glue.files_dropped(&driver);
         // The computer driven answering its pings, or not: one silent for
@@ -1962,6 +1989,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             driver.set_clipboard(config.shared_input_clipboard);
             glue.sound_on = config.shared_input_sound;
             glue.quick_on = config.shared_input_low_latency;
+            glue.pacer.set(glue.quick_on);
             if config.shared_input_files != glue.files_on {
                 glue.files_setting(config.shared_input_files);
             }

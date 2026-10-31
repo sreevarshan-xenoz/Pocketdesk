@@ -47,6 +47,7 @@ pub mod keys_evdev;
 pub mod keys_windows;
 pub mod layout;
 pub mod link;
+pub mod pace;
 pub mod phone;
 pub mod phone_test;
 pub mod portal_drive;
