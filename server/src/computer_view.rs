@@ -1458,6 +1458,11 @@ async fn attempt(
         if let Some(windows) = pocketdesk_core::streaming::screen_runs_windows(features) {
             next.windows = Some(windows);
         }
+        // Whether its clicks land on the screen this window shows (PC11),
+        // so another window of it may take control.
+        if let Some(per_screen) = pocketdesk_core::streaming::screen_input_per_screen(features) {
+            next.per_screen = Some(per_screen);
+        }
         // Whether it plays this computer's mic, so the window says why
         // nothing is heard (PC10 review).
         if let Some(mic) = pocketdesk_core::streaming::screen_takes_mic(features) {
