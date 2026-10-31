@@ -16,9 +16,6 @@ use tracing::{debug, error, info, trace, warn};
 use super::capture::{CaptureSession, monitor_rect};
 use super::{StreamingConfig, VideoFrame};
 
-/// SPA_PARAM_Format property ID (from SPA param type enum).
-const SPA_PARAM_FORMAT: u32 = 0;
-
 /// Shared state between the PipeWire thread and stream callbacks.
 struct StreamUserData {
     frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
@@ -629,7 +626,7 @@ fn video_format_pod(config: &StreamingConfig) -> Result<Vec<u8>> {
 
 /// Handle the param_changed callback to learn the negotiated video format.
 fn on_param_changed(id: u32, param: Option<&libspa::pod::Pod>, user_data: &StreamUserData) {
-    if id != SPA_PARAM_FORMAT {
+    if id != libspa::param::ParamType::Format.as_raw() {
         return;
     }
 
@@ -638,13 +635,10 @@ fn on_param_changed(id: u32, param: Option<&libspa::pod::Pod>, user_data: &Strea
         return;
     };
 
-    // Parse the negotiated format
-    let mut video_info = libspa::param::video::VideoInfoRaw::new();
-    if video_info.parse(param).is_err() {
+    let Some(video_info) = negotiated(id, param) else {
         warn!("Failed to parse video format from param_changed");
         return;
-    }
-
+    };
     let format = video_info.format();
     let size = video_info.size();
     let framerate = video_info.framerate();
@@ -657,6 +651,19 @@ fn on_param_changed(id: u32, param: Option<&libspa::pod::Pod>, user_data: &Strea
     // Update the actual dimensions for frame capture
     user_data.width.store(size.width, Ordering::Relaxed);
     user_data.height.store(size.height, Ordering::Relaxed);
+}
+
+/// The video format a `param_changed` of `id` settled on, when it is the
+/// stream's Format (`SPA_PARAM_Format`, 4; this was checked against 0,
+/// `SPA_PARAM_Invalid`, so the frames kept the configured size whatever the
+/// compositor sent, 2026-10-31).
+fn negotiated(id: u32, param: &libspa::pod::Pod) -> Option<libspa::param::video::VideoInfoRaw> {
+    if id != libspa::param::ParamType::Format.as_raw() {
+        return None;
+    }
+    let mut video_info = libspa::param::video::VideoInfoRaw::new();
+    video_info.parse(param).ok()?;
+    Some(video_info)
 }
 
 /// Handle the process callback -- dequeue frames and send them through the channel.
@@ -1039,6 +1046,54 @@ mod tests {
         };
         assert_eq!(default, Fraction { num: 30, denom: 1 });
         assert_eq!(min, Fraction { num: 0, denom: 1 });
+    }
+
+    #[test]
+    fn the_size_the_compositor_settled_on_is_read_from_the_format_param() {
+        use libspa::param::ParamType;
+        use libspa::param::format::{FormatProperties, MediaSubtype, MediaType};
+        use libspa::param::video::VideoFormat;
+        use libspa::utils::{Fraction, Rectangle};
+        let object = libspa::pod::object!(
+            libspa::utils::SpaTypes::ObjectParamFormat,
+            ParamType::Format,
+            libspa::pod::property!(FormatProperties::MediaType, Id, MediaType::Video),
+            libspa::pod::property!(FormatProperties::MediaSubtype, Id, MediaSubtype::Raw),
+            libspa::pod::property!(FormatProperties::VideoFormat, Id, VideoFormat::BGRx),
+            libspa::pod::property!(
+                FormatProperties::VideoSize,
+                Rectangle,
+                Rectangle {
+                    width: 1280,
+                    height: 720
+                }
+            ),
+            libspa::pod::property!(
+                FormatProperties::VideoFramerate,
+                Fraction,
+                Fraction { num: 0, denom: 1 }
+            ),
+        );
+        let (cursor, _) = libspa::pod::serialize::PodSerializer::serialize(
+            std::io::Cursor::new(Vec::new()),
+            &libspa::pod::Value::Object(object),
+        )
+        .unwrap();
+        let bytes = cursor.into_inner();
+        let pod = libspa::pod::Pod::from_bytes(&bytes).unwrap();
+
+        let info = negotiated(ParamType::Format.as_raw(), pod).expect("the format");
+        assert_eq!(
+            info.size(),
+            Rectangle {
+                width: 1280,
+                height: 720
+            }
+        );
+        assert_eq!(info.format(), VideoFormat::BGRx);
+        // Only the Format param is the one settled on.
+        assert!(negotiated(ParamType::EnumFormat.as_raw(), pod).is_none());
+        assert!(negotiated(0, pod).is_none());
     }
 
     #[test]
