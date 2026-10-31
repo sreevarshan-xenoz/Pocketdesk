@@ -1,0 +1,5 @@
+* Pair once for all your computers: a computer you paired can introduce the phone to your others.
+* Remove a lost phone or computer from another of your devices.
+* Each card says which release the computer runs, with a hint when it differs.
+* The phone as a second screen on Hyprland; a tidier Home and card menu.
+* Phones paired before 0.8.3 pair again with the computer's own code for these.

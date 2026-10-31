@@ -5605,7 +5605,7 @@ dependencies = [
 
 [[package]]
 name = "pocketdesk-android-bridge"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5626,7 +5626,7 @@ dependencies = [
 
 [[package]]
 name = "pocketdesk-core"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "anyhow",
  "ashpd",
@@ -5681,7 +5681,7 @@ dependencies = [
 
 [[package]]
 name = "pocketdesk-desktop"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
@@ -5705,14 +5705,14 @@ dependencies = [
 
 [[package]]
 name = "pocketdesk-ffmpeg"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "ffmpeg-next",
 ]
 
 [[package]]
 name = "pocketdesk-server"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "ab_glyph",
  "anyhow",
