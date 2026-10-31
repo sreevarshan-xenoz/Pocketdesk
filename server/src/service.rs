@@ -598,6 +598,10 @@ pub async fn run(config: Config) -> Result<()> {
         });
     }
 
+    // A screen session's absolute moves land on its own screen where the
+    // input backend spans the compositor's layout (PC11 on Linux).
+    #[cfg(target_os = "linux")]
+    crate::pointer_space::install();
     // Spawn input injection task — receives InputPacket from the QUIC
     // streaming channel and injects them into the host system.
     tokio::spawn(async move {

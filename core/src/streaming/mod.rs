@@ -97,10 +97,10 @@ pub use client::StreamingClient;
 pub use client::report_samples;
 pub use client::{
     REMOTE_FEATURE_LASER, REMOTE_FEATURES_SAID, SCREEN_FEATURE_INPUT, SCREEN_FEATURE_MIC,
-    SCREEN_FEATURE_MIC_SAID, SCREEN_FEATURE_PEN, SCREEN_FEATURE_SYSTEM_SAID,
-    SCREEN_FEATURE_WINDOWS, SCREEN_FEATURES_SAID, SOUND_GRANT_AUDIO, SOUND_GRANT_MIC,
-    SOUND_GRANT_SAID, remote_features, screen_features, screen_runs_windows, screen_takes_input,
-    screen_takes_mic, sound_grant,
+    SCREEN_FEATURE_MIC_SAID, SCREEN_FEATURE_PEN, SCREEN_FEATURE_PER_SCREEN,
+    SCREEN_FEATURE_SYSTEM_SAID, SCREEN_FEATURE_WINDOWS, SCREEN_FEATURES_SAID, SOUND_GRANT_AUDIO,
+    SOUND_GRANT_MIC, SOUND_GRANT_SAID, remote_features, screen_features, screen_input_per_screen,
+    screen_runs_windows, screen_takes_input, screen_takes_mic, sound_grant,
 };
 pub use connection::{
     Connection, ConnectionError, ConnectionStats, InStream, OutStream, PeerKey, QuinnConnection,
@@ -126,7 +126,9 @@ pub use session_telemetry::{
     set_session_telemetry_callback,
 };
 #[cfg(feature = "server")]
-pub use streamer::{SessionClaim, SessionInput, StreamingServer};
+pub use streamer::{
+    AbsoluteSpace, AbsoluteSpaceFn, SessionClaim, SessionInput, StreamingServer, set_absolute_space,
+};
 
 use serde::{Deserialize, Serialize};
 
