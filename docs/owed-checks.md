@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1074 open items.
+1078 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
 | A second computer | 146 |
-| A Linux desktop (the Azure VM serves for some) | 174 |
+| A Linux desktop (the Azure VM serves for some) | 178 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
 
@@ -1577,6 +1577,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - From a phone on the laptop: "Add a screen for this phone" in the picker, the session switches to it and a window dragged onto it shows on the phone; the screen goes about 10 s after the phone leaves. (where: linux)
 - A Hyprland whose config has a monitor rule for every output (`output = ""` with a fixed position): the phone's screen still lands right of the others. (where: linux)
+
+**246. Linux firewall: nftables and iptables, said at pairing**
+
+- The desktop app on the laptop: the Pair page (Phone and Computer) and Settings → Other computers show the firewall line, and it goes within 30 s of the ports being opened. (where: linux)
+- Arch's stock `/etc/nftables.conf` loaded: the row names "Arch's stock rules, which let in ssh only". (where: linux)
+- The hint's `nft insert` lines run by hand: the row turns green and a phone pairs. (where: linux)
+- iptables (`iptables.service` with a DROP policy): the row is red with the `iptables -I INPUT` lines. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
