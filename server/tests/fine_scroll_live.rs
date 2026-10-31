@@ -7,7 +7,9 @@
 //! does, then a touchpad's quarter notches, then half notches sideways.
 //! What arrives is read inside the compositor B injects into: a `wev`
 //! filling its output logs to the file `PD_WEV_LOG` names, and the test
-//! reads back each `axis` and `axis_value120` (or `axis_discrete`).
+//! reads back each `axis_source`, `axis` and `axis_value120` (or
+//! `axis_discrete`): the whole notch as a wheel with its step, the fine
+//! turns as a continuous source in pixels with no step.
 //!
 //! B injects into a nested or headless compositor only, never the desktop
 //! this computer shows: the test refuses to run without `PD_NESTED_WAYLAND`
@@ -98,7 +100,8 @@ fn refuse_the_desktop(nested: &str) {
 }
 
 /// One wheel event `wev` logged on the pointer: its kind (`axis`,
-/// `value120` or `discrete`), axis (0 vertical, 1 horizontal) and value.
+/// `value120`, `discrete`, or `source` with the source's number: 0 wheel,
+/// 2 continuous), axis (0 vertical, 1 horizontal) and value.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Wheel {
     kind: &'static str,
@@ -127,6 +130,19 @@ fn wheel_events(log: &Path) -> Vec<Wheel> {
         // wev binds the pointer twice; one object's events are enough.
         let id = id.trim().to_string();
         if object.get_or_insert_with(|| id.clone()) != &id {
+            continue;
+        }
+        if let Some(source) = event.strip_prefix("axis_source: ") {
+            let value = source
+                .split_whitespace()
+                .next()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(f64::NAN);
+            out.push(Wheel {
+                kind: "source",
+                axis: u32::MAX,
+                value,
+            });
             continue;
         }
         let kind = if event.starts_with("axis_value120:") {
@@ -328,21 +344,29 @@ fn a_touchpads_fine_scroll_lands_in_120ths() {
         ],
         "every turn as pixels, the fine ones as finely as they came"
     );
-    // A client of wl_pointer 8 or newer gets value120 for the whole notches
-    // only (the virtual pointer's steps are whole); an older one discrete.
+    // Review I1: a motion is all steps or all pixels. The whole notch
+    // goes as a wheel with its step; the touchpad's turns as a continuous
+    // source, pixels alone, never a step, so a toolkit reading steps when
+    // a frame has one never scrolls one motion twice.
+    let sources: Vec<f64> = landed
+        .iter()
+        .filter(|w| w.kind == "source")
+        .map(|w| w.value)
+        .collect();
+    assert_eq!(
+        sources,
+        [0.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0],
+        "the wheel, then continuous for each fine turn"
+    );
     let steps: Vec<(u32, f64)> = landed
         .iter()
-        .filter(|w| w.kind != "axis")
+        .filter(|w| w.kind == "value120" || w.kind == "discrete")
         .map(|w| {
             let per = if w.kind == "value120" { 120.0 } else { 1.0 };
             (w.axis, w.value / per)
         })
         .collect();
-    assert_eq!(
-        steps,
-        [(0, -1.0), (0, 1.0), (1, 1.0)],
-        "a step for each whole notch, on the turn that completed it"
-    );
+    assert_eq!(steps, [(0, -1.0)], "a step for the whole notch only");
 
     let session_id = wire::read_window(&a_state, 0).map(|v| v.session_id);
     computers::request(

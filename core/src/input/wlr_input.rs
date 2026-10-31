@@ -9,7 +9,7 @@ use std::os::fd::{AsFd, AsRawFd};
 use std::time::{Duration, Instant};
 
 use wayland_client::globals::registry_queue_init;
-use wayland_client::protocol::wl_pointer::{Axis, ButtonState};
+use wayland_client::protocol::wl_pointer::{Axis, AxisSource, ButtonState};
 use wayland_client::protocol::wl_seat::WlSeat;
 use wayland_client::{Connection, EventQueue, QueueHandle};
 use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1;
@@ -44,18 +44,43 @@ pub fn wheel(axis_vertical: bool, notches: i32) -> (f64, i32) {
     (f64::from(steps) * NOTCH, steps)
 }
 
-/// A fine turn of `v120` 120ths of a notch (uinput's sign), with the whole
-/// `notches` it completes, as the axis value and discrete steps Wayland
-/// expects (positive is down, or right). The virtual pointer's
-/// `axis_discrete` takes whole steps only (wlroots makes each one a
-/// `value120` of 120), so a turn that completes none goes as `axis` alone,
-/// in pixels.
-pub fn fine_wheel(axis_vertical: bool, v120: i32, notches: i32) -> (f64, i32) {
+/// A fine turn of `v120` 120ths of a notch (uinput's sign) as the axis
+/// value Wayland expects, in pixels (positive is down, or right).
+pub fn fine_pixels(axis_vertical: bool, v120: i32) -> f64 {
     let sign = if axis_vertical { -1 } else { 1 };
-    (
-        crate::streaming::wheel::pixels(v120.saturating_mul(sign)),
-        notches.saturating_mul(sign),
-    )
+    crate::streaming::wheel::pixels(v120.saturating_mul(sign))
+}
+
+/// How a wheel turn goes to the virtual pointer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WheelKind {
+    /// As a mouse wheel: source `wheel`, `axis_discrete` with whole steps
+    /// (wlroots gives clients `value120` = 120 a step).
+    Notches,
+    /// As a touchpad: source `continuous`, `axis` pixels alone, never a
+    /// step. The virtual pointer has no `value120` of its own (none in any
+    /// version), so a part of a notch cannot go as a wheel; and a client
+    /// must not get pixels for some frames of one motion and a step for
+    /// others (GTK and Firefox scroll each frame by whichever it has, so
+    /// that scrolls twice as far).
+    Continuous,
+}
+
+/// How long after a continuous turn a whole-notch turn still belongs to
+/// that motion, and goes continuous too.
+pub const CONTINUOUS_GAP: Duration = Duration::from_millis(300);
+
+/// The kind for a turn of `x`, `y` 120ths: whole notches on both axes go
+/// as a wheel, unless a continuous motion is still going (`continuing`).
+pub fn wheel_kind(x: i32, y: i32, continuing: bool) -> WheelKind {
+    if continuing
+        || x % crate::streaming::wheel::NOTCH != 0
+        || y % crate::streaming::wheel::NOTCH != 0
+    {
+        WheelKind::Continuous
+    } else {
+        WheelKind::Notches
+    }
 }
 
 /// One connection's virtual pointer and keyboard.
@@ -196,6 +221,8 @@ pub struct WlrInput {
     retry_at: Instant,
     /// The modifiers held through this connection's keyboard.
     mods: Mods,
+    /// When the last continuous wheel turn went.
+    continuous_at: Option<Instant>,
 }
 
 impl WlrInput {
@@ -209,6 +236,7 @@ impl WlrInput {
             link: Some(within(Link::open)?),
             retry_at: Instant::now(),
             mods: Mods::default(),
+            continuous_at: None,
         })
     }
 
@@ -301,6 +329,7 @@ impl WlrInput {
     pub fn scroll(&mut self, x: i32, y: i32) -> std::io::Result<()> {
         let time = monotonic_ms();
         self.send(|l| {
+            l.pointer.axis_source(AxisSource::Wheel);
             for (axis, notches, vertical) in [
                 (Axis::VerticalScroll, y, true),
                 (Axis::HorizontalScroll, x, false),
@@ -314,28 +343,34 @@ impl WlrInput {
         })
     }
 
-    /// Turn the wheel `x` and `y` 120ths of a notch (right, and up), with
-    /// the whole notches `nx`, `ny` the turns have completed now: smooth
-    /// for clients that read pixels, a step for ones that read only steps.
-    pub fn scroll_fine(&mut self, x: i32, y: i32, nx: i32, ny: i32) -> std::io::Result<()> {
-        let time = monotonic_ms();
-        self.send(|l| {
-            for (axis, v120, notches, vertical) in [
-                (Axis::VerticalScroll, y, ny, true),
-                (Axis::HorizontalScroll, x, nx, false),
-            ] {
-                if v120 == 0 {
-                    continue;
-                }
-                let (value, steps) = fine_wheel(vertical, v120, notches);
-                if steps != 0 {
-                    l.pointer.axis_discrete(time, axis, value, steps);
-                } else {
-                    l.pointer.axis(time, axis, value);
-                }
+    /// Turn the wheel `x` and `y` 120ths of a notch (right, and up):
+    /// whole notches as a mouse wheel, anything finer, and the rest of
+    /// that motion, as a touchpad's pixels ([`WheelKind`]).
+    pub fn scroll_fine(&mut self, x: i32, y: i32) -> std::io::Result<()> {
+        let now = Instant::now();
+        let continuing = self
+            .continuous_at
+            .is_some_and(|at| now.saturating_duration_since(at) < CONTINUOUS_GAP);
+        let notch = crate::streaming::wheel::NOTCH;
+        match wheel_kind(x, y, continuing) {
+            WheelKind::Notches => self.scroll(x / notch, y / notch),
+            WheelKind::Continuous => {
+                self.continuous_at = Some(now);
+                let time = monotonic_ms();
+                self.send(|l| {
+                    l.pointer.axis_source(AxisSource::Continuous);
+                    for (axis, v120, vertical) in [
+                        (Axis::VerticalScroll, y, true),
+                        (Axis::HorizontalScroll, x, false),
+                    ] {
+                        if v120 != 0 {
+                            l.pointer.axis(time, axis, fine_pixels(vertical, v120));
+                        }
+                    }
+                    l.pointer.frame();
+                })
             }
-            l.pointer.frame();
-        })
+        }
     }
 
     /// Press or release the evdev key `code`, and say the modifier state
@@ -371,13 +406,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_fine_turn_is_pixels_and_its_notches_steps_in_waylands_signs() {
-        // A quarter notch up: 3.75 px up, no step.
-        assert_eq!(fine_wheel(true, 30, 0), (-3.75, 0));
-        // The turn that completes a notch down carries its step.
-        assert_eq!(fine_wheel(true, -40, -1), (5.0, 1));
-        assert_eq!(fine_wheel(false, 60, 0), (7.5, 0));
-        assert_eq!(fine_wheel(false, -120, -1), (-NOTCH, -1));
+    fn a_fine_turn_is_pixels_in_waylands_signs() {
+        // A quarter notch up: 3.75 px up.
+        assert_eq!(fine_pixels(true, 30), -3.75);
+        assert_eq!(fine_pixels(true, -40), 5.0);
+        assert_eq!(fine_pixels(false, 60), 7.5);
+        assert_eq!(fine_pixels(false, -120), -NOTCH);
+    }
+
+    #[test]
+    fn a_motion_is_all_steps_or_all_pixels() {
+        // A mouse wheel's whole notches: steps.
+        assert_eq!(wheel_kind(0, 120, false), WheelKind::Notches);
+        assert_eq!(wheel_kind(-240, 360, false), WheelKind::Notches);
+        // Any part of a notch: pixels.
+        assert_eq!(wheel_kind(0, 30, false), WheelKind::Continuous);
+        assert_eq!(wheel_kind(120, 1, false), WheelKind::Continuous);
+        // A whole notch in the middle of a touchpad's motion stays pixels.
+        assert_eq!(wheel_kind(0, 120, true), WheelKind::Continuous);
     }
 
     #[test]

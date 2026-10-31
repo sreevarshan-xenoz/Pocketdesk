@@ -323,7 +323,7 @@ pub struct InputInjector {
     /// snapshot, so every bit must be treated as an edge (see 2063).
     gamepad_buttons: u16,
     /// Fine wheel turns not yet a whole notch, for the backends that also
-    /// need notches (uinput's `REL_WHEEL`, the wlroots steps, enigo).
+    /// need notches (uinput's `REL_WHEEL`, enigo).
     wheel_rest: pocketdesk_core::streaming::wheel::Notches,
     /// The phone's pen (E3).
     pen: PenState,
@@ -1034,11 +1034,7 @@ impl InputInjector {
             InputBackend::SendInput(backend) => backend.scroll_fine(x, y),
             InputBackend::Enigo(_) => Ok(()),
             #[cfg(target_os = "linux")]
-            InputBackend::Wlr(wlr) => {
-                let (nx, ny) = self.wheel_rest.add(x, y);
-                wlr.scroll_fine(x, y, nx, ny)
-                    .context("virtual pointer scroll")
-            }
+            InputBackend::Wlr(wlr) => wlr.scroll_fine(x, y).context("virtual pointer scroll"),
             // As `scroll`: the portal's down is the wheel's negative.
             #[cfg(target_os = "linux")]
             InputBackend::Portal => {
