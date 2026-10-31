@@ -269,7 +269,7 @@ curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/s
 curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh | bash -s -- --dry-run
 ```
 
-The script installs the release's `linux-x86_64` tarball, which runs on any distro with glibc 2.39 or newer. It encodes video through the system `ffmpeg` program, so it works with whichever FFmpeg your distro has; the script installs FFmpeg if it is missing (on Fedora `ffmpeg-free`; RPM Fusion's `ffmpeg` adds the software encoder).
+The script installs the release's `linux-x86_64` tarball, which runs on any distro with glibc 2.39 or newer. It encodes video through the system `ffmpeg` program, so it works with whichever FFmpeg version your distro has. With apt, pacman, apk or dnf the script installs FFmpeg if it is missing; with another package manager, install it yourself. The software encoder needs an FFmpeg with libx264: on Fedora that is RPM Fusion's `ffmpeg`, not `ffmpeg-free`, which the script installs and which leaves hardware (VAAPI) encoding only.
 
 ### Debian and Ubuntu: the .deb
 

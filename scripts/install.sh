@@ -862,7 +862,10 @@ _build_dep_list() {
   if ! command -v ffmpeg &>/dev/null; then
     case "$PKG_MANAGER" in
       apt|pacman|apk) _deps+=("ffmpeg") ;;
-      dnf) _deps+=("ffmpeg-free") ;;
+      dnf)
+        _deps+=("ffmpeg-free")
+        warn "Fedora's ffmpeg-free has no libx264: Pocketdesk encodes in hardware (VAAPI) only. RPM Fusion's ffmpeg adds the software encoder."
+        ;;
       *) warn "Install FFmpeg (the ffmpeg program): the server encodes video with it." ;;
     esac
   fi
