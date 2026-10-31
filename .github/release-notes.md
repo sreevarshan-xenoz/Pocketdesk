@@ -58,6 +58,7 @@ Pocketdesk 0.8.3 makes your computers one set: pair two of them once, both ways,
 - A review of everything since 0.8.2 found and fixed more: the window's mic on by default only for a computer paired both ways and never played while the session is view-only; privacy refused for the computer the shared keyboard is on; the clipboard handed between windows without echo.
 - SECURITY.md has two new known limits: an owner device can remove your other devices (71), and a computer paired both ways can add an owner phone (72). Read them before turning these on for a computer someone else can reach.
 - On Windows, the server's sockets are no longer inherited by the programs it starts (ffmpeg), which could hold a port after a restart.
+- **For developers:** the tests are isolated: a test build that names no test folder gets throwaway state and config folders, so no test can touch your real Pocketdesk folders, and tests that share a folder take turns (#586).
 
 ## Upgrade notes
 
