@@ -30,6 +30,19 @@ The second clippy command matters: the Android bridge builds `core` with
 `default-features = false, features = ["client"]`, and that profile has
 code paths the server build never compiles.
 
+### 2a. Fuzzing the parsers
+
+`fuzz/` holds a cargo-fuzz target for each packet Pocketdesk parses: shared input's wire, the computer link's framing, KDE Connect's identity and packets, the pairing link, the clipboard push, and the owner packets (introductions, remote revoke). It is its own workspace, built on nightly with the server's Linux dependencies, and its parsers are reached through `server/src/fuzzing.rs` (compiled only under `cargo fuzz`'s `--cfg fuzzing`).
+
+```bash
+rustup toolchain install nightly --profile minimal
+cargo install cargo-fuzz
+scripts/fuzz.sh 120                 # each target for 2 minutes
+scripts/fuzz.sh 600 pair_link       # one target
+```
+
+The script copies the workspace's `Cargo.lock` in, builds every target without a sanitizer and with debug assertions (`FUZZ_SANITIZER=address` for ASan), and grows each target's corpus in `fuzz/corpus/<target>` from the seeds in `fuzz/seeds/<target>`. A crash lands in `fuzz/artifacts/<target>/` (`cargo +nightly fuzz run <target> <file>` replays it): make it a unit test beside the parser, then fix it. CI runs each target for 30 s on a pull request and 5 minutes a night (`.github/workflows/fuzz-nightly.yml`, its crashes uploaded). Delete `fuzz/corpus/`, `fuzz/artifacts/` and `fuzz/target/` after a local run.
+
 ## 2b. Desktop app tests (C4)
 
 - `cargo test -p pocketdesk-desktop` drives the app headless through AccessKit (`desktop/src/ui_tests.rs`, `egui_kittest`), over throwaway state and config folders that the test binary sets as its own (`paths::use_state_dir`, `use_config_dir`), never this computer's.

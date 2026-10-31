@@ -1,0 +1,6 @@
+target/
+corpus/
+artifacts/
+coverage/
+# The workspace's lock, copied in by scripts/fuzz.sh.
+Cargo.lock

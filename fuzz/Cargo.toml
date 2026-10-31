@@ -1,0 +1,66 @@
+# cargo-fuzz targets for every packet Pocketdesk parses (run with
+# `scripts/fuzz.sh`; docs/development-setup.md). Not part of the workspace:
+# it needs nightly, and its own lock file is the workspace's, copied in.
+[package]
+name = "pocketdesk-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+pocketdesk-core = { path = "../core", features = ["local"] }
+pocketdesk-server = { path = "../server" }
+serde_json = "1"
+
+# Its own workspace, so the repository's never takes it in.
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "shared_input_wire"
+path = "fuzz_targets/shared_input_wire.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "computer_link"
+path = "fuzz_targets/computer_link.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "kdeconnect"
+path = "fuzz_targets/kdeconnect.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pair_link"
+path = "fuzz_targets/pair_link.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "clipboard_push"
+path = "fuzz_targets/clipboard_push.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "owner_packets"
+path = "fuzz_targets/owner_packets.rs"
+test = false
+doc = false
+bench = false

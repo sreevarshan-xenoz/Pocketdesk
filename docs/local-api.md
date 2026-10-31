@@ -115,6 +115,7 @@ Every event has `at`, `event` and `device_id` (the phone, or null). The kinds an
 | `session_refused` | — (not paired, denied by you, or without the permission it needs) | — |
 | `phone_paired`, `phone_unpaired` | — (however it was done: the PIN, the desktop app, `pocketdesk unpair`, or a guest grant ending) | — |
 | `device_removed` | `by`, the id of the owner device that removed it from afar (remote revoke); `device_id` is the device removed. `phone_unpaired` follows as for any unpairing | — |
+| `clipboard_too_big` | `bytes`, the text's length; `limit`, 262144 (256 KiB); `out`, true when it was this computer's copy, not shared with `device_id` (or, with none, with any computer it shares the clipboard with), else another computer's, not copied here. At most one a minute per computer and way, with a desktop notification | — |
 | `device_introduced` | `by`, the id of the computer paired both ways that introduced the phone (ecosystem phase 4); `device_id` is the phone, now paired here as an owner phone. `phone_paired` follows as for any pairing | — |
 | `task_started` | `task` (its name) | — |
 | `task_finished` | `task`, `code` (its exit code, or null), `timed_out`; never its output | — |

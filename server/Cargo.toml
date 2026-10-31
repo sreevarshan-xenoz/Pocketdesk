@@ -135,3 +135,8 @@ inproc = ["pocketdesk-core/inproc"]
 # BG8: the in-process Windows encoder (needs FFmpeg's development files to
 # build and its DLLs to run; docs/development-setup.md).
 inproc-windows = ["pocketdesk-core/inproc-windows"]
+
+# `cargo fuzz` builds with `--cfg fuzzing` (the entry points in
+# `src/fuzzing.rs`, for `fuzz/`).
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }

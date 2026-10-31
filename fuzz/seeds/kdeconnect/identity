@@ -1,0 +1,4 @@
+{"id": 1, "type": "kdeconnect.identity", "body": {"deviceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "deviceName": "Phone", "protocolVersion": 8, "deviceType": "phone"}}
+{"id": 1, "type": "kdeconnect.pair", "body": {"pair": true, "timestamp": 1700000000}}
+{"id": 1, "type": "kdeconnect.share.request", "body": {"filename": "a.txt"}}
+{"id": 1, "type": "kdeconnect.clipboard", "body": {"content": "x"}}

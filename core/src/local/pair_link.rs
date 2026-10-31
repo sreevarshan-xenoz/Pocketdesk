@@ -24,6 +24,14 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 const PREFIX: &str = "pocketdesk://pair?";
 const VERSION: &str = "1";
 
+/// The longest link read, in bytes, before anything in it is decoded.
+pub use crate::protocol::MAX_PAIR_LINK_BYTES as MAX_LINK_BYTES;
+
+/// The most addresses a link's reader keeps, and its writer names: the
+/// first, which are the best (a link from a desktop before this limit may
+/// name more).
+pub const MAX_ADDRESSES: usize = 32;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PairLink {
     pub name: String,
@@ -123,6 +131,9 @@ impl PairLink {
     }
 
     pub fn from_uri(uri: &str) -> Result<Self, PairLinkError> {
+        if uri.len() > MAX_LINK_BYTES {
+            return Err(invalid("the link is too long"));
+        }
         let query = clean_link(uri)
             .strip_prefix(PREFIX)
             .ok_or_else(|| invalid("not a Pocketdesk pairing link"))?;
@@ -138,7 +149,7 @@ impl PairLink {
         if !super::pin::is_valid(&pin) {
             return Err(invalid("the PIN must be 6 digits"));
         }
-        let addresses: Vec<String> = fields
+        let mut addresses: Vec<String> = fields
             .remove("a")
             .unwrap_or_default()
             .split(',')
@@ -149,6 +160,8 @@ impl PairLink {
         if addresses.is_empty() {
             return Err(invalid("the link names no address"));
         }
+        // Best first: a longer list is cut to its best, not refused.
+        addresses.truncate(MAX_ADDRESSES);
         let port = |key: &str, default: u16| -> Result<u16, PairLinkError> {
             match fields.get(key) {
                 None => Ok(default),
@@ -184,7 +197,8 @@ impl PairLink {
 
 /// Addresses a phone should try, best first: home/office LANs, then other
 /// private ranges (often virtual adapters: WSL, Hyper-V, Docker), then the
-/// tailnet. Loopback, link-local, IPv6 and duplicates are dropped.
+/// tailnet. Loopback, link-local, IPv6 and duplicates are dropped, and
+/// only the best [`MAX_ADDRESSES`] are kept, so a link made of them reads.
 pub fn order_addresses(addresses: Vec<String>) -> Vec<String> {
     fn rank(ip: Ipv4Addr) -> Option<u8> {
         let [a, b, ..] = ip.octets();
@@ -215,7 +229,11 @@ pub fn order_addresses(addresses: Vec<String>) -> Vec<String> {
         }
     }
     ranked.sort();
-    ranked.into_iter().map(|(_, _, a)| a).collect()
+    ranked
+        .into_iter()
+        .take(MAX_ADDRESSES)
+        .map(|(_, _, a)| a)
+        .collect()
 }
 
 /// A pasted pairing link without what a copy can carry around it unseen:
@@ -342,6 +360,26 @@ mod tests {
     }
 
     #[test]
+    fn only_the_best_addresses_a_link_can_carry_are_kept() {
+        let mut many: Vec<String> = (1..=40).map(|n| format!("100.64.0.{n}")).collect();
+        many.push("192.168.1.20".into());
+        let ordered = order_addresses(many);
+        assert_eq!(ordered.len(), MAX_ADDRESSES);
+        assert_eq!(ordered[0], "192.168.1.20", "the best is kept first");
+    }
+
+    /// PR #597 review I2: a link naming 40 addresses (an older desktop's,
+    /// with many virtual adapters) reads, keeping its best (first) 32.
+    #[test]
+    fn a_link_with_more_addresses_keeps_its_best_32() {
+        let many: Vec<String> = (1..=40).map(|n| format!("192.0.2.{n}")).collect();
+        let uri = format!("pocketdesk://pair?v=1&a={}&pin=123456", many.join(","));
+        let link = PairLink::from_uri(&uri).expect("it reads");
+        assert_eq!(link.addresses.len(), MAX_ADDRESSES);
+        assert_eq!(link.addresses, many[..MAX_ADDRESSES]);
+    }
+
+    #[test]
     fn malformed_links_are_rejected_with_a_reason() {
         assert!(PairLink::from_uri("https://example.com").is_err());
         assert!(PairLink::from_uri("pocketdesk://pair?v=2&a=1.2.3.4&pin=123456").is_err());
@@ -351,6 +389,12 @@ mod tests {
             "no address"
         );
         assert!(PairLink::from_uri("pocketdesk://pair?v=1&a=1.2.3.4&pin=123456&cp=x").is_err());
+        // Too long is refused before anything is decoded.
+        let long = format!(
+            "pocketdesk://pair?v=1&a=192.0.2.1&pin=123456&name={}",
+            "a".repeat(MAX_LINK_BYTES)
+        );
+        assert!(PairLink::from_uri(&long).is_err());
         let err = PairLink::from_uri("pocketdesk://pair?v=1&a=1.2.3.4&pin=12").unwrap_err();
         assert!(err.to_string().contains("PIN"), "{err}");
     }

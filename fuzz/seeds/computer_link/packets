@@ -1,0 +1,6 @@
+{"id": 1, "type": "kdeconnect.clipboard", "body": {"content": "hi", "follows": true, "view": true}}
+{"id": 1, "type": "kdeconnect.clipboard", "body": {"image": {"id": "abababababababababababababababababababababababababababababababab", "size": 2048}}}
+{"id": 1, "type": "kdeconnect.pocketdesk.remote_devices_answer", "body": {"request": "r1", "ask": "list", "devices": [{"id": "p", "name": "Pixel", "owner": true}]}}
+{"id": 1, "type": "kdeconnect.pocketdesk.introduce_phone", "body": {"request": "r2", "phone": {"deviceId": "phone-1", "name": "Pixel", "tls": "abababababababababababababababababababababababababababababababab"}, "permissions": {}}}
+{"id": 1, "type": "kdeconnect.pocketdesk.endpoint", "body": {"endpointId": "abababababababababababababababababababababababababababababababab", "relayUrls": ["https://relay.example.com"], "directAddrs": ["192.0.2.1:4433"]}}
+{"id": 1, "type": "kdeconnect.pocketdesk.computer_wake", "body": {"mac": "02:00:00:00:00:01", "broadcast": "192.0.2.255", "wired": true}}
