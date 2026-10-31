@@ -727,6 +727,33 @@ fn negotiated(id: u32, param: &libspa::pod::Pod) -> Option<libspa::param::video:
     Some(video_info)
 }
 
+/// Where a chunk's pixels lie in its mapped data of `map_len` bytes, and
+/// their rows' stride: from the chunk's offset, at most its size; none for
+/// a chunk marked corrupted or empty. A stride of zero or below (bottom-up
+/// rows) is read as tightly packed rows of `width` 4-byte pixels.
+fn chunk_pixels(
+    map_len: usize,
+    offset: u32,
+    size: u32,
+    stride: i32,
+    width: u32,
+    corrupted: bool,
+) -> Option<(std::ops::Range<usize>, u32)> {
+    if corrupted || size == 0 {
+        return None;
+    }
+    let start = offset as usize;
+    let end = start.checked_add(size as usize)?.min(map_len);
+    if start >= end {
+        return None;
+    }
+    let stride = u32::try_from(stride)
+        .ok()
+        .filter(|&s| s > 0)
+        .unwrap_or_else(|| width.saturating_mul(4));
+    Some((start..end, stride))
+}
+
 /// Handle the process callback -- dequeue frames and send them through the channel.
 fn on_process(stream: &pipewire::stream::Stream, user_data: &StreamUserData) {
     // Dequeue an available buffer
@@ -747,14 +774,18 @@ fn on_process(stream: &pipewire::stream::Stream, user_data: &StreamUserData) {
 
     let data = &mut datas[0];
 
-    // Get chunk info first (size and stride)
-    let (size, stride) = {
+    // Get chunk info first (where the pixels are, and the rows' stride)
+    let (offset, size, stride, corrupted) = {
         let chunk = data.chunk();
-        (chunk.size() as usize, chunk.stride())
+        (
+            chunk.offset(),
+            chunk.size(),
+            chunk.stride(),
+            chunk
+                .flags()
+                .contains(libspa::buffer::ChunkFlags::CORRUPTED),
+        )
     };
-    if size == 0 {
-        return;
-    }
 
     // Then get the data slice
     let Some(data_slice) = data.data() else {
@@ -762,16 +793,17 @@ fn on_process(stream: &pipewire::stream::Stream, user_data: &StreamUserData) {
         return;
     };
 
-    if data_slice.is_empty() {
-        return;
-    }
-
     // Get the actual negotiated dimensions
     let width = user_data.width.load(Ordering::Relaxed);
     let height = user_data.height.load(Ordering::Relaxed);
 
-    // Copy the frame data (cap at actual data slice length)
-    let frame_data = data_slice[..size.min(data_slice.len())].to_vec();
+    let Some((range, stride)) =
+        chunk_pixels(data_slice.len(), offset, size, stride, width, corrupted)
+    else {
+        return;
+    };
+    let size = range.len();
+    let frame_data = data_slice[range].to_vec();
 
     // Update frame counter
     let count = user_data.frame_count.fetch_add(1, Ordering::Relaxed);
@@ -784,7 +816,7 @@ fn on_process(stream: &pipewire::stream::Stream, user_data: &StreamUserData) {
         data: frame_data,
         width,
         height,
-        stride: stride as u32,
+        stride,
         timestamp: Instant::now(),
         gpu: None,
     };
@@ -1179,6 +1211,33 @@ mod tests {
         assert_eq!(after_remote_failed(&failed, false), ScreenAlone);
         let timed_out = anyhow::anyhow!("Portal request timed out");
         assert_eq!(after_remote_failed(&timed_out, false), ScreenAlone);
+    }
+
+    #[test]
+    fn a_chunks_pixels_start_at_its_offset_and_a_bad_stride_is_packed_rows() {
+        // Offset and size inside the map, stride as given.
+        assert_eq!(
+            chunk_pixels(10_000, 64, 4096, 512, 128, false),
+            Some((64..4160, 512))
+        );
+        // A size past the map's end is cut at the end.
+        assert_eq!(
+            chunk_pixels(1000, 100, 4096, 512, 128, false),
+            Some((100..1000, 512))
+        );
+        // Zero or negative (bottom-up) stride: packed rows of the width.
+        assert_eq!(
+            chunk_pixels(4096, 0, 4096, 0, 128, false),
+            Some((0..4096, 512))
+        );
+        assert_eq!(
+            chunk_pixels(4096, 0, 4096, -512, 128, false),
+            Some((0..4096, 512))
+        );
+        // Corrupted, empty, or an offset past the map: no frame.
+        assert_eq!(chunk_pixels(4096, 0, 4096, 512, 128, true), None);
+        assert_eq!(chunk_pixels(4096, 0, 0, 512, 128, false), None);
+        assert_eq!(chunk_pixels(4096, 5000, 10, 512, 128, false), None);
     }
 
     #[test]
