@@ -550,7 +550,8 @@ about once; "Remember the screen-sharing grant" keeps that answer.
 with "Remember the screen-sharing grant" on: the grant kept before was for an
 unnamed program, and the portal keeps grants by name. Answer the dialog at
 the computer once after the update. Until then a computer with no one at it
-waits a minute at each session and ends it ("No one answered the
+waits a minute at each session, or two where input goes through the portal
+(its dialog, then the screen's), and ends it ("No one answered the
 screen-sharing dialog"), and a dialog answered late leaves "The kept
 screen-sharing grant was not taken" in the server's log.
 
