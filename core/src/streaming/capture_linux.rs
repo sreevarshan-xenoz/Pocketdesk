@@ -68,8 +68,8 @@ pub async fn start_capture(
     // N8: input goes through the portal here, so the screen and the input
     // come from one RemoteDesktop session, under one grant.
     // A desktop without RemoteDesktop, or one that refused it, still gets
-    // its picture (N8 review); a dialog the owner cancelled is not asked
-    // again.
+    // its picture (N8 review); a dialog the owner cancelled, or left
+    // unanswered, is not asked again.
     if crate::streaming::portal_input::wanted() {
         match start_remote_desktop_capture(
             config.clone(),
@@ -80,7 +80,7 @@ pub async fn start_capture(
         .await
         {
             Ok(session) => return Ok(session),
-            Err(e) if cancelled_by_owner(&e) => return Err(e),
+            Err(e) if asked_already(&e) => return Err(e),
             Err(e) => warn!("No remote desktop session ({e:#}): the screen alone, with no input"),
         }
     }
@@ -142,7 +142,7 @@ pub async fn start_capture(
             screencast.start(&session, None, Default::default()),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("No answer to the screen-sharing dialog within a minute"))?
+        .map_err(|_| anyhow::Error::new(NoAnswer))?
         .context("Failed to start capture")?;
 
         let streams = response
@@ -236,16 +236,31 @@ fn spawn_pipewire_capture(
 /// and answers its dialog (N8 review: 10 s failed a slow first grant).
 const START_WAIT: Duration = Duration::from_secs(60);
 
-/// Whether `e` is the owner cancelling the portal's dialog, which is not
-/// asked again in another form.
-fn cancelled_by_owner(e: &anyhow::Error) -> bool {
+/// The portal's dialog went unanswered for [`START_WAIT`].
+#[derive(Debug)]
+struct NoAnswer;
+
+impl std::fmt::Display for NoAnswer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("No answer to the screen-sharing dialog within a minute")
+    }
+}
+
+impl std::error::Error for NoAnswer {}
+
+/// Whether `e` is the owner cancelling the portal's dialog, or no one
+/// answering it, which is not asked again in another form: with no one at
+/// the desk a second dialog only doubled the wait, to two minutes (KDE
+/// Plasma 6.8, 2026-10-31).
+fn asked_already(e: &anyhow::Error) -> bool {
     e.chain().any(|cause| {
-        matches!(
-            cause.downcast_ref::<ashpd::Error>(),
-            Some(ashpd::Error::Response(
-                ashpd::desktop::ResponseError::Cancelled
-            ))
-        )
+        cause.is::<NoAnswer>()
+            || matches!(
+                cause.downcast_ref::<ashpd::Error>(),
+                Some(ashpd::Error::Response(
+                    ashpd::desktop::ResponseError::Cancelled
+                ))
+            )
     })
 }
 
@@ -323,9 +338,7 @@ async fn start_remote_desktop_capture(
         let started =
             tokio::time::timeout(START_WAIT, remote.start(&session, None, Default::default()))
                 .await
-                .map_err(|_| {
-                    anyhow::anyhow!("No answer to the screen-sharing dialog within a minute")
-                })?
+                .map_err(|_| anyhow::Error::new(NoAnswer))?
                 .context("Failed to start the remote desktop session")?
                 .response()
                 .context("No response from the remote desktop start")?;
@@ -1094,6 +1107,22 @@ mod tests {
         // Only the Format param is the one settled on.
         assert!(negotiated(ParamType::EnumFormat.as_raw(), pod).is_none());
         assert!(negotiated(0, pod).is_none());
+    }
+
+    #[test]
+    fn a_dialog_cancelled_or_unanswered_is_not_asked_again() {
+        let unanswered = anyhow::Error::new(NoAnswer).context("Failed to start");
+        assert!(asked_already(&unanswered));
+        let cancelled = anyhow::Error::new(ashpd::Error::Response(
+            ashpd::desktop::ResponseError::Cancelled,
+        ))
+        .context("Failed to start");
+        assert!(asked_already(&cancelled));
+        // No RemoteDesktop portal, or one that failed: the screen alone.
+        let failed =
+            anyhow::Error::new(ashpd::Error::Response(ashpd::desktop::ResponseError::Other));
+        assert!(!asked_already(&failed));
+        assert!(!asked_already(&anyhow::anyhow!("Portal request timed out")));
     }
 
     #[test]
