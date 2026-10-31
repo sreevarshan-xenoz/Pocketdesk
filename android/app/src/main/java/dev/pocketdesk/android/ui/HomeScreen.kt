@@ -86,7 +86,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import androidx.compose.material3.MenuDefaults
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.heading
@@ -1134,10 +1133,14 @@ private fun HostCard(
                                         )
                                     },
                                     onClick = { run(action) },
+                                    // Room above and below the label, so an
+                                    // item that wraps (Tamil or Spanish at a
+                                    // large font) does not run into the next;
+                                    // a one-line item keeps its 48 dp.
                                     contentPadding = if (section.folded) {
-                                        PaddingValues(start = 24.dp, end = 12.dp)
+                                        PaddingValues(start = 24.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)
                                     } else {
-                                        MenuDefaults.DropdownMenuItemContentPadding
+                                        PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                                     },
                                 )
                             }
