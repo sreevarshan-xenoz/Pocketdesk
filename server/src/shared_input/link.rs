@@ -178,26 +178,49 @@ fn forget_answer(device_id: &str, link: usize) {
 /// ([`Msg::TakesFineWheel`]), each with the link it said it on.
 static TAKES_FINE: LazyLock<Mutex<HashMap<String, usize>>> = LazyLock::new(Default::default);
 
-/// A fine wheel turn as `device_id` is sent it: as it is when that
-/// computer said it takes fine turns (`fine_ok`, with smooth scrolling on
-/// here), else the whole notches the turns add up to in `rest`, none
-/// until they make one.
-pub(crate) fn fit_wheel(
-    fine_ok: bool,
-    rest: &mut pocketdesk_core::streaming::wheel::Notches,
-    dx: i16,
-    dy: i16,
-) -> Option<Msg> {
-    use pocketdesk_core::streaming::wheel::clamp16;
-    if fine_ok {
-        return Some(Msg::WheelFine { dx, dy });
+/// Whether `device_id` takes fine wheel turns on the link `link` now: it
+/// said so on that link, and smooth scrolling is on here.
+fn takes_fine_now(device_id: &str, link: usize) -> bool {
+    pocketdesk_core::streaming::wheel::smooth() && lock(&TAKES_FINE).get(device_id) == Some(&link)
+}
+
+/// A channel's fine wheel turns on their way: as they are to a computer
+/// that takes them, else as the whole notches they add up to, added up as
+/// builds before fine scrolling did ([`wheel::add_plain`]). What was not
+/// yet a notch is forgotten when the pointer arrives or leaves, and when
+/// the way they go changes (the setting, or the computer's answer).
+///
+/// [`wheel::add_plain`]: pocketdesk_core::streaming::wheel::add_plain
+#[derive(Debug, Default)]
+pub(crate) struct WheelFit {
+    rest: (i32, i32),
+    fine_ok: Option<bool>,
+}
+
+impl WheelFit {
+    /// A fine turn as it is sent, none until it makes a notch where
+    /// notches are what go.
+    pub(crate) fn fit(&mut self, fine_ok: bool, dx: i16, dy: i16) -> Option<Msg> {
+        use pocketdesk_core::streaming::wheel::{add_plain, clamp16};
+        if self.fine_ok != Some(fine_ok) {
+            self.rest = (0, 0);
+            self.fine_ok = Some(fine_ok);
+        }
+        if fine_ok {
+            return Some(Msg::WheelFine { dx, dy });
+        }
+        match add_plain(&mut self.rest, i32::from(dx), i32::from(dy)) {
+            (0, 0) => None,
+            (x, y) => Some(Msg::Wheel {
+                dx: clamp16(x),
+                dy: clamp16(y),
+            }),
+        }
     }
-    match rest.add(i32::from(dx), i32::from(dy)) {
-        (0, 0) => None,
-        (x, y) => Some(Msg::Wheel {
-            dx: clamp16(x),
-            dy: clamp16(y),
-        }),
+
+    /// Forget what was not yet a notch.
+    pub(crate) fn clear(&mut self) {
+        self.rest = (0, 0);
     }
 }
 
@@ -488,7 +511,14 @@ fn answer(device_id: &str, conn: &Connection, msg: &Msg) -> bool {
             false
         }
         Msg::TakesFineWheel => {
-            lock(&TAKES_FINE).insert(device_id.to_string(), conn.stable_id());
+            // Only for the link registered now: a word read off a link just
+            // replaced must not stand for the next one (review N5).
+            let current = lock(&LINKS)
+                .get(device_id)
+                .is_some_and(|r| r.conn.stable_id() == conn.stable_id());
+            if current {
+                lock(&TAKES_FINE).insert(device_id.to_string(), conn.stable_id());
+            }
             false
         }
         _ => true,
@@ -589,7 +619,7 @@ pub struct Channel {
     order: ClickOrder,
     /// Fine wheel turns not yet a notch, for a computer that takes notches
     /// only.
-    wheel: pocketdesk_core::streaming::wheel::Notches,
+    wheel: WheelFit,
 }
 
 impl Channel {
@@ -670,10 +700,13 @@ impl Channel {
         // the notches it completes, if any.
         let fitted;
         let msg = match *msg {
+            Msg::Enter { .. } | Msg::Leave => {
+                self.wheel.clear();
+                msg
+            }
             Msg::WheelFine { dx, dy } => {
-                let fine_ok = pocketdesk_core::streaming::wheel::smooth()
-                    && lock(&TAKES_FINE).get(&self.device_id) == Some(&self.conn.stable_id());
-                match fit_wheel(fine_ok, &mut self.wheel, dx, dy) {
+                let fine_ok = takes_fine_now(&self.device_id, self.conn.stable_id());
+                match self.wheel.fit(fine_ok, dx, dy) {
                     Some(m) => {
                         fitted = m;
                         &fitted
@@ -884,24 +917,41 @@ pub(crate) mod tests {
     /// they make one.
     #[test]
     fn a_fine_wheel_turn_goes_fine_or_as_its_notches() {
-        use pocketdesk_core::streaming::wheel::Notches;
-        let mut rest = Notches::default();
-        assert_eq!(
-            fit_wheel(true, &mut rest, 0, 30),
-            Some(Msg::WheelFine { dx: 0, dy: 30 })
-        );
-        assert_eq!(rest, Notches::default());
-        assert_eq!(fit_wheel(false, &mut rest, 0, 60), None);
-        assert_eq!(fit_wheel(false, &mut rest, 0, 50), None);
-        assert_eq!(
-            fit_wheel(false, &mut rest, 0, 40),
-            Some(Msg::Wheel { dx: 0, dy: 1 })
-        );
-        assert_eq!(
-            fit_wheel(false, &mut rest, -360, 0),
-            Some(Msg::Wheel { dx: -3, dy: 0 })
-        );
-        assert_eq!(fit_wheel(false, &mut rest, 0, 0), None);
+        let mut fit = WheelFit::default();
+        assert_eq!(fit.fit(true, 0, 30), Some(Msg::WheelFine { dx: 0, dy: 30 }));
+        assert_eq!(fit.fit(false, 0, 60), None);
+        assert_eq!(fit.fit(false, 0, 50), None);
+        assert_eq!(fit.fit(false, 0, 40), Some(Msg::Wheel { dx: 0, dy: 1 }));
+        assert_eq!(fit.fit(false, -360, 0), Some(Msg::Wheel { dx: -3, dy: 0 }));
+        assert_eq!(fit.fit(false, 0, 0), None);
+    }
+
+    /// Review N4: what was not yet a notch goes with the visit, and when
+    /// the way turns go changes.
+    #[test]
+    fn the_wheels_rest_goes_with_the_visit_and_the_setting() {
+        let mut fit = WheelFit::default();
+        assert_eq!(fit.fit(false, 0, 100), None);
+        fit.clear();
+        assert_eq!(fit.fit(false, 0, 100), None, "a new visit starts at 0");
+        // Fine for a while, then notches again: the old 100 is gone.
+        assert!(fit.fit(true, 0, 10).is_some());
+        assert_eq!(fit.fit(false, 0, 100), None);
+        assert_eq!(fit.fit(false, 0, 20), Some(Msg::Wheel { dx: 0, dy: 1 }));
+    }
+
+    /// Review N7: the channel's gate. A computer gets fine turns only for
+    /// the link it said it takes them on; another link of it (a computer
+    /// that restarted as an older build) gets notches.
+    #[test]
+    fn fine_turns_go_only_on_the_link_that_asked_for_them() {
+        let id = "fine-gate-test-computer";
+        assert!(!takes_fine_now(id, 7), "nothing said yet");
+        lock(&TAKES_FINE).insert(id.to_string(), 7);
+        assert!(takes_fine_now(id, 7));
+        assert!(!takes_fine_now(id, 8), "another link of it");
+        forget_answer(id, 7);
+        assert!(!takes_fine_now(id, 7), "forgotten with its link");
     }
 
     async fn endpoint() -> iroh::Endpoint {

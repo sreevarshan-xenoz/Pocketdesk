@@ -269,8 +269,8 @@ pub struct ToPhone {
     caps: bool,
     /// The key held now, repeated by [`ToPhone::repeats`].
     held: Option<Held>,
-    /// Fine wheel turns not yet a notch.
-    wheel: pocketdesk_core::streaming::wheel::Notches,
+    /// Fine wheel turns not yet a notch, added up as before fine scrolling.
+    wheel: (i32, i32),
 }
 
 impl ToPhone {
@@ -351,7 +351,11 @@ impl ToPhone {
             }
             Msg::Wheel { dx, dy } => PhoneEvent::Wheel { dx, dy },
             // The phone scrolls by notches: fine turns add up to them.
-            Msg::WheelFine { dx, dy } => match self.wheel.add(i32::from(dx), i32::from(dy)) {
+            Msg::WheelFine { dx, dy } => match pocketdesk_core::streaming::wheel::add_plain(
+                &mut self.wheel,
+                i32::from(dx),
+                i32::from(dy),
+            ) {
                 (0, 0) => return Vec::new(),
                 (x, y) => PhoneEvent::Wheel {
                     dx: pocketdesk_core::streaming::wheel::clamp16(x),

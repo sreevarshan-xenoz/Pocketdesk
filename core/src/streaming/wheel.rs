@@ -65,6 +65,20 @@ fn add_axis(rest: &mut i32, v: i32) -> i32 {
     whole
 }
 
+/// Fine turns added up to whole notches as builds before fine scrolling
+/// added up a touchpad's turns (Windows' hook, libei's discrete scroll):
+/// the rest kept across a turn the other way. For a receiver that takes
+/// notches only, so it gets what it always got.
+pub fn add_plain(rest: &mut (i32, i32), x: i32, y: i32) -> (i32, i32) {
+    let axis = |rest: &mut i32, v: i32| {
+        *rest = rest.saturating_add(v);
+        let whole = *rest / NOTCH;
+        *rest -= whole * NOTCH;
+        whole
+    };
+    (axis(&mut rest.0, x), axis(&mut rest.1, y))
+}
+
 /// `v` as an `i16`, saturating.
 pub fn clamp16(v: i32) -> i16 {
     v.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16
@@ -171,6 +185,19 @@ mod tests {
         assert_eq!(n.add(0, -100), (0, -1));
         n.clear();
         assert_eq!(n.rest(), (0, 0));
+    }
+
+    #[test]
+    fn the_plain_adding_up_keeps_its_rest_across_a_turn_back() {
+        let mut rest = (0, 0);
+        assert_eq!(add_plain(&mut rest, 0, 110), (0, 0));
+        // As the old hook: 110 then -20 leaves 90, not -20.
+        assert_eq!(add_plain(&mut rest, 0, -20), (0, 0));
+        assert_eq!(rest, (0, 90));
+        assert_eq!(add_plain(&mut rest, 30, 30), (0, 1));
+        assert_eq!(rest, (30, 0));
+        assert_eq!(add_plain(&mut rest, -270, 0), (-2, 0));
+        assert_eq!(rest, (0, 0));
     }
 
     #[test]

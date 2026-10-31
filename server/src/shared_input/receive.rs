@@ -36,6 +36,17 @@ use super::status;
 use super::wire::{self, Msg, Screen, Timing};
 use crate::input_injector::InputInjector;
 
+/// A fine wheel turn from the wire (positive down, and right) as the
+/// injector takes it (positive up, and right). Its notches are not read
+/// where the fine turn is.
+fn fine_wheel_packet(dx: i16, dy: i16) -> InputPacket {
+    InputPacket::MouseScroll {
+        dx: 0,
+        dy: 0,
+        fine: Some((dx, dy.saturating_neg())),
+    }
+}
+
 /// Where what the driving computer sends ends up.
 pub trait Inject: Send {
     /// Press or let go of the key with this evdev code.
@@ -94,15 +105,7 @@ impl Inject for InputInjector {
     }
 
     fn wheel_fine(&mut self, dx: i16, dy: i16) {
-        // Its notches are not read where the fine turn is.
-        inject(
-            self,
-            InputPacket::MouseScroll {
-                dx: 0,
-                dy: 0,
-                fine: Some((dx, dy.saturating_neg())),
-            },
-        );
+        inject(self, fine_wheel_packet(dx, dy));
     }
 
     fn move_abs(&mut self, x: u16, y: u16) {
@@ -2403,6 +2406,34 @@ mod tests {
         assert!(!drives_now(&key, "pc", true, None));
         assert!(!drives_now(&Msg::Ping { t_us: 1 }, "pc", true, Some("pc")));
         assert!(!drives_now(&Msg::Leave, "pc", true, Some("pc")));
+    }
+
+    /// Review N7: a fine wheel turn from the computer driving this one is
+    /// injected fine, the wire's down as the injector's negative; from one
+    /// that does not drive it, not at all.
+    #[test]
+    fn a_fine_wheel_turn_from_the_driver_is_injected_fine() {
+        let (mut r, fake) = receiver();
+        r.handle("pc", Msg::WheelFine { dx: 0, dy: 30 }, true);
+        assert_eq!(fake.take(), vec![], "not driven yet");
+        r.handle("pc", Msg::Enter { x: 1, y: 2 }, true);
+        fake.take();
+        r.handle("pc", Msg::WheelFine { dx: -60, dy: 30 }, true);
+        r.handle("other", Msg::WheelFine { dx: 0, dy: 120 }, true);
+        assert_eq!(fake.take(), vec![Call::WheelFine(-60, 30)]);
+        match fine_wheel_packet(-60, 30) {
+            InputPacket::MouseScroll { dx, dy, fine } => {
+                assert_eq!((dx, dy, fine), (0, 0, Some((-60, -30))))
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            fine_wheel_packet(0, i16::MIN),
+            InputPacket::MouseScroll {
+                fine: Some((0, i16::MAX)),
+                ..
+            }
+        ));
     }
 
     #[test]
