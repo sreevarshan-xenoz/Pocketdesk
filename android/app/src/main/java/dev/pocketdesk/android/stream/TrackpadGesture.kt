@@ -90,6 +90,13 @@ class TrackpadGesture(
     private var scrollCarryY = 0f
     private var fineCarryX = 0f
     private var fineCarryY = 0f
+
+    /** Fine scroll not yet sent: at most one send each [FINE_EVERY_MS]. */
+    private var waitingFx = 0
+    private var waitingFy = 0
+    private var waitingSx = 0
+    private var waitingSy = 0
+    private var fineSentMs: Long? = null
     private var twoFinger = TwoFinger.UNDECIDED
     private var twoTravel = 0f
     private var startSpan = 0f
@@ -126,6 +133,7 @@ class TrackpadGesture(
         scrollCarryY = 0f
         fineCarryX = 0f
         fineCarryY = 0f
+        clearWaitingFine()
         twoFinger = TwoFinger.UNDECIDED
         twoTravel = 0f
         startSpan = 0f
@@ -138,9 +146,18 @@ class TrackpadGesture(
      * further scaled by [cursorScale] (view to video pixels); scrolling and
      * the slop are not. With two or more fingers, ([dx], [dy]) is their
      * centre's motion. [span] is the distance between two fingers (view px),
-     * or 0 when the caller does not zoom or the pair just changed.
+     * or 0 when the caller does not zoom or the pair just changed. [timeMs]
+     * (one clock with the others) spaces smooth scrolling's sends at least
+     * [FINE_EVERY_MS] apart; without it each move sends.
      */
-    fun move(dx: Float, dy: Float, fingers: Int, cursorScale: Float = 1f, span: Float = 0f): List<PadOutput> {
+    fun move(
+        dx: Float,
+        dy: Float,
+        fingers: Int,
+        cursorScale: Float = 1f,
+        span: Float = 0f,
+        timeMs: Long? = null,
+    ): List<PadOutput> {
         maxFingers = maxOf(maxFingers, fingers)
         travelled += hypot(dx, dy)
         if (maxFingers >= 2 && !dragging) {
@@ -192,10 +209,17 @@ class TrackpadGesture(
             if (fine) {
                 val fx = fineCarryX.toInt()
                 val fy = fineCarryY.toInt()
-                if (fx == 0 && fy == 0 && sx == 0 && sy == 0) return out
                 fineCarryX -= fx
                 fineCarryY -= fy
-                out += PadOutput.Scroll(sx, sy, fx, fy, fine = true)
+                waitingFx += fx
+                waitingFy += fy
+                waitingSx += sx
+                waitingSy += sy
+                val last = fineSentMs
+                if (timeMs != null && last != null && timeMs - last < FINE_EVERY_MS) return out
+                val sent = takeWaitingFine() ?: return out
+                fineSentMs = timeMs
+                out += sent
                 return out
             }
             if (sx == 0 && sy == 0) return out
@@ -223,8 +247,30 @@ class TrackpadGesture(
         return out
     }
 
-    /** The last finger lifted. */
+    /** The last finger lifted: smooth scroll still waiting goes first. */
     fun up(timeMs: Long): List<PadOutput> {
+        val tail = takeWaitingFine()
+        fineSentMs = null
+        val rest = lifted(timeMs)
+        return if (tail == null) rest else listOf(tail) + rest
+    }
+
+    /** Fine scroll waiting to be sent, if any: never an empty one. */
+    private fun takeWaitingFine(): PadOutput? {
+        if (waitingFx == 0 && waitingFy == 0 && waitingSx == 0 && waitingSy == 0) return null
+        val out = PadOutput.Scroll(waitingSx, waitingSy, waitingFx, waitingFy, fine = true)
+        clearWaitingFine()
+        return out
+    }
+
+    private fun clearWaitingFine() {
+        waitingFx = 0
+        waitingFy = 0
+        waitingSx = 0
+        waitingSy = 0
+    }
+
+    private fun lifted(timeMs: Long): List<PadOutput> {
         fingerDown = false
         if (dragging) {
             dragging = false
@@ -262,6 +308,8 @@ class TrackpadGesture(
         armed = false
         fingerDown = false
         pendingClickDeadline = null
+        clearWaitingFine()
+        fineSentMs = null
         return out
     }
 
@@ -274,6 +322,12 @@ class TrackpadGesture(
     companion object {
         /** One wheel notch in the fine units (`wheel120`). */
         const val NOTCH = 120f
+
+        /**
+         * Smooth scrolling sends at most once this often (a touch screen
+         * reports 60 to 120 times a second), what came between added up.
+         */
+        const val FINE_EVERY_MS = 8L
 
         /** `RustCore.sendMouseClick` button codes. */
         const val LEFT = 0

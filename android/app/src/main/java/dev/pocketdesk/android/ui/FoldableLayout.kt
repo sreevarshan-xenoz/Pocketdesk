@@ -156,7 +156,14 @@ fun TrackpadDock(
                                     }
                                     val delta = change.position - last
                                     last = change.position
-                                    sendPad(pad.move(delta.x, delta.y, fingers))
+                                    sendPad(
+                                        pad.move(
+                                            delta.x,
+                                            delta.y,
+                                            fingers,
+                                            timeMs = android.os.SystemClock.uptimeMillis(),
+                                        ),
+                                    )
                                 }
                             }
                             } finally {

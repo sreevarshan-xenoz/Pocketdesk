@@ -95,6 +95,36 @@ class TrackpadGestureTest {
     }
 
     @Test
+    fun smoothScrollingSendsAtMostOnceEvery8MsAndTheRestOnLift() {
+        val pad = TrackpadGesture(slop = 8f, pxPerNotch = 10f, fine = true)
+        pad.down(0)
+        assertEquals(emptyList<PadOutput>(), pad.move(0f, 3f, fingers = 2, timeMs = 0))
+        // Past the slop: the first goes at once.
+        assertEquals(
+            listOf(PadOutput.Scroll(0, 0, 0, 108, fine = true)),
+            pad.move(0f, 6f, fingers = 2, timeMs = 1),
+        )
+        // 4 and 7 ms later: held back, added up.
+        assertEquals(emptyList<PadOutput>(), pad.move(0f, 5f, fingers = 2, timeMs = 5))
+        assertEquals(emptyList<PadOutput>(), pad.move(0f, 5f, fingers = 2, timeMs = 8))
+        assertEquals(
+            "8 ms after the last send: what came between, as one",
+            listOf(PadOutput.Scroll(0, 2, 0, 180, fine = true)),
+            pad.move(0f, 5f, fingers = 2, timeMs = 9),
+        )
+        assertEquals(emptyList<PadOutput>(), pad.move(0f, 2.5f, fingers = 2, timeMs = 11))
+        assertEquals(
+            "the lift sends what waits",
+            listOf(PadOutput.Scroll(0, 0, 0, 30, fine = true)),
+            pad.up(500),
+        )
+        // A still pair of fingers sends nothing, empty never.
+        pad.down(600)
+        pad.move(0f, 20f, fingers = 2, timeMs = 601)
+        assertEquals(emptyList<PadOutput>(), pad.move(0f, 0f, fingers = 2, timeMs = 700))
+    }
+
+    @Test
     fun tapThenTouchAndMoveDragsWithTheButtonHeld() {
         val pad = pad()
         pad.down(0)

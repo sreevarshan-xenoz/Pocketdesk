@@ -556,6 +556,7 @@ private fun InputOverlay(
                                 fingers,
                                 cursorScale = travel / zoom.scale,
                                 span = span,
+                                timeMs = android.os.SystemClock.uptimeMillis(),
                             )
                             // A pinch zooms this view, panning with the
                             // fingers' centre, as direct touch's pinch does.
