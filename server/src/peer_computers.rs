@@ -2912,8 +2912,10 @@ mod tests {
             "another link's"
         );
         drop(crate::plugins::privacy::LinkGrab("pc8-link-desk".into()));
+        // Released on the blocking pool (it joins the input hook's thread on
+        // Windows), which a loaded test run can keep busy past a second.
         let mut released = false;
-        for _ in 0..50 {
+        for _ in 0..250 {
             if !crate::plugins::privacy::held_by_test("pc8-link-desk") {
                 released = true;
                 break;
