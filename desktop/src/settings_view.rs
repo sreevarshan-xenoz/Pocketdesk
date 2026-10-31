@@ -2311,7 +2311,7 @@ impl SettingsForm {
                     );
                     note(
                         ui,
-                        "That computer scrolls by it as by a high-resolution wheel, so a slow two-finger scroll moves a little at a time instead of a notch at a time. Off, only whole notches go. A computer older than this gets whole notches either way. The phone has its own switch.",
+                        "That computer scrolls by it as finely as it can, so a slow two-finger scroll moves a little at a time instead of a notch at a time. Off, the window sends what it sent before this setting came. A computer older than this gets whole notches either way. The phone has its own switch.",
                     );
                 });
                 // PC10: the microphone "Send my mic" sends.

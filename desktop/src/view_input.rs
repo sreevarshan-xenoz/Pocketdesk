@@ -528,8 +528,8 @@ pub struct WindowInput {
     moved_at: Option<Instant>,
     /// A move that waits for its turn.
     pending: Option<(u16, u16)>,
-    /// What the wheel turned that is not yet a whole 120th of a notch,
-    /// each way.
+    /// What the wheel turned that is not yet sent, each way: part of a
+    /// 120th of a notch with smooth scrolling, else part of a notch.
     wheel: egui::Vec2,
     /// The wheel's turns on their way (fine scrolling): sent in 120ths of
     /// a notch with smooth scrolling, else as whole notches.
@@ -585,7 +585,48 @@ impl WindowInput {
     pub fn set_smooth_scrolling(&mut self, on: bool) {
         if on != self.wheel_sender.smooth {
             self.wheel_sender = WheelSender::new(on);
+            self.wheel = egui::Vec2::ZERO;
         }
+    }
+
+    /// A wheel turn with smooth scrolling: in 120ths of a notch (a line is
+    /// a notch, a page three, a touchpad's 50 points one), with the whole
+    /// notches it completes beside.
+    fn fine_turn(&mut self, unit: egui::MouseWheelUnit, delta: egui::Vec2) -> Option<InputPacket> {
+        let per = match unit {
+            egui::MouseWheelUnit::Line => 120.0,
+            egui::MouseWheelUnit::Page => 360.0,
+            egui::MouseWheelUnit::Point => 120.0 / 50.0,
+        };
+        self.wheel += delta * per;
+        let (dx, dy) = (self.wheel.x.trunc(), self.wheel.y.trunc());
+        self.wheel -= egui::vec2(dx, dy);
+        let most = 10.0 * 120.0;
+        self.wheel_sender.turn(
+            (-dx).clamp(-most, most) as i32,
+            dy.clamp(-most, most) as i32,
+        )
+    }
+
+    /// A wheel turn without smooth scrolling: whole notches, added up as
+    /// every build before fine scrolling did, so the bytes are the same.
+    fn notch_turn(&mut self, unit: egui::MouseWheelUnit, delta: egui::Vec2) -> Option<InputPacket> {
+        let scale = match unit {
+            egui::MouseWheelUnit::Line => 1.0,
+            egui::MouseWheelUnit::Page => 3.0,
+            egui::MouseWheelUnit::Point => 1.0 / 50.0,
+        };
+        self.wheel += delta * scale;
+        let (dx, dy) = (self.wheel.x.trunc(), self.wheel.y.trunc());
+        if dx == 0.0 && dy == 0.0 {
+            return None;
+        }
+        self.wheel -= egui::vec2(dx, dy);
+        Some(InputPacket::MouseScroll {
+            dx: (-dx).clamp(-10.0, 10.0) as i16,
+            dy: dy.clamp(-10.0, 10.0) as i16,
+            fine: None,
+        })
     }
 
     /// Whether keys go by their position.
@@ -676,24 +717,14 @@ impl WindowInput {
                     }
                 }
                 egui::Event::MouseWheel { unit, delta, .. } => {
-                    // In 120ths of a notch: a line is a notch, a page
-                    // three, and a touchpad's 50 points one.
-                    let per = match unit {
-                        egui::MouseWheelUnit::Line => 120.0,
-                        egui::MouseWheelUnit::Page => 360.0,
-                        egui::MouseWheelUnit::Point => 120.0 / 50.0,
-                    };
-                    self.wheel += *delta * per;
-                    let (dx, dy) = (self.wheel.x.trunc(), self.wheel.y.trunc());
-                    self.wheel -= egui::vec2(dx, dy);
                     // Content that moves down is the wheel turned up (the
                     // wire's positive); content that moves right is the
                     // wheel turned left. At most ten notches a pass.
-                    let most = 10.0 * 120.0;
-                    let Some(packet) = self.wheel_sender.turn(
-                        (-dx).clamp(-most, most) as i32,
-                        dy.clamp(-most, most) as i32,
-                    ) else {
+                    let Some(packet) = (if self.wheel_sender.smooth {
+                        self.fine_turn(*unit, *delta)
+                    } else {
+                        self.notch_turn(*unit, *delta)
+                    }) else {
                         continue;
                     };
                     self.flush(now, &mut out, true);
@@ -1312,6 +1343,28 @@ mod tests {
             words(&input.take(&[small], picture(), now)),
             ["MouseScroll { dx: 0, dy: 1, fine: None }"]
         );
+        // Review N1: as before, a turn back takes from what was left
+        // (0.2 notch left, then -0.4: -0.2), never starting over.
+        let back = wheel(egui::MouseWheelUnit::Point, 0.0, -20.0);
+        assert!(
+            input
+                .take(std::slice::from_ref(&back), picture(), now)
+                .is_empty()
+        );
+        let more = wheel(egui::MouseWheelUnit::Point, 0.0, -50.0);
+        assert_eq!(
+            words(&input.take(&[more], picture(), now)),
+            ["MouseScroll { dx: 0, dy: -1, fine: None }"]
+        );
+        // Bytes as every build before fine scrolling made them: five.
+        let mut input = WindowInput::default();
+        input.set_smooth_scrolling(false);
+        let out = input.take(
+            &[wheel(egui::MouseWheelUnit::Line, 0.0, 1.0)],
+            picture(),
+            now,
+        );
+        assert_eq!(out[0].encode(), [2, 0, 0, 1, 0]);
     }
 
     /// Smooth scrolling (on by default): every turn goes in 120ths of a

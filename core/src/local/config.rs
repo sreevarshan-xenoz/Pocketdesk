@@ -441,7 +441,9 @@ pub struct Config {
     /// Smooth scrolling: a touchpad's scroll goes to the other computer in
     /// 120ths of a notch (`wheel120`), as finely as it comes, from a
     /// computer's screen window and from shared input; that computer takes
-    /// it as a high-resolution wheel. Off, only whole notches go, as before.
+    /// it as finely as its backend can. Off, the window sends what it sent
+    /// before fine scrolling, and shared input whole notches added up as
+    /// before.
     /// A computer older than fine scrolling gets whole notches either way.
     /// Read as each window opens, and by shared input within a second or
     /// two. On by default.
