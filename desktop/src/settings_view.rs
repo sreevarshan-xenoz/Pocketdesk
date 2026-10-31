@@ -184,6 +184,27 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "Lock after the phone leaves",
         Section::Phones,
     ),
+    ("phone_approves", "Approve with my phone", Section::Phones),
+    (
+        "phone_approves_lock_screen",
+        "The lock screen too",
+        Section::Phones,
+    ),
+    (
+        "phone_approves_local_only",
+        "Only from this desk, not ssh",
+        Section::Phones,
+    ),
+    (
+        "phone_approves_timeout_secs",
+        "Wait for the phone",
+        Section::Phones,
+    ),
+    (
+        "phone_approves_phones",
+        "Phones that may approve",
+        Section::Phones,
+    ),
     ("open_links", "Links from phones", Section::Phones),
     ("version_hints", VERSION_HINTS, Section::Phones),
     ("link_rules", "Links by site", Section::Phones),
@@ -516,6 +537,8 @@ fn drawn_in(key: &str) -> &str {
         "mqtt_broker" | "mqtt_user" | "mqtt_password" => "home_assistant",
         "events_detail" => "events",
         "quiet_from" | "quiet_to" | "quiet_days" => "quiet_hours",
+        // Ticked beside each phone's key in the set-up.
+        "phone_approves_phones" => "phone_approves",
         _ => key,
     }
 }
@@ -544,6 +567,12 @@ pub(crate) fn drawn_here(key: &str) -> bool {
         "clipboard_hotkey" | "typing_hotkey" => cfg!(any(windows, target_os = "linux")),
         // R3: the lock on Linux too.
         "away_lock_minutes" => cfg!(any(windows, target_os = "linux")),
+        // Approve with my phone: Linux's PAM.
+        "phone_approves"
+        | "phone_approves_lock_screen"
+        | "phone_approves_local_only"
+        | "phone_approves_timeout_secs"
+        | "phone_approves_phones" => cfg!(target_os = "linux"),
         "mic_relay_device" => cfg!(windows),
         // PC10: the window reads the microphone on Windows and Linux.
         "computer_view_mic_device" => cfg!(any(windows, target_os = "linux")),
@@ -706,6 +735,12 @@ pub fn applies_live(key: &str) -> bool {
             | "phone_alarms"
             | "link_rules"
             | "away_lock_minutes"
+            // Read by the PAM helper and the server at each request.
+            | "phone_approves"
+            | "phone_approves_lock_screen"
+            | "phone_approves_local_only"
+            | "phone_approves_timeout_secs"
+            | "phone_approves_phones"
             // The key is read at start; the rest at each crossing.
             | "shared_input"
             | "shared_input_drive"

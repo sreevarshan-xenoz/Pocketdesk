@@ -59,9 +59,12 @@ pub mod notification_monitor;
 pub mod offers;
 pub mod overlay;
 pub mod packets;
+#[cfg(target_os = "linux")]
+pub mod pam_ask;
 pub mod paused;
 pub mod peer_computers;
 pub mod pen;
+pub mod phone_approves;
 pub mod phone_sound;
 pub mod platform;
 pub mod plugins;

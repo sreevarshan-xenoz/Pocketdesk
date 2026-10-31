@@ -52,6 +52,14 @@ pub const ALERTS_DIR: &str = "alerts_out";
 pub const ASKS_DIR: &str = "asks_out";
 /// Their answers, which the server leaves for `pocketdesk ask` (BF3).
 pub const ASK_ANSWERS_DIR: &str = "asks_in";
+/// Requests `pocketdesk-pam-ask` leaves for the server to put to the phones
+/// (approve with my phone).
+pub const APPROVE_DIR: &str = "approve_out";
+/// Where the server says how each went: put to phones, no phone, answered.
+pub const APPROVE_STATUS_DIR: &str = "approve_in";
+/// The phones' approval keys, as each phone gave it (owner-only; root pins
+/// its own copy in `/etc/pocketdesk/pam/`).
+pub const APPROVE_KEYS_FILE: &str = "approve_keys.json";
 /// Mutes the desktop app or the local API asks the server to send to a phone (D2).
 pub const QUIET_DIR: &str = "quiet_out";
 /// The texts that crossed between this computer and its phones (D3).
@@ -450,6 +458,7 @@ pub fn is_temp_beside_file(name: &str) -> bool {
         PHONE_NOTES_FILE,
         NOTIFICATION_ANSWERS_FILE,
         DEVICE_KEYS_FILE,
+        APPROVE_KEYS_FILE,
         WAN_STATUS_FILE,
         super::sms::SMS_FILE,
         "virtual_screens.json",

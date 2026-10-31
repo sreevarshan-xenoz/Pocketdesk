@@ -243,6 +243,26 @@ pub struct Config {
     /// gone before the computer locks (D9), in minutes, 2 to 60.
     #[serde(default = "default_away_lock_minutes")]
     pub away_lock_minutes: u32,
+    /// Approve with my phone: sudo and polkit (and the lock screen with
+    /// [`Config::phone_approves_lock_screen`]) may be approved on a linked
+    /// phone, through `pocketdesk-pam-ask` in PAM as `auth sufficient`, so
+    /// the password always stays. Off by default; the owner adds the PAM
+    /// lines and pins the phone's key as root.
+    #[serde(default)]
+    pub phone_approves: bool,
+    /// How long a request waits for the phone, 5 to 60 seconds.
+    #[serde(default = "default_phone_approves_timeout")]
+    pub phone_approves_timeout_secs: u64,
+    /// The lock screen too (hyprlock, swaylock, KDE's, GNOME's). Off.
+    #[serde(default)]
+    pub phone_approves_lock_screen: bool,
+    /// Only from this desk: refuse a request from an ssh session. On.
+    #[serde(default = "default_true")]
+    pub phone_approves_local_only: bool,
+    /// Which phones may approve (device ids); empty is every phone whose
+    /// key root pinned.
+    #[serde(default)]
+    pub phone_approves_phones: Vec<String>,
     /// Whether phones are told when this computer is in use (N7), so a
     /// phone with "Toast only on the computer I'm using" on keeps its
     /// notifications off the others' screens. On.
@@ -510,6 +530,10 @@ fn default_away_lock_minutes() -> u32 {
     5
 }
 
+fn default_phone_approves_timeout() -> u64 {
+    crate::protocol::approve::DEFAULT_TIMEOUT_SECS
+}
+
 fn default_input_idle_secs() -> u32 {
     10
 }
@@ -648,6 +672,11 @@ impl Default for Config {
             phone_drive: false,
             phone_drive_write: true,
             away_lock_minutes: default_away_lock_minutes(),
+            phone_approves: false,
+            phone_approves_timeout_secs: default_phone_approves_timeout(),
+            phone_approves_lock_screen: false,
+            phone_approves_local_only: true,
+            phone_approves_phones: Vec::new(),
             tell_in_use: true,
             kdeconnect_compat: true,
             phone_battery_alerts: true,
@@ -914,6 +943,11 @@ impl Config {
         "phone_drive",
         "phone_drive_write",
         "away_lock_minutes",
+        "phone_approves",
+        "phone_approves_timeout_secs",
+        "phone_approves_lock_screen",
+        "phone_approves_local_only",
+        "phone_approves_phones",
         "tell_in_use",
         "kdeconnect_compat",
         "phone_battery_alerts",
