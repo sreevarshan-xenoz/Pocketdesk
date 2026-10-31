@@ -30,15 +30,35 @@ pub const APP_ID: &str = "dev.pocketdesk.Pocketdesk";
 /// host registry (1.19), it stays unnamed, as before. True when named.
 #[cfg(all(target_os = "linux", feature = "capture"))]
 pub async fn register_app() -> bool {
+    register(None).await
+}
+
+/// [`register_app`] on a D-Bus connection of the caller's own: the portal
+/// names each connection apart (the input capture keeps one of its own).
+#[cfg(all(target_os = "linux", feature = "capture"))]
+pub async fn register_app_on(connection: ashpd::zbus::Connection) -> bool {
+    register(Some(connection)).await
+}
+
+#[cfg(all(target_os = "linux", feature = "capture"))]
+async fn register(connection: Option<ashpd::zbus::Connection>) -> bool {
+    // In Flatpak or Snap the portal names the program by its package, and
+    // the registry is not asked (review N4: this had logged a name it never
+    // gave).
+    if ashpd::is_sandboxed() {
+        tracing::debug!("In a sandbox: the desktop portal names this program by its package");
+        return false;
+    }
     let Ok(id) = ashpd::AppID::try_from(APP_ID) else {
         return false;
     };
-    match tokio::time::timeout(
-        std::time::Duration::from_secs(3),
-        ashpd::register_host_app(id),
-    )
-    .await
-    {
+    let call = async {
+        match connection {
+            Some(connection) => ashpd::register_host_app_with_connection(connection, id).await,
+            None => ashpd::register_host_app(id).await,
+        }
+    };
+    match tokio::time::timeout(std::time::Duration::from_secs(3), call).await {
         Ok(Ok(())) => {
             tracing::info!("Named to the desktop portal as {APP_ID}");
             true
