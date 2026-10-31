@@ -30,8 +30,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.pocketdesk.android.HostStore
+import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.ui.plainErrorText
@@ -48,6 +50,11 @@ import kotlinx.coroutines.withContext
  * A question the computer put to this phone (BF3), with Yes and No. No is
  * sent at a tap; Yes first takes the phone's fingerprint or screen lock
  * (a phone with none cannot say Yes, and is told so).
+ *
+ * An approval request (approve with my phone: sudo, polkit, the lock
+ * screen) shows what it is for, and its Yes is a signature over the request
+ * by this phone's Keystore key, which the fingerprint (or the screen lock,
+ * unless "Fingerprint only" is on) unlocks for that one signature.
  */
 class AskActivity : ComponentActivity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -62,6 +69,7 @@ class AskActivity : ComponentActivity() {
     private lateinit var id: String
     private lateinit var question: String
     private var expiresUnix = 0L
+    private var approval: ApproveRule.Approval? = null
 
     /** The screen lock's own screen, below Android 11. */
     private val confirm = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -80,6 +88,9 @@ class AskActivity : ComponentActivity() {
         id = intent.getStringExtra(Asks.EXTRA_ID) ?: return finish()
         question = intent.getStringExtra(Asks.EXTRA_QUESTION) ?: return finish()
         expiresUnix = intent.getLongExtra(Asks.EXTRA_EXPIRES, 0L)
+        approval = ApproveRule.parse(intent.getStringExtra(Asks.EXTRA_APPROVE))
+        if (intent.hasExtra(Asks.EXTRA_APPROVE) && approval == null) return finish()
+        val asked = approval
         val computer = HostStore.shownName(this, host)
         val until = DateFormat.getTimeFormat(this).format(Date(expiresUnix * 1000))
         setContent {
@@ -90,7 +101,28 @@ class AskActivity : ComponentActivity() {
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
                         Text(stringResource(R.string.ask_from_computer, computer), style = MaterialTheme.typography.titleMedium)
-                        Text(question, style = MaterialTheme.typography.headlineSmall)
+                        if (asked == null) {
+                            Text(question, style = MaterialTheme.typography.headlineSmall)
+                        } else {
+                            // What the signature covers, as the computer
+                            // sent it: never the free words of the question.
+                            Text(
+                                if (asked.unlock) {
+                                    stringResource(R.string.approve_unlock, asked.user)
+                                } else {
+                                    stringResource(R.string.approve_admin, asked.service, asked.user)
+                                },
+                                style = MaterialTheme.typography.headlineSmall,
+                            )
+                            if (asked.command.isNotEmpty()) {
+                                Text(asked.command, fontFamily = FontFamily.Monospace)
+                            }
+                            Text(
+                                stringResource(R.string.approve_signs),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         Text(
                             stringResource(R.string.ask_waits_until, until),
                             style = MaterialTheme.typography.bodySmall,
@@ -132,6 +164,7 @@ class AskActivity : ComponentActivity() {
             return
         }
         if (!yes) return send(yes = false)
+        approval?.let { return approve(it) }
         val keyguard = getSystemService(KeyguardManager::class.java)
         if (!AskRule.mayAnswerYes(keyguard.isDeviceSecure)) {
             said = getString(R.string.ask_needs_lock)
@@ -175,8 +208,70 @@ class AskActivity : ComponentActivity() {
         }
     }
 
+    /** Yes to an approval: the fingerprint (or lock) unlocks one signature over it. */
+    private fun approve(asked: ApproveRule.Approval) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            said = getString(R.string.approve_needs_android_11)
+            return
+        }
+        val signature = ApproveKey.signature().getOrElse {
+            val problem = (it as? ApproveKey.ProblemException)?.problem
+            said = getString(
+                if (problem == ApproveKey.Problem.Invalidated) R.string.approve_invalidated else R.string.approve_no_key,
+            )
+            Log.i(TAG, "an approval was not signed: ${problem ?: it.javaClass.simpleName}")
+            return
+        }
+        val biometricOnly = Prefs.approveBiometricOnly(this)
+        sending = true
+        val signal = CancellationSignal().also { prompt = it }
+        val builder = BiometricPrompt.Builder(this)
+            .setTitle(getString(R.string.ask_confirm_title))
+            .setDescription(asked.command.ifEmpty { question })
+        if (biometricOnly) {
+            builder.setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+                .setNegativeButton(getString(R.string.ask_no), mainExecutor) { _, _ ->
+                    sending = false
+                    said = getString(R.string.ask_not_confirmed)
+                }
+        } else {
+            builder.setAllowedAuthenticators(
+                BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL,
+            )
+        }
+        builder.build().authenticate(
+            BiometricPrompt.CryptoObject(signature),
+            signal,
+            mainExecutor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    val signed = runCatching {
+                        val s = result.cryptoObject?.signature ?: error("no signature")
+                        s.update(ApproveRule.message(asked))
+                        s.sign()
+                    }.getOrElse {
+                        sending = false
+                        said = getString(R.string.approve_no_key)
+                        Log.i(TAG, "an approval was not signed: ${it.javaClass.simpleName}")
+                        return
+                    }
+                    sendBody(ApproveRule.signedAnswer(asked.id, signed) ?: return finish(), yes = true)
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    sending = false
+                    said = getString(R.string.ask_not_confirmed)
+                }
+            },
+        )
+    }
+
     private fun send(yes: Boolean) {
         val body = AskRule.body(id, yes) ?: return finish()
+        sendBody(body, yes)
+    }
+
+    private fun sendBody(body: String, yes: Boolean) {
         // A prompt can outlive the question (BF3 review).
         if (expired()) {
             sending = false

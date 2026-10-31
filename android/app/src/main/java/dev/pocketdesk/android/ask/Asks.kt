@@ -28,6 +28,7 @@ object Asks {
     const val EXTRA_ID = "id"
     const val EXTRA_QUESTION = "question"
     const val EXTRA_EXPIRES = "expires_unix"
+    const val EXTRA_APPROVE = "approve"
 
     /** Take the questions waiting; [own] is the computer the phone works with. */
     fun take(context: Context, own: HostStore.Host?) {
@@ -41,6 +42,20 @@ object Asks {
             if (decision != AskRule.Decision.Offer) {
                 Log.i(TAG, "a question from the computer was not offered: $decision")
                 continue
+            }
+            // Approve with my phone: only with its own switch on and a key
+            // to sign with.
+            if (ask.approve != null) {
+                val approve = ApproveRule.decide(
+                    Prefs.approveRequests(context),
+                    ApproveKey.exists(),
+                    ask.expiresUnix,
+                    now,
+                )
+                if (approve != ApproveRule.Decision.Offer || ApproveRule.parse(ask.approve) == null) {
+                    Log.i(TAG, "an approval request was not offered: $approve")
+                    continue
+                }
             }
             offer(context, ask, now)
             // For the device checks; never the question.
@@ -67,6 +82,7 @@ object Asks {
             .putExtra(EXTRA_ID, ask.id)
             .putExtra(EXTRA_QUESTION, ask.question)
             .putExtra(EXTRA_EXPIRES, ask.expiresUnix)
+            .putExtra(EXTRA_APPROVE, ask.approve)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val pending = PendingIntent.getActivity(
             context,
