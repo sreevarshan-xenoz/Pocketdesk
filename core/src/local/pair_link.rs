@@ -24,6 +24,14 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 const PREFIX: &str = "pocketdesk://pair?";
 const VERSION: &str = "1";
 
+/// The longest link read, in bytes, before anything in it is decoded. A
+/// link this desktop makes is a few hundred bytes (its endpoint and a
+/// handful of addresses); a QR code holds under 3 KB.
+pub const MAX_LINK_BYTES: usize = 8 * 1024;
+
+/// The most addresses a link may name.
+pub const MAX_ADDRESSES: usize = 32;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PairLink {
     pub name: String,
@@ -123,6 +131,9 @@ impl PairLink {
     }
 
     pub fn from_uri(uri: &str) -> Result<Self, PairLinkError> {
+        if uri.len() > MAX_LINK_BYTES {
+            return Err(invalid("the link is too long"));
+        }
         let query = clean_link(uri)
             .strip_prefix(PREFIX)
             .ok_or_else(|| invalid("not a Pocketdesk pairing link"))?;
@@ -148,6 +159,9 @@ impl PairLink {
             .collect();
         if addresses.is_empty() {
             return Err(invalid("the link names no address"));
+        }
+        if addresses.len() > MAX_ADDRESSES {
+            return Err(invalid("the link names too many addresses"));
         }
         let port = |key: &str, default: u16| -> Result<u16, PairLinkError> {
             match fields.get(key) {
@@ -184,7 +198,8 @@ impl PairLink {
 
 /// Addresses a phone should try, best first: home/office LANs, then other
 /// private ranges (often virtual adapters: WSL, Hyper-V, Docker), then the
-/// tailnet. Loopback, link-local, IPv6 and duplicates are dropped.
+/// tailnet. Loopback, link-local, IPv6 and duplicates are dropped, and
+/// only the best [`MAX_ADDRESSES`] are kept, so a link made of them reads.
 pub fn order_addresses(addresses: Vec<String>) -> Vec<String> {
     fn rank(ip: Ipv4Addr) -> Option<u8> {
         let [a, b, ..] = ip.octets();
@@ -215,7 +230,11 @@ pub fn order_addresses(addresses: Vec<String>) -> Vec<String> {
         }
     }
     ranked.sort();
-    ranked.into_iter().map(|(_, _, a)| a).collect()
+    ranked
+        .into_iter()
+        .take(MAX_ADDRESSES)
+        .map(|(_, _, a)| a)
+        .collect()
 }
 
 /// A pasted pairing link without what a copy can carry around it unseen:
@@ -342,6 +361,15 @@ mod tests {
     }
 
     #[test]
+    fn only_the_best_addresses_a_link_can_carry_are_kept() {
+        let mut many: Vec<String> = (1..=40).map(|n| format!("100.64.0.{n}")).collect();
+        many.push("192.168.1.20".into());
+        let ordered = order_addresses(many);
+        assert_eq!(ordered.len(), MAX_ADDRESSES);
+        assert_eq!(ordered[0], "192.168.1.20", "the best is kept first");
+    }
+
+    #[test]
     fn malformed_links_are_rejected_with_a_reason() {
         assert!(PairLink::from_uri("https://example.com").is_err());
         assert!(PairLink::from_uri("pocketdesk://pair?v=2&a=1.2.3.4&pin=123456").is_err());
@@ -351,6 +379,22 @@ mod tests {
             "no address"
         );
         assert!(PairLink::from_uri("pocketdesk://pair?v=1&a=1.2.3.4&pin=123456&cp=x").is_err());
+        // Too long, or too many addresses, before anything is decoded.
+        assert_eq!(crate::protocol::introductions::MAX_LINK, MAX_LINK_BYTES);
+        let long = format!(
+            "pocketdesk://pair?v=1&a=192.0.2.1&pin=123456&name={}",
+            "a".repeat(MAX_LINK_BYTES)
+        );
+        assert!(PairLink::from_uri(&long).is_err());
+        let many = vec!["192.0.2.1"; MAX_ADDRESSES + 1].join(",");
+        let many = format!("pocketdesk://pair?v=1&a={many}&pin=123456");
+        assert!(PairLink::from_uri(&many).is_err());
+        let most = vec!["192.0.2.1"; MAX_ADDRESSES].join(",");
+        let most = format!("pocketdesk://pair?v=1&a={most}&pin=123456");
+        assert_eq!(
+            PairLink::from_uri(&most).unwrap().addresses.len(),
+            MAX_ADDRESSES
+        );
         let err = PairLink::from_uri("pocketdesk://pair?v=1&a=1.2.3.4&pin=12").unwrap_err();
         assert!(err.to_string().contains("PIN"), "{err}");
     }

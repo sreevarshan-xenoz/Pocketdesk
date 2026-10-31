@@ -178,6 +178,8 @@ From `core/src/local/pair_link.rs`. Values are percent-encoded.
 | `fp` | Hex SHA-256 of the desktop's certificate | absent before the server has made one |
 | `ep` | The iroh endpoint JSON (`endpointId`, `relayUrls`, `directAddrs`, `dht`), base64url | absent until the server has recorded it |
 
+A link is at most 8 KiB and names at most 32 addresses (§6).
+
 Anyone who sees the code while it is valid holds everything needed to pair within the PIN's 300 s. `directAddrs` can include the desktop's LAN and public addresses.
 
 ### 2.7 Pairing a computer nearby (the matching code)
@@ -577,6 +579,7 @@ All of these are inside the app's private storage unless noted. None of it is ba
 | WAN (iroh) connections in all | 128, no per-address limit | `server/src/iroh_endpoint.rs` |
 | Control handshake | 8 s for TLS and HELLO, 5 s for the identity, 64 KiB per handshake line | `server/src/service.rs` |
 | Control packet | 4 MiB per line (TCP), 4 MiB per frame (v2) | `service.rs` (`MAX_PACKET_LINE`), `core/src/protocol/v2.rs` |
+| Pairing link (§2.6) | 8 KiB, 32 addresses (the desktop puts its best 32 in a link it makes); a longer link is refused before it is decoded | `core/src/local/pair_link.rs` |
 | Owner answers (introductions, remote revoke) | a request id of 1 to 64 printable ASCII characters; at most 64 computers offered or 512 devices listed, counted before any is read, each id and name at most 256 bytes; a pairing link at most 8 KiB. An answer over them is dropped whole | `core/src/protocol/introductions.rs`, `core/src/protocol/remote_devices.rs` |
 | File transfers | 4 at once on the desktop, 2 per phone; refused, not queued | `server/src/plugins/share.rs` |
 | File size, name | 8 GiB; names cut to 200 bytes | same, `server/src/offers.rs` |
