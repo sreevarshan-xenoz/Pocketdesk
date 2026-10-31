@@ -350,7 +350,13 @@ fun HomeScreen(
     // (review N3: not from the preferences at every recomposition), and the
     // clock it is told against, a tick a minute while Home shows: only while
     // resumed, so a paused app is not woken each minute (UX2, review N9).
-    val lastUsed = remember(hosts, resumes) { hosts.associate { it.address to HostStore.lastUsed(context, it.address) } }
+    // Also when a stamp is recorded while Home shows: a camera or cast
+    // stopped from its notification leaves Home resumed (device check
+    // 2026-10-31).
+    val usedStamps = HostStore.usedStamps
+    val lastUsed = remember(hosts, resumes, usedStamps) {
+        hosts.associate { it.address to HostStore.lastUsed(context, it.address) }
+    }
     val minuteNow by produceState(System.currentTimeMillis(), lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             while (true) {
