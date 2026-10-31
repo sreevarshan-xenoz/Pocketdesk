@@ -180,7 +180,12 @@ impl VideoEncoder {
         };
 
         if matches!(resolved, HardwareEncoder::Software) {
-            return open_software(config);
+            // The default config is Auto: on a machine with no usable
+            // hardware it lands here, and must take the software ladder
+            // (libx264, else libopenh264) like an explicit Software one.
+            let mut soft = config;
+            soft.hardware_encoder = HardwareEncoder::Software;
+            return open_software(soft);
         }
 
         let mut hw_config = config.clone();
@@ -536,11 +541,15 @@ impl SidecarEncoder {
         // and which software encoders it has.
         let program = ffmpeg_sidecar::paths::ffmpeg_path();
         let fps_mode = super::ffmpeg_flags::fps_mode_flag(&program);
-        let software = if config.hardware_encoder == HardwareEncoder::Software {
-            software_rung(&mut config, program.as_os_str())?
-        } else {
-            None
-        };
+        let software = plan_sidecar(
+            &mut config,
+            || {
+                use super::encoder_detect::{probe_encoders, resolve_encoder};
+                resolve_encoder(HardwareEncoder::Auto, &probe_encoders())
+            },
+            super::ffmpeg_flags::listed_encoders(&program).as_deref(),
+            || super::encoder_detect::openh264_encodes(program.as_os_str()),
+        )?;
         let args = build_ffmpeg_args(
             &config,
             keyframe_interval,
@@ -1115,22 +1124,44 @@ pub fn describe_sidecar_software_h264() -> String {
     }
 }
 
-/// Settle the software rung's encoder for the ffmpeg at `program`: HEVC
-/// becomes H.264 when it has no libx265 (Fedora's `ffmpeg-free`), and H.264
-/// takes libx264, else libopenh264, else fails with what to install.
+/// Settle what a sidecar runs for `config`. Auto is resolved first (by
+/// `resolve`), so an Auto that finds no usable hardware takes the software
+/// ladder like an explicit Software config; then [`software_rung`] settles
+/// that rung against the ffmpeg's listing.
+fn plan_sidecar(
+    config: &mut StreamingConfig,
+    resolve: impl FnOnce() -> HardwareEncoder,
+    listed: Option<&std::collections::BTreeSet<String>>,
+    openh264_encodes: impl FnOnce() -> bool,
+) -> anyhow::Result<Option<SoftwareH264>> {
+    if config.hardware_encoder == HardwareEncoder::Auto {
+        config.hardware_encoder = resolve();
+    }
+    if config.hardware_encoder != HardwareEncoder::Software {
+        return Ok(None);
+    }
+    software_rung(config, listed, openh264_encodes)
+}
+
+/// Settle the software rung's encoder for an ffmpeg that lists `listed`
+/// (`None`: it could not be listed): HEVC becomes H.264 when it has no
+/// libx265 (Fedora's `ffmpeg-free`), and H.264 takes libx264, else a working
+/// libopenh264, else fails with what to install.
 fn software_rung(
     config: &mut StreamingConfig,
-    program: &std::ffi::OsStr,
+    listed: Option<&std::collections::BTreeSet<String>>,
+    openh264_encodes: impl FnOnce() -> bool,
 ) -> anyhow::Result<Option<SoftwareH264>> {
-    use super::encoder_detect::{lists_libx265, software_h264};
+    use super::encoder_detect::{lists_libx265, software_h264_from};
     if config.codec == VideoCodec::H265 {
-        if lists_libx265(program) {
+        if lists_libx265(listed) {
             return Ok(None);
         }
         info!("The system ffmpeg has no libx265; the software rung encodes H.264");
         config.codec = VideoCodec::H264;
     }
-    let software = software_h264(program).map_err(|why| anyhow::anyhow!(why))?;
+    let software =
+        software_h264_from(listed, openh264_encodes).map_err(|why| anyhow::anyhow!(why))?;
     if software == SoftwareH264::OpenH264 {
         info!(
             "The system ffmpeg has no libx264; encoding with libopenh264 (Constrained Baseline, lower quality per bit)"
@@ -1780,10 +1811,10 @@ mod tests {
         assert_eq!(arg_after(&args, "-maxrate"), "5000000");
         assert_eq!(arg_after(&args, "-g"), "60");
         assert_eq!(arg_after(&args, "-allow_skip_frames"), "0");
-        assert_eq!(
-            args[args.len() - 11..args.len() - 9],
-            ["-pix_fmt", "yuv420p"]
-        );
+        // The output format: the last -pix_fmt (the first is the input's).
+        let output_pix_fmt = args.iter().rposition(|a| a == "-pix_fmt").unwrap();
+        assert_eq!(args[output_pix_fmt + 1], "yuv420p");
+        assert!(output_pix_fmt > args.iter().position(|a| a == "libopenh264").unwrap());
         // None of x264's own options reach a wrapper that would refuse them.
         for flag in ["-x264-params", "-preset", "-tune"] {
             assert!(!args.iter().any(|a| a == flag), "{flag}");
@@ -1800,17 +1831,105 @@ mod tests {
         assert!(!args.iter().any(|a| a == "-allow_skip_frames"));
     }
 
+    fn listing(names: &[&str]) -> std::collections::BTreeSet<String> {
+        names.iter().map(|n| n.to_string()).collect()
+    }
+
+    /// Fedora's `ffmpeg-free`, as far as the software rung cares.
+    const FEDORA: &[&str] = &["libopenh264", "h264_vaapi", "hevc_vaapi", "h264_nvenc"];
+
+    /// The review's C1: the default config is Auto, and on a machine with no
+    /// usable hardware it must reach the same ladder as an explicit Software
+    /// config, not fall to libx264 that ffmpeg-free does not have.
+    #[test]
+    fn a_default_auto_config_with_no_hardware_takes_openh264() {
+        let mut config = StreamingConfig::default();
+        assert_eq!(config.hardware_encoder, HardwareEncoder::Auto);
+        let fedora = listing(FEDORA);
+        let software = plan_sidecar(
+            &mut config,
+            || HardwareEncoder::Software,
+            Some(&fedora),
+            || true,
+        )
+        .unwrap();
+        assert_eq!(software, Some(SoftwareH264::OpenH264));
+        assert_eq!(config.hardware_encoder, HardwareEncoder::Software);
+        let args = build_ffmpeg_args(&config, 60, FPS_MODE, software.unwrap());
+        assert_eq!(arg_after(&args, "-c:v"), "libopenh264");
+        assert!(!args.iter().any(|a| a == "libx264"));
+    }
+
+    #[test]
+    fn a_default_auto_config_with_hardware_keeps_it() {
+        let mut config = StreamingConfig::default();
+        let fedora = listing(FEDORA);
+        let checked = std::cell::Cell::new(false);
+        let software = plan_sidecar(
+            &mut config,
+            || HardwareEncoder::Vaapi,
+            Some(&fedora),
+            || {
+                checked.set(true);
+                true
+            },
+        )
+        .unwrap();
+        assert_eq!(software, None);
+        assert_eq!(config.hardware_encoder, HardwareEncoder::Vaapi);
+        assert!(!checked.get(), "no software check for a hardware rung");
+    }
+
+    #[test]
+    fn auto_with_no_software_encoder_fails_saying_what_to_install() {
+        let mut config = StreamingConfig::default();
+        let bare = listing(&["h264_vaapi"]);
+        let error = plan_sidecar(
+            &mut config,
+            || HardwareEncoder::Software,
+            Some(&bare),
+            || true,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("neither libx264 nor libopenh264"), "{error}");
+        let mut config = StreamingConfig::default();
+        let stub = listing(FEDORA);
+        let error = plan_sidecar(
+            &mut config,
+            || HardwareEncoder::Software,
+            Some(&stub),
+            || false,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("dnf install openh264"), "{error}");
+    }
+
     #[test]
     fn software_hevc_without_libx265_becomes_h264() {
-        // An ffmpeg that cannot be listed keeps the historical rung: HEVC on
-        // libx265, and libx264 for H.264.
-        let missing = std::ffi::OsStr::new("no-such-program-pocketdesk");
+        let fedora = listing(FEDORA);
         let mut hevc = openh264_config(VideoCodec::H265, H264Profile::Main);
-        assert_eq!(software_rung(&mut hevc, missing).unwrap(), None);
+        assert_eq!(
+            software_rung(&mut hevc, Some(&fedora), || true).unwrap(),
+            Some(SoftwareH264::OpenH264)
+        );
+        assert_eq!(hevc.codec, VideoCodec::H264);
+        // With libx265 it stays HEVC, on libx265.
+        let mut hevc = openh264_config(VideoCodec::H265, H264Profile::Main);
+        let x265 = listing(&["libx264", "libx265"]);
+        assert_eq!(
+            software_rung(&mut hevc, Some(&x265), || true).unwrap(),
+            None
+        );
+        assert_eq!(hevc.codec, VideoCodec::H265);
+        // An ffmpeg that cannot be listed keeps the historical rung.
+        let mut hevc = openh264_config(VideoCodec::H265, H264Profile::Main);
+        assert_eq!(software_rung(&mut hevc, None, || false).unwrap(), None);
         assert_eq!(hevc.codec, VideoCodec::H265);
         let mut h264 = openh264_config(VideoCodec::H264, H264Profile::Main);
         assert_eq!(
-            software_rung(&mut h264, missing).unwrap(),
+            software_rung(&mut h264, None, || false).unwrap(),
             Some(SoftwareH264::X264)
         );
     }
@@ -1916,7 +2035,9 @@ mod tests {
     /// The software rung on an FFmpeg without libx264 (Fedora's
     /// `ffmpeg-free`, with Cisco's OpenH264 installed): 60 moving frames
     /// through the real sidecar, and the stream they make decodes as
-    /// Constrained Baseline H.264. Run with such an `ffmpeg` first on PATH.
+    /// Constrained Baseline H.264. Run with such an `ffmpeg` first on PATH, on
+    /// a machine whose hardware encoders do not run, in a build without
+    /// `inproc` (whose in-process libx264 would be tried first).
     #[test]
     #[ignore]
     fn openh264_sidecar_encodes_frames_a_phone_decodes() {
@@ -1927,19 +2048,18 @@ mod tests {
             "needs an ffmpeg with a working libopenh264 and no libx264 first on PATH"
         );
         let (width, height) = (640, 360);
+        // The session's own path: the default config (Auto), through
+        // VideoEncoder::new, on a machine whose hardware rungs do not run.
         let config = StreamingConfig {
             width,
             height,
-            fps: 30,
             bitrate_bps: 2_000_000,
-            codec: VideoCodec::H264,
-            profile: H264Profile::High,
-            preset: EncoderPreset::UltraFast,
-            hardware_encoder: HardwareEncoder::Software,
-            monitor_index: 0,
+            ..StreamingConfig::default()
         };
-        let mut encoder = SidecarEncoder::new(config).expect("spawn the openh264 sidecar");
+        assert_eq!(config.hardware_encoder, HardwareEncoder::Auto);
+        let mut encoder = VideoEncoder::new(config).expect("open the default encoder");
         assert_eq!(encoder.backend_name(), "ffmpeg-sidecar-openh264");
+        assert_eq!(encoder.config().hardware_encoder, HardwareEncoder::Software);
         let mut stream = Vec::new();
         let mut packets = 0;
         let mut keyframes = 0;
