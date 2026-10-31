@@ -39,4 +39,19 @@ class StringsTranslatedTest {
             assertEquals("placeholders differ in $language", emptySet<String>(), mismatched)
         }
     }
+
+    /**
+     * Spanish says "equipo" for a computer everywhere (R5): "ordenador" and
+     * "computadora" crept back in with later features, three words for one thing.
+     */
+    @Test
+    fun spanishSaysEquipoForComputer() {
+        val xml = File("src/main/res/values-es/strings.xml").readText().replace(comment, "")
+        val other = Regex("""(?i)(ordenador(es)?|computadoras?)""")
+        val found = entry.findAll(xml)
+            .filter { other.containsMatchIn(it.groupValues[4]) }
+            .map { it.groupValues[2] }
+            .toList()
+        assertEquals("strings not saying equipo", emptyList<String>(), found)
+    }
 }
