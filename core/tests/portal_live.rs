@@ -11,11 +11,14 @@
 //!
 //! `PD_PORTAL_PROBE_ACTIONS` replaces the default input with a list, comma
 //! separated: `click:X:Y` (0 to 1 across the screen), `key:CODE` (evdev),
-//! `scroll:STEPS`, `wait:MS` and `snap:PATH` (the newest frame as a PPM).
+//! `scroll:STEPS`, `wait:MS` and `snap:NAME` (the newest frame as a PPM, written only as
+//! NAME in `PD_PORTAL_PROBE_DIR`, the throwaway folder).
 //!
-//! `PD_PORTAL_PROBE_DIR=/tmp/grant cargo test -p pocketdesk-core --test
+//! `PD_PORTAL_PROBE_DIR="$XDG_RUNTIME_DIR/pd-grant" cargo test -p pocketdesk-core --test
 //! portal_live -- --ignored --nocapture`
-#![cfg(target_os = "linux")]
+// The portal capture exists only with the capture feature, which CI's
+// client and wan profiles leave out.
+#![cfg(all(target_os = "linux", feature = "capture"))]
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -26,7 +29,11 @@ use pocketdesk_core::streaming::{StreamingConfig, VideoFrame, capture_linux, lat
 use tokio_util::sync::CancellationToken;
 
 /// The newest frame as a binary PPM, reading BGRx.
-fn snap(frame: &VideoFrame, path: &str) {
+fn snap(frame: &VideoFrame, dir: &std::path::Path, name: &str) {
+    // Only a plain name, so a screen capture lands in the throwaway folder.
+    let name = std::path::Path::new(name)
+        .file_name()
+        .expect("snap takes a file name");
     let mut out = format!("P6\n{} {}\n255\n", frame.width, frame.height).into_bytes();
     for row in 0..frame.height as usize {
         let start = row * frame.stride as usize;
@@ -35,7 +42,7 @@ fn snap(frame: &VideoFrame, path: &str) {
             out.extend_from_slice(&[frame.data[at + 2], frame.data[at + 1], frame.data[at]]);
         }
     }
-    std::fs::write(path, out).unwrap();
+    std::fs::write(dir.join(name), out).unwrap();
 }
 
 /// Frames for `for_`, keeping the newest.
@@ -149,10 +156,10 @@ async fn the_portal_shares_the_screen_and_takes_input() {
                     );
                     vec![]
                 }
-                ["snap", path] => {
+                ["snap", name] => {
                     count(&mut rx, &mut newest, Duration::from_millis(300));
                     match &newest {
-                        Some(frame) => snap(frame, path),
+                        Some(frame) => snap(frame, &dir, name),
                         None => println!("NO_FRAME_TO_SNAP"),
                     }
                     vec![]
