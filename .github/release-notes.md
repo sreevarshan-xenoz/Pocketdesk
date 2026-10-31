@@ -1,6 +1,6 @@
-Pocketdesk is a remote desktop for your own computers: an Android app that streams and controls a Linux or Windows desktop, with files both ways, the clipboard, notifications and sound, and now one keyboard and mouse across your computers.
+Pocketdesk is a remote desktop for your own computers: an Android app that streams and controls a Linux or Windows desktop, with files both ways, the clipboard, notifications and sound, one keyboard and mouse across your computers, and now each of your computers showing and controlling the others in a window.
 
-**This is a beta.** Most features are verified on two Android phones against a Windows host, and many on-device checks are still open. The shared keyboard and mouse has not yet been tried at a desk with two real computers, and Linux driving it has run live on Hyprland only (see the end of these notes). See [`docs/device-verification-checklist.md`](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/device-verification-checklist.md). Please read [SECURITY.md](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/SECURITY.md) before using it on a network you do not control.
+**This is a beta.** Most features are verified on two Android phones against a Windows host, and many on-device checks are still open. Much of what is new in this release (the window onto another computer's screen and its extras, pairing two computers nearby, introductions) has run in tests and between throwaway servers, not yet at a real desk with two real computers (see the end of these notes). See [`docs/device-verification-checklist.md`](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/device-verification-checklist.md). Please read [SECURITY.md](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/SECURITY.md) before using it on a network you do not control.
 
 ## Install
 
@@ -18,69 +18,72 @@ An APK named `…-debug-signed.apk` is the debug build. It works, but Android wi
 
 ## What's changed
 
-Pocketdesk 0.8.2 lets a Linux computer drive the shared keyboard and mouse too, takes the lag out of sharing, and fixes what stopped the desktop app's picture and the Pair page's link on a plain Arch Linux laptop. It updates 0.8.1 (or 0.7.0) in place (same signing key), keeping your saved computers and pairings. The phone app has nothing new in this release; it is rebuilt as 0.8.2.
+Pocketdesk 0.8.3 makes your computers one set: pair two of them once, both ways, and each can show and control the other in a window, with the clipboard, files, keys, the mic and every screen following. Your phone pairs once for all of them and can remove a lost device from any. KDE Plasma's screen sharing gets a picture at last. It updates 0.8.2 in place (same signing key), keeping your saved computers and pairings. Most new features need 0.8.3 at both ends, so update every device.
 
-**Linux drives the shared keyboard and mouse too (new)**
-- Push the pointer off the edge of a Linux screen that faces another computer, or press Ctrl+Alt+Right, and your keys and mouse go there; push back to come home, as from Windows. Linux asks the desktop's input-capture permission for it: GNOME 45 or later, KDE Plasma 6.1 or later, or Hyprland with xdg-desktop-portal-hyprland 1.4 or later. GNOME and KDE show their permission dialog once; Hyprland asks nothing.
-- To use it, turn on "Share my keyboard and mouse with my computers" and "This computer's keyboard and mouse can move to the others" on the Linux computer (desktop app, Keyboard and mouse), and allow "Keyboard and mouse" for it on the other computer's Devices page. It works only while the link between the two is direct, never through a relay.
-- While you work on the Linux computer itself, the computers it drives are not told someone is there (its desktop says nothing of keys made at home), so they stop being kept awake by it after a minute.
-- It ran live on one real desktop only: Hyprland 0.56 with xdg-desktop-portal-hyprland 1.4.1, where a laptop's own touchpad drove a stand-in computer (7 crossings out and back, clicks, the wheel, typing in order, nothing left held). GNOME and KDE are not yet checked.
+**Your computers, both ways**
+- **Both are mine:** pair two of your computers once, both ways, with consent given at pairing ("This is another of my computers" on the Pair page, off by default), so you never walk to the far computer to click Allow or turn Control on.
+- **Pair a computer nearby:** Pair → Computer lists the Pocketdesk computers on your network; Pair shows the same six-digit code on both screens, and the other computer accepts or declines. No link to carry across. "Let computers nearby ask to pair" turns it off. If a pairing times out on Windows, the Pair page now says when the network is marked Public (where the firewall lets nothing in) and how to make it Private.
+- **Another computer's screen in a window** gained:
+  - **Stats** (the road, size, codec, frame rate, bitrate, round trip, decode time, frames lost) and **reconnecting by itself** after a drop, for about two minutes; a computer whose server stops or restarts now says so at once, and the window has its picture back within seconds;
+  - **the clipboard and files follow the window** while it controls that computer;
+  - **Send keys** (the Windows key, Alt+Tab, Alt+F4, Print Screen, and Ctrl+Shift+Esc and Lock for a Windows computer), and on Windows the window can take Win and Alt+Tab while it has the focus;
+  - **a faster picture:** hardware decoding (D3D11 on Windows, VA-API on Linux), a lighter pipe and HEVC;
+  - **Lock the pointer** (Ctrl+Alt+Shift+M) with relative mouse moves, for games and 3D;
+  - **Keys by position**, for games and other keyboard layouts: every key goes by where it sits, not what it types;
+  - **Hide what I do there:** the other computer's privacy mode, from the window, if that computer allows it;
+  - **Send my mic** to the other computer (off by default);
+  - **every screen** of the other computer as a row of buttons laid out as they sit (Ctrl+Alt+Shift+1 to 9).
+- **Your computers on the Overview and in the tray**, and **waking one that sleeps** (a computer paired both ways tells the other how to wake it).
+- **Both computers driving at once:** with the shared keyboard and mouse driving from both sides, the pointer no longer bounces straight back home. A pasted pairing link that began with an invisible character no longer leaves Pair greyed out.
+- **No pacing stall on the link between computers:** a key after a pause no longer waits about 25 ms for the link to wake (now about 3 ms over Wi-Fi). An older computer at the other end still connects.
 
-**No lag while sharing**
-- While you share the keyboard and mouse, keys and moves are no longer held up: Windows' timer runs at 1 ms while you share (the network's share of a key fell from about 16 ms to about 3 ms), and a tiny packet every 50 ms keeps the other computer's Wi-Fi awake, only on your own network (first keys after a quiet spell no longer wait up to a tenth of a second for it). "Keep the connection quick while sharing" in Keyboard and mouse turns it off. How it feels at a real desk is not yet checked.
+**Your phone**
+- **Remove a lost device from another of yours:** a phone paired with a computer's own code, or another of your computers paired both ways, lists a computer's paired devices and removes one there (the phone's computer card → Devices on this computer; the desktop's Settings → Other computers → Devices there…). The computer says who removed what. "Let my devices remove others from afar" turns it off on each computer.
+- **Pair once for all your computers:** after you pair the phone with one computer, it offers your other computers paired both ways with that one ("Also pair with …?"). You tap Pair on the phone, and the other computer can refuse ("Let my computers add my phones here").
+- **One version across your devices:** the phone's computer cards and the desktop's Devices page and Other computers say which release each device runs, with a hint to update the older one ("Tell me when my devices run different versions" turns the hint off). Nothing is checked online.
+- **The phone as a second screen on Hyprland** (0.56 on), as on Sway.
+- **Home and Settings:** one system card at a time, card buttons on one row, jumps to each Settings group, "Used 2 min ago" on each card, the card menu in two headed sections with its upkeep under Manage, long window titles cut in the middle (a long-press shows them whole), and Pair again on a card that is no longer paired. Spanish says "emparejar" and "equipo" throughout.
 
-**Fixes from a real Arch Linux laptop**
-- **The desktop app showed no picture:** FFmpeg 9 dropped `-vsync`, so the picture in the phone's cast window and in another computer's window never appeared. Pocketdesk now asks each ffmpeg which frame-rate flag it knows and uses that one, for the decoder and for the server's encoder alike (FFmpeg 4.4 lacks the new one).
-- **The Pair page had no link** on a computer without the `hostname` program (a stock Arch), and its announcement on the network no address; Pocketdesk now reads this computer's addresses from its network interfaces.
-- **The switch notice names the right computer:** a computer that only takes input (one with driving off) was shown as "this computer"; it now carries the name it was paired under, and says its own name with its screens.
-- **A Linux desktop with neither Hyprland nor X** (Sway with Xwayland off, for one) now reports its screens, read from Wayland, so the keyboard and mouse can cross onto it.
-- **Debug logs for crossings:** the log (at debug level) now says each crossing, release and landing, for finding why a crossing did not happen.
-- **For developers:** running the tests no longer writes into your real Pocketdesk state folder (they used to create a trusted-devices file there).
-- The winget manifests, the F-Droid recipe and the AUR package are brought to 0.8.1's files and checksums.
+**Linux desktops**
+- **KDE Plasma:** screen sharing through the desktop portal now gets a picture. Its capture never offered a picture format, so the stream stayed empty (the same capture serves GNOME, not yet checked there). An unanswered permission dialog now ends after one minute instead of two, and the server names itself to the portal as `dev.pocketdesk.Pocketdesk`, so the dialog no longer calls it "an unidentifiable application".
+- **KDE Plasma with no one at the desk:** "Remember the screen-sharing grant" restores the next session with no dialog, and the guide's "KDE Plasma: no dialog at all" shows how to allow Pocketdesk ahead, with what that costs.
+- **The wheel on KDE** without uinput scrolls a notch per notch, not a pixel.
+- **The Linux tray** no longer crashed at start in a build that compiled the server and the app together (the release packages were not affected).
 
-### New in 0.8, if you are updating from 0.7.0
+**Desktop app**
+- Four rounds of polish: greyed controls say why and offer the fix, pairing shows its progress with Cancel, one Start server bar on every page, Pair has a Phone | Computer switch, the Keyboard and mouse page starts with a setup checklist and holds its options, a new look for both themes (spacing, focus ring, contrast), and every page reworked with clearer empty states.
 
-Pocketdesk 0.8 brings your computers together. One keyboard and mouse moves between them, Windows driving Linux (and now Linux driving too), and the clipboard, images, files and sound follow the pointer; your phone can be another screen beside them; and one computer can show another's screen in a window. 0.8.0 was tagged but never published (its release run stopped on a flaky test), so these first reached people in 0.8.1.
+**Security and fixes**
+- A computer this one paired into only one way can no longer ask for this computer's privacy mode or lock it, and the always-on clipboard between computers now respects the Clipboard switch on the Devices page.
+- A review of everything since 0.8.2 found and fixed more: the window's mic on by default only for a computer paired both ways and never played while the session is view-only; privacy refused for the computer the shared keyboard is on; the clipboard handed between windows without echo.
+- SECURITY.md has two new known limits: an owner device can remove your other devices (71), and a computer paired both ways can add an owner phone (72). Read them before turning these on for a computer someone else can reach.
+- On Windows, the server's sockets are no longer inherited by the programs it starts (ffmpeg), which could hold a port after a restart.
+- **For developers:** the tests are isolated: a test build that names no test folder gets throwaway state and config folders, so no test can touch your real Pocketdesk folders, and tests that share a folder take turns (#586).
 
-The shared keyboard and mouse is new and largely unchecked at a desk. It is unit-tested throughout, and its receiving end ran on a real Linux laptop from a script, but nobody has yet pushed a real Windows mouse onto a Linux screen with it. Everything it does is off until you turn it on. Please try it and tell us how it went.
+## Upgrade notes
 
-**One keyboard and mouse across your computers (new in 0.8)**
-- **Windows drives Linux:** pair two computers, turn on "Share my keyboard and mouse with my computers" on both (desktop app, Keyboard and mouse), and allow "Keyboard and mouse" for the Windows computer on the Linux computer's Devices page. Then push the pointer off the edge that faces the other computer, or press Ctrl+Alt+Right, and your keys and mouse go there; push back to come home. It works only while the link between the two is direct (at home), never through a relay.
-- **Arrange them:** the Keyboard and mouse page places your computers by dragging, shows each link and both permissions, and Identify flashes each computer's name on its screen. Each switch flashes the name of the computer that has the keyboard and mouse, and the tray says where they are.
-- **Nothing left stuck:** if the other computer stops answering for a second (a Wi-Fi drop, a crash), the keyboard and mouse come home by themselves and every key held there is let go. Win+L while away comes home and then locks this computer, Ctrl+Alt+Del stays with Windows, and stopping or uninstalling the server brings them home first.
-- **Games:** "Stay on this computer while a game runs" (on) keeps them on Windows while a full-screen game or a program you list is in front, with no hook installed at all. The switch key can still take them off a game, except while a kernel anti-cheat runs (Vanguard, FACEIT, Easy Anti-Cheat, BattlEye) or the program in front runs as administrator while the server does not.
-- **The clipboard follows the mouse:** what you copied goes with the pointer to the other computer and comes back as it returns, text or, with no text, an image (a PNG of up to 32 MB; images need "Files over the internet" on on both). Never a password manager's private copy. "Clipboard with my computers" also shares images now.
-- **Files dragged across the edge:** drag files or folders in Explorer onto the other computer and let go there; they are copied to it as the Files page sends them (at most 100 at once).
-- **Hear the computer you're driving:** with "Hear the computer you're driving here" on (off by default), the other computer's sound plays on Windows while the pointer is there, and stops as it comes home. Update both computers before turning it on.
-- **Your phone as another screen:** with the phone's "Let my computer's keyboard and mouse use this phone" on (it uses the "Pocketdesk control" Accessibility service) and "Keyboard and mouse" allowed for the phone on the computer's Devices page, the Windows mouse crosses onto the phone like onto a computer: a click taps, a drag swipes, the wheel scrolls, the right button is Back and the middle Home, and keys type into the field in front (on a US layout; never into a password field or on a locked phone). It needs only the phone's own link, at home or away.
-- **How quick it is:** `pocketdesk share-test <computer>` measures how long keys and moves take, and the desktop app's Diagnostics page shows the result.
+- **Update every device.** Introductions, removing from afar, the version line and the window's new extras need 0.8.3 at both ends; an older end refuses or ignores them, and nothing breaks.
+- **Phones paired before 0.8.3 pair again with the computer's own code** (its Pair page, not "Someone else's") to remove devices from afar or to be introduced to your other computers. Until then they are not owner phones.
+- **Computers paired both ways before 0.8.3 keep "Use the phone as a microphone" off** for each other, so Send my mic plays nothing there until you turn it on in that computer's Devices page.
+- **GNOME and KDE may ask once more** for screen sharing after the update: the server now names itself `dev.pocketdesk.Pocketdesk` (where the .deb, the AUR package or the tray installed its desktop file), and a grant kept for the unnamed program is not this name's. If you allowed Pocketdesk ahead on KDE, allow `dev.pocketdesk.Pocketdesk` again. That lets any program running as you that claims this name share your screen and drive it without asking; the guide shows how to take it back.
+- **An older desktop app beside a newer server** (or going back to 0.8.2) drops the owner mark from `trusted_devices.json`, so owner phones must pair again.
 
-**Another computer's screen in a window (new)**
-- In Settings → Other computers, "Show its screen" beside a paired computer opens a window with that computer's screen, as the phone shows it, on the home network or over the internet. Windows and Linux alike, either way round.
-- It is view-only unless the other computer's Devices page turns on "Control the mouse and keyboard" for this one; by default the other computer asks before each session. Its bar has the screen, Quality, View only, Screenshot, Record and Full screen, and its sound plays here when that computer allows "Hear and change this computer's sound" for this one.
-- Pairing between computers is one way: show the screen from the computer that pasted the other's pairing link.
+## Known issues
 
-**Installing, starting and stopping**
-- **Reachable from the internet** (desktop Settings, on by default) can be turned off: the computer then contacts no relay and no DHT and maps no router port, and phones reach it on the same network or through Tailscale only.
-- **A privacy policy** ([docs/privacy.md](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/privacy.md)) says what goes where and how to turn each off; the Windows installer shows it before it installs.
-- **A phone can pair as soon as the server starts:** on a computer without Tailscale, its probe kept the server's door shut for about 24 s after every start.
-- **`pocketdesk stop` returns once the server has gone** (0.4 s, where it could take 27), and the Windows uninstaller and an upgrade stop a server that outlives its stop, so no file is left in use.
-- **On Arch Linux** Pocketdesk is in the AUR (`yay -S pocketdesk`).
+- On Windows, saving the trusted devices list (`trusted_devices.json`) can fail with "Access is denied" while another program has the file open. Not fixed yet.
+- The wheel through a desktop portal carries whole notches only: a touchpad's fine scrolling arrives as notches, and an app on KDE that scrolls only by high-resolution wheel steps still won't.
 
-**Smaller fixes**
-- The computer's sound from Linux: Pocketdesk now tells PipeWire the sound format it reads, where it named none, which the phone's sound in a session from a Linux computer needed too. Not yet checked by ear.
-- A pointer sent to the screen's last pixel lands on it, not one past it (on Linux, a phone's touches land at most a pixel further up and left).
+## Not yet checked on a device
 
-### Not yet checked on a device
+These work in tests, and some ran on real hardware from a script or between throwaway servers, but not yet:
+- **Another computer's screen in a window between two real computers** (checklist §224, §227, §231, §233 to §235, §237 to §240): stats and reconnecting, the clipboard and files following, Send keys, hardware decode and HEVC, the pointer lock, privacy, the mic, every screen, and Keys by position with real layouts and games. What did run: the Linux laptop viewing Windows view-only by both roads, with a server restart coming back in about 3 to 4 s (§219).
+- **Your computers paired both ways and nearby** (§223, §228, §229, §232): pairing both ways and nearby with the code, the Public-network hint, the always-on clipboard held to its switch, the Overview and tray entries, and waking a computer.
+- **Both computers driving at once** (§225) and **the link without the pacing stall** at a desk (§222).
+- **Removing from afar and introductions between two real computers** (§241, §244): removing a guest, a computer paired one way refused, and the introduction from Windows to the Linux laptop end to end. The phone side ran on an OPPO against two throwaway servers.
+- **The version line between computers a release apart** (§242), and the phone against a 0.8.2 computer.
+- **The phone's second screen on Hyprland from a real phone** (§245); the screen itself was added, captured and removed on the laptop by a test.
+- **GNOME** (§100): nothing yet. **KDE Plasma at a real desk** with a phone, two phones, and the systemd unit (§100); KDE ran headless in a container, driven by a script.
+- **The desktop app's new pages** (§226, §230, §236) by eye at a desk, and the Android UX items with TalkBack and the phone's own sound (§243).
+- **Updating** from 0.8.2 to this release on a phone, and a clean install.
 
-These work in tests, and some ran on real hardware from a script, but not yet:
-- **Linux driving, beyond Hyprland's stand-in run** (§220): crossing to a real Windows computer and back; keys and modifiers there; the safety nets (Wi-Fi off, the lock screen, a monitor plugged or unplugged); a fractional-scale screen's wall; a full-screen game keeping the pointer; the phone's screen sharing after driving; GNOME 45 or later and KDE Plasma 6.1 or later, the permission dialog included; and GNOME's screen sizes at scale 2.
-- **No lag while sharing**: how it feels over real Wi-Fi at a desk, with a real Windows computer and a real Linux one: whether keys and moves are no longer held up, and a first key after a quiet spell. Nobody has felt it yet.
-- **The shared keyboard and mouse at the desk** (checklist §214 and §215): Windows driving Linux with its real mouse and keyboard, at the edge and by the switch key; typing; Win+L; a pulled network and a server stopped while away; mixed display scales; the gaming lock with real games and anti-cheats; the badges, Identify and the tray; the clipboard and images following both ways; Linux kept awake while driven; the arrangement's crossings; and the latency over real Wi-Fi. What did run: a script typing into a headless Sway on the Linux laptop (102 keys in order, none left down; a killed sender's key let go about a second later; a lock screen typed into).
-- **Files dragged across the edge** (§216): whether Windows' drag finds Pocketdesk's drop target under the parked cursor at all, and drops of several files, folders, and files from a zip or from a phone shown in Explorer.
-- **The phone as a screen with a real mouse** (§217): it was checked on an OPPO phone from a script (taps, swipes, scrolls, Back, Home, typing, a held drag), not yet with a Windows mouse crossing onto it, nor its lag from away.
-- **Sound following the mouse** (§218): not yet heard between two real computers; only a test tone crossed a link on one machine.
-- **Another computer's screen in a window** (§219): it ran between two throwaway servers on one Windows computer, view-only, by both roads, but not yet between two real computers: control, keys, a second monitor, reconnecting, quality, the session list, sound, Linux showing Windows, screenshots and recordings.
-- **Updating:** from 0.8.1 (and 0.7.0) to this release on a phone, and a clean install.
-
-The full list is in [the checklist](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/device-verification-checklist.md) (§214 on are the 0.8 series').
+The full list is in [the checklist](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/device-verification-checklist.md) (§222 on are 0.8.3's) and, by where each can run, in [docs/owed-checks.md](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/owed-checks.md).

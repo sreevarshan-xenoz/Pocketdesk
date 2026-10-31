@@ -13,8 +13,8 @@ android {
         applicationId = "dev.pocketdesk.android"
         minSdk = 26
         targetSdk = 37
-        versionCode = 10
-        versionName = "0.8.2"
+        versionCode = 11
+        versionName = "0.8.3"
         // The Rust bridge is built for arm64 only, so no other ABI can run
         // the app; libraries' other ABIs would only add size. A build for an
         // emulator names its ABIs: -Ppocketdesk.abis=arm64-v8a,x86_64.

@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
+
+PackageIdentifier: SreevarshanXenoz.Pocketdesk
+PackageVersion: 0.8.3
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+- RelativeFilePath: pocketdesk-v0.8.3-windows-x86_64\pocketdesk.exe
+  PortableCommandAlias: pocketdesk
+- RelativeFilePath: pocketdesk-v0.8.3-windows-x86_64\pocketdesk-app.exe
+  PortableCommandAlias: pocketdesk-app
+# The server encodes video with ffmpeg on PATH; the zip does not carry it.
+Dependencies:
+  PackageDependencies:
+  - PackageIdentifier: Gyan.FFmpeg
+Installers:
+- Architecture: x64
+  InstallerUrl: https://github.com/sreevarshan-xenoz/Pocketdesk/releases/download/v0.8.3/pocketdesk-v0.8.3-windows-x86_64.zip
+  InstallerSha256: DC242EC781B3C921552DB9B9D6C5F42FC8F4CDE56D195A5E237DA224C208A69D
+ManifestType: installer
+ManifestVersion: 1.10.0
