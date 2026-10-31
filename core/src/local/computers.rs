@@ -627,9 +627,8 @@ pub fn try_read(state_dir: &Path) -> io::Result<ComputersFile> {
     }
 }
 
-/// The server's writes, one at a time.
-// Keeps this file's writes in turn. On Windows a contended save holds it up to
-// about half a second (`atomic_file::replace` waits out another handle).
+/// The server's writes, one at a time. On Windows a contended save holds it up to
+/// about half a second (`atomic_file::replace` waits out another handle).
 static WRITING: Mutex<()> = Mutex::new(());
 
 /// Change the file under `change` (the server's side), written whole and
