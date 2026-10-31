@@ -1032,12 +1032,23 @@ fn another_computers_waiting_pin_for_the_phone_is_never_replaced() {
 fn three_wrong_pins_discard_the_introduction_pin() {
     let _turn = pin_turn();
     PINS.lock().unwrap().clear();
-    assert!(!miss("no-pin-phone"), "no PIN waits: not its miss");
+    let right = key_of(PHONE_TLS);
+    assert!(
+        !miss("no-pin-phone", Some(&right)),
+        "no PIN waits: not its miss"
+    );
     let pin = mint("a", introduction("missing-phone")).unwrap();
-    assert!(miss("missing-phone"));
-    assert!(miss("missing-phone"));
+    // Another key, or none, never touches its count (re-review R2).
+    let stranger = key_of(&"44".repeat(32));
+    for _ in 0..PIN_MISSES + 1 {
+        assert!(!miss("missing-phone", Some(&stranger)));
+        assert!(!miss("missing-phone", None));
+    }
+    assert_eq!(PINS.lock().unwrap()[0].misses, 0);
+    assert!(miss("missing-phone", Some(&right)));
+    assert!(miss("missing-phone", Some(&right)));
     assert_eq!(PINS.lock().unwrap().len(), 1, "two misses keep it");
-    assert!(miss("missing-phone"));
+    assert!(miss("missing-phone", Some(&right)));
     assert!(PINS.lock().unwrap().is_empty(), "the third discards it");
     assert!(take_pin("missing-phone", Some(&key_of(PHONE_TLS)), &pin).is_none());
     PINS.lock().unwrap().clear();

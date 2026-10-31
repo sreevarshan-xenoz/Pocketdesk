@@ -696,13 +696,24 @@ pub(crate) fn cancel_phone(from: &str, phone: &str) -> bool {
     pins.len() != before
 }
 
-/// A wrong PIN from `device_id`, while an introduction PIN waits for it:
-/// counted against that PIN alone, which goes after [`PIN_MISSES`], and
-/// never against the owner's own PIN (PR #581 I1). Whether one waited.
-pub(crate) fn miss(device_id: &str) -> bool {
+/// A wrong PIN from `device_id` on a connection that proved `key`, while
+/// an introduction PIN waits for that phone and that key: counted against
+/// that PIN alone, which goes after [`PIN_MISSES`], and never against the
+/// owner's own PIN (PR #581 I1). A connection that proved another key (or
+/// none) never touches the count (re-review R2: a stranger claiming the id
+/// cannot wipe the phone's PIN); its guess is the owner's PIN's as any
+/// other. Whether it was counted here.
+pub(crate) fn miss(device_id: &str, key: Option<&PeerKey>) -> bool {
+    let Some(PeerKey::Tls(hash)) = key else {
+        return false;
+    };
+    let presented = hex(hash);
     let mut pins = PINS.lock().unwrap_or_else(|e| e.into_inner());
     pins.retain(|p| p.minted.elapsed() < PIN_FOR);
-    let Some(pin) = pins.iter_mut().find(|p| p.phone.device_id == device_id) else {
+    let Some(pin) = pins
+        .iter_mut()
+        .find(|p| p.phone.device_id == device_id && p.phone.tls == presented)
+    else {
         return false;
     };
     pin.misses += 1;

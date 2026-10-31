@@ -1312,7 +1312,7 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
                 respond_pair(sender, false, "").await;
             }
         }
-    } else if crate::introductions::miss(&phone_id) {
+    } else if crate::introductions::miss(&phone_id, sender.peer_key().as_ref()) {
         // Ecosystem phase 4 (PR #581 I1): a wrong PIN from a phone an
         // introduction PIN waits for is that PIN's miss alone (it goes after
         // three), never the owner's own PIN's.
