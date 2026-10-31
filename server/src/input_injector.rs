@@ -1294,9 +1294,10 @@ fn emit_uinput(
     if device_mut(state, which).is_none() {
         set_device(state, which, build_uinput(which)?);
     }
-    let first = device_mut(state, which)
-        .expect("an absent device was just built")
-        .emit(events);
+    let first = write_frames(
+        device_mut(state, which).expect("an absent device was just built"),
+        events,
+    );
     match first {
         Ok(()) => Ok(()),
         Err(e) => {
@@ -1307,12 +1308,56 @@ fn emit_uinput(
                 "uinput emit failed, rebuilding the device and retrying"
             );
             set_device(state, which, build_uinput(which)?);
-            device_mut(state, which)
-                .expect("the device was just rebuilt")
-                .emit(events)
-                .with_context(|| format!("uinput {what} failed again after its device was rebuilt"))
+            write_frames(
+                device_mut(state, which).expect("the device was just rebuilt"),
+                events,
+            )
+            .with_context(|| format!("uinput {what} failed again after its device was rebuilt"))
         }
     }
+}
+
+/// Write `events` to a uinput device in one `write(2)`, each frame ending
+/// in the SYN_REPORT its caller put there (one is added when the last
+/// event is not one). evdev 0.13's `emit` adds a SYN_REPORT of its own
+/// after the events, an empty frame after ours, and writes each part with
+/// a trailing empty write: four system calls a move instead of one.
+#[cfg(target_os = "linux")]
+fn write_frames(device: &impl std::os::fd::AsFd, events: &[InputEvent]) -> std::io::Result<()> {
+    let ends_in_syn = events
+        .last()
+        .is_some_and(|e| e.event_type().0 == EV_SYN && e.code() == SYN_REPORT);
+    let synced;
+    let events = if ends_in_syn {
+        events
+    } else {
+        synced = [events, &[InputEvent::new(EV_SYN, SYN_REPORT, 0)]].concat();
+        &synced
+    };
+    // SAFETY: `InputEvent` is `repr(transparent)` over the kernel's plain
+    // `input_event`, which uinput reads as these bytes, as evdev's own
+    // `emit` writes them.
+    let bytes = unsafe {
+        std::slice::from_raw_parts(events.as_ptr().cast::<u8>(), std::mem::size_of_val(events))
+    };
+    let fd = std::os::fd::AsRawFd::as_raw_fd(&device.as_fd());
+    let mut rest = bytes;
+    while !rest.is_empty() {
+        // SAFETY: `rest` is valid for its length; `fd` is the device's
+        // own, open while it is borrowed.
+        let n = unsafe { libc::write(fd, rest.as_ptr().cast(), rest.len()) };
+        match usize::try_from(n) {
+            Ok(0) => return Err(std::io::ErrorKind::WriteZero.into()),
+            Ok(n) => rest = &rest[n.min(rest.len())..],
+            Err(_) => {
+                let e = std::io::Error::last_os_error();
+                if e.kind() != std::io::ErrorKind::Interrupted {
+                    return Err(e);
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The device `which` names, if built.
@@ -1469,7 +1514,7 @@ impl InputInjector {
             return true;
         }
         events.push(InputEvent::new(EV_SYN, SYN_REPORT, 0));
-        if let Err(e) = device.emit(&events) {
+        if let Err(e) = write_frames(device, &events) {
             // Made again at the next packet; this one types keys.
             warn!("The game controller did not take the phone's gamepad ({e}); making it again");
             self.pad = PadSlot::Untried;
@@ -1511,7 +1556,7 @@ impl InputInjector {
                 return;
             }
             events.push(InputEvent::new(EV_SYN, SYN_REPORT, 0));
-            if device.emit(&events).is_ok() {
+            if write_frames(device, &events).is_ok() {
                 *last = Some(rest);
             }
         }
@@ -2472,6 +2517,59 @@ mod tests {
             error.raw_os_error(),
             Some(libc::EBADF),
             "the injected fault was not the one the rebuild path handles"
+        );
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod frame_tests {
+    use super::*;
+    use std::io::Read;
+
+    fn read_events(reader: &mut std::io::PipeReader, count: usize) -> Vec<(u16, u16, i32)> {
+        let size = std::mem::size_of::<InputEvent>();
+        let mut bytes = vec![0u8; size * count];
+        reader.read_exact(&mut bytes).unwrap();
+        bytes
+            .chunks(size)
+            .map(|chunk| {
+                // SAFETY: a whole `input_event` as written.
+                let e: InputEvent = unsafe { std::ptr::read_unaligned(chunk.as_ptr().cast()) };
+                (e.event_type().0, e.code(), e.value())
+            })
+            .collect()
+    }
+
+    /// A move is its two axes and one SYN_REPORT, in one write: never the
+    /// empty frame evdev's `emit` adds after the caller's own SYN_REPORT.
+    #[test]
+    fn a_frame_is_written_whole_with_one_syn() {
+        let (mut reader, writer) = std::io::pipe().unwrap();
+        let events = [
+            InputEvent::new(EV_ABS, AbsoluteAxisCode::ABS_X.0, 10),
+            InputEvent::new(EV_ABS, AbsoluteAxisCode::ABS_Y.0, 20),
+            InputEvent::new(EV_SYN, SYN_REPORT, 0),
+        ];
+        write_frames(&writer, &events).unwrap();
+        // Events without a SYN_REPORT last get one.
+        write_frames(&writer, &[InputEvent::new(EV_KEY, 30, 1)]).unwrap();
+        drop(writer);
+        assert_eq!(
+            read_events(&mut reader, 5),
+            [
+                (EV_ABS, AbsoluteAxisCode::ABS_X.0, 10),
+                (EV_ABS, AbsoluteAxisCode::ABS_Y.0, 20),
+                (EV_SYN, SYN_REPORT, 0),
+                (EV_KEY, 30, 1),
+                (EV_SYN, SYN_REPORT, 0),
+            ]
+        );
+        let mut rest = Vec::new();
+        reader.read_to_end(&mut rest).unwrap();
+        assert!(
+            rest.is_empty(),
+            "no empty frame after: {} bytes",
+            rest.len()
         );
     }
 }
