@@ -1022,21 +1022,22 @@ mod tests {
         use iroh::RelayMode;
         use iroh::endpoint::Endpoint;
         use iroh::endpoint::presets::Minimal;
-        let addr: SocketAddr = ([127, 0, 0, 1], 0).into();
-        // The spike dials an explicitly-bound port; reserve one the same way.
-        let port = {
-            let sock = std::net::UdpSocket::bind(addr).unwrap();
-            sock.local_addr().unwrap().port()
-        };
-        let addr = SocketAddr::new(addr.ip(), port);
+        // Port 0, the port read back from the bound socket: a port reserved
+        // first and bound again later can be taken by a parallel test in
+        // between ("address in use").
         let endpoint = Endpoint::builder(Minimal)
             .alpns(vec![alpn.to_vec()])
             .relay_mode(RelayMode::Disabled)
-            .bind_addr(addr)
+            .bind_addr(SocketAddr::from(([127, 0, 0, 1], 0)))
             .expect("bind_addr")
             .bind()
             .await
             .expect("endpoint bind");
+        let addr = endpoint
+            .bound_sockets()
+            .into_iter()
+            .find(|a| a.ip().is_loopback() && a.is_ipv4() && a.port() != 0)
+            .expect("a loopback socket bound");
         (endpoint, addr)
     }
 
