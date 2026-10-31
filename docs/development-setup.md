@@ -93,6 +93,25 @@ every test that can reach either one calls it first: one that does not uses
 your real folders whenever it runs before the others. The core's own tests
 panic if they reach a real folder.
 
+### 3a. The portal capture, live (GNOME, KDE)
+
+`core/tests/portal_live.rs` (ignored) starts the portal capture as the
+server does and prints its start time, the frames counted in 3 s and which
+restore tokens it kept; with `PD_PORTAL_PROBE_INPUT` set it opens the
+RemoteDesktop session and sends a click, a wheel notch and keys. Run it
+twice with the same folder to see a grant restored with no dialog. Its input
+goes to whichever session the portal serves, so point it at a throwaway
+desktop (a nested `kwin_wayland --virtual` in a container, a VM), never your
+own:
+
+```bash
+PD_PORTAL_PROBE_DIR="$XDG_RUNTIME_DIR/pd-grant" PD_PORTAL_PROBE_INPUT=1 \
+  cargo test -p pocketdesk-core --test portal_live -- --ignored --nocapture
+```
+
+The file lists its other knobs: naming itself as the server does, a list of
+clicks and keys, and snapshots of the screen.
+
 ## 4. Windows server (the Windows host)
 
 The server builds and runs on Windows 10 1903+ / 11 with the **GNU** toolchain
