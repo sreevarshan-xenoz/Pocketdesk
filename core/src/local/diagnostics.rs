@@ -661,22 +661,50 @@ pub fn check_firewall(state: Option<Result<FirewallState, String>>) -> Option<Fi
     })
 }
 
-/// O9: a Linux firewall as it applies to phones: ufw's or firewalld's.
+pub use super::netfilter::{PortsOpen, Verdict};
+
+/// O9: a Linux firewall as it applies to phones: ufw's, firewalld's, or
+/// plain nftables or iptables rules.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinuxFirewall {
-    /// Neither is installed.
+    /// None is installed, or no rules filter what comes in.
     None,
     /// `tool` is installed but not running.
     Off { tool: &'static str },
     /// `tool` runs, and its rules could not be read (ufw needs root).
     Unreadable { tool: &'static str },
-    /// `tool` runs: whether it lets in the control port (TCP) and the
-    /// stream port (UDP).
+    /// `tool` runs: whether it lets in the control port (TCP), the stream
+    /// port (UDP), KDE Connect's ports and mDNS.
     On {
         tool: &'static str,
-        control: bool,
-        stream: bool,
+        ports: PortsOpen,
+        rules: RulesRead,
     },
+}
+
+/// Where the rules judged came from, for the words and the line that
+/// opens the ports.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RulesRead {
+    /// The file read in place of the rules running (reading those needs
+    /// root).
+    pub file: Option<&'static str>,
+    /// The nftables chain that keeps them out, as `nft` names it (`inet
+    /// filter input`).
+    pub chain: Option<String>,
+    /// Arch's stock nftables rules, which let in ssh only.
+    pub stock_arch: bool,
+}
+
+/// What Pocketdesk needs let in: the control and stream ports always, KDE
+/// Connect's ports with its bridge on, mDNS with "Found on this network"
+/// (`lan_discovery`) on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FirewallNeeds {
+    pub control_port: u16,
+    pub stream_port: u16,
+    pub kde: bool,
+    pub mdns: bool,
 }
 
 /// Whether `rule`'s port part (`1716`, `1716/tcp`, `1714:1764/udp`,
@@ -756,8 +784,8 @@ pub fn parse_ufw(status: &str, control_port: u16, stream_port: u16) -> LinuxFire
     let allows_in = status
         .lines()
         .any(|l| l.trim_start().starts_with("Default:") && l.contains("allow (incoming)"));
-    let mut control = allows_in;
-    let mut stream = allows_in;
+    let mut every = allows_in;
+    let mut port_rules: Vec<String> = Vec::new();
     for line in status.lines() {
         let Some((to, action, direction)) = ufw_rule(line) else {
             continue;
@@ -769,33 +797,38 @@ pub fn parse_ufw(status: &str, control_port: u16, stream_port: u16) -> LinuxFire
         }
         let port = to.iter().find(|t| ufw_ports(t));
         match port {
-            Some(port) => {
-                control |= rule_takes(port, control_port, "tcp");
-                stream |= rule_takes(port, stream_port, "udp");
-            }
+            Some(port) => port_rules.push(port.to_string()),
+            // KDE Connect's app profile opens its range both ways.
+            None if to.join(" ") == "KDE Connect" => port_rules.push("1714:1764".into()),
             // "Anywhere ALLOW IN 192.0.2.0/24", or one address: every port
-            // to it. An app profile ("OpenSSH") names no port read here.
+            // to it. Any other app profile ("OpenSSH") names no port read
+            // here.
             None => {
-                let every = to
+                every |= to
                     .first()
                     .is_some_and(|t| *t == "Anywhere" || t.contains(['.', ':', '/']));
-                control |= every;
-                stream |= every;
             }
         }
     }
+    let ports = PortsOpen::from_check(control_port, stream_port, |p| {
+        let proto = match p.proto {
+            super::netfilter::Proto::Tcp => "tcp",
+            super::netfilter::Proto::Udp => "udp",
+        };
+        Verdict::from_open(every || port_rules.iter().any(|r| rule_takes(r, p.port, proto)))
+    });
     LinuxFirewall::On {
         tool,
-        control,
-        stream,
+        ports,
+        rules: RulesRead::default(),
     }
 }
 
 /// O9: firewalld read for the two ports, from `firewall-cmd --state` and
 /// `--list-all` of each active zone (their lists one after another; a port
 /// let in by any of them counts): its `ports:`, rich rules that accept a
-/// port, an ACCEPT target, and the `kdeconnect` service, which opens
-/// 1714-1764 both ways.
+/// port, an ACCEPT target, the `kdeconnect` service, which opens
+/// 1714-1764 both ways, and the `mdns` service.
 pub fn parse_firewalld(
     state: &str,
     list_all: Option<&str>,
@@ -839,28 +872,98 @@ pub fn parse_firewalld(
             ports.push(format!("{}/{proto}", port.replace('-', ":")));
         }
     }
-    let kde = field("services").iter().any(|s| s == "kdeconnect");
-    let takes = |port: u16, proto: &str| {
-        target_accepts
-            || ports.iter().any(|r| rule_takes(r, port, proto))
-            || (kde && (1714..=1764).contains(&port))
-    };
+    let services = field("services");
+    let kde = services.iter().any(|s| s == "kdeconnect");
+    let mdns = services.iter().any(|s| s == "mdns");
+    let open = PortsOpen::from_check(control_port, stream_port, |p| {
+        let proto = match p.proto {
+            super::netfilter::Proto::Tcp => "tcp",
+            super::netfilter::Proto::Udp => "udp",
+        };
+        Verdict::from_open(
+            target_accepts
+                || ports.iter().any(|r| rule_takes(r, p.port, proto))
+                || (kde && (1714..=1764).contains(&p.port))
+                || (mdns && proto == "udp" && p.port == super::netfilter::MDNS_PORT),
+        )
+    });
     LinuxFirewall::On {
         tool,
-        control: takes(control_port, "tcp"),
-        stream: takes(stream_port, "udp"),
+        ports: open,
+        rules: RulesRead::default(),
     }
 }
 
-/// O9: the firewall on Linux; never a failure without one.
-pub fn check_linux_firewall(
-    firewall: &LinuxFirewall,
+/// Plain nftables rules, from `nft list ruleset` (`file` None) or the file
+/// `nftables.service` loads. Rules running that filter nothing coming in
+/// are no firewall.
+pub fn parse_nftables(
+    text: &str,
+    file: Option<&'static str>,
     control_port: u16,
     stream_port: u16,
-) -> Finding {
+) -> LinuxFirewall {
+    let rules = super::netfilter::parse_nft(text);
+    if file.is_none() && rules.filters_nothing() {
+        return LinuxFirewall::None;
+    }
+    from_ruleset("nftables", &rules, file, control_port, stream_port)
+}
+
+/// iptables rules in `iptables-save`'s form, from it (`file` None) or the
+/// file `iptables.service` restores.
+pub fn parse_iptables(
+    text: &str,
+    file: Option<&'static str>,
+    control_port: u16,
+    stream_port: u16,
+) -> LinuxFirewall {
+    let rules = super::netfilter::parse_iptables(text);
+    if file.is_none() && rules.filters_nothing() {
+        return LinuxFirewall::None;
+    }
+    from_ruleset("iptables", &rules, file, control_port, stream_port)
+}
+
+fn from_ruleset(
+    tool: &'static str,
+    rules: &super::netfilter::Ruleset,
+    file: Option<&'static str>,
+    control_port: u16,
+    stream_port: u16,
+) -> LinuxFirewall {
+    use super::netfilter::{Cast, Packet, Proto};
+    let packet = |proto, port| Packet {
+        proto,
+        port,
+        cast: Cast::Unicast,
+    };
+    let chain = rules
+        .stopping_chain(packet(Proto::Tcp, control_port))
+        .or_else(|| rules.stopping_chain(packet(Proto::Udp, stream_port)));
+    LinuxFirewall::On {
+        tool,
+        ports: PortsOpen::from_check(control_port, stream_port, |p| rules.verdict(p)),
+        rules: RulesRead {
+            file,
+            chain,
+            stock_arch: rules.stock_arch,
+        },
+    }
+}
+
+/// O9: the firewall on Linux; never a failure without one. A port shut
+/// for certain is a problem; one a rule not understood may shut, or KDE
+/// Connect's or mDNS's, is a warning.
+pub fn check_linux_firewall(firewall: &LinuxFirewall, needs: &FirewallNeeds) -> Finding {
     let check = "Firewall";
+    let (control_port, stream_port) = (needs.control_port, needs.stream_port);
     match firewall {
-        LinuxFirewall::None => finding(check, Status::Good, "no firewall found (ufw or firewalld)"),
+        LinuxFirewall::None => finding(
+            check,
+            Status::Good,
+            "no firewall found (ufw, firewalld, nftables or iptables)",
+        ),
         LinuxFirewall::Off { tool } => {
             finding(check, Status::Good, format!("{tool} is installed but off"))
         }
@@ -874,55 +977,217 @@ pub fn check_linux_firewall(
                 "ufw" => format!(
                     "Run `sudo ufw status` and check that {control_port}/tcp and {stream_port}/udp are allowed."
                 ),
+                "nftables" => format!(
+                    "Run `sudo nft list ruleset` and check that its input chain accepts {control_port}/tcp and {stream_port}/udp."
+                ),
+                "iptables" => format!(
+                    "Run `sudo iptables -S INPUT` and check that {control_port}/tcp and {stream_port}/udp are accepted."
+                ),
                 _ => format!(
                     "Run `sudo firewall-cmd --list-all` and check that {control_port}/tcp and {stream_port}/udp are allowed."
                 ),
             },
         ),
-        LinuxFirewall::On {
-            tool,
-            control: true,
-            stream: true,
-        } => finding(
-            check,
-            Status::Good,
-            format!("{tool} lets phones in on {control_port}/tcp and {stream_port}/udp"),
-        ),
-        LinuxFirewall::On {
-            tool,
-            control,
-            stream,
-        } => {
-            let shut: Vec<String> = [
-                (!control).then(|| format!("{control_port}/tcp")),
-                (!stream).then(|| format!("{stream_port}/udp")),
-            ]
-            .into_iter()
-            .flatten()
-            .collect();
-            let hint = match *tool {
-                "ufw" => format!(
-                    "Run {}.",
-                    shut.iter()
-                        .map(|p| format!("`sudo ufw allow {p}`"))
-                        .collect::<Vec<_>>()
-                        .join(" and ")
-                ),
-                _ => format!(
-                    "Run `sudo firewall-cmd --permanent {}` and then `sudo firewall-cmd --reload`.",
-                    shut.iter()
-                        .map(|p| format!("--add-port={p}"))
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                ),
+        LinuxFirewall::On { tool, ports, rules } => {
+            let wanted = [
+                (Need::Control, ports.control, true),
+                (Need::Stream, ports.stream, true),
+                (Need::Kde, ports.kde, needs.kde),
+                (Need::Mdns, ports.mdns, needs.mdns),
+            ];
+            let not_open: Vec<(Need, Verdict)> = wanted
+                .iter()
+                .filter(|(_, v, want)| *want && *v != Verdict::Open)
+                .map(|(n, v, _)| (*n, *v))
+                .collect();
+            if not_open.is_empty() {
+                return finding(
+                    check,
+                    Status::Good,
+                    format!("{tool} lets phones in on {control_port}/tcp and {stream_port}/udp"),
+                );
+            }
+            let label = |n: &Need| n.label(needs);
+            let shut: Vec<String> = not_open
+                .iter()
+                .filter(|(_, v)| *v == Verdict::Shut)
+                .map(|(n, _)| label(n))
+                .collect();
+            let unsure: Vec<String> = not_open
+                .iter()
+                .filter(|(_, v)| *v == Verdict::Unsure)
+                .map(|(n, _)| label(n))
+                .collect();
+            let pairing_shut = ports.control == Verdict::Shut || ports.stream == Verdict::Shut;
+            let who = if rules.stock_arch {
+                format!("{tool} (Arch's stock rules, which let in ssh only)")
+            } else {
+                tool.to_string()
             };
+            let mut detail = if shut.is_empty() {
+                format!(
+                    "{who} may be blocking phones on {}: some of its rules could not be judged",
+                    unsure.join(" or ")
+                )
+            } else if unsure.is_empty() {
+                format!("{who} does not let phones in on {}", shut.join(" or "))
+            } else {
+                format!(
+                    "{who} does not let phones in on {}, and may block {}",
+                    shut.join(" or "),
+                    unsure.join(" or ")
+                )
+            };
+            if let Some(file) = rules.file {
+                detail.push_str(&format!(
+                    " (read from {file}: the rules running need root to read)"
+                ));
+            }
+            let open: Vec<Need> = not_open.iter().map(|(n, _)| *n).collect();
             with_hint(
                 finding(
                     check,
-                    Status::Bad,
-                    format!("{tool} does not let phones in on {}", shut.join(" or ")),
+                    if pairing_shut {
+                        Status::Bad
+                    } else {
+                        Status::Warn
+                    },
+                    detail,
                 ),
-                hint,
+                open_hint(tool, rules.chain.as_deref(), &open, needs),
+            )
+        }
+    }
+}
+
+/// What a Linux firewall must let in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Need {
+    Control,
+    Stream,
+    Kde,
+    Mdns,
+}
+
+impl Need {
+    fn label(self, needs: &FirewallNeeds) -> String {
+        match self {
+            Need::Control => format!("{}/tcp", needs.control_port),
+            Need::Stream => format!("{}/udp", needs.stream_port),
+            Need::Kde => "1714-1764 (KDE Connect)".to_string(),
+            Need::Mdns => "5353/udp (mDNS)".to_string(),
+        }
+    }
+}
+
+/// The exact line that lets `open` in with `tool`. The app never changes
+/// the firewall itself.
+fn open_hint(tool: &str, chain: Option<&str>, open: &[Need], needs: &FirewallNeeds) -> String {
+    let has = |n: Need| open.contains(&n);
+    let (kde_lo, kde_hi) = super::netfilter::KDE_PORTS;
+    let in_kde = |port: u16| has(Need::Kde) && (kde_lo..=kde_hi).contains(&port);
+    // The ports by protocol, a port inside KDE Connect's range left to it
+    // (nftables refuses overlapping elements in one set).
+    let mut tcp: Vec<String> = Vec::new();
+    let mut udp: Vec<String> = Vec::new();
+    if has(Need::Control) && !in_kde(needs.control_port) {
+        tcp.push(needs.control_port.to_string());
+    }
+    if has(Need::Stream) && !in_kde(needs.stream_port) {
+        udp.push(needs.stream_port.to_string());
+    }
+    if has(Need::Kde) {
+        tcp.push(format!("{kde_lo}-{kde_hi}"));
+        udp.push(format!("{kde_lo}-{kde_hi}"));
+    }
+    if has(Need::Mdns) && !in_kde(super::netfilter::MDNS_PORT) {
+        udp.push(super::netfilter::MDNS_PORT.to_string());
+    }
+    let quote = |cmds: Vec<String>| {
+        cmds.iter()
+            .map(|c| format!("`{c}`"))
+            .collect::<Vec<_>>()
+            .join(" and ")
+    };
+    match tool {
+        "ufw" => {
+            let cmds = tcp
+                .iter()
+                .map(|p| format!("sudo ufw allow {}/tcp", p.replace('-', ":")))
+                .chain(
+                    udp.iter()
+                        .map(|p| format!("sudo ufw allow {}/udp", p.replace('-', ":"))),
+                )
+                .collect();
+            format!("Run {}.", quote(cmds))
+        }
+        "firewalld" => {
+            let mut args: Vec<String> = Vec::new();
+            if has(Need::Control) && !in_kde(needs.control_port) {
+                args.push(format!("--add-port={}/tcp", needs.control_port));
+            }
+            if has(Need::Stream) && !in_kde(needs.stream_port) {
+                args.push(format!("--add-port={}/udp", needs.stream_port));
+            }
+            if has(Need::Kde) {
+                args.push("--add-service=kdeconnect".into());
+            }
+            if has(Need::Mdns) {
+                args.push("--add-service=mdns".into());
+            }
+            format!(
+                "Run `sudo firewall-cmd --permanent {}` and then `sudo firewall-cmd --reload`.",
+                args.join(" ")
+            )
+        }
+        "iptables" => {
+            let rule = |proto: &str, ports: &[String]| {
+                let ports: Vec<String> = ports.iter().map(|p| p.replace('-', ":")).collect();
+                if ports.len() == 1 && !ports[0].contains(':') {
+                    format!(
+                        "sudo iptables -I INPUT -p {proto} --dport {} -j ACCEPT",
+                        ports[0]
+                    )
+                } else {
+                    format!(
+                        "sudo iptables -I INPUT -p {proto} -m multiport --dports {} -j ACCEPT",
+                        ports.join(",")
+                    )
+                }
+            };
+            let cmds = [("tcp", &tcp), ("udp", &udp)]
+                .into_iter()
+                .filter(|(_, ports)| !ports.is_empty())
+                .map(|(proto, ports)| rule(proto, ports))
+                .collect();
+            format!(
+                "Run {}, then save them where your system loads them from (on Arch, `sudo iptables-save -f /etc/iptables/iptables.rules`).",
+                quote(cmds)
+            )
+        }
+        // nftables.
+        _ => {
+            let chain = chain.unwrap_or("inet filter input");
+            let line = |proto: &str, ports: &[String]| {
+                if ports.len() == 1 {
+                    format!("{proto} dport {} accept", ports[0])
+                } else {
+                    format!("{proto} dport {{ {} }} accept", ports.join(", "))
+                }
+            };
+            let lines: Vec<String> = [("tcp", &tcp), ("udp", &udp)]
+                .into_iter()
+                .filter(|(_, ports)| !ports.is_empty())
+                .map(|(proto, ports)| line(proto, ports))
+                .collect();
+            let cmds = lines
+                .iter()
+                .map(|l| format!("sudo nft 'insert rule {chain} {l}'"))
+                .collect();
+            format!(
+                "Run {}. They last until a restart: to keep them, add {} to that chain in /etc/nftables.conf, above its reject or drop line.",
+                quote(cmds),
+                quote(lines)
             )
         }
     }
@@ -1275,6 +1540,24 @@ mod tests {
         assert!(off.detail.starts_with("off in Settings"));
     }
 
+    /// A ufw or firewalld reading as (tool, control open, stream open).
+    #[derive(Debug, PartialEq)]
+    enum Seen {
+        On(&'static str, bool, bool),
+        Other(LinuxFirewall),
+    }
+
+    fn seen(fw: LinuxFirewall) -> Seen {
+        match fw {
+            LinuxFirewall::On { tool, ports, .. } => Seen::On(
+                tool,
+                ports.control == Verdict::Open,
+                ports.stream == Verdict::Open,
+            ),
+            other => Seen::Other(other),
+        }
+    }
+
     /// O9: ufw's status read for the two ports.
     #[test]
     fn ufw_says_which_ports_it_lets_in() {
@@ -1284,110 +1567,78 @@ mod tests {
             )
         };
         assert_eq!(
-            parse_ufw(
+            seen(parse_ufw(
                 &on(
                     "22/tcp ALLOW IN Anywhere\n1716/tcp ALLOW IN Anywhere\n4716/udp ALLOW IN Anywhere\n"
                 ),
                 1716,
                 4716
-            ),
-            LinuxFirewall::On {
-                tool: "ufw",
-                control: true,
-                stream: true
-            }
+            )),
+            Seen::On("ufw", true, true)
         );
         assert_eq!(
-            parse_ufw(
+            seen(parse_ufw(
                 &on("1714:1764/tcp ALLOW IN Anywhere\n1716 (v6) ALLOW IN Anywhere (v6)\n"),
                 1716,
                 4716
-            ),
-            LinuxFirewall::On {
-                tool: "ufw",
-                control: true,
-                stream: false
-            },
+            )),
+            Seen::On("ufw", true, false),
             "a range, and a v6 rule's own port"
         );
         assert_eq!(
-            parse_ufw(
+            seen(parse_ufw(
                 &on("Anywhere ALLOW IN 192.0.2.0/24
 "),
                 1716,
                 4716
-            ),
-            LinuxFirewall::On {
-                tool: "ufw",
-                control: true,
-                stream: true
-            },
+            )),
+            Seen::On("ufw", true, true),
             "every port from the home network"
         );
         assert_eq!(
-            parse_ufw(&on("4716 DENY IN Anywhere\n"), 1716, 4716),
-            LinuxFirewall::On {
-                tool: "ufw",
-                control: false,
-                stream: false
-            }
+            seen(parse_ufw(&on("4716 DENY IN Anywhere\n"), 1716, 4716)),
+            Seen::On("ufw", false, false)
         );
         assert_eq!(
-            parse_ufw("Status: inactive\n", 1716, 4716),
-            LinuxFirewall::Off { tool: "ufw" }
+            seen(parse_ufw("Status: inactive\n", 1716, 4716)),
+            Seen::Other(LinuxFirewall::Off { tool: "ufw" })
         );
         assert_eq!(
-            parse_ufw(
+            seen(parse_ufw(
                 "ERROR: You need to be root to run this script\n",
                 1716,
                 4716
-            ),
-            LinuxFirewall::Unreadable { tool: "ufw" }
+            )),
+            Seen::Other(LinuxFirewall::Unreadable { tool: "ufw" })
         );
         // O9 review: what an OUT or FWD rule, an interface or an address does.
         assert_eq!(
-            parse_ufw(
+            seen(parse_ufw(
                 &on("Anywhere ALLOW OUT Anywhere\nAnywhere ALLOW FWD 10.0.0.0/8\n"),
                 1716,
                 4716
-            ),
-            LinuxFirewall::On {
-                tool: "ufw",
-                control: false,
-                stream: false
-            },
+            )),
+            Seen::On("ufw", false, false),
             "not for what comes in"
         );
         assert_eq!(
-            parse_ufw(
+            seen(parse_ufw(
                 &on("1716/tcp on wlan0 ALLOW IN Anywhere\n192.0.2.5 4716/udp LIMIT IN Anywhere\n"),
                 1716,
                 4716
-            ),
-            LinuxFirewall::On {
-                tool: "ufw",
-                control: true,
-                stream: true
-            },
+            )),
+            Seen::On("ufw", true, true),
             "an interface, an address and a limit"
         );
         assert_eq!(
-            parse_ufw(&on("OpenSSH ALLOW IN Anywhere\n"), 1716, 4716),
-            LinuxFirewall::On {
-                tool: "ufw",
-                control: false,
-                stream: false
-            },
+            seen(parse_ufw(&on("OpenSSH ALLOW IN Anywhere\n"), 1716, 4716)),
+            Seen::On("ufw", false, false),
             "an app profile"
         );
         let open = "Status: active\nDefault: allow (incoming), allow (outgoing)\n";
         assert_eq!(
-            parse_ufw(open, 1716, 4716),
-            LinuxFirewall::On {
-                tool: "ufw",
-                control: true,
-                stream: true
-            }
+            seen(parse_ufw(open, 1716, 4716)),
+            Seen::On("ufw", true, true)
         );
     }
 
@@ -1400,111 +1651,247 @@ mod tests {
             )
         };
         assert_eq!(
-            parse_firewalld(
+            seen(parse_firewalld(
                 "running\n",
                 Some(&zone("1716/tcp 4716/udp", "ssh")),
                 1716,
                 4716
-            ),
-            LinuxFirewall::On {
-                tool: "firewalld",
-                control: true,
-                stream: true
-            }
+            )),
+            Seen::On("firewalld", true, true)
         );
         assert_eq!(
-            parse_firewalld("running", Some(&zone("", "ssh kdeconnect")), 1716, 4716),
-            LinuxFirewall::On {
-                tool: "firewalld",
-                control: true,
-                stream: false
-            },
+            seen(parse_firewalld(
+                "running",
+                Some(&zone("", "ssh kdeconnect")),
+                1716,
+                4716
+            )),
+            Seen::On("firewalld", true, false),
             "KDE Connect's service opens 1714-1764 only"
         );
         assert_eq!(
-            parse_firewalld(
+            seen(parse_firewalld(
                 "running",
                 Some(&zone("1700-1800/tcp 4000-5000/udp", "")),
                 1716,
                 4716
-            ),
-            LinuxFirewall::On {
-                tool: "firewalld",
-                control: true,
-                stream: true
-            }
+            )),
+            Seen::On("firewalld", true, true)
         );
         let rich = "home (active)\n  ports:\n  rich rules:\n\trule family=\"ipv4\" port port=\"1716\" protocol=\"tcp\" accept\n\trule family=\"ipv4\" port port=\"4700-4800\" protocol=\"udp\" accept\n";
         assert_eq!(
-            parse_firewalld("running", Some(rich), 1716, 4716),
-            LinuxFirewall::On {
-                tool: "firewalld",
-                control: true,
-                stream: true
-            },
+            seen(parse_firewalld("running", Some(rich), 1716, 4716)),
+            Seen::On("firewalld", true, true),
             "rich rules"
         );
         assert_eq!(
-            parse_firewalld("not running", None, 1716, 4716),
-            LinuxFirewall::Off { tool: "firewalld" }
+            seen(parse_firewalld("not running", None, 1716, 4716)),
+            Seen::Other(LinuxFirewall::Off { tool: "firewalld" })
         );
         assert_eq!(
-            parse_firewalld("running", None, 1716, 4716),
-            LinuxFirewall::Unreadable { tool: "firewalld" }
+            seen(parse_firewalld("running", None, 1716, 4716)),
+            Seen::Other(LinuxFirewall::Unreadable { tool: "firewalld" })
         );
+    }
+
+    const NEEDS: FirewallNeeds = FirewallNeeds {
+        control_port: 1716,
+        stream_port: 4716,
+        kde: false,
+        mdns: false,
+    };
+
+    fn on(tool: &'static str, control: Verdict, stream: Verdict) -> LinuxFirewall {
+        LinuxFirewall::On {
+            tool,
+            ports: PortsOpen {
+                control,
+                stream,
+                kde: Verdict::Open,
+                mdns: Verdict::Open,
+            },
+            rules: RulesRead::default(),
+        }
     }
 
     /// O9: no firewall is never a failure; a shut port says what to run.
     #[test]
     fn the_linux_firewall_finding_says_what_to_run() {
+        use Verdict::{Open, Shut};
         assert_eq!(
-            check_linux_firewall(&LinuxFirewall::None, 1716, 4716).status,
+            check_linux_firewall(&LinuxFirewall::None, &NEEDS).status,
             Status::Good
         );
         assert_eq!(
-            check_linux_firewall(&LinuxFirewall::Off { tool: "ufw" }, 1716, 4716).status,
+            check_linux_firewall(&LinuxFirewall::Off { tool: "ufw" }, &NEEDS).status,
             Status::Good
         );
-        let unread = check_linux_firewall(&LinuxFirewall::Unreadable { tool: "ufw" }, 1716, 4716);
+        let unread = check_linux_firewall(&LinuxFirewall::Unreadable { tool: "ufw" }, &NEEDS);
         assert_eq!(unread.status, Status::Warn);
         assert!(unread.hint.unwrap().contains("sudo ufw status"));
-        let shut = check_linux_firewall(
-            &LinuxFirewall::On {
-                tool: "ufw",
-                control: true,
-                stream: false,
-            },
-            1716,
-            4716,
-        );
+        let unread = check_linux_firewall(&LinuxFirewall::Unreadable { tool: "nftables" }, &NEEDS);
+        assert!(unread.hint.unwrap().contains("sudo nft list ruleset"));
+        let shut = check_linux_firewall(&on("ufw", Open, Shut), &NEEDS);
         assert_eq!(shut.status, Status::Bad);
         assert!(shut.detail.contains("4716/udp") && !shut.detail.contains("1716/tcp"));
         assert_eq!(shut.hint.as_deref(), Some("Run `sudo ufw allow 4716/udp`."));
-        let fw = check_linux_firewall(
-            &LinuxFirewall::On {
-                tool: "firewalld",
-                control: false,
-                stream: false,
-            },
-            1716,
-            4716,
-        );
+        let fw = check_linux_firewall(&on("firewalld", Shut, Shut), &NEEDS);
         assert_eq!(
             fw.hint.as_deref(),
             Some(
                 "Run `sudo firewall-cmd --permanent --add-port=1716/tcp --add-port=4716/udp` and then `sudo firewall-cmd --reload`."
             )
         );
-        let open = check_linux_firewall(
-            &LinuxFirewall::On {
-                tool: "ufw",
-                control: true,
-                stream: true,
-            },
+        let open = check_linux_firewall(&on("ufw", Open, Open), &NEEDS);
+        assert_eq!(open.status, Status::Good);
+    }
+
+    /// Arch's stock nftables rules (the owner's laptop, 2026-10-31): named,
+    /// with the exact lines that open every port Pocketdesk uses.
+    #[test]
+    fn arch_stock_nftables_is_named_with_the_lines_that_open_it() {
+        let fw = parse_nftables(
+            super::super::netfilter::tests::ARCH_STOCK,
+            Some("/etc/nftables.conf"),
             1716,
             4716,
         );
-        assert_eq!(open.status, Status::Good);
+        let all = FirewallNeeds {
+            kde: true,
+            mdns: true,
+            ..NEEDS
+        };
+        let f = check_linux_firewall(&fw, &all);
+        assert_eq!(f.status, Status::Bad);
+        assert_eq!(
+            f.detail,
+            "nftables (Arch's stock rules, which let in ssh only) does not let phones in on \
+             1716/tcp or 4716/udp or 1714-1764 (KDE Connect) or 5353/udp (mDNS) (read from \
+             /etc/nftables.conf: the rules running need root to read)"
+        );
+        assert_eq!(
+            f.hint.as_deref(),
+            Some(
+                "Run `sudo nft 'insert rule inet filter input tcp dport 1714-1764 accept'` and \
+                 `sudo nft 'insert rule inet filter input udp dport { 4716, 1714-1764, 5353 } accept'`. \
+                 They last until a restart: to keep them, add `tcp dport 1714-1764 accept` and \
+                 `udp dport { 4716, 1714-1764, 5353 } accept` to that chain in /etc/nftables.conf, \
+                 above its reject or drop line."
+            )
+        );
+        // Only the two ports wanted: just those.
+        let f = check_linux_firewall(&fw, &NEEDS);
+        assert!(
+            f.hint.as_deref().unwrap().starts_with(
+                "Run `sudo nft 'insert rule inet filter input tcp dport 1716 accept'` and `sudo nft 'insert rule inet filter input udp dport 4716 accept'`."
+            ),
+            "{f:?}"
+        );
+        // Live rules that filter nothing are no firewall; the same read from
+        // the file is nftables letting everything in.
+        assert_eq!(parse_nftables("", None, 1716, 4716), LinuxFirewall::None);
+        let open = "table inet filter {\n chain input {\n  type filter hook input priority filter;\n }\n}\n";
+        let f = check_linux_firewall(&parse_nftables(open, None, 1716, 4716), &all);
+        assert_eq!(f.status, Status::Good);
+        assert_eq!(f.detail, "nftables lets phones in on 1716/tcp and 4716/udp");
+    }
+
+    /// nftables with Pocketdesk's ports opened by the hint's own lines.
+    #[test]
+    fn nftables_opened_by_the_hint_reads_open() {
+        let conf = super::super::netfilter::tests::ARCH_STOCK.replace(
+            "    tcp dport ssh accept",
+            "    tcp dport 1714-1764 accept\n    udp dport { 4716, 1714-1764, 5353 } accept\n    tcp dport ssh accept",
+        );
+        let fw = parse_nftables(&conf, None, 1716, 4716);
+        let all = FirewallNeeds {
+            kde: true,
+            mdns: true,
+            ..NEEDS
+        };
+        assert_eq!(check_linux_firewall(&fw, &all).status, Status::Good);
+    }
+
+    /// A rule not understood: a warning that it may block, never "open".
+    #[test]
+    fn nftables_it_cannot_judge_may_be_blocking() {
+        let conf = "table inet filter {\n chain input {\n  type filter hook input priority 0; policy drop;\n  ip saddr 192.0.2.0/24 accept\n }\n}\n";
+        let fw = parse_nftables(conf, None, 1716, 4716);
+        let f = check_linux_firewall(&fw, &NEEDS);
+        assert_eq!(f.status, Status::Warn);
+        assert_eq!(
+            f.detail,
+            "nftables may be blocking phones on 1716/tcp or 4716/udp: some of its rules could not be judged"
+        );
+    }
+
+    #[test]
+    fn iptables_drop_is_read_with_its_lines() {
+        let fw = parse_iptables(
+            super::super::netfilter::tests::IPTABLES_DROP,
+            None,
+            1716,
+            4716,
+        );
+        let f = check_linux_firewall(&fw, &NEEDS);
+        assert_eq!(f.status, Status::Bad);
+        assert_eq!(
+            f.detail,
+            "iptables does not let phones in on 1716/tcp or 4716/udp"
+        );
+        assert_eq!(
+            f.hint.as_deref(),
+            Some(
+                "Run `sudo iptables -I INPUT -p tcp --dport 1716 -j ACCEPT` and `sudo iptables -I INPUT -p udp --dport 4716 -j ACCEPT`, then save them where your system loads them from (on Arch, `sudo iptables-save -f /etc/iptables/iptables.rules`)."
+            )
+        );
+        assert_eq!(parse_iptables("", None, 1716, 4716), LinuxFirewall::None);
+    }
+
+    /// KDE Connect's and mDNS's ports: a warning, with ufw's and
+    /// firewalld's lines for them; only when wanted.
+    #[test]
+    fn kde_connect_and_mdns_are_warned_with_each_tools_line() {
+        let status = "Status: active\nDefault: deny (incoming), allow (outgoing)\n\nTo Action From\n1716/tcp ALLOW IN Anywhere\n4716/udp ALLOW IN Anywhere\n";
+        let fw = parse_ufw(status, 1716, 4716);
+        assert_eq!(check_linux_firewall(&fw, &NEEDS).status, Status::Good);
+        let all = FirewallNeeds {
+            kde: true,
+            mdns: true,
+            ..NEEDS
+        };
+        let f = check_linux_firewall(&fw, &all);
+        assert_eq!(f.status, Status::Warn);
+        assert_eq!(
+            f.detail,
+            "ufw does not let phones in on 1714-1764 (KDE Connect) or 5353/udp (mDNS)"
+        );
+        assert_eq!(
+            f.hint.as_deref(),
+            Some(
+                "Run `sudo ufw allow 1714:1764/tcp` and `sudo ufw allow 1714:1764/udp` and `sudo ufw allow 5353/udp`."
+            )
+        );
+        let kde = parse_ufw(
+            &format!("{status}KDE Connect ALLOW IN Anywhere\n5353/udp ALLOW IN Anywhere\n"),
+            1716,
+            4716,
+        );
+        assert_eq!(check_linux_firewall(&kde, &all).status, Status::Good);
+
+        let zone =
+            "public (active)\n  target: default\n  services: ssh\n  ports: 1716/tcp 4716/udp\n";
+        let fw = parse_firewalld("running", Some(zone), 1716, 4716);
+        let f = check_linux_firewall(&fw, &all);
+        assert_eq!(
+            f.hint.as_deref(),
+            Some(
+                "Run `sudo firewall-cmd --permanent --add-service=kdeconnect --add-service=mdns` and then `sudo firewall-cmd --reload`."
+            )
+        );
+        let zone = zone.replace("services: ssh", "services: ssh kdeconnect mdns");
+        let fw = parse_firewalld("running", Some(&zone), 1716, 4716);
+        assert_eq!(check_linux_firewall(&fw, &all).status, Status::Good);
     }
 
     #[test]

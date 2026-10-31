@@ -266,12 +266,16 @@ fn run(state_dir: &Path, config: Option<Config>) -> Report {
     if let Some(firewall) = diagnostics::check_firewall(firewall_state(state_dir)) {
         findings.push(firewall);
     }
-    // O9: ufw's or firewalld's rules for the two ports.
+    // O9: ufw's, firewalld's, nftables' or iptables' rules for the ports.
     #[cfg(target_os = "linux")]
     findings.push(diagnostics::check_linux_firewall(
         &linux_firewall(control_port, config.streaming_port),
-        control_port,
-        config.streaming_port,
+        &diagnostics::FirewallNeeds {
+            control_port,
+            stream_port: config.streaming_port,
+            kde: config.kdeconnect_compat,
+            mdns: config.lan_discovery,
+        },
     ));
     findings.push(diagnostics::check_addresses(
         &pocketdesk_core::local::network::local_ips(),
@@ -396,24 +400,116 @@ fn firewall_state(_state_dir: &Path) -> Option<Result<diagnostics::FirewallState
     None
 }
 
-/// O9: ufw's or firewalld's rules for the control and stream ports, each
-/// tool asked within 3 s. ufw's status needs root; its config file says
-/// whether it is on without it.
+/// O9: the firewall's rules for Pocketdesk's ports: ufw's, else
+/// firewalld's, else plain nftables or iptables rules (Arch's stock
+/// nftables lets in ssh only), each tool asked within 3 s. Only read, never
+/// changed.
 #[cfg(target_os = "linux")]
 fn linux_firewall(control_port: u16, stream_port: u16) -> diagnostics::LinuxFirewall {
+    use diagnostics::LinuxFirewall;
+    let running =
+        |fw: &LinuxFirewall| !matches!(fw, LinuxFirewall::None | LinuxFirewall::Off { .. });
     let ufw = linux_ufw(control_port, stream_port);
     // A ufw that is off does not hide a firewalld that runs (O9 review).
-    if !matches!(
-        ufw,
-        diagnostics::LinuxFirewall::None | diagnostics::LinuxFirewall::Off { .. }
-    ) {
+    if running(&ufw) {
         return ufw;
     }
-    match linux_firewalld(control_port, stream_port) {
-        diagnostics::LinuxFirewall::None => ufw,
-        diagnostics::LinuxFirewall::Off { .. } if ufw != diagnostics::LinuxFirewall::None => ufw,
-        firewalld => firewalld,
+    let firewalld = linux_firewalld(control_port, stream_port);
+    if running(&firewalld) {
+        return firewalld;
     }
+    let nftables = linux_nftables(control_port, stream_port);
+    if nftables != LinuxFirewall::None {
+        return nftables;
+    }
+    let iptables = linux_iptables(control_port, stream_port);
+    if iptables != LinuxFirewall::None {
+        return iptables;
+    }
+    // An installed tool that is off says more than none.
+    if ufw != LinuxFirewall::None {
+        ufw
+    } else {
+        firewalld
+    }
+}
+
+/// Whether a systemd unit loads its rules: active, or enabled (asked
+/// without root). Arch's `nftables.service` is a oneshot without
+/// `RemainAfterExit`, so once it has loaded the rules at boot it reads
+/// "inactive" (the owner's laptop, 2026-10-31).
+#[cfg(target_os = "linux")]
+fn unit_on(unit: &str) -> bool {
+    installed(&["/usr/bin/systemctl", "/bin/systemctl"]).is_some_and(|systemctl| {
+        ["is-active", "is-enabled"].iter().any(|ask| {
+            pocketdesk_core::local::network::output_within(systemctl, &[ask, unit], FIREWALL_WAIT)
+                .is_some()
+        })
+    })
+}
+
+/// nftables: `nft list ruleset` needs root; without it, the file
+/// `nftables.service` loads, while that is on (rules loaded some other way
+/// are not seen then).
+#[cfg(target_os = "linux")]
+fn linux_nftables(control_port: u16, stream_port: u16) -> diagnostics::LinuxFirewall {
+    let Some(nft) = installed(&["/usr/bin/nft", "/usr/sbin/nft", "/sbin/nft"]) else {
+        return diagnostics::LinuxFirewall::None;
+    };
+    if let Some(out) =
+        pocketdesk_core::local::network::output_within(nft, &["list", "ruleset"], FIREWALL_WAIT)
+    {
+        return diagnostics::parse_nftables(
+            &String::from_utf8_lossy(&out),
+            None,
+            control_port,
+            stream_port,
+        );
+    }
+    if !unit_on("nftables.service") {
+        return diagnostics::LinuxFirewall::None;
+    }
+    for file in ["/etc/nftables.conf", "/etc/sysconfig/nftables.conf"] {
+        if let Ok(text) = std::fs::read_to_string(file) {
+            return diagnostics::parse_nftables(&text, Some(file), control_port, stream_port);
+        }
+    }
+    diagnostics::LinuxFirewall::Unreadable { tool: "nftables" }
+}
+
+/// iptables: `iptables-save` needs root; without it, the file
+/// `iptables.service` (Arch) or `netfilter-persistent` (Debian) restores,
+/// while it is on.
+#[cfg(target_os = "linux")]
+fn linux_iptables(control_port: u16, stream_port: u16) -> diagnostics::LinuxFirewall {
+    let Some(save) = installed(&[
+        "/usr/bin/iptables-save",
+        "/usr/sbin/iptables-save",
+        "/sbin/iptables-save",
+    ]) else {
+        return diagnostics::LinuxFirewall::None;
+    };
+    if let Some(out) = pocketdesk_core::local::network::output_within(save, &[], FIREWALL_WAIT) {
+        return diagnostics::parse_iptables(
+            &String::from_utf8_lossy(&out),
+            None,
+            control_port,
+            stream_port,
+        );
+    }
+    if !unit_on("iptables.service") && !unit_on("netfilter-persistent.service") {
+        return diagnostics::LinuxFirewall::None;
+    }
+    for file in [
+        "/etc/iptables/iptables.rules",
+        "/etc/iptables/rules.v4",
+        "/etc/sysconfig/iptables",
+    ] {
+        if let Ok(text) = std::fs::read_to_string(file) {
+            return diagnostics::parse_iptables(&text, Some(file), control_port, stream_port);
+        }
+    }
+    diagnostics::LinuxFirewall::Unreadable { tool: "iptables" }
 }
 
 /// The first of `paths` that exists.
@@ -541,6 +637,37 @@ mod tests {
             super::single_quoted("a\u{2019}b\u{2018}c"),
             "a\u{2019}\u{2019}b\u{2018}\u{2018}c"
         );
+    }
+
+    /// This computer's firewall, read as Diagnostics reads
+    /// it (only read: `nft list ruleset`, `systemctl is-active`, the rules
+    /// files). Prints the words only, which name no address. With
+    /// `POCKETDESK_NFT_RULESET` naming a saved `nft list ruleset`, that is
+    /// judged too.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "live: reads this computer's firewall"]
+    fn this_computers_firewall_is_read() {
+        use pocketdesk_core::local::diagnostics;
+        let needs = diagnostics::FirewallNeeds {
+            control_port: 1716,
+            stream_port: 4716,
+            kde: true,
+            mdns: true,
+        };
+        let say = |what: &str, firewall: &diagnostics::LinuxFirewall| {
+            let f = diagnostics::check_linux_firewall(firewall, &needs);
+            println!("{what}: [{:?}] {}: {}", f.status, f.check, f.detail);
+            println!("  hint: {:?}", f.hint);
+        };
+        say("as this user", &super::linux_firewall(1716, 4716));
+        if let Ok(path) = std::env::var("POCKETDESK_NFT_RULESET") {
+            let text = std::fs::read_to_string(path).unwrap();
+            say(
+                "the saved ruleset",
+                &diagnostics::parse_nftables(&text, None, 1716, 4716),
+            );
+        }
     }
 
     /// The tab's checks against this computer's real state and server.

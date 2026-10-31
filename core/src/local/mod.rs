@@ -35,6 +35,7 @@ pub mod links;
 pub mod listening;
 pub mod muted_apps;
 pub mod nearby;
+pub mod netfilter;
 pub mod network;
 pub mod note_clears;
 pub mod notes;
