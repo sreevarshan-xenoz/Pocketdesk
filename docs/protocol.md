@@ -577,6 +577,7 @@ All of these are inside the app's private storage unless noted. None of it is ba
 | WAN (iroh) connections in all | 128, no per-address limit | `server/src/iroh_endpoint.rs` |
 | Control handshake | 8 s for TLS and HELLO, 5 s for the identity, 64 KiB per handshake line | `server/src/service.rs` |
 | Control packet | 4 MiB per line (TCP), 4 MiB per frame (v2) | `service.rs` (`MAX_PACKET_LINE`), `core/src/protocol/v2.rs` |
+| Owner answers (introductions, remote revoke) | a request id of 1 to 64 printable ASCII characters; at most 64 computers offered or 512 devices listed, counted before any is read, each id and name at most 256 bytes; a pairing link at most 8 KiB. An answer over them is dropped whole | `core/src/protocol/introductions.rs`, `core/src/protocol/remote_devices.rs` |
 | File transfers | 4 at once on the desktop, 2 per phone; refused, not queued | `server/src/plugins/share.rs` |
 | File size, name | 8 GiB; names cut to 200 bytes | same, `server/src/offers.rs` |
 | Transfer pace | 10 s to connect, 30 s idle, at least 32 KiB/s | `share.rs` |
