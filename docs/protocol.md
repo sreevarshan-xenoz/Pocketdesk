@@ -579,7 +579,7 @@ All of these are inside the app's private storage unless noted. None of it is ba
 | WAN (iroh) connections in all | 128, no per-address limit | `server/src/iroh_endpoint.rs` |
 | Control handshake | 8 s for TLS and HELLO, 5 s for the identity, 64 KiB per handshake line | `server/src/service.rs` |
 | Control packet | 4 MiB per line (TCP), 4 MiB per frame (v2) | `service.rs` (`MAX_PACKET_LINE`), `core/src/protocol/v2.rs` |
-| Computer link (2f) | 4 MiB per line; a clipboard text over 256 KiB (`MAX_PUSH`, more than any computer pushes) is dropped, logged once | `server/src/peer_computers.rs`, `server/src/clipboard_push.rs` |
+| Computer link (2f) | 4 MiB per line; a clipboard text over 256 KiB (`MAX_PUSH`, more than any computer pushes) is dropped. The owner is told, with a desktop notification and the Activity event `clipboard_too_big`, at most once a minute per computer, and so is the sender, when a copy it holds is over the limit for the computers it shares the clipboard with | `server/src/peer_computers.rs`, `server/src/clipboard_push.rs` |
 | KDE Connect device (3a) | 8192 bytes per line until paired (the identity), 4 MiB once paired; a longer line ends the connection | `server/src/kdeconnect_compat/handshake.rs`, `link.rs` |
 | Shared input's wire | a frame of at most 65,535 bytes (its `u16` length); in it a name at most 255 bytes, 64 screens, 3,500 timings and an Opus packet of 1000 bytes, as the encoder clips them: a longer one is refused before it is copied, which ends a stream (a datagram is dropped) | `server/src/shared_input/wire.rs` |
 | Pairing link (§2.6) | 8 KiB, refused before it is decoded; its first (best) 32 addresses kept, and a link the desktop makes names only its best 32 | `core/src/local/pair_link.rs` |

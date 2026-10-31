@@ -35,7 +35,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket};
 
@@ -43,27 +43,130 @@ use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket};
 /// gets longer text; a push goes to every phone, so it stays small.
 pub(crate) const MAX_PUSH: usize = 256 * 1024;
 
-/// Whether a computer's push over [`MAX_PUSH`] was logged yet (logged
-/// once at the default level, then at debug).
-static TOO_LONG_SAID: AtomicBool = AtomicBool::new(false);
-
-/// A push from the computer `device_id` of `len` bytes, over [`MAX_PUSH`],
-/// which no computer sends: it is dropped, and said once.
-pub(crate) fn too_long_from(device_id: &str, len: usize) {
-    if TOO_LONG_SAID.swap(true, Ordering::Relaxed) {
-        tracing::debug!(
-            device_id,
-            len,
-            "Another computer's clipboard over the limit; dropped"
-        );
-    } else {
-        tracing::warn!(
-            device_id,
-            len,
-            limit = MAX_PUSH,
-            "Another computer's clipboard over the limit; dropped"
-        );
+/// The text a clipboard push from another computer carries in `body`:
+/// `Ok(None)` for none (an image, or nothing), `Err(len)` for a text of
+/// `len` bytes over [`MAX_PUSH`], which no computer sends.
+pub(crate) fn pushed_text(body: &serde_json::Value) -> Result<Option<&str>, usize> {
+    match body.get("content").and_then(|v| v.as_str()) {
+        Some(text) if text.len() > MAX_PUSH => Err(text.len()),
+        text => Ok(text),
     }
+}
+
+/// Which way a clipboard text over [`MAX_PUSH`] would have gone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum TooBig {
+    /// Another computer's, arriving on the link.
+    In,
+    /// This computer's, for another computer (or for every computer it
+    /// shares the clipboard with: no device named).
+    Out,
+}
+
+/// The owner is told of a clipboard too big at most this often, per
+/// computer and way: each copy is said, but a loop of them is not.
+const TOO_BIG_EVERY: Duration = Duration::from_secs(60);
+
+/// When each notice of a clipboard too big was last shown, by computer
+/// (empty: every computer) and way.
+static TOO_BIG_SHOWN: LazyLock<Mutex<HashMap<(String, TooBig), Instant>>> =
+    LazyLock::new(Default::default);
+
+/// Whether a notice for `key` is due at `now`, noting it shown if it is.
+fn too_big_due(
+    shown: &mut HashMap<(String, TooBig), Instant>,
+    key: (String, TooBig),
+    now: Instant,
+) -> bool {
+    if shown
+        .get(&key)
+        .is_some_and(|at| now.duration_since(*at) < TOO_BIG_EVERY)
+    {
+        return false;
+    }
+    shown.insert(key, now);
+    true
+}
+
+/// The words of a notice of a clipboard of `len` bytes too big to go
+/// `way`, with the computer `name`: its summary and body.
+fn too_big_words(way: TooBig, name: &str, len: usize) -> (&'static str, String) {
+    let kb = len.div_ceil(1024);
+    let limit = MAX_PUSH / 1024;
+    match way {
+        TooBig::In => (
+            "A clipboard was too big to copy",
+            format!("A clipboard from {name} was too big to copy ({kb} KB, over {limit} KB)"),
+        ),
+        TooBig::Out => (
+            "The clipboard was too big to share",
+            format!("The text copied was not shared with {name} ({kb} KB, over {limit} KB)"),
+        ),
+    }
+}
+
+/// The name the owner knows the computer `device_id` by, else the start
+/// of its id. Reads `computers.json`: called only for a notice.
+fn computer_name(device_id: &str) -> String {
+    crate::state::state_dir()
+        .ok()
+        .and_then(|dir| {
+            pocketdesk_core::local::computers::read(&dir)
+                .computers
+                .into_iter()
+                .find(|c| c.device_id == device_id)
+                .map(|c| c.name)
+        })
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| device_id.chars().take(8).collect())
+}
+
+/// A clipboard text of `len` bytes, over [`MAX_PUSH`], that did not go
+/// `way` (to or from the computer `device_id`, or with none, to every
+/// computer this one shares the clipboard with): logged, and, at most
+/// once a minute per computer and way, told to the owner as a desktop
+/// notification and in Activity (`clipboard_too_big`).
+pub(crate) fn too_big(device_id: Option<&str>, len: usize, way: TooBig) {
+    let key = (device_id.unwrap_or_default().to_string(), way);
+    let due = too_big_due(
+        &mut TOO_BIG_SHOWN.lock().unwrap_or_else(|e| e.into_inner()),
+        key,
+        Instant::now(),
+    );
+    if !due {
+        tracing::debug!(
+            ?device_id,
+            len,
+            ?way,
+            "A clipboard over the limit, not shared"
+        );
+        return;
+    }
+    tracing::warn!(
+        ?device_id,
+        len,
+        limit = MAX_PUSH,
+        ?way,
+        "A clipboard over the limit, not shared"
+    );
+    if cfg!(test) {
+        return;
+    }
+    crate::events::emit(
+        "clipboard_too_big",
+        device_id,
+        serde_json::json!({ "bytes": len, "limit": MAX_PUSH, "out": way == TooBig::Out }),
+        serde_json::json!({}),
+    );
+    let device_id = device_id.map(str::to_string);
+    std::thread::spawn(move || {
+        let name = match &device_id {
+            Some(id) => computer_name(id),
+            None => "your other computers".to_string(),
+        };
+        let (summary, body) = too_big_words(way, &name, len);
+        crate::platform::notify(summary, &body, Duration::from_secs(10));
+    });
 }
 
 /// How often the clipboard is looked at while a phone could receive it. On
@@ -80,6 +183,9 @@ const TICK: Duration = Duration::from_secs(2);
 pub(crate) struct Watch {
     seen: Option<u64>,
     primed: bool,
+    /// The length of the last new text left unpushed for being over
+    /// [`MAX_PUSH`], until [`Watch::take_skipped`] takes it.
+    skipped: Option<usize>,
 }
 
 fn hash(text: &str) -> u64 {
@@ -105,7 +211,19 @@ impl Watch {
         if first {
             return None;
         }
-        text.filter(|t| t.len() <= MAX_PUSH).map(str::to_string)
+        match text {
+            Some(t) if t.len() > MAX_PUSH => {
+                self.skipped = Some(t.len());
+                None
+            }
+            text => text.map(str::to_string),
+        }
+    }
+
+    /// The length of the new text last left unpushed for being over
+    /// [`MAX_PUSH`], once.
+    pub(crate) fn take_skipped(&mut self) -> Option<usize> {
+        self.skipped.take()
     }
 }
 
@@ -1060,6 +1178,11 @@ async fn push_held(device_id: &str, follow: Follow, answering: bool) {
     let text_from = FROM_PHONE.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let image_from = IMAGE_FROM.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let last_image = image_sent_last(device_id);
+    if let Held::Text(text) = &held
+        && text.len() > MAX_PUSH
+    {
+        too_big(Some(device_id), text.len(), TooBig::Out);
+    }
     let follows = what_follows(
         held,
         device_id,
@@ -1821,6 +1944,17 @@ async fn push_change(
         .clone()
         .or_else(|| image.as_ref().map(|(id, _)| image_key(id)));
     let Some(changed) = watch.observe(seen.as_deref()) else {
+        // Too big for any computer it would have gone to: the owner is
+        // told (phones are not: one in a session still asks for it).
+        if let Some(len) = watch.take_skipped()
+            && (!linked.is_empty()
+                || clients.iter().any(|c| {
+                    crate::plugins::pair::is_computer_device(c.device_id())
+                        && may_push(c.device_id())
+                }))
+        {
+            too_big(None, len, TooBig::Out);
+        }
         return;
     };
     if text.is_none() {
@@ -2122,6 +2256,65 @@ mod tests {
         assert_eq!(watch.observe(Some("")), None);
         let long = "x".repeat(MAX_PUSH + 1);
         assert_eq!(watch.observe(Some(&long)), None, "too long to push");
+        assert_eq!(watch.take_skipped(), Some(MAX_PUSH + 1), "said once");
+        assert_eq!(watch.take_skipped(), None);
+        assert_eq!(watch.observe(Some(&long)), None, "the same copy again");
+        assert_eq!(watch.take_skipped(), None, "is no new copy");
+    }
+
+    /// Another computer's push is its text up to [`MAX_PUSH`], not past it.
+    #[test]
+    fn a_pushed_text_over_the_limit_is_its_length() {
+        let at = "x".repeat(MAX_PUSH);
+        assert_eq!(
+            pushed_text(&serde_json::json!({ "content": at })),
+            Ok(Some(at.as_str()))
+        );
+        let over = "x".repeat(MAX_PUSH + 1);
+        assert_eq!(
+            pushed_text(&serde_json::json!({ "content": over })),
+            Err(MAX_PUSH + 1)
+        );
+        assert_eq!(pushed_text(&serde_json::json!({ "image": {} })), Ok(None));
+    }
+
+    /// I1 (PR #597 review): a clipboard too big is told once a minute per
+    /// computer and way, in words that name the computer and the limit.
+    #[test]
+    fn a_clipboard_too_big_is_told_once_a_minute_per_computer_and_way() {
+        let mut shown = HashMap::new();
+        let now = Instant::now();
+        let key = |id: &str, way| (id.to_string(), way);
+        assert!(too_big_due(&mut shown, key("desk", TooBig::In), now));
+        assert!(!too_big_due(
+            &mut shown,
+            key("desk", TooBig::In),
+            now + Duration::from_secs(30)
+        ));
+        assert!(
+            too_big_due(&mut shown, key("desk", TooBig::Out), now),
+            "the other way"
+        );
+        assert!(
+            too_big_due(&mut shown, key("laptop", TooBig::In), now),
+            "another computer"
+        );
+        assert!(too_big_due(
+            &mut shown,
+            key("desk", TooBig::In),
+            now + TOO_BIG_EVERY
+        ));
+        let (summary, body) = too_big_words(TooBig::In, "Desk", MAX_PUSH + 1);
+        assert_eq!(summary, "A clipboard was too big to copy");
+        assert_eq!(
+            body,
+            "A clipboard from Desk was too big to copy (257 KB, over 256 KB)"
+        );
+        let (_, body) = too_big_words(TooBig::Out, "your other computers", 300 * 1024);
+        assert_eq!(
+            body,
+            "The text copied was not shared with your other computers (300 KB, over 256 KB)"
+        );
     }
 
     fn phone(id: &str) -> Arc<dyn DeviceSender> {

@@ -2526,12 +2526,20 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
         if !always && !crate::clipboard_push::takes_follow(device_id, &packet.body) {
             return;
         }
-        if let Some(content) = packet.body.get("content").and_then(|v| v.as_str()) {
-            // No computer pushes more (`MAX_PUSH`): longer is dropped.
-            if content.len() > crate::clipboard_push::MAX_PUSH {
-                crate::clipboard_push::too_long_from(device_id, content.len());
+        // No computer pushes more than `MAX_PUSH`: longer is dropped, and
+        // the owner told.
+        let text = match crate::clipboard_push::pushed_text(&packet.body) {
+            Ok(text) => text,
+            Err(len) => {
+                crate::clipboard_push::too_big(
+                    Some(device_id),
+                    len,
+                    crate::clipboard_push::TooBig::In,
+                );
                 return;
             }
+        };
+        if let Some(content) = text {
             crate::clipboard_push::follow_arrived(&packet.body);
             // Not sent back to the computer it came from.
             crate::clipboard_push::note_from_phone(device_id, content);
