@@ -160,6 +160,8 @@ windows.workspace = true
 pocketdesk-ffmpeg = { path = "../ffmpeg-shim", optional = true }
 
 [dev-dependencies]
+# The portal probe's log (tests/portal_live.rs).
+tracing-subscriber.workspace = true
 # A local Mainline DHT for the N3 lookup test (no internet).
 n0-mainline = "0.7"
 futures-lite = "2"

@@ -159,6 +159,9 @@ async fn run(
     let connection = ashpd::zbus::Connection::session()
         .await
         .map_err(|e| format!("no session bus for input capture: {e}"))?;
+    // Named as the server is, on this connection too: the portal names each
+    // connection apart (review N4).
+    pocketdesk_core::portal_grant::register_app_on(connection.clone()).await;
     let portal = match InputCapture::with_connection(connection).await {
         Ok(portal) => portal,
         // Only the portal's own word that it has no such interface is "not

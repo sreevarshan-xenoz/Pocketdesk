@@ -53,6 +53,10 @@ pub async fn run(config: Config) -> Result<()> {
     {
         anyhow::bail!("a Pocketdesk server already runs for this state folder (pid {pid})");
     }
+    // Named before any portal call on the shared connection, which the
+    // portal ties to the first name it hears (KDE spike, 2026-10-31).
+    #[cfg(target_os = "linux")]
+    pocketdesk_core::portal_grant::register_app().await;
     let pid_file = state::pid_file_path()?;
     state::write_pid_file(&pid_file)?;
     let _pid_guard = PidFileGuard { path: pid_file };
