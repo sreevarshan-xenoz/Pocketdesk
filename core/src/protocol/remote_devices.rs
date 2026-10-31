@@ -243,8 +243,8 @@ pub enum Answer {
 
 /// The request id an answer names and what it says, or `None` for one
 /// that does not read: a request id that does not read, more than
-/// [`MAX_LISTED`] devices (judged before any is copied), or an id or name
-/// over 256 bytes.
+/// [`MAX_LISTED`] devices, or an id or name over 256 bytes, each measured
+/// before any of it is copied.
 pub fn read_answer(body: &Value) -> Option<(String, Answer)> {
     let request = body.get("request")?.as_str()?;
     if !request_reads(request) {
@@ -260,14 +260,23 @@ pub fn read_answer(body: &Value) -> Option<(String, Answer)> {
             if devices.len() > MAX_LISTED {
                 return None;
             }
-            let devices: Vec<ThereDevice> =
-                serde_json::from_value(Value::Array(devices.clone())).ok()?;
-            if devices
-                .iter()
-                .any(|d| d.id.len() > MAX_FIELD || d.name.len() > MAX_FIELD)
-            {
+            // Each id and name measured where it lies, then each device
+            // read from it: nothing over the limits is copied.
+            let fits = |item: &Value| {
+                ["id", "name"].iter().all(|key| {
+                    item.get(key)
+                        .and_then(Value::as_str)
+                        .is_none_or(|v| v.len() <= MAX_FIELD)
+                })
+            };
+            if !devices.iter().all(fits) {
                 return None;
             }
+            let devices = devices
+                .iter()
+                .map(ThereDevice::deserialize)
+                .collect::<Result<Vec<_>, _>>()
+                .ok()?;
             Answer::Listed(devices)
         }
         "remove" => {

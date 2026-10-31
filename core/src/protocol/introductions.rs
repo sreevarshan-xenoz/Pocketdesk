@@ -241,8 +241,8 @@ pub enum PhoneAnswer {
 ///
 /// Held to the sizes the computer ever sends: a request id that reads,
 /// at most [`MAX_OFFERS`] computers of short ids and names, and a link of
-/// at most [`MAX_LINK`] bytes; anything longer is `None`, judged before it
-/// is copied.
+/// at most [`MAX_LINK`] bytes; anything longer is `None`, measured before
+/// any of it is copied.
 pub fn read_phone_answer(body: &Value) -> Option<(String, PhoneAnswer)> {
     let request = body.get("request")?.as_str()?;
     if !request_reads(request) {
@@ -258,14 +258,23 @@ pub fn read_phone_answer(body: &Value) -> Option<(String, PhoneAnswer)> {
             if computers.len() > MAX_OFFERS {
                 return None;
             }
-            let offers: Vec<Offer> =
-                serde_json::from_value(Value::Array(computers.clone())).ok()?;
-            if offers
-                .iter()
-                .any(|o| o.id.len() > MAX_FIELD || o.name.len() > MAX_FIELD)
-            {
+            // Each id and name measured where it lies, then each offer
+            // read from it: nothing over the limits is copied.
+            let fits = |item: &Value| {
+                ["id", "name"].iter().all(|key| {
+                    item.get(key)
+                        .and_then(Value::as_str)
+                        .is_none_or(|v| v.len() <= MAX_FIELD)
+                })
+            };
+            if !computers.iter().all(fits) {
                 return None;
             }
+            let offers = computers
+                .iter()
+                .map(Offer::deserialize)
+                .collect::<Result<Vec<_>, _>>()
+                .ok()?;
             PhoneAnswer::Listed(offers)
         }
         "pair" => {
