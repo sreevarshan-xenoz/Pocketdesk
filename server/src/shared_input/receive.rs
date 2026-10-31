@@ -1157,6 +1157,45 @@ fn drives_now(msg: &Msg, from: &str, allowed: bool, driver: Option<&str>) -> boo
 /// send ([`link::incoming`]) and act on it, keep this computer awake while
 /// someone drives it, and keep `shared_screens.json`. Not run with
 /// `POCKETDESK_SHARE_TEST` set, whose recorder takes what arrives instead.
+/// The most messages taken off the link at once, for [`stale_moves`].
+const BATCH_MOST: usize = 256;
+
+/// Which of `batch` (each message with the computer it came from, in the
+/// order they came off the link) are moves to drop: a newer move from the
+/// same computer comes after it with nothing from that computer between
+/// but moves, activity notes and pings. The receive loop takes what queued
+/// while it was busy and injects only the newest of such a run, so a loop
+/// held up a moment catches up at once instead of replaying the pointer's
+/// path. A key, button, wheel turn or anything else from that computer
+/// between them keeps the move before it: a click lands where the pointer
+/// was when it was made. A move older by its `seq` (a datagram late on
+/// the way) never drops a newer one before it; the receiver drops it.
+fn stale_moves<'a>(batch: impl DoubleEndedIterator<Item = (&'a str, &'a Msg)>) -> Vec<bool> {
+    let mut newest_after: HashMap<&str, u32> = HashMap::new();
+    let mut stale: Vec<bool> = batch
+        .rev()
+        .map(|(from, msg)| match msg {
+            Msg::Move { seq, .. } => {
+                // Newer by the count, which may wrap.
+                let newer = |a: u32, b: u32| (a.wrapping_sub(b) as i32) > 0;
+                let after = newest_after.get(from).copied();
+                let dropped = after.is_some_and(|after| newer(after, *seq));
+                if !dropped {
+                    newest_after.insert(from, *seq);
+                }
+                dropped
+            }
+            Msg::Active { .. } | Msg::Ping { .. } | Msg::Pong { .. } => false,
+            _ => {
+                newest_after.remove(from);
+                false
+            }
+        })
+        .collect();
+    stale.reverse();
+    stale
+}
+
 pub async fn run() {
     let mut arriving = link::incoming();
     let state_dir = crate::state::state_dir().ok();
@@ -1202,103 +1241,117 @@ pub async fn run() {
         set_driven_by(receiver.driven_by(Instant::now()));
         tokio::select! {
             arrival = arriving.recv() => {
-                let Some((from, msg, arrived_us, link_id)) = arrival else { break };
-                if let Msg::Refuse { reason } = msg {
-                    // Its answer to this computer driving it.
-                    if heard_refusals.note(&from, reason) {
-                        tracing::info!(
-                            from,
-                            reason,
-                            "Shared input: another computer won't take this one's input"
-                        );
-                    } else {
-                        tracing::debug!(from, reason, "Shared input: refused again");
+                let Some(first) = arrival else { break };
+                // What queued behind it is taken too, and a move that a newer
+                // one from the same computer follows is dropped: only the
+                // newest is injected ([`stale_moves`]).
+                let mut batch = vec![first];
+                while batch.len() < BATCH_MOST {
+                    let Ok(next) = arriving.try_recv() else { break };
+                    batch.push(next);
+                }
+                let stale = stale_moves(batch.iter().map(|(from, msg, ..)| (from.as_str(), msg)));
+                for ((from, msg, arrived_us, link_id), stale) in batch.into_iter().zip(stale) {
+                    if stale {
+                        continue;
                     }
-                    link::note_refused(&from, reason);
-                    continue;
-                }
-                let standing = gate.standing(&from).await;
-                if !standing.allowed && refuses(&msg, receiver.driver() == Some(from.as_str())) {
-                    let reason = gate.refusal(&from).await.unwrap_or(wire::REFUSE_NOT_ALLOWED);
-                    refuse(&from, reason, &mut told_refusals);
-                    channels.remove(&from);
-                }
-                if standing.allowed {
-                    told_refusals.clear(&from);
-                }
-                // Its cursor arriving over a relay is refused, and it comes
-                // home: the keyboard and mouse go over a direct link only.
-                if standing.allowed && arrives_relayed(&msg, || link::direct_on(link_id) == Some(true)) {
-                    tracing::info!(
-                        from,
-                        "Shared input: another computer's cursor came over a relay; refused"
-                    );
-                    refuse(&from, wire::REFUSE_RELAYED, &mut told_refusals);
-                    receiver.link_lost(&from);
-                    continue;
-                }
-                // Its screens are the answer the driving side waits for
-                // before it treats this computer as one to cross onto (a
-                // hello from its own driver is not).
-                if standing.computer
-                    && super::drive::is_answer(&msg)
-                    && link::note_screens(&from, link_id)
-                {
-                    heard_refusals.clear(&from);
-                }
-                match &msg {
-                    Msg::Hello { version, name, screens } if standing.computer => {
-                        note_heard(&mut heard, &from, Some(name), screens);
-                        if standing.allowed && *version == wire::VERSION {
-                            // Not looked at since sharing came on: a look
-                            // is asked for, and its screens go to every
-                            // computer told when it comes. This answer
-                            // says what is known now.
-                            if own.is_unread() {
-                                looks.ask();
-                            }
-                            let name = crate::kde::host_device_name();
-                            answer_hello(&mut channels, &from, own.get(), &name);
+                    if let Msg::Refuse { reason } = msg {
+                        // Its answer to this computer driving it.
+                        if heard_refusals.note(&from, reason) {
+                            tracing::info!(
+                                from,
+                                reason,
+                                "Shared input: another computer won't take this one's input"
+                            );
+                        } else {
+                            tracing::debug!(from, reason, "Shared input: refused again");
                         }
+                        link::note_refused(&from, reason);
+                        continue;
                     }
-                    Msg::Screens(screens) if standing.computer => {
-                        note_heard(&mut heard, &from, None, screens);
+                    let standing = gate.standing(&from).await;
+                    if !standing.allowed && refuses(&msg, receiver.driver() == Some(from.as_str())) {
+                        let reason = gate.refusal(&from).await.unwrap_or(wire::REFUSE_NOT_ALLOWED);
+                        refuse(&from, reason, &mut told_refusals);
+                        channels.remove(&from);
                     }
-                    Msg::Name { name } if standing.computer => {
-                        note_name(&mut heard, &from, name);
+                    if standing.allowed {
+                        told_refusals.clear(&from);
                     }
-                    Msg::Identify { name } if standing.allowed => {
-                        // Shown on screen by the receiver, below.
+                    // Its cursor arriving over a relay is refused, and it comes
+                    // home: the keyboard and mouse go over a direct link only.
+                    if standing.allowed && arrives_relayed(&msg, || link::direct_on(link_id) == Some(true)) {
                         tracing::info!(
                             from,
-                            name,
-                            "Shared input: another computer asks this one to show who it is"
+                            "Shared input: another computer's cursor came over a relay; refused"
                         );
+                        refuse(&from, wire::REFUSE_RELAYED, &mut told_refusals);
+                        receiver.link_lost(&from);
+                        continue;
                     }
-                    _ => {}
-                }
-                if standing.allowed && matches!(msg, Msg::Enter { .. }) {
-                    tracing::info!(from, "Shared input: another computer drives this one");
-                    driver_link = Some(link_id);
-                }
-                // Said before its pointer is put here or moved, so no edge
-                // it lands on is watched.
-                if drives_now(&msg, &from, standing.allowed, receiver.driver()) {
-                    set_driven_by(Some(&from));
-                }
-                if standing.allowed && matches!(msg, Msg::AskTimings) {
-                    let timings = receiver.timings_for(&from).unwrap_or_default().to_vec();
-                    send_to(&mut channels, &from, &Msg::Timings(timings));
-                    continue;
-                }
-                // The cursor going home from here: this computer's
-                // clipboard goes with it, when it follows the mouse here.
-                let follows = matches!(msg, Msg::Leave) && gate.clipboard_follows().await;
-                let back = pushes_back(&msg, &from, standing.allowed, receiver.driver(), follows);
-                receiver.handle_arrived(&from, msg, standing.allowed, arrived_us);
-                if back {
-                    let to = from.clone();
-                    tokio::spawn(async move { crate::clipboard_push::push_now(&to).await });
+                    // Its screens are the answer the driving side waits for
+                    // before it treats this computer as one to cross onto (a
+                    // hello from its own driver is not).
+                    if standing.computer
+                        && super::drive::is_answer(&msg)
+                        && link::note_screens(&from, link_id)
+                    {
+                        heard_refusals.clear(&from);
+                    }
+                    match &msg {
+                        Msg::Hello { version, name, screens } if standing.computer => {
+                            note_heard(&mut heard, &from, Some(name), screens);
+                            if standing.allowed && *version == wire::VERSION {
+                                // Not looked at since sharing came on: a look
+                                // is asked for, and its screens go to every
+                                // computer told when it comes. This answer
+                                // says what is known now.
+                                if own.is_unread() {
+                                    looks.ask();
+                                }
+                                let name = crate::kde::host_device_name();
+                                answer_hello(&mut channels, &from, own.get(), &name);
+                            }
+                        }
+                        Msg::Screens(screens) if standing.computer => {
+                            note_heard(&mut heard, &from, None, screens);
+                        }
+                        Msg::Name { name } if standing.computer => {
+                            note_name(&mut heard, &from, name);
+                        }
+                        Msg::Identify { name } if standing.allowed => {
+                            // Shown on screen by the receiver, below.
+                            tracing::info!(
+                                from,
+                                name,
+                                "Shared input: another computer asks this one to show who it is"
+                            );
+                        }
+                        _ => {}
+                    }
+                    if standing.allowed && matches!(msg, Msg::Enter { .. }) {
+                        tracing::info!(from, "Shared input: another computer drives this one");
+                        driver_link = Some(link_id);
+                    }
+                    // Said before its pointer is put here or moved, so no edge
+                    // it lands on is watched.
+                    if drives_now(&msg, &from, standing.allowed, receiver.driver()) {
+                        set_driven_by(Some(&from));
+                    }
+                    if standing.allowed && matches!(msg, Msg::AskTimings) {
+                        let timings = receiver.timings_for(&from).unwrap_or_default().to_vec();
+                        send_to(&mut channels, &from, &Msg::Timings(timings));
+                        continue;
+                    }
+                    // The cursor going home from here: this computer's
+                    // clipboard goes with it, when it follows the mouse here.
+                    let follows = matches!(msg, Msg::Leave) && gate.clipboard_follows().await;
+                    let back = pushes_back(&msg, &from, standing.allowed, receiver.driver(), follows);
+                    receiver.handle_arrived(&from, msg, standing.allowed, arrived_us);
+                    if back {
+                        let to = from.clone();
+                        tokio::spawn(async move { crate::clipboard_push::push_now(&to).await });
+                    }
                 }
             }
             _ = tick.tick() => {
@@ -1466,6 +1519,132 @@ pub async fn run() {
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+
+    fn mv(seq: u32) -> Msg {
+        Msg::Move { seq, x: 1, y: 2 }
+    }
+
+    fn stale_of(batch: &[(&str, Msg)]) -> Vec<bool> {
+        stale_moves(batch.iter().map(|(from, msg)| (*from, msg)))
+    }
+
+    /// A run of moves queued behind each other: only the newest is
+    /// injected; pings and activity notes between do not break the run.
+    #[test]
+    fn only_the_newest_of_a_run_of_moves_is_kept() {
+        let a = "aaaa";
+        assert_eq!(
+            stale_of(&[(a, mv(1)), (a, mv(2)), (a, mv(3))]),
+            [true, true, false]
+        );
+        assert_eq!(
+            stale_of(&[
+                (a, mv(1)),
+                (a, Msg::Ping { t_us: 5 }),
+                (a, Msg::Active { idle_ms: 0 }),
+                (a, mv(2)),
+            ]),
+            [true, false, false, false]
+        );
+        // One move alone, and none at all.
+        assert_eq!(stale_of(&[(a, mv(1))]), [false]);
+        assert!(stale_of(&[]).is_empty());
+        // The count wraps: 0 is newer than u32::MAX.
+        assert_eq!(stale_of(&[(a, mv(u32::MAX)), (a, mv(0))]), [true, false]);
+    }
+
+    /// A key, button or wheel turn between two moves keeps the move before
+    /// it, so a click lands where the pointer was; nothing but a stale
+    /// move is ever dropped.
+    #[test]
+    fn a_click_or_key_keeps_the_move_before_it() {
+        let a = "aaaa";
+        for between in [
+            Msg::Button {
+                button: 0,
+                pressed: true,
+            },
+            Msg::Key {
+                code: 30,
+                pressed: true,
+            },
+            Msg::Wheel { dx: 0, dy: 1 },
+            Msg::ReleaseAll,
+            Msg::Leave,
+        ] {
+            assert_eq!(
+                stale_of(&[(a, mv(1)), (a, between.clone()), (a, mv(2))]),
+                [false, false, false],
+                "{between:?}"
+            );
+        }
+        // Moves on both sides of a click: those before it collapse to the
+        // last one before it, those after to the newest.
+        assert_eq!(
+            stale_of(&[
+                (a, mv(1)),
+                (a, mv(2)),
+                (
+                    a,
+                    Msg::Button {
+                        button: 0,
+                        pressed: true
+                    }
+                ),
+                (a, mv(3)),
+                (a, mv(4)),
+            ]),
+            [true, false, false, true, false]
+        );
+    }
+
+    /// Each computer's moves are its own: another's queued between does
+    /// not drop them, nor does another's click keep them.
+    #[test]
+    fn moves_are_coalesced_per_computer() {
+        let (a, b) = ("aaaa", "bbbb");
+        assert_eq!(
+            stale_of(&[(a, mv(1)), (b, mv(7)), (a, mv(2)), (b, mv(8))]),
+            [true, true, false, false]
+        );
+        assert_eq!(
+            stale_of(&[
+                (a, mv(1)),
+                (
+                    b,
+                    Msg::Button {
+                        button: 0,
+                        pressed: true
+                    }
+                ),
+                (a, mv(2)),
+            ]),
+            [true, false, false]
+        );
+    }
+
+    /// A move late on the way (older by its count) never drops the newer
+    /// one before it: the newer is kept, and the receiver drops the late
+    /// one by its count.
+    #[test]
+    fn a_late_move_never_drops_a_newer_one() {
+        let a = "aaaa";
+        assert_eq!(stale_of(&[(a, mv(10)), (a, mv(9))]), [false, false]);
+        assert_eq!(
+            stale_of(&[(a, mv(8)), (a, mv(10)), (a, mv(9))]),
+            [true, false, false]
+        );
+        let fake = Fake::default();
+        let mut r = Receiver::new(Box::new(fake.clone()));
+        r.handle(a, Msg::Enter { x: 0, y: 0 }, true);
+        fake.take();
+        for (msg, stale) in [(mv(10), false), (mv(9), false)] {
+            if !stale {
+                r.handle(a, msg, true);
+            }
+        }
+        assert_eq!(fake.take(), [Call::Move(1, 2)]);
+    }
 
     /// The gate waits only for the first read of the settings and of each
     /// computer's standing; one past its recheck is read again in the
