@@ -625,6 +625,27 @@ pub fn clear_left_over() {
     }
 }
 
+/// How long start-up waits for [`clear_left_over`] before going on without
+/// it: a hung compositor must not keep every phone from the computer.
+const SWEEP_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Run [`clear_left_over`] at start and wait for it at most [`SWEEP_WAIT`];
+/// slower, it finishes alone. Adds wait for it either way, as it holds
+/// their lock.
+pub async fn clear_left_over_at_start() {
+    if !wait_at_most(SWEEP_WAIT, clear_left_over).await {
+        tracing::warn!("The sweep of left-over screens is slow; starting without waiting for it");
+    }
+}
+
+/// Run `work` on the blocking pool and wait at most `limit`: `true` when it
+/// finished in time.
+async fn wait_at_most(limit: std::time::Duration, work: impl FnOnce() + Send + 'static) -> bool {
+    tokio::time::timeout(limit, tokio::task::spawn_blocking(work))
+        .await
+        .is_ok()
+}
+
 /// Remove the outputs of phones with no session in `live` twice in a row
 /// (a session switching screens is gone for a moment). Runs every few
 /// seconds for the server's life.
@@ -1226,6 +1247,32 @@ mod tests {
             }
         );
         assert!(hypr_outputs("not json").is_err());
+    }
+
+    /// A sweep stuck on a compositor that takes requests and never answers
+    /// holds start-up back no longer than its limit.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_hung_sweep_holds_start_up_back_only_its_limit() {
+        let dir = std::env::temp_dir().join(format!("pd-vs-hung-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.sock");
+        let _ = std::fs::remove_file(&path);
+        let _listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let at = std::time::Instant::now();
+        let sock = path.clone();
+        let finished = wait_at_most(std::time::Duration::from_millis(300), move || {
+            let _ =
+                crate::hyprland::request_at(&sock, "j/monitors", std::time::Duration::from_secs(2));
+        })
+        .await;
+        assert!(!finished, "the sweep could not have finished");
+        assert!(
+            at.elapsed() < std::time::Duration::from_secs(2),
+            "start-up waited"
+        );
+        assert!(wait_at_most(std::time::Duration::from_secs(1), || {}).await);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
