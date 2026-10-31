@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1078 open items.
+1080 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
 | A second computer | 146 |
-| A Linux desktop (the Azure VM serves for some) | 178 |
+| A Linux desktop (the Azure VM serves for some) | 180 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
 
@@ -1584,6 +1584,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Arch's stock `/etc/nftables.conf` loaded: the row names "Arch's stock rules, which let in ssh only". (where: linux)
 - The hint's `nft insert` lines run by hand: the row turns green and a phone pairs. (where: linux)
 - iptables (`iptables.service` with a DROP policy): the row is red with the `iptables -I INPUT` lines. (where: linux)
+
+**247. Software encoding through OpenH264 on stock Fedora**
+
+- A phone session against the tarball's server on a real stock Fedora machine with no working hardware encoder (or `POCKETDESK_FAIL_ENCODERS` naming its rungs) and `ffmpeg-free` plus `openh264`: the picture appears and stays, Diagnostics' last session names `ffmpeg-sidecar-openh264`, and the picture quality at the default bitrate is acceptable. (where: linux)
+- install.sh on a fresh stock Fedora: it lists `ffmpeg-free` and `openh264` and, once they are installed, `pocketdesk capabilities` names libopenh264. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

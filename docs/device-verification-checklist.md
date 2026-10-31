@@ -3353,6 +3353,15 @@ Built 2026-10-31. Diagnostics' Firewall row reads plain nftables and iptables ru
 - [ ] The hint's `nft insert` lines run by hand: the row turns green and a phone pairs. (where: linux)
 - [ ] iptables (`iptables.service` with a DROP policy): the row is red with the `iptables -I INPUT` lines. (where: linux)
 
+## 247. Software encoding through OpenH264 on stock Fedora
+
+Built 2026-10-31. The sidecar's software rung asks the system `ffmpeg` for its encoders once (`ffmpeg -hide_banner -encoders`, remembered per program) and takes libx264, else libopenh264 (after a one-frame encode proves it is not Fedora's `noopenh264` stub), else fails saying what to install. OpenH264 runs as Constrained Baseline, bitrate rate control, `-g` at two seconds, frame skipping off. `pocketdesk capabilities` names the software encoder; a session on it records `ffmpeg-sidecar-openh264`.
+- [x] Fedora 44's `ffmpeg-free` 8.1.3 (a throwaway `systemd-nspawn` container on the Linux laptop) with the `noopenh264` stub: `pocketdesk capabilities` says "none: the system ffmpeg lists libopenh264 but cannot open it (…sudo dnf install openh264…)". (where: linux)
+      (2026-10-31, the tarball-style build: `pocketdesk-server --no-default-features`.)
+- [x] The same container after `dnf install openh264`: `capabilities` says libopenh264; the ignored live test `openh264_sidecar_encodes_frames_a_phone_decodes` encodes 60 moving frames through the sidecar and ffprobe reads them back as Constrained Baseline H.264, every access unit decoded; `pocketdesk bench --target software --frames 60` records `ffmpeg-sidecar-openh264`, 1280x720 at 5 Mbit/s, p50 8 ms, 1.25 MB for 2 s, no frame without a packet. (where: linux)
+- [ ] A phone session against the tarball's server on a real stock Fedora machine with no working hardware encoder (or `POCKETDESK_FAIL_ENCODERS` naming its rungs) and `ffmpeg-free` plus `openh264`: the picture appears and stays, Diagnostics' last session names `ffmpeg-sidecar-openh264`, and the picture quality at the default bitrate is acceptable. (where: linux)
+- [ ] install.sh on a fresh stock Fedora: it lists `ffmpeg-free` and `openh264` and, once they are installed, `pocketdesk capabilities` names libopenh264. (where: linux)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
