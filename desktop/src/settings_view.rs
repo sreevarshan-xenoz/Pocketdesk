@@ -571,9 +571,9 @@ pub(crate) fn drawn_here(key: &str) -> bool {
 /// timer is Windows' only (BK10 review M8).
 pub(crate) fn quick_note() -> &'static str {
     if cfg!(windows) {
-        "While the pointer is on another computer, or this one is driven, and keys or moves keep coming: Windows' timer runs finer for Pocketdesk, and this computer sends the other a byte every 50 ms so its Wi-Fi does not doze between keys. A little more battery while it lasts."
+        "While the pointer is on another computer, or this one is driven, and keys or moves keep coming: Windows' timer runs finer for Pocketdesk, and this computer sends the other a byte every 50 ms so its Wi-Fi does not doze between keys. Moves go at most every 2 ms, the newest kept. A little more battery while it lasts."
     } else {
-        "While the pointer is on another computer, or this one is driven, and keys or moves keep coming: this computer sends the other a byte every 50 ms so its Wi-Fi does not doze between keys. A little more battery while it lasts."
+        "While the pointer is on another computer, or this one is driven, and keys or moves keep coming: this computer sends the other a byte every 50 ms so its Wi-Fi does not doze between keys. Moves go at most every 2 ms, the newest kept. A little more battery while it lasts."
     }
 }
 

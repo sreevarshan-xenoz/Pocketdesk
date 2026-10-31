@@ -14,6 +14,7 @@
 //! keyboard and mouse are shared at home only.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -37,8 +38,26 @@ const HEAD_WAIT: Duration = Duration::from_secs(5);
 /// of files (-1) on the connection: a key is a few bytes, and late is wrong.
 const STREAM_PRIORITY: i32 = 1;
 
+/// For the driver bench: each move's `seq` and when it was handed to the
+/// link, while it is `Some`.
+#[cfg(test)]
+pub(crate) static SENT_PROBE: Mutex<Option<Vec<(u32, u64)>>> = Mutex::new(None);
+
 /// The computers' connections registered now, by the other computer's id.
 static LINKS: LazyLock<Mutex<HashMap<String, Registered>>> = LazyLock::new(Default::default);
+
+/// Counts each change to [`LINKS`] (made under its lock): a channel that
+/// found its link current at a count needs no look while it stands.
+static LINKS_CHANGED: AtomicU64 = AtomicU64::new(0);
+
+/// [`LINKS`] changed (its lock held).
+fn links_changed() {
+    LINKS_CHANGED.fetch_add(1, Ordering::SeqCst);
+}
+
+/// How much one buffer for datagrams holds before a new one is taken (or
+/// the old one reused, once every datagram carved from it went).
+const DATAGRAM_ARENA: usize = 4096;
 
 /// A message from another computer: that computer's id, the message, when
 /// it came off the link ([`now_us`]), and the link it came on (its
@@ -88,7 +107,12 @@ impl Drop for Registered {
 pub fn register(device_id: &str, conn: Connection) {
     let reader = tokio::spawn(read_link(device_id.to_string(), conn.clone())).abort_handle();
     let stable_id = conn.stable_id();
-    let replaced = lock(&LINKS).insert(device_id.to_string(), Registered { conn, reader });
+    let replaced = {
+        let mut links = lock(&LINKS);
+        let replaced = links.insert(device_id.to_string(), Registered { conn, reader });
+        links_changed();
+        replaced
+    };
     // An answer on the link replaced is no answer on this one.
     if let Some(old) = replaced.as_ref().map(|r| r.conn.stable_id())
         && old != stable_id
@@ -101,7 +125,12 @@ pub fn register(device_id: &str, conn: Connection) {
 
 /// Forget the link to `device_id` and stop reading it.
 pub fn unregister(device_id: &str) {
-    let gone = lock(&LINKS).remove(device_id);
+    let gone = {
+        let mut links = lock(&LINKS);
+        let gone = links.remove(device_id);
+        links_changed();
+        gone
+    };
     if let Some(gone) = &gone {
         forget_answer(device_id, gone.conn.stable_id());
     }
@@ -244,6 +273,7 @@ impl Drop for Held {
             .get(&self.device_id)
             .is_some_and(|r| r.conn.stable_id() == self.stable_id);
         let gone = if ours {
+            links_changed();
             links.remove(&self.device_id)
         } else {
             None
@@ -551,6 +581,12 @@ pub struct Channel {
     timings_in: TimingsIn,
     /// The last move, sent again on the stream ahead of a click.
     order: ClickOrder,
+    /// The [`LINKS_CHANGED`] count this channel's link was last found
+    /// current at.
+    current_at: AtomicU64,
+    /// Where datagrams are carved from: one buffer for many, not an
+    /// allocation each.
+    arena: bytes::BytesMut,
 }
 
 impl Channel {
@@ -596,6 +632,8 @@ impl Channel {
             timings,
             timings_in,
             order: ClickOrder::default(),
+            current_at: AtomicU64::new(u64::MAX),
+            arena: bytes::BytesMut::new(),
         })
     }
 
@@ -605,10 +643,20 @@ impl Channel {
     /// it times out, about 45 s, carrying what is sent on it nowhere) or the
     /// link went. A channel that is not current is opened anew.
     pub fn is_current(&self) -> bool {
+        // Unchanged since it was last found current: no look (each move
+        // took the lock and a lookup by name).
+        let count = LINKS_CHANGED.load(Ordering::SeqCst);
+        if self.current_at.load(Ordering::Relaxed) == count {
+            return true;
+        }
         let stable_id = self.conn.stable_id();
-        lock(&LINKS)
+        let current = lock(&LINKS)
             .get(&self.device_id)
-            .is_some_and(|registered| registered.conn.stable_id() == stable_id)
+            .is_some_and(|registered| registered.conn.stable_id() == stable_id);
+        if current {
+            self.current_at.store(count, Ordering::Relaxed);
+        }
+        current
     }
 
     /// Send `msg`: a move, an activity note, a ping or a pong as one
@@ -642,11 +690,23 @@ impl Channel {
             }
             _ => {}
         }
+        #[cfg(test)]
+        if let Msg::Move { seq, .. } = msg
+            && let Some(sent) = lock(&SENT_PROBE).as_mut()
+        {
+            sent.push((*seq, now_us()));
+        }
         let ahead = self.order.before(msg);
         if rides_datagram(msg) {
+            // A move, a ping or an activity note encoded on the stack and
+            // carved from this channel's buffer.
+            let bytes = match wire::encode_small(msg) {
+                Some(small) => carve(&mut self.arena, small.as_slice()),
+                None => wire::encode(msg).into(),
+            };
             return self
                 .conn
-                .send_datagram(wire::encode(msg).into())
+                .send_datagram(bytes)
                 .map_err(|e| format!("not sent: {e}"));
         }
         if let Some(ahead) = ahead {
@@ -736,6 +796,17 @@ impl Drop for Channel {
     }
 }
 
+/// `bytes` as a datagram carved from `arena`: its room taken again once
+/// every datagram carved from it went, else a new buffer of
+/// [`DATAGRAM_ARENA`].
+fn carve(arena: &mut bytes::BytesMut, bytes: &[u8]) -> bytes::Bytes {
+    if arena.capacity() < bytes.len() {
+        arena.reserve(DATAGRAM_ARENA.max(bytes.len()));
+    }
+    arena.extend_from_slice(bytes);
+    arena.split().freeze()
+}
+
 /// Write `frames` in order on a uni stream opened for them, the magic and
 /// the version first; finish it once the channel is gone. Why it stopped,
 /// if it broke, goes in `broken`.
@@ -814,6 +885,43 @@ pub(crate) mod tests {
         assert_eq!(order.before(&mv(5)), None);
         assert_eq!(order.before(&Msg::Enter { x: 0, y: 0 }), None);
         assert_eq!(order.before(&click), None, "an arrival puts it");
+    }
+
+    /// Datagrams carved from one buffer are each their own bytes, and the
+    /// buffer is reused, not grown, once they went.
+    #[test]
+    fn datagrams_are_carved_from_one_buffer() {
+        let mut arena = bytes::BytesMut::new();
+        let first = carve(&mut arena, b"abc");
+        let second = carve(&mut arena, b"defg");
+        assert_eq!((&first[..], &second[..]), (&b"abc"[..], &b"defg"[..]));
+        drop((first, second));
+        for _ in 0..10_000 {
+            let one = carve(&mut arena, &[7; 13]);
+            assert_eq!(one.len(), 13);
+        }
+        assert!(arena.capacity() <= DATAGRAM_ARENA, "reused, not grown");
+    }
+
+    /// A channel's link found current needs no look again until a link
+    /// changes, and one replaced is seen at once.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_channel_looks_at_its_link_again_only_after_a_change() {
+        let (a, b, out, back) = linked_pair().await;
+        let _first = hold("test-current", out.clone());
+        let channel = Channel::open_with("test-current", |_| true).unwrap();
+        assert!(channel.is_current());
+        let count = LINKS_CHANGED.load(Ordering::SeqCst);
+        assert_eq!(channel.current_at.load(Ordering::SeqCst), count);
+        assert!(channel.is_current(), "cached");
+        // Another computer's link changes: looked at again, still current.
+        drop(hold("test-current-other", back.clone()));
+        assert!(channel.is_current());
+        // Its own replaced: not current.
+        let _second = hold("test-current", back);
+        assert!(!channel.is_current());
+        a.close().await;
+        b.close().await;
     }
 
     async fn endpoint() -> iroh::Endpoint {

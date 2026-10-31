@@ -328,6 +328,60 @@ pub fn encode(msg: &Msg) -> Vec<u8> {
     out
 }
 
+/// The most bytes [`encode_small`] makes: a pong's tag and two readings.
+pub const SMALL_MOST: usize = 17;
+
+/// A small message's bytes, on the stack ([`encode_small`]).
+#[derive(Debug, Clone, Copy)]
+pub struct Small {
+    bytes: [u8; SMALL_MOST],
+    len: usize,
+}
+
+impl Small {
+    pub fn as_slice(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+
+    fn put(&mut self, more: &[u8]) {
+        self.bytes[self.len..self.len + more.len()].copy_from_slice(more);
+        self.len += more.len();
+    }
+}
+
+/// [`encode`] with no allocation, for what goes as a datagram many times a
+/// second (a move, an activity note, a ping, a pong); `None` for any other
+/// message.
+pub fn encode_small(msg: &Msg) -> Option<Small> {
+    let mut out = Small {
+        bytes: [0; SMALL_MOST],
+        len: 0,
+    };
+    match msg {
+        Msg::Move { seq, x, y } => {
+            out.put(&[TAG_MOVE]);
+            out.put(&seq.to_be_bytes());
+            out.put(&x.to_be_bytes());
+            out.put(&y.to_be_bytes());
+        }
+        Msg::Active { idle_ms } => {
+            out.put(&[TAG_ACTIVE]);
+            out.put(&idle_ms.to_be_bytes());
+        }
+        Msg::Ping { t_us } => {
+            out.put(&[TAG_PING]);
+            out.put(&t_us.to_be_bytes());
+        }
+        Msg::Pong { t_us, at_us } => {
+            out.put(&[TAG_PONG]);
+            out.put(&t_us.to_be_bytes());
+            out.put(&at_us.to_be_bytes());
+        }
+        _ => return None,
+    }
+    Some(out)
+}
+
 /// A message from the bytes [`encode`] made, all of them and nothing more.
 pub fn decode(bytes: &[u8]) -> Result<Msg, WireError> {
     let mut r = Reader { rest: bytes };
@@ -749,6 +803,34 @@ mod tests {
             assert_eq!(decode(&bytes), Ok(m));
         }
         assert_ne!(REFUSE_SHARING_OFF, REFUSE_NOT_ALLOWED);
+    }
+
+    /// The stack encoding is the same bytes as [`encode`]'s, for every
+    /// message it takes, and takes nothing that rides the stream.
+    #[test]
+    fn the_small_encoding_is_encode_s_bytes() {
+        let mut small = 0;
+        for msg in every_variant() {
+            match encode_small(&msg) {
+                Some(bytes) => {
+                    assert_eq!(bytes.as_slice(), encode(&msg).as_slice(), "{msg:?}");
+                    small += 1;
+                }
+                None => assert!(
+                    !matches!(
+                        msg,
+                        Msg::Move { .. } | Msg::Active { .. } | Msg::Ping { .. } | Msg::Pong { .. }
+                    ),
+                    "{msg:?}"
+                ),
+            }
+        }
+        assert!(small >= 4);
+        let most = Msg::Pong {
+            t_us: u64::MAX,
+            at_us: u64::MAX,
+        };
+        assert_eq!(encode_small(&most).unwrap().as_slice().len(), SMALL_MOST);
     }
 
     #[test]

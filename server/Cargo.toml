@@ -50,6 +50,9 @@ iroh-mainline-address-lookup = "0.6"
 futures-lite = "2"
 # Relay hosts in the DHT record (N3).
 url = "2"
+# Shared input's datagrams carved from one buffer (already in the graph
+# through iroh, which takes them as `Bytes`).
+bytes = "1"
 # Clipboard images (N4): PNG on the wire, DIB for Windows apps.
 png = "0.18"
 # O7: a received JPEG goes onto the clipboard as PNG.
