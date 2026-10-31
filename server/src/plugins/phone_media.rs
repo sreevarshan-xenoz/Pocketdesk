@@ -261,7 +261,15 @@ pub async fn run_watcher() {
         for device in gone {
             pocketdesk_core::local::phone_media::forget_art(&dir, &device);
         }
-        if let Err(e) = pocketdesk_core::local::phone_media::write(&dir, &phones) {
+        // Off the runtime: on Windows a replace can wait up to about half a
+        // second for another program's handle on the file.
+        let at = dir.clone();
+        let kept = tokio::task::spawn_blocking(move || {
+            pocketdesk_core::local::phone_media::write(&at, &phones)
+        })
+        .await
+        .unwrap_or_else(|e| Err(std::io::Error::other(e)));
+        if let Err(e) = kept {
             tracing::warn!("Could not keep the phones' media: {e}");
         }
     }

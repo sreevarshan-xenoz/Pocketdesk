@@ -504,7 +504,15 @@ fn spawn_endpoint_recorder(endpoint: Endpoint, dht_mode: DhtPublish, dht_check: 
                     status.dht_found,
                 );
                 if last_status.as_ref() != Some(&facts) {
-                    match pocketdesk_core::local::diagnostics::write_wan_status(&dir, &status) {
+                    // Off the runtime: on Windows a replace can wait up to
+                    // about half a second for another program's handle.
+                    let at = dir.clone();
+                    let written = tokio::task::spawn_blocking(move || {
+                        pocketdesk_core::local::diagnostics::write_wan_status(&at, &status)
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(std::io::Error::other(e)));
+                    match written {
                         Ok(()) => last_status = Some(facts),
                         Err(e) => tracing::debug!("could not record the WAN status: {e}"),
                     }

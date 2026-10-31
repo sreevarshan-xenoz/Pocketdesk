@@ -1121,7 +1121,10 @@ impl Plugin for NotificationPlugin {
                     .map(crate::toast_answers::Answerable::of);
                 if let Some(note) = note
                     && let Ok(dir) = crate::state::state_dir()
-                    && let Err(e) = phone_notes::keep(&dir, note)
+                    && let Err(e) =
+                        tokio::task::spawn_blocking(move || phone_notes::keep(&dir, note))
+                            .await
+                            .unwrap_or_else(|e| Err(std::io::Error::other(e)))
                 {
                     tracing::warn!("A phone notification was not kept to answer: {e}");
                 }

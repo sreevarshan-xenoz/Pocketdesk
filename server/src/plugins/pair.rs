@@ -1215,35 +1215,38 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         {
             crate::peer_computers::stop_waiting(&dir, &phone_id);
         }
-        let outcome = TrustStore::update(state::trust_store_path().expect("state dir"), |store| {
-            let was_trusted = store.is_trusted(&phone_id);
-            // The permissions before the trust (M2 review): a write that fails
-            // between them leaves an untrusted id's entry, which the store
-            // drops as it loads, never a phone trusted with the defaults.
-            if let Some(permissions) = preset_permissions(
-                grant_secs.is_some(),
-                someone_else,
-                computer,
-                was_trusted.then(|| store.permissions(&phone_id)).as_ref(),
-                profile.as_ref(),
-            ) {
-                store.set_permissions(&phone_id, permissions)?;
-            }
-            match grant_secs {
-                Some(secs) => {
-                    store.trust_device_with_ttl(phone_id.clone(), Duration::from_secs(secs))
+        // The trust store's save can wait on Windows: off the workers.
+        let outcome = state::off_the_workers(|| {
+            TrustStore::update(state::trust_store_path().expect("state dir"), |store| {
+                let was_trusted = store.is_trusted(&phone_id);
+                // The permissions before the trust (M2 review): a write that fails
+                // between them leaves an untrusted id's entry, which the store
+                // drops as it loads, never a phone trusted with the defaults.
+                if let Some(permissions) = preset_permissions(
+                    grant_secs.is_some(),
+                    someone_else,
+                    computer,
+                    was_trusted.then(|| store.permissions(&phone_id)).as_ref(),
+                    profile.as_ref(),
+                ) {
+                    store.set_permissions(&phone_id, permissions)?;
                 }
-                // PC1: both ways, but as one way until the link between
-                // the two shows the other computer recorded it too (review
-                // M1): `peer_computers::grant_on_link` gives the rest then.
-                None if computer => store.trust_computer(phone_id.clone()),
-                // Remote revoke: only the owner's own code makes an owner
-                // phone, which may remove this computer's devices from afar.
-                None => store.trust_phone(
-                    phone_id.clone(),
-                    is_owner_code(someone_else, profile.is_some()),
-                ),
-            }
+                match grant_secs {
+                    Some(secs) => {
+                        store.trust_device_with_ttl(phone_id.clone(), Duration::from_secs(secs))
+                    }
+                    // PC1: both ways, but as one way until the link between
+                    // the two shows the other computer recorded it too (review
+                    // M1): `peer_computers::grant_on_link` gives the rest then.
+                    None if computer => store.trust_computer(phone_id.clone()),
+                    // Remote revoke: only the owner's own code makes an owner
+                    // phone, which may remove this computer's devices from afar.
+                    None => store.trust_phone(
+                        phone_id.clone(),
+                        is_owner_code(someone_else, profile.is_some()),
+                    ),
+                }
+            })
         });
         match outcome {
             Ok(()) => {

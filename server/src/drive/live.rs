@@ -225,19 +225,22 @@ impl Phones for LivePhones {
         if let Ok(dir) = crate::state::state_dir() {
             let mut shown = folder.to_vec();
             shown.push(name.to_string());
-            let _ = pocketdesk_core::local::sent::record(
-                &dir,
-                pocketdesk_core::local::sent::SentFile {
-                    id: id.clone(),
-                    name: name.to_string(),
-                    path: format!("the phone's drive: {}", shown.join("/")),
-                    size,
-                    device_id: device.to_string(),
-                    sent_unix: pocketdesk_core::local::pin::now_unix(),
-                    state: pocketdesk_core::local::sent::SentState::Offered,
-                    note: None,
-                },
-            );
+            let sent = pocketdesk_core::local::sent::SentFile {
+                id: id.clone(),
+                name: name.to_string(),
+                path: format!("the phone's drive: {}", shown.join("/")),
+                size,
+                device_id: device.to_string(),
+                sent_unix: pocketdesk_core::local::pin::now_unix(),
+                state: pocketdesk_core::local::sent::SentState::Offered,
+                note: None,
+            };
+            // Off the runtime: on Windows a replace can wait up to about
+            // half a second for another program's handle on the file.
+            let _ = tokio::task::spawn_blocking(move || {
+                pocketdesk_core::local::sent::record(&dir, sent)
+            })
+            .await;
         }
         // Offered first, so the phone's fetch finds it; the file goes when
         // the offer ends, however it ends.
