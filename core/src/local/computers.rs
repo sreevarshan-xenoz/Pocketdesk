@@ -628,6 +628,8 @@ pub fn try_read(state_dir: &Path) -> io::Result<ComputersFile> {
 }
 
 /// The server's writes, one at a time.
+// Keeps this file's writes in turn. On Windows a contended save holds it up to
+// about half a second (`atomic_file::replace` waits out another handle).
 static WRITING: Mutex<()> = Mutex::new(());
 
 /// Change the file under `change` (the server's side), written whole and
@@ -643,10 +645,10 @@ pub fn update(state_dir: &Path, change: impl FnOnce(&mut ComputersFile)) -> io::
     }
     let json = serde_json::to_string_pretty(&file).map_err(io::Error::other)?;
     let path = state_dir.join(COMPUTERS_FILE);
-    let tmp = path.with_extension("json.tmp");
+    let tmp = crate::atomic_file::temp_beside(&path);
     std::fs::create_dir_all(state_dir)?;
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// Leave a request for the server (the app's side).
@@ -665,11 +667,9 @@ pub fn request(state_dir: &Path, ask: ComputerAsk, now_unix: u64) -> io::Result<
     let json = serde_json::to_string(&request).map_err(io::Error::other)?;
     let tmp = file.with_extension("json.tmp");
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    if let Err(e) = std::fs::rename(&tmp, &file) {
-        // Not left behind (BD3 review): a Pair request holds the PIN.
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e);
-    }
+    // A failed replace removes the temp file, so none is left behind (BD3
+    // review): a Pair request holds the PIN.
+    crate::atomic_file::replace(&tmp, &file)?;
     Ok(request)
 }
 

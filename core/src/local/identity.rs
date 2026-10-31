@@ -26,9 +26,9 @@ pub fn fingerprint_hex(fingerprint: [u8; 32]) -> String {
 pub fn write_endpoint(state_dir: &Path, body: &serde_json::Value) -> io::Result<()> {
     std::fs::create_dir_all(state_dir)?;
     let path = state_dir.join(ENDPOINT_FILE);
-    let tmp = state_dir.join(format!("{ENDPOINT_FILE}.tmp"));
+    let tmp = crate::atomic_file::temp_beside(&state_dir.join(ENDPOINT_FILE));
     std::fs::write(&tmp, serde_json::to_vec(body)?)?;
-    std::fs::rename(&tmp, path)
+    crate::atomic_file::replace(&tmp, path)
 }
 
 /// The endpoint the server last recorded, if any.

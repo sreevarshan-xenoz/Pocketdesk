@@ -166,6 +166,21 @@ pub fn pair_pin_path() -> Result<PathBuf> {
 }
 
 /// Path to the trust store file.
+/// Run blocking file work (a state file's save, which on Windows can wait
+/// up to about half a second for another program's handle) from async code
+/// whose borrows make `spawn_blocking` awkward. On the server's
+/// multi-thread runtime the worker hands its other tasks off first
+/// (`block_in_place`); on a current-thread runtime (the tests) or outside
+/// a runtime it runs inline, where `block_in_place` would panic.
+pub fn off_the_workers<R>(work: impl FnOnce() -> R) -> R {
+    match tokio::runtime::Handle::try_current() {
+        Ok(h) if h.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(work)
+        }
+        _ => work(),
+    }
+}
+
 pub fn trust_store_path() -> Result<PathBuf> {
     Ok(state_dir()?.join("trusted_devices.json"))
 }

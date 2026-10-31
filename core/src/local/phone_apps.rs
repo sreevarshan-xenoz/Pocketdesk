@@ -43,7 +43,7 @@ pub fn keep(
     let file = state_dir.join(PHONE_APPS_FILE);
     let tmp = file.with_extension("json.tmp");
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &file)
+    crate::atomic_file::replace(&tmp, &file)
 }
 
 #[cfg(test)]

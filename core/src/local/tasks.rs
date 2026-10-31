@@ -171,7 +171,7 @@ fn answer_path(state_dir: &Path, id: &str) -> io::Result<PathBuf> {
 fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let tmp = path.with_extension("json.tmp");
     crate::secure_fs::write_private(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)
+    crate::atomic_file::replace(&tmp, path)
 }
 
 /// The last [`MAX_OUTPUT`] bytes of `bytes` as text, and whether any were

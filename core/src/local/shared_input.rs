@@ -284,6 +284,8 @@ pub fn try_read(state_dir: &Path) -> io::Result<ScreensFile> {
 }
 
 /// The server's writes, one at a time.
+// Keeps this file's writes in turn. On Windows a contended save holds it up to
+// about half a second (`atomic_file::replace` waits out another handle).
 static WRITING: Mutex<()> = Mutex::new(());
 
 /// Change the file under `change` (the server's side), written whole and
@@ -299,24 +301,20 @@ pub fn update(state_dir: &Path, change: impl FnOnce(&mut ScreensFile)) -> io::Re
         return Ok(());
     }
     let json = serde_json::to_string_pretty(&file).map_err(io::Error::other)?;
-    let tmp = path.with_extension("json.tmp");
+    let tmp = crate::atomic_file::temp_beside(&path);
     std::fs::create_dir_all(state_dir)?;
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// `bytes` as `name` in `state_dir`, written whole (a reader never sees it
 /// half-written) and owner-only.
 fn write_whole(state_dir: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
     let path = state_dir.join(name);
-    let tmp = path.with_extension("json.tmp");
+    let tmp = crate::atomic_file::temp_beside(&path);
     std::fs::create_dir_all(state_dir)?;
     crate::secure_fs::write_private(&tmp, bytes)?;
-    std::fs::rename(&tmp, &path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// Where the owner put each computer (the Keyboard and mouse page's
@@ -638,9 +636,7 @@ pub fn request(state_dir: &Path, ask: ShareAsk, now_unix: u64) -> io::Result<Sha
     let json = serde_json::to_string(&request).map_err(io::Error::other)?;
     let tmp = file.with_extension("json.tmp");
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &file).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })?;
+    crate::atomic_file::replace(&tmp, &file)?;
     Ok(request)
 }
 

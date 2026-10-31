@@ -59,9 +59,7 @@ pub fn write(state_dir: &Path, token: &RestoreToken) -> io::Result<()> {
     let path = state_dir.join(TOKEN_FILE);
     let tmp = path.with_extension("token.tmp");
     pocketdesk_core::secure_fs::write_private(&tmp, token.0.as_bytes())?;
-    std::fs::rename(&tmp, &path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })
+    pocketdesk_core::atomic_file::replace(&tmp, &path)
 }
 
 /// Forget the token (the portal refused it, or the owner said no).

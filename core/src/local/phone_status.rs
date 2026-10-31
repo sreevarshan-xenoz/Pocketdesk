@@ -203,10 +203,10 @@ pub fn write(state_dir: &Path, batteries: &BTreeMap<String, PhoneBattery>) -> io
     })
     .map_err(io::Error::other)?;
     let path = state_dir.join(PHONE_STATUS_FILE);
-    let tmp = path.with_extension("json.tmp");
+    let tmp = crate::atomic_file::temp_beside(&path);
     std::fs::create_dir_all(state_dir)?;
     std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 #[cfg(test)]

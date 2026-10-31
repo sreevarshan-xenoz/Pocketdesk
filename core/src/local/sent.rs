@@ -99,10 +99,10 @@ pub fn settle_offered(state_dir: &Path, reason: &str) -> io::Result<usize> {
 fn write(state_dir: &Path, files: Vec<SentFile>) -> io::Result<()> {
     let json = serde_json::to_string(&SentList { files }).map_err(io::Error::other)?;
     let path = state_dir.join(SENT_FILE);
-    let tmp = path.with_extension("json.tmp");
+    let tmp = crate::atomic_file::temp_beside(&path);
     std::fs::create_dir_all(state_dir)?;
     std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 #[cfg(test)]

@@ -92,10 +92,10 @@ pub fn write(state_dir: &Path, entries: &[ClipEntry]) -> io::Result<()> {
     })
     .map_err(io::Error::other)?;
     let path = state_dir.join(CLIP_HISTORY_FILE);
-    let tmp = path.with_extension("json.tmp");
+    let tmp = crate::atomic_file::temp_beside(&path);
     std::fs::create_dir_all(state_dir)?;
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// Add `entry` to the history on disk, at most `limit` kept.
@@ -211,7 +211,7 @@ fn write_send(state_dir: &Path, request: &SendRequest) -> io::Result<()> {
     let json = serde_json::to_string(request).map_err(io::Error::other)?;
     let tmp = file.with_extension("json.tmp");
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &file)
+    crate::atomic_file::replace(&tmp, &file)
 }
 
 /// Take every waiting send (the server's side): read and removed; one that

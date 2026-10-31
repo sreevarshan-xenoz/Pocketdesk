@@ -32,7 +32,7 @@ pub fn put(state_dir: &Path, number: &str, now_unix: u64) -> io::Result<()> {
     let json = serde_json::to_string(&ask).map_err(io::Error::other)?;
     let tmp = file.with_extension("json.tmp");
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &file)
+    crate::atomic_file::replace(&tmp, &file)
 }
 
 /// The question waiting, if one is fresh; a stale, future-dated or

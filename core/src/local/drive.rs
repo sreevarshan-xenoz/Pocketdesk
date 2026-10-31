@@ -60,11 +60,11 @@ pub fn read(state_dir: &Path) -> Option<DriveInfo> {
 /// Keep `info` as the drive's address (the server's side), owner-only.
 pub fn write(state_dir: &Path, info: &DriveInfo) -> io::Result<()> {
     let path = state_dir.join(DRIVE_FILE);
-    let tmp = path.with_extension("json.tmp");
+    let tmp = crate::atomic_file::temp_beside(&path);
     std::fs::create_dir_all(state_dir)?;
     let json = serde_json::to_string(info).map_err(io::Error::other)?;
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// Forget the address (the drive is off, or the server starts).

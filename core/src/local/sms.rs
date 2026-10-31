@@ -146,9 +146,9 @@ fn write(state_dir: &Path, mut messages: Vec<Message>, keep: usize) -> io::Resul
     // The state folder is shared (the trust store, the keys…): only this
     // file is made private, never the folder's own permissions.
     std::fs::create_dir_all(state_dir)?;
-    let tmp = state_dir.join(format!("{SMS_FILE}.tmp"));
+    let tmp = crate::atomic_file::temp_beside(&state_dir.join(SMS_FILE));
     secure_fs::write_private(&tmp, &json)?;
-    std::fs::rename(&tmp, state_dir.join(SMS_FILE))
+    crate::atomic_file::replace(&tmp, state_dir.join(SMS_FILE))
 }
 
 /// Add `message`, keeping the newest `keep` (the server's side). The caller

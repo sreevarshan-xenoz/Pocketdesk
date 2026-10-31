@@ -44,7 +44,7 @@ pub fn keep(
     let file = state_dir.join(PHONE_CONTACTS_FILE);
     let tmp = file.with_extension("json.tmp");
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &file)
+    crate::atomic_file::replace(&tmp, &file)
 }
 
 /// Forget `device_id`'s list (P10: its owner turned it off).
@@ -57,7 +57,7 @@ pub fn forget(state_dir: &Path, device_id: &str) -> io::Result<()> {
     let file = state_dir.join(PHONE_CONTACTS_FILE);
     let tmp = file.with_extension("json.tmp");
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &file)
+    crate::atomic_file::replace(&tmp, &file)
 }
 
 #[cfg(test)]

@@ -209,9 +209,7 @@ pub(crate) fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
         NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     crate::secure_fs::write_private(&tmp, bytes)?;
-    std::fs::rename(&tmp, path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })
+    crate::atomic_file::replace(&tmp, path)
 }
 
 /// How old a temp file must be to count as a crash's leftover.

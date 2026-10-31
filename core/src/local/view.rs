@@ -428,10 +428,10 @@ pub fn write(state_dir: &Path, view: &ViewFile) -> io::Result<()> {
 pub fn write_window(state_dir: &Path, window: u8, view: &ViewFile) -> io::Result<()> {
     let json = serde_json::to_string(view).map_err(io::Error::other)?;
     let path = state_dir.join(file_name(window));
-    let tmp = path.with_extension("json.tmp");
+    let tmp = crate::atomic_file::temp_beside(&path);
     std::fs::create_dir_all(state_dir)?;
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// The first window's view ended: forget it, if it is still the one with

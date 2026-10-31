@@ -138,7 +138,7 @@ fn write<T: Serialize>(folder: &Path, id: &str, value: &T) -> io::Result<()> {
     let json = serde_json::to_string(value).map_err(io::Error::other)?;
     let tmp = file.with_extension("json.tmp");
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &file)
+    crate::atomic_file::replace(&tmp, &file)
 }
 
 fn path(folder: &Path, id: &str) -> io::Result<PathBuf> {

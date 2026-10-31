@@ -56,6 +56,8 @@ struct NotesFile {
 /// One writer at a time within the server: two connections keeping and
 /// forgetting at once would lose each other's change, and share the temp
 /// file.
+// Keeps this file's writes in turn. On Windows a contended save holds it up to
+// about half a second (`atomic_file::replace` waits out another handle).
 static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn writing() -> std::sync::MutexGuard<'static, ()> {
@@ -75,11 +77,11 @@ pub fn read(state_dir: &Path) -> Vec<PhoneNote> {
 fn write(state_dir: &Path, notes: Vec<PhoneNote>) -> io::Result<()> {
     let json = serde_json::to_string(&NotesFile { notes }).map_err(io::Error::other)?;
     let path = state_dir.join(PHONE_NOTES_FILE);
-    let tmp = path.with_extension("json.tmp");
+    let tmp = crate::atomic_file::temp_beside(&path);
     std::fs::create_dir_all(state_dir)?;
     // What a phone's notifications say: owner-only, as texts are.
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// Keep `note`, replacing the phone's earlier one of the same key; past
@@ -222,7 +224,7 @@ pub fn request(
     let tmp = file.with_extension("json.tmp");
     // A reply is what the person typed: owner-only.
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &file)?;
+    crate::atomic_file::replace(&tmp, &file)?;
     Ok(request)
 }
 

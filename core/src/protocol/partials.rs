@@ -91,7 +91,7 @@ impl Store {
         let id = Self::id(&record.device, &record.source);
         let tmp = self.dir.join(format!("{id}.json.tmp"));
         std::fs::write(&tmp, serde_json::to_vec(record)?)?;
-        std::fs::rename(&tmp, self.path(&id))
+        crate::atomic_file::replace(&tmp, self.path(&id))
     }
 
     /// Forget `device`'s file `source`.

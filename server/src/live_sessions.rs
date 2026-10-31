@@ -79,9 +79,9 @@ fn write_live_json(json: &str) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_extension("json.tmp");
+    let tmp = pocketdesk_core::atomic_file::temp_beside(&path);
     std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, &path)?;
+    pocketdesk_core::atomic_file::replace(&tmp, &path)?;
     Ok(())
 }
 
@@ -438,7 +438,12 @@ pub async fn run_watcher() {
         let content = render_json(&live, driver, &linked, 0);
         if content != prev_content || last_write.elapsed() >= MIRROR_HEARTBEAT {
             let json = render_json(&live, driver, &linked, now);
-            if let Err(e) = write_live_json(&json) {
+            // Off the runtime: on Windows a replace can wait up to about
+            // half a second for another program's handle on the file.
+            let written = tokio::task::spawn_blocking(move || write_live_json(&json))
+                .await
+                .unwrap_or_else(|e| Err(e.into()));
+            if let Err(e) = written {
                 tracing::warn!(error = %e, "Failed to mirror live sessions file");
             } else {
                 prev_content = content;

@@ -146,11 +146,11 @@ pub fn write(state_dir: &Path, phones: &BTreeMap<String, PhoneMediaState>) -> io
     })
     .map_err(io::Error::other)?;
     let path = state_dir.join(PHONE_MEDIA_FILE);
-    let tmp = path.with_extension("json.tmp");
+    let tmp = crate::atomic_file::temp_beside(&path);
     std::fs::create_dir_all(state_dir)?;
     // What a phone plays is listening history: owner-only, as texts are.
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// One press for a phone's player.
@@ -189,7 +189,7 @@ pub fn press(
     let json = serde_json::to_string(&press).map_err(io::Error::other)?;
     let tmp = file.with_extension("json.tmp");
     std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, &file)?;
+    crate::atomic_file::replace(&tmp, &file)?;
     Ok(press)
 }
 

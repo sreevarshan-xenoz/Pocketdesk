@@ -431,7 +431,15 @@ pub async fn run_writer() {
             reports.dirty = false;
             reports.batteries.clone()
         };
-        if let Err(e) = pocketdesk_core::local::phone_status::write(&dir, &batteries) {
+        // Off the runtime: on Windows a replace can wait up to about half a
+        // second for another program's handle on the file.
+        let at = dir.clone();
+        let kept = tokio::task::spawn_blocking(move || {
+            pocketdesk_core::local::phone_status::write(&at, &batteries)
+        })
+        .await
+        .unwrap_or_else(|e| Err(std::io::Error::other(e)));
+        if let Err(e) = kept {
             tracing::warn!("Could not keep the phones' batteries: {e}");
         }
     }

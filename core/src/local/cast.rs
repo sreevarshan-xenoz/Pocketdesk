@@ -187,10 +187,10 @@ pub fn read(state_dir: &Path) -> Option<CastFile> {
 pub fn write(state_dir: &Path, cast: &CastFile) -> io::Result<()> {
     let json = serde_json::to_string(cast).map_err(io::Error::other)?;
     let path = state_dir.join(CAST_FILE);
-    let tmp = path.with_extension("json.tmp");
+    let tmp = crate::atomic_file::temp_beside(&path);
     std::fs::create_dir_all(state_dir)?;
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &path)
+    crate::atomic_file::replace(&tmp, &path)
 }
 
 /// The cast ended: forget it, if it is still the one with `session_id`.
