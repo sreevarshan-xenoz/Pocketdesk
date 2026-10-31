@@ -427,7 +427,7 @@ pub type Start<B> = fn(Option<PathBuf>, Sender<Portal>) -> Option<B>;
 
 /// The driver while `stop` is not set, on a thread of its own inside
 /// `runtime`: how the portal stood as it ended.
-fn drive<B: Backend>(
+pub(super) fn drive<B: Backend>(
     stop: Arc<AtomicBool>,
     runtime: tokio::runtime::Handle,
     start: Start<B>,

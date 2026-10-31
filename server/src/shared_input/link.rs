@@ -37,6 +37,11 @@ const HEAD_WAIT: Duration = Duration::from_secs(5);
 /// of files (-1) on the connection: a key is a few bytes, and late is wrong.
 const STREAM_PRIORITY: i32 = 1;
 
+/// For the driver bench: each move's `seq` and when it was handed to the
+/// link, while it is `Some`.
+#[cfg(test)]
+pub(crate) static SENT_PROBE: Mutex<Option<Vec<(u32, u64)>>> = Mutex::new(None);
+
 /// The computers' connections registered now, by the other computer's id.
 static LINKS: LazyLock<Mutex<HashMap<String, Registered>>> = LazyLock::new(Default::default);
 
@@ -641,6 +646,12 @@ impl Channel {
                 lock(&TIMINGS).insert(self.device_id.clone(), self.timings_in.clone());
             }
             _ => {}
+        }
+        #[cfg(test)]
+        if let Msg::Move { seq, .. } = msg
+            && let Some(sent) = lock(&SENT_PROBE).as_mut()
+        {
+            sent.push((*seq, now_us()));
         }
         let ahead = self.order.before(msg);
         if rides_datagram(msg) {

@@ -37,6 +37,8 @@ pub mod capture_restore;
 pub mod capture_windows;
 pub mod drag_files;
 pub mod drive;
+#[cfg(test)]
+mod driver_bench;
 #[cfg(windows)]
 pub mod drop_windows;
 pub mod game_lock;
