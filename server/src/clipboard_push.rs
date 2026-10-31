@@ -43,6 +43,29 @@ use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket};
 /// gets longer text; a push goes to every phone, so it stays small.
 pub(crate) const MAX_PUSH: usize = 256 * 1024;
 
+/// Whether a computer's push over [`MAX_PUSH`] was logged yet (logged
+/// once at the default level, then at debug).
+static TOO_LONG_SAID: AtomicBool = AtomicBool::new(false);
+
+/// A push from the computer `device_id` of `len` bytes, over [`MAX_PUSH`],
+/// which no computer sends: it is dropped, and said once.
+pub(crate) fn too_long_from(device_id: &str, len: usize) {
+    if TOO_LONG_SAID.swap(true, Ordering::Relaxed) {
+        tracing::debug!(
+            device_id,
+            len,
+            "Another computer's clipboard over the limit; dropped"
+        );
+    } else {
+        tracing::warn!(
+            device_id,
+            len,
+            limit = MAX_PUSH,
+            "Another computer's clipboard over the limit; dropped"
+        );
+    }
+}
+
 /// How often the clipboard is looked at while a phone could receive it. On
 /// Windows a look costs a sequence number; elsewhere it costs a flag set by
 /// one `wl-paste --watch` (R6d), or runs `wl-paste` where that cannot run.
