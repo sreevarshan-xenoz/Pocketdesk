@@ -856,6 +856,21 @@ _build_dep_list() {
       ;;
   esac
 
+  # The server encodes video through the system `ffmpeg` program; the
+  # release tarball links no FFmpeg library, so it works with any version.
+  # Fedora's own build is ffmpeg-free (RPM Fusion's ffmpeg adds libx264).
+  if ! command -v ffmpeg &>/dev/null; then
+    case "$PKG_MANAGER" in
+      apt|pacman|apk) _deps+=("ffmpeg") ;;
+      dnf)
+        _deps+=("ffmpeg-free")
+        warn "Fedora's ffmpeg-free has the VAAPI and NVENC encoders but no libx264, Pocketdesk's software encoder, and Fedora's own Mesa (AMD) does not encode H.264 through VAAPI."
+        warn "Without an NVIDIA card, add RPM Fusion's ffmpeg ('sudo dnf swap ffmpeg-free ffmpeg --allowerasing') or its freeworld VA drivers."
+        ;;
+      *) warn "Install FFmpeg (the ffmpeg program): the server encodes video with it." ;;
+    esac
+  fi
+
   # Compositor-specific portal backends
   if [ "$SESSION_TYPE" = "wayland" ]; then
     case "$PKG_MANAGER" in
@@ -888,7 +903,10 @@ _install_deps() {
       cmd="sudo apt-get update && sudo apt-get install -y ${deps[*]}"
       ;;
     pacman)
-      cmd="sudo pacman -Sy --noconfirm ${deps[*]}"
+      # Never -Sy alone: refreshing the database without upgrading is a
+      # partial upgrade, and a package as large as FFmpeg can then leave
+      # libraries mismatched. A stale database is the user's -Syu to run.
+      cmd="sudo pacman -S --needed --noconfirm ${deps[*]}"
       ;;
     dnf)
       cmd="sudo dnf install -y ${deps[*]}"
@@ -923,6 +941,9 @@ _install_deps() {
   else
     warn "Some dependencies may have failed to install."
     warn "Please install manually: ${deps[*]}"
+    if [ "$PKG_MANAGER" = "pacman" ]; then
+      warn "If pacman could not find a package or download it, its database is stale: run 'sudo pacman -Syu' first, then run this script again."
+    fi
   fi
 }
 
@@ -965,6 +986,19 @@ preflight() {
       echo "Aborted."
       exit 0
     fi
+  fi
+
+  # The release binaries are built on Ubuntu 24.04 and need its glibc, 2.39,
+  # or newer (packaging/README.md); an older one fails at start with a bare
+  # "GLIBC_2.39 not found".
+  local glibc
+  glibc=$(ldd --version 2>/dev/null | head -n 1 | grep -oE '[0-9]+\.[0-9]+$' || true)
+  debug "  glibc: ${glibc:-unknown}"
+  if [ -z "$glibc" ]; then
+    warn "Could not read the glibc version (a musl system such as Alpine?)."
+    warn "The release binaries need glibc 2.39 or newer; elsewhere, build from source (docs/guide.md, Build from Source)."
+  elif [ "$(printf '%s\n' 2.39 "$glibc" | sort -V | head -n 1)" != "2.39" ]; then
+    fatal "This system has glibc ${glibc}; the release binaries need 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40, Arch and later). Build from source instead (docs/guide.md, Build from Source)."
   fi
 
   # Check sudo access
