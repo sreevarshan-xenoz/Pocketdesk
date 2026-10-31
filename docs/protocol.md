@@ -178,7 +178,7 @@ From `core/src/local/pair_link.rs`. Values are percent-encoded.
 | `fp` | Hex SHA-256 of the desktop's certificate | absent before the server has made one |
 | `ep` | The iroh endpoint JSON (`endpointId`, `relayUrls`, `directAddrs`, `dht`), base64url | absent until the server has recorded it |
 
-A link is at most 8 KiB and names at most 32 addresses (§6).
+A link is at most 8 KiB; of its addresses, the first 32 (the best) are kept (§6).
 
 Anyone who sees the code while it is valid holds everything needed to pair within the PIN's 300 s. `directAddrs` can include the desktop's LAN and public addresses.
 
@@ -582,7 +582,7 @@ All of these are inside the app's private storage unless noted. None of it is ba
 | Computer link (2f) | 4 MiB per line; a clipboard text over 256 KiB (`MAX_PUSH`, more than any computer pushes) is dropped, logged once | `server/src/peer_computers.rs`, `server/src/clipboard_push.rs` |
 | KDE Connect device (3a) | 8192 bytes per line until paired (the identity), 4 MiB once paired; a longer line ends the connection | `server/src/kdeconnect_compat/handshake.rs`, `link.rs` |
 | Shared input's wire | a frame of at most 65,535 bytes (its `u16` length); in it a name at most 255 bytes, 64 screens, 3,500 timings and an Opus packet of 1000 bytes, as the encoder clips them: a longer one is refused before it is copied, which ends a stream (a datagram is dropped) | `server/src/shared_input/wire.rs` |
-| Pairing link (§2.6) | 8 KiB, 32 addresses (the desktop puts its best 32 in a link it makes); a longer link is refused before it is decoded | `core/src/local/pair_link.rs` |
+| Pairing link (§2.6) | 8 KiB, refused before it is decoded; its first (best) 32 addresses kept, and a link the desktop makes names only its best 32 | `core/src/local/pair_link.rs` |
 | Owner answers (introductions, remote revoke) | a request id of 1 to 64 printable ASCII characters; at most 64 computers offered or 512 devices listed, counted before any is read, each id and name at most 256 bytes; a pairing link at most 8 KiB. An answer over them is dropped whole | `core/src/protocol/introductions.rs`, `core/src/protocol/remote_devices.rs` |
 | File transfers | 4 at once on the desktop, 2 per phone; refused, not queued | `server/src/plugins/share.rs` |
 | File size, name | 8 GiB; names cut to 200 bytes | same, `server/src/offers.rs` |

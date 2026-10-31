@@ -29,7 +29,9 @@ const VERSION: &str = "1";
 /// handful of addresses); a QR code holds under 3 KB.
 pub const MAX_LINK_BYTES: usize = 8 * 1024;
 
-/// The most addresses a link may name.
+/// The most addresses a link's reader keeps, and its writer names: the
+/// first, which are the best (a link from a desktop before this limit may
+/// name more).
 pub const MAX_ADDRESSES: usize = 32;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,7 +151,7 @@ impl PairLink {
         if !super::pin::is_valid(&pin) {
             return Err(invalid("the PIN must be 6 digits"));
         }
-        let addresses: Vec<String> = fields
+        let mut addresses: Vec<String> = fields
             .remove("a")
             .unwrap_or_default()
             .split(',')
@@ -160,9 +162,8 @@ impl PairLink {
         if addresses.is_empty() {
             return Err(invalid("the link names no address"));
         }
-        if addresses.len() > MAX_ADDRESSES {
-            return Err(invalid("the link names too many addresses"));
-        }
+        // Best first: a longer list is cut to its best, not refused.
+        addresses.truncate(MAX_ADDRESSES);
         let port = |key: &str, default: u16| -> Result<u16, PairLinkError> {
             match fields.get(key) {
                 None => Ok(default),
@@ -369,6 +370,17 @@ mod tests {
         assert_eq!(ordered[0], "192.168.1.20", "the best is kept first");
     }
 
+    /// PR #597 review I2: a link naming 40 addresses (an older desktop's,
+    /// with many virtual adapters) reads, keeping its best (first) 32.
+    #[test]
+    fn a_link_with_more_addresses_keeps_its_best_32() {
+        let many: Vec<String> = (1..=40).map(|n| format!("192.0.2.{n}")).collect();
+        let uri = format!("pocketdesk://pair?v=1&a={}&pin=123456", many.join(","));
+        let link = PairLink::from_uri(&uri).expect("it reads");
+        assert_eq!(link.addresses.len(), MAX_ADDRESSES);
+        assert_eq!(link.addresses, many[..MAX_ADDRESSES]);
+    }
+
     #[test]
     fn malformed_links_are_rejected_with_a_reason() {
         assert!(PairLink::from_uri("https://example.com").is_err());
@@ -379,22 +391,13 @@ mod tests {
             "no address"
         );
         assert!(PairLink::from_uri("pocketdesk://pair?v=1&a=1.2.3.4&pin=123456&cp=x").is_err());
-        // Too long, or too many addresses, before anything is decoded.
+        // Too long is refused before anything is decoded.
         assert_eq!(crate::protocol::introductions::MAX_LINK, MAX_LINK_BYTES);
         let long = format!(
             "pocketdesk://pair?v=1&a=192.0.2.1&pin=123456&name={}",
             "a".repeat(MAX_LINK_BYTES)
         );
         assert!(PairLink::from_uri(&long).is_err());
-        let many = vec!["192.0.2.1"; MAX_ADDRESSES + 1].join(",");
-        let many = format!("pocketdesk://pair?v=1&a={many}&pin=123456");
-        assert!(PairLink::from_uri(&many).is_err());
-        let most = vec!["192.0.2.1"; MAX_ADDRESSES].join(",");
-        let most = format!("pocketdesk://pair?v=1&a={most}&pin=123456");
-        assert_eq!(
-            PairLink::from_uri(&most).unwrap().addresses.len(),
-            MAX_ADDRESSES
-        );
         let err = PairLink::from_uri("pocketdesk://pair?v=1&a=1.2.3.4&pin=12").unwrap_err();
         assert!(err.to_string().contains("PIN"), "{err}");
     }
