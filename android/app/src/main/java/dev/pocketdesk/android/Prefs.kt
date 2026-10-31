@@ -53,6 +53,7 @@ object Prefs {
     private const val KEY_FILES_BACKGROUND = "files_in_background"
     private const val KEY_RING_FROM_COMPUTER = "ring_from_computer"
     private const val KEY_CAPTURE_MOUSE = "capture_mouse"
+    private const val KEY_SMOOTH_SCROLLING = "smooth_scrolling"
     private const val KEY_BACKGROUND_REMINDER = "background_reminder"
     private const val KEY_HEALTH_ALERTS = "health_alerts"
     private const val KEY_STAY_LINKED = "stay_linked"
@@ -564,6 +565,19 @@ object Prefs {
 
     fun setCaptureMouse(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_CAPTURE_MOUSE, enabled) }
+        bump()
+    }
+
+    /**
+     * Smooth scrolling: the trackpad's two-finger scroll goes in 120ths of a
+     * notch as well as whole notches, so the computer scrolls as finely as
+     * the fingers move. On by default.
+     */
+    fun smoothScrolling(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_SMOOTH_SCROLLING, true)
+
+    fun setSmoothScrolling(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_SMOOTH_SCROLLING, enabled) }
         bump()
     }
 

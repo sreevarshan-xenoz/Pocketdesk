@@ -1028,6 +1028,25 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendMou
     to_jstring(&mut env, json)
 }
 
+/// A wheel turn: whole notches and, when `fine` is set, the turn in 120ths
+/// of a notch (`x120`, `y120`) beside them. Values saturate to the wire's
+/// `i16`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendScroll(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    dx: jint,
+    dy: jint,
+    x120: jint,
+    y120: jint,
+    fine: jboolean,
+) -> jstring {
+    use pocketdesk_core::streaming::wheel::clamp16;
+    let fine = (fine != 0).then(|| (clamp16(x120), clamp16(y120)));
+    let json = envelope_unit(RUNTIME.block_on(api::send_scroll(clamp16(dx), clamp16(dy), fine)));
+    to_jstring(&mut env, json)
+}
+
 /// Restrict capture to a window (R3#7 crop + R4 B2 compositor-side capture);
 /// zero width/height clears it. `address` is the Hyprland window address as
 /// reported by `get_windows` — empty when unknown, which leaves the server

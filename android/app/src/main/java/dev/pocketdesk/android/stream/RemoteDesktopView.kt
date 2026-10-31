@@ -256,6 +256,7 @@ fun RemoteDesktopView(
             mapping = mapping,
             sensitivity = Prefs.trackpadSensitivity(context),
             penCurve = Prefs.penCurve(context),
+            smoothScroll = Prefs.smoothScrolling(context),
             modifier = Modifier
                 .matchParentSize()
                 .pointerInput(zoomGesturesEnabled) {
@@ -333,13 +334,14 @@ private fun InputOverlay(
     mapping: DesktopMapping?,
     sensitivity: Float,
     penCurve: PenCurve,
+    smoothScroll: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
     fun send(block: () -> Unit) = scope.launch(padOrdered) { block() }
 
     Box(
-        modifier.pointerInput(address to port to mode to layout to mapping to sensitivity to penCurve) {
+        modifier.pointerInput(address to port to mode to layout to mapping to sensitivity to penCurve to smoothScroll) {
             fun mappedPoint(pos: Offset): Pair<Int, Int> {
                 // Viewport -> scale-1 content space -> letterboxed video
                 // pixel -> desktop coordinate -> normalized axis value.
@@ -376,6 +378,7 @@ private fun InputOverlay(
                 slop = viewConfiguration.touchSlop,
                 sensitivity = sensitivity,
                 pxPerNotch = SCROLL_DP_PER_NOTCH.dp.toPx(),
+                fine = smoothScroll,
             )
 
             // Direct touch's press, visible to the finally below so a torn-down

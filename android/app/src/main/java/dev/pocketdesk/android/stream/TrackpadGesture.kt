@@ -8,8 +8,19 @@ import kotlin.math.roundToInt
 sealed interface PadOutput {
     data class Move(val dx: Int, val dy: Int) : PadOutput
 
-    /** Wheel steps, content following the fingers. */
-    data class Scroll(val dx: Int, val dy: Int) : PadOutput
+    /**
+     * Wheel steps, content following the fingers. With [fine] (smooth
+     * scrolling) the turn also goes in 120ths of a notch ([x120], [y120]),
+     * and [dx]/[dy] are the whole notches it completes, for a computer older
+     * than fine scrolling; such an output may complete none.
+     */
+    data class Scroll(
+        val dx: Int,
+        val dy: Int,
+        val x120: Int = 0,
+        val y120: Int = 0,
+        val fine: Boolean = false,
+    ) : PadOutput
 
     data class Click(val button: Int) : PadOutput
 
@@ -60,6 +71,11 @@ class TrackpadGesture(
     private val tapMaxMs: Long = 400,
     /** Finger travel (view px) per wheel notch; the caller derives it from dp. */
     private val pxPerNotch: Float = 1f,
+    /**
+     * Smooth scrolling: two-finger scroll also goes in 120ths of a notch,
+     * every move, not only when a notch is complete.
+     */
+    private val fine: Boolean = false,
 ) {
     private var startMs = 0L
     private var maxFingers = 0
@@ -72,6 +88,8 @@ class TrackpadGesture(
     private var moveCarryY = 0f
     private var scrollCarryX = 0f
     private var scrollCarryY = 0f
+    private var fineCarryX = 0f
+    private var fineCarryY = 0f
     private var twoFinger = TwoFinger.UNDECIDED
     private var twoTravel = 0f
     private var startSpan = 0f
@@ -106,6 +124,8 @@ class TrackpadGesture(
         moveCarryY = 0f
         scrollCarryX = 0f
         scrollCarryY = 0f
+        fineCarryX = 0f
+        fineCarryY = 0f
         twoFinger = TwoFinger.UNDECIDED
         twoTravel = 0f
         startSpan = 0f
@@ -160,12 +180,25 @@ class TrackpadGesture(
             // content right = a negative horizontal wheel).
             scrollCarryX -= dx / pxPerNotch
             scrollCarryY += dy / pxPerNotch
+            if (fine) {
+                fineCarryX -= dx / pxPerNotch * NOTCH
+                fineCarryY += dy / pxPerNotch * NOTCH
+            }
             if (twoFinger != TwoFinger.SCROLL) return out
             val sx = scrollCarryX.toInt()
             val sy = scrollCarryY.toInt()
-            if (sx == 0 && sy == 0) return out
             scrollCarryX -= sx
             scrollCarryY -= sy
+            if (fine) {
+                val fx = fineCarryX.toInt()
+                val fy = fineCarryY.toInt()
+                if (fx == 0 && fy == 0 && sx == 0 && sy == 0) return out
+                fineCarryX -= fx
+                fineCarryY -= fy
+                out += PadOutput.Scroll(sx, sy, fx, fy, fine = true)
+                return out
+            }
+            if (sx == 0 && sy == 0) return out
             out += PadOutput.Scroll(sx, sy)
             return out
         }
@@ -239,6 +272,9 @@ class TrackpadGesture(
     }
 
     companion object {
+        /** One wheel notch in the fine units (`wheel120`). */
+        const val NOTCH = 120f
+
         /** `RustCore.sendMouseClick` button codes. */
         const val LEFT = 0
         const val MIDDLE = 1

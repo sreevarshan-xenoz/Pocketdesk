@@ -243,6 +243,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                     Prefs.captureMouse(context),
                     { Prefs.setCaptureMouse(context, it) },
                 )
+                SettingSwitch(
+                    stringResource(R.string.settings_smooth_scrolling),
+                    stringResource(R.string.settings_smooth_scrolling_summary),
+                    Prefs.smoothScrolling(context),
+                    { Prefs.setSmoothScrolling(context, it) },
+                )
                 TrackpadSpeed()
                 AirMouseSpeed()
                 // H2: the talk timer in Remote.
