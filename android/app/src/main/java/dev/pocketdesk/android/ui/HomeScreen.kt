@@ -213,6 +213,11 @@ fun HomeScreen(
     LaunchedEffect(hosts) {
         val pending = Prefs.takeIntroducePending(context) ?: return@LaunchedEffect
         if (!Prefs.offerMyComputers(context)) return@LaunchedEffect
+        // Never over a sheet already open, nor again soon after Not now.
+        if (introduceFor != null) return@LaunchedEffect
+        if (!dev.pocketdesk.android.pair.IntroduceRule.gate.mayOfferByItself(pending, System.currentTimeMillis())) {
+            return@LaunchedEffect
+        }
         hosts.firstOrNull { it.address == pending }?.let { introduceFor = it to true }
     }
     var names by remember { mutableIntStateOf(0) }
@@ -618,7 +623,7 @@ fun HomeScreen(
                         onPeek = { peekFor = host },
                         onAllowed = { allowedFor = host },
                         onDevices = { devicesFor = host },
-                        onIntroduce = { introduceFor = host to false },
+                        onIntroduce = { if (introduceFor == null) introduceFor = host to false },
                         onPairAgain = { pairingFor = host },
                     )
                 }
