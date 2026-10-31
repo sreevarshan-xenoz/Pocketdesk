@@ -49,10 +49,8 @@ struct AnswersFile {
     answers: Vec<Outcome>,
 }
 
-// Keeps this file's writes in turn. On Windows a contended save holds it up to
-
-// about half a second (`atomic_file::replace` waits out another handle).
-
+/// Keeps this file's writes in turn. On Windows a contended save holds it up to
+/// about half a second (`atomic_file::replace` waits out another handle).
 static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Every answer kept, oldest first; none when there is no file or it does

@@ -165,7 +165,6 @@ pub fn pair_pin_path() -> Result<PathBuf> {
     Ok(state_dir()?.join("pairing.pin"))
 }
 
-/// Path to the trust store file.
 /// Run blocking file work (a state file's save, which on Windows can wait
 /// up to about half a second for another program's handle) from async code
 /// whose borrows make `spawn_blocking` awkward. On the server's
@@ -181,6 +180,7 @@ pub fn off_the_workers<R>(work: impl FnOnce() -> R) -> R {
     }
 }
 
+/// Path to the trust store file.
 pub fn trust_store_path() -> Result<PathBuf> {
     Ok(state_dir()?.join("trusted_devices.json"))
 }
