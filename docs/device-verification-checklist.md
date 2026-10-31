@@ -3342,7 +3342,16 @@ Built 2026-10-31. On Hyprland 0.56 a phone's screen is a headless output named `
 - [ ] From a phone on the laptop: "Add a screen for this phone" in the picker, the session switches to it and a window dragged onto it shows on the phone; the screen goes about 10 s after the phone leaves. (where: linux)
 - [ ] A Hyprland whose config has a monitor rule for every output (`output = ""` with a fixed position): the phone's screen still lands right of the others. (where: linux)
 
-## 246. Shared input A: the receiving end, measured end to end
+## 246. Linux firewall: nftables and iptables, said at pairing
+
+Built 2026-10-31. Diagnostics' Firewall row reads plain nftables and iptables rules too (the rules running with root, else the file their service loads), and the Pair page and Settings → Other computers say when the firewall shuts the control or stream port.
+- [x] The laptop's own nftables rules, read without root: red, "nftables does not let phones in on 1716/tcp or 4716/udp or 1714-1764 (KDE Connect) or 5353/udp (mDNS) (read from /etc/nftables.conf: …)", with the `sudo nft 'insert rule inet filter input …'` lines; the Pair page's line says the same for 1716/tcp and 4716/udp. (where: linux)
+      (2026-10-31 on the Linux laptop, the ignored live test `this_computers_firewall_is_read`, read-only: `nftables.service` enabled but inactive (a oneshot), the owner's own rules file. The same verdict from its `nft list ruleset` read with root.)
+- [ ] The desktop app on the laptop: the Pair page (Phone and Computer) and Settings → Other computers show the firewall line, and it goes within 30 s of the ports being opened. (where: linux)
+- [ ] Arch's stock `/etc/nftables.conf` loaded: the row names "Arch's stock rules, which let in ssh only". (where: linux)
+- [ ] The hint's `nft insert` lines run by hand: the row turns green and a phone pairs. (where: linux)
+- [ ] iptables (`iptables.service` with a DROP policy): the row is red with the `iptables -I INPUT` lines. (where: linux)
+## 247. Shared input A: the receiving end, measured end to end
 
 Built 2026-10-31. `share-test` stamps each key and move as the script captures it and prints each stage end to end at p50, p95, p99 and the most (captured to the link, the network one way, off the link to injected), with how many moves were injected. The computer driven no longer waits on a file read before injecting (the settings, each computer's standing and the status are read and written in the background), injects only the newest of moves queued behind each other, writes each uinput frame in one `write(2)` with one SYN_REPORT, keeps the X11 display size, and takes a click's last move on the stream ahead of the click.
 

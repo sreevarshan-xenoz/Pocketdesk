@@ -8,15 +8,26 @@
 //!
 //! The words are chosen here ([`notice`], pure); Windows' Network List
 //! Manager is asked off the UI thread every [`EVERY`] ([`PublicNetwork`]).
-//! Elsewhere nothing is asked and nothing is said, so off Windows the
-//! words are built only by the tests (PR #552 review C1: dead code there).
+//!
+//! On Linux the same line says when this computer's firewall keeps other
+//! devices out (Arch's stock nftables rules let in ssh only): Diagnostics'
+//! firewall reading, asked off the UI thread every [`EVERY`], its words
+//! from `diagnostics::firewall_pairing_notice`. Elsewhere nothing is asked
+//! and nothing is said, so there the Windows words are built only by the
+//! tests (PR #552 review C1: dead code there).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// How often the networks are asked again while a page that says it shows.
-pub const EVERY: Duration = Duration::from_secs(10);
+/// How often the networks (Windows) or the firewall (Linux, which starts a
+/// few programs to read it) are asked again while a page that says it
+/// shows.
+pub const EVERY: Duration = if cfg!(target_os = "linux") {
+    Duration::from_secs(30)
+} else {
+    Duration::from_secs(10)
+};
 
 /// The most of a network's name shown.
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -90,7 +101,7 @@ pub struct PublicNetwork {
     asked: Option<Instant>,
     /// An ask is under way: no second one starts beside it, should
     /// Windows' Network List Manager hang (PR #552 review M2).
-    #[cfg_attr(not(windows), allow(dead_code))]
+    #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
     busy: Arc<AtomicBool>,
 }
 
@@ -106,13 +117,13 @@ impl PublicNetwork {
     }
 
     /// Start an ask, unless one is under way.
-    #[cfg_attr(not(windows), allow(dead_code))]
+    #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
     fn begin(&self) -> bool {
         !self.busy.swap(true, Ordering::SeqCst)
     }
 
     /// The ask answered `now`: kept, and whether it changed what is said.
-    #[cfg_attr(not(windows), allow(dead_code))]
+    #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
     fn answered(said: &Mutex<Option<String>>, busy: &AtomicBool, now: Option<String>) -> bool {
         let changed = match said.lock() {
             Ok(mut said) if *said != now => {
@@ -128,7 +139,7 @@ impl PublicNetwork {
     /// Not under test: the UI tests' pages never depend on the network of
     /// the computer they run on (a CI runner's is Public, and its line
     /// appearing mid-test moved the Pair page under a click).
-    #[cfg(all(windows, not(test)))]
+    #[cfg(all(any(windows, target_os = "linux"), not(test)))]
     fn ask(&self, ctx: &eframe::egui::Context) {
         if !self.begin() {
             return;
@@ -137,7 +148,7 @@ impl PublicNetwork {
         let started = std::thread::Builder::new()
             .name("network-profile".into())
             .spawn(move || {
-                let now = connected().ok().and_then(|networks| notice(&networks));
+                let now = current();
                 if Self::answered(&said, &busy, now) {
                     ctx.request_repaint();
                 }
@@ -148,7 +159,7 @@ impl PublicNetwork {
         }
     }
 
-    #[cfg(any(not(windows), test))]
+    #[cfg(any(not(any(windows, target_os = "linux")), test))]
     fn ask(&self, _ctx: &eframe::egui::Context) {}
 
     /// Show the notice, if any, as a warning line under `ui`'s cursor.
@@ -157,6 +168,42 @@ impl PublicNetwork {
             ui.label(eframe::egui::RichText::new(words).color(crate::theme::warn(ui)));
         }
     }
+}
+
+/// What to say now: a Public network's name.
+#[cfg(all(windows, not(test)))]
+fn current() -> Option<String> {
+    connected().ok().and_then(|networks| notice(&networks))
+}
+
+/// What to say now: the firewall keeping other devices from the ports the
+/// server listens on.
+///
+/// One reading serves both pages for 20 s (PR #594 review N4: each page
+/// asks on its own every [`EVERY`]).
+#[cfg(all(target_os = "linux", not(test)))]
+fn current() -> Option<String> {
+    use pocketdesk_core::local::{config::Config, diagnostics, listening, paths};
+    type Kept = Option<(Instant, (u16, u16), Option<String>)>;
+    static KEPT: Mutex<Kept> = Mutex::new(None);
+    let config = Config::load().unwrap_or_default();
+    let control_port = paths::state_dir()
+        .map(|dir| listening::control_port(&dir, config.control_port))
+        .unwrap_or(config.control_port);
+    let ports = (control_port, config.streaming_port);
+    if let Ok(kept) = KEPT.lock()
+        && let Some((at, for_ports, said)) = kept.as_ref()
+        && *for_ports == ports
+        && at.elapsed() < Duration::from_secs(20)
+    {
+        return said.clone();
+    }
+    let firewall = crate::diagnostics_view::linux_firewall(control_port, config.streaming_port);
+    let said = diagnostics::firewall_pairing_notice(&firewall, control_port, config.streaming_port);
+    if let Ok(mut kept) = KEPT.lock() {
+        *kept = Some((Instant::now(), ports, said.clone()));
+    }
+    said
 }
 
 /// The networks this computer is connected to now, from Windows' Network
