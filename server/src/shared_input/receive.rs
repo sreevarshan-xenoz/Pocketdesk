@@ -634,6 +634,23 @@ impl Inject for LazyInjector {
 /// [`SILENCE_RELEASE`].
 const TICK: Duration = Duration::from_millis(100);
 
+/// How often they are looked at while no computer drives this one, it is
+/// not held awake and nothing heard waits to be written: a refusal for a
+/// computer told this one's screens goes within it (plan item 3e: the
+/// receive loop woke ten times a second for the server's life).
+const IDLE_TICK: Duration = Duration::from_secs(1);
+
+/// How long until the receive loop looks again: [`TICK`] while a computer
+/// drives this one (its silence is timed), it is held awake or quick, or
+/// screens heard wait to be written; else [`IDLE_TICK`].
+fn tick_every(driven: bool, held: bool, heard: bool) -> Duration {
+    if driven || held || heard {
+        TICK
+    } else {
+        IDLE_TICK
+    }
+}
+
 /// How often this computer's own screens are looked at.
 const SCREENS_EVERY: Duration = Duration::from_secs(5);
 
@@ -1336,8 +1353,9 @@ pub async fn run() {
     let mut own = OwnScreens::default();
     let mut channels: HashMap<String, Channel> = HashMap::new();
     let mut heard = Heard::new();
-    let mut tick = tokio::time::interval(TICK);
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // When the loop last looked at silences, permissions and the
+    // keep-awake: it looks again at the next deadline, not on a fixed tick.
+    let mut ticked = tokio::time::Instant::now();
     let mut look = tokio::time::interval(SCREENS_EVERY);
     look.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     // Read off this loop: a slow compositor never delays an injection.
@@ -1364,6 +1382,11 @@ pub async fn run() {
         follow_sound(&mut sound, &receiver, &mut channels);
         // And whether this computer's own driver may watch its edges.
         set_driven_by(receiver.driven_by(Instant::now()));
+        let every = tick_every(
+            receiver.driver().is_some(),
+            awake.is_held() || quick.is_held(),
+            !heard.is_empty(),
+        );
         tokio::select! {
             arrival = arriving.recv() => {
                 let Some(first) = arrival else { break };
@@ -1479,7 +1502,8 @@ pub async fn run() {
                     }
                 }
             }
-            _ = tick.tick() => {
+            _ = tokio::time::sleep_until(ticked + every) => {
+                ticked = tokio::time::Instant::now();
                 // A computer told this one's screens (one that may cross
                 // onto it) whose permission went, or with sharing turned
                 // off here, is told it may not.
@@ -1638,6 +1662,21 @@ pub async fn run() {
         }
     }
     set_driven_by(None);
+}
+
+#[cfg(test)]
+mod tick_tests {
+    use super::*;
+
+    /// At rest the loop wakes once a second, not ten times; anything to
+    /// time or write brings the tenth of a second back.
+    #[test]
+    fn the_loop_looks_often_only_while_something_is_under_way() {
+        assert_eq!(tick_every(false, false, false), IDLE_TICK);
+        assert_eq!(tick_every(true, false, false), TICK);
+        assert_eq!(tick_every(false, true, false), TICK);
+        assert_eq!(tick_every(false, false, true), TICK);
+    }
 }
 
 #[cfg(test)]

@@ -41,8 +41,16 @@ use super::wire::{self, Msg};
 use crate::hyprland::HyprWindow;
 
 /// How often the loop looks at the rest (pings, sound, status, the link,
-/// the layout), whatever input comes.
+/// the layout), whatever input comes, while a key held on a phone repeats
+/// there (every 33 ms), or on Windows while the drop catcher is up or just
+/// after a window came to the front.
 const TICK: Duration = Duration::from_millis(50);
+/// How often while away on a computer: its pings go every 200 ms, its link
+/// is looked at every 250 ms and a silence counts after a second (plan
+/// item 3e; a fixed 50 ms tick woke the loop twenty times a second).
+const AWAY_TICK: Duration = Duration::from_millis(100);
+/// How often at home: its next deadline is the activity note.
+const HOME_TICK: Duration = ACTIVE_EVERY;
 /// The most events taken in one turn before the rest is looked at.
 const BATCH_MOST: usize = 256;
 /// How often what the owner does is told to every computer with a channel.
@@ -550,7 +558,12 @@ pub(super) fn drive<B: Backend>(
     while !stop.load(Ordering::SeqCst) && !STOPPING.load(Ordering::SeqCst) {
         // At most until the next look at the rest, less while a move waits
         // its turn.
-        let next = housekept + TICK;
+        let every = match driver.away_on() {
+            Some(to) if glue.phone_ids.contains(to) => TICK,
+            Some(_) => AWAY_TICK,
+            None => HOME_TICK,
+        };
+        let next = housekept + every;
         let next = glue.pacer.deadline().map_or(next, |at| at.min(next));
         match events.recv_timeout(next.saturating_duration_since(Instant::now())) {
             Ok(first) => {
@@ -604,7 +617,7 @@ pub(super) fn drive<B: Backend>(
         }
         // The rest is looked at on a timer, never per event: at 1 kHz it
         // ran a thousand times a second. New zones are laid out at once.
-        if housekept.elapsed() < TICK && layout_at.is_some() {
+        if housekept.elapsed() < every && layout_at.is_some() {
             continue;
         }
         housekept = Instant::now();
