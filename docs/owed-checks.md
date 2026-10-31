@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1080 open items.
+1082 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
 | A second computer | 147 |
-| A Linux desktop (the Azure VM serves for some) | 179 |
+| A Linux desktop (the Azure VM serves for some) | 181 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
 
@@ -1592,6 +1592,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **247. Shared input A: the receiving end, measured end to end**
 
 - The uinput path on a Linux computer where `/dev/uinput` is writable: the same run, the receiver's write calls per move a quarter of before. (where: linux)
+
+**248. Software encoding through OpenH264 on stock Fedora**
+
+- A phone session against the tarball's server on a real stock Fedora machine with no working hardware encoder and `ffmpeg-free` plus `openh264`: the picture appears and stays, Diagnostics' last session names `ffmpeg-sidecar-openh264`, and the picture quality at the default bitrate is acceptable. (where: linux)
+- install.sh on a fresh stock Fedora: it lists `ffmpeg-free` and `openh264` and, once they are installed, `pocketdesk capabilities` names libopenh264; with `fedora-cisco-openh264` disabled it says how to enable it and enables nothing. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
