@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1076 open items.
+1078 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
 | A second computer | 143 |
-| A Linux desktop (the Azure VM serves for some) | 171 |
+| A Linux desktop (the Azure VM serves for some) | 173 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
 
@@ -1313,7 +1313,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **75. A second screen at the phone's shape (T10j)**
 
-- "Phones may add a screen" off: refused with its reason; on Windows and Hyprland: "only Sway can for now".
+- "Phones may add a screen" off: refused with its reason; on Windows, GNOME or KDE: "only Sway and Hyprland can for now" (Hyprland: §245).
 
 **77. This phone's screen on the computer (T10k)**
 
@@ -1582,6 +1582,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **234. A faster picture: hardware decode, NV12 and HEVC (PC5)**
 
 - The Linux laptop viewing Windows: Stats say `vaapi (renderD129)` (the Intel iHD node, past the NVIDIA renderD128 that has no VA driver); with `POCKETDESK_VAAPI_DEVICE=/dev/dri/renderD128` the window moves on to `auto` or `software` within about 2 s and the picture comes; the shader draws on the laptop's GL (colours as above). (where: linux)
+
+**245. A second screen at the phone's shape on Hyprland**
+
+- From a phone on the laptop: "Add a screen for this phone" in the picker, the session switches to it and a window dragged onto it shows on the phone; the screen goes about 10 s after the phone leaves. (where: linux)
+- A Hyprland whose config has a monitor rule for every output (`output = ""` with a fixed position): the phone's screen still lands right of the others. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

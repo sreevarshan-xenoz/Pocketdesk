@@ -57,6 +57,9 @@ ring = "0.17"
 
 # Cancellation tokens and utilities
 tokio-util.workspace = true
+# A Unix socket connect with a time limit (Hyprland's socket, which a
+# frozen compositor stops accepting on).
+socket2 = { version = "0.6", features = ["all"] }
 # The control channel runs inside TLS (phase B).
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
 # A KDE Connect device's certificate names its id, and this computer has one

@@ -184,9 +184,10 @@ pub async fn run(config: Config) -> Result<()> {
     tokio::spawn(crate::drive::live::run());
     tokio::spawn(crate::away_lock::run());
     tokio::spawn(crate::plugins::phone_photos::run_watcher());
-    // A phone's own screen (T10j): those a stopped server left go, and
-    // each goes once its phone has no session.
-    tokio::task::spawn_blocking(crate::virtual_screen::clear_left_over);
+    // A phone's own screen (T10j): those a stopped server left go before
+    // any phone can ask for one (waited for at most 5 s; adds wait behind it
+    // either way), and each goes once its phone has no session.
+    crate::virtual_screen::clear_left_over_at_start().await;
     // Task starts held by an earlier run wait for no one now (ecosystem 1c).
     tokio::task::spawn_blocking(crate::plugins::tasks::clear_left_over);
     tokio::spawn(crate::virtual_screen::run_sweeper());

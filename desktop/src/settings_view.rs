@@ -1541,7 +1541,7 @@ impl SettingsForm {
                 row(ui, "virtual_screens", |ui| {
                     ui.checkbox(
                         &mut e.virtual_screens,
-                        "a phone with Input can add a screen of its own shape (Sway)",
+                        "a phone with Input can add a screen of its own shape (Sway, Hyprland)",
                     );
                 });
                 // BF2: a still of the screen on a phone's Home.

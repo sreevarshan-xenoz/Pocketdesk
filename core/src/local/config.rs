@@ -154,7 +154,7 @@ pub struct Config {
     /// disks, battery, uptime (F2).
     #[serde(default = "default_true")]
     pub share_state: bool,
-    /// Let a phone with Input add a screen of its own shape (T10j, Sway).
+    /// Let a phone with Input add a screen of its own shape (T10j; Sway and Hyprland).
     #[serde(default = "default_true")]
     pub virtual_screens: bool,
     /// Let phones with the Peek permission see this screen as one still,
