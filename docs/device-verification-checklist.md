@@ -1729,14 +1729,19 @@ Owed, on an Android 17 device or the API 37 emulator (the emulator here stalled 
 
 ## 100. GNOME and KDE hosts that work unattended (N8)
 
-Owed, on a GNOME VM (Ubuntu 24.04, a GNOME session) and KDE where one allows; none of this has run:
+Owed, on a GNOME VM (Ubuntu 24.04, a GNOME session) and KDE where one allows. KDE Plasma 6.8.2 ran headless on 2026-10-31 (`kwin_wayland --virtual` in a throwaway container on the laptop, the portal capture driven by `core/tests/portal_live.rs` rather than a phone; status-history has the details); GNOME has not run:
 
-- [ ] "Remember the screen-sharing grant" on: a session from the phone asks once at the desk; a second session and a reconnect start with no dialog.
+- [x] KDE, headless: the portal's screen arrives (about 58 fps of an animated window, once the capture offered its formats; before that fix no frame ever came), at the size the compositor settled on.
+- [x] KDE, headless: "Remember the screen-sharing grant" on, the ScreenCast dialog answered once (its screen ticked, then Enter); the next session started in 0.1 s with no dialog. A RemoteDesktop grant's token restored too, with the pre-authorization below taken back.
+- [x] KDE, headless: allowed ahead (`kde-authorized`, `remote-desktop`, the guide's "KDE Plasma: no dialog at all"), a RemoteDesktop session started with no dialog at all, by the name `dev.pocketdesk.Pocketdesk` once the server registers it; taken back (`no`), the dialog came again. Unanswered, the dialog ends the session after one minute, not two.
+- [x] KDE, headless: input through the RemoteDesktop portal reached a `wev` window: pointer moves, a left click, the `a` key, and `é` by keysym.
+- [ ] KDE: the wheel through the portal. One notch arrives as a 1-pixel scroll (`axis` 1.0, no `value120`), so it barely scrolls; a fix is owed (continuous scroll in KWin's units, or KDE's own fix). (where: linux)
+- [ ] "Remember the screen-sharing grant" on: a session from the phone asks once at the desk; a second session and a reconnect start with no dialog. (KDE headless above; a phone session and GNOME owed.)
 - [ ] Without uinput access: the phone's taps, typing (accents, emoji), keys and the wheel (its direction) reach GNOME through the RemoteDesktop portal; a remote without the screen is told it gets no input there.
 - [ ] Two phones at once, then one leaving: the other's picture and input go on.
 - [ ] Revoking in GNOME's settings brings the dialog back; Forget the grant and turning the setting off make the next session ask.
 - [ ] No RemoteDesktop portal (or refused): the screen alone.
-- [ ] The server started as a systemd user service: does the portal keep its restore data with no desktop app id?
+- [ ] The server started as a systemd user service: does the portal keep its restore data with no desktop app id? (Unnamed, KDE kept and restored both tokens under the empty id; the server now names itself `dev.pocketdesk.Pocketdesk` where the package's desktop file is installed. The unit itself is still owed.)
 
 ## 101. KDE Connect, next steps (N9)
 
