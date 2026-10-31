@@ -842,7 +842,7 @@ async fn send<W: AsyncWrite + Unpin>(
 }
 
 /// A device's packets, one a line.
-struct PacketReader<R> {
+pub(crate) struct PacketReader<R> {
     reader: BufReader<R>,
     /// The longest line taken.
     limit: usize,
@@ -852,7 +852,7 @@ struct PacketReader<R> {
 }
 
 impl<R: AsyncRead + Unpin> PacketReader<R> {
-    fn new(reader: R) -> Self {
+    pub(crate) fn new(reader: R) -> Self {
         Self {
             reader: BufReader::new(reader),
             limit: MAX_LINE,
@@ -863,7 +863,7 @@ impl<R: AsyncRead + Unpin> PacketReader<R> {
     /// The next packet, `None` at the end or on a line longer than the
     /// limit; a line that is not a packet is skipped. Safe to cut
     /// short in `select!`: `read_until` keeps what it read in `line`.
-    async fn next(&mut self) -> Option<NetworkPacket> {
+    pub(crate) async fn next(&mut self) -> Option<NetworkPacket> {
         use tokio::io::AsyncReadExt;
         loop {
             let room = (self.limit + 1).saturating_sub(self.line.len()) as u64;

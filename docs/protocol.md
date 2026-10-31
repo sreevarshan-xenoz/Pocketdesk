@@ -598,6 +598,8 @@ All of these are inside the app's private storage unless noted. None of it is ba
 | QUIC idle and keepalive | 45 s idle, 15 s keepalive | `core/src/streaming/transport.rs` |
 | PIN | 300 s; 5 wrong guesses; one new PIN per 10 s | §2.5 |
 
+Every parser above has a fuzz target (`fuzz/`, run by `scripts/fuzz.sh`): each runs 30 s on every pull request and 5 minutes a night in CI.
+
 `SECURITY.md` covers the rest: approval holds, permission changes applied within a second, file-browse confinement, and the known limits.
 
 ---

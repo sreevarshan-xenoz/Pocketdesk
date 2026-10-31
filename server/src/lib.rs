@@ -22,6 +22,9 @@ pub mod done;
 pub(crate) mod drive;
 pub mod driving;
 pub mod events;
+// The fuzz targets' entry points (`fuzz/`), only under `cargo fuzz`.
+#[cfg(fuzzing)]
+pub mod fuzzing;
 pub mod gamepad_pad;
 pub mod home_assistant;
 pub mod hypr_events;
