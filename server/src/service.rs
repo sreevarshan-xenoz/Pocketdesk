@@ -2431,7 +2431,7 @@ mod control_tls_tests {
     async fn a_kde_connect_devices_packet_goes_to_the_bridge_not_the_refusal() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         // The bridge makes its identity in a throwaway state folder.
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         let addr = control_port().await;
         let mut tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
         let hello = serde_json::json!({
@@ -2489,7 +2489,7 @@ mod control_tls_tests {
         pairing_required: bool,
     ) -> (std::net::SocketAddr, Arc<std::sync::atomic::AtomicUsize>) {
         // The gates read a throwaway state folder, never the user's.
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let desktop = CertManager::new().unwrap();
@@ -2543,6 +2543,7 @@ mod control_tls_tests {
 
     #[tokio::test]
     async fn an_unpaired_phones_packets_are_never_dispatched() {
+        let _state = crate::state::use_test_dirs();
         let (addr, count) = counting_port(true).await;
         assert_eq!(ping(addr, &count).await, 0, "refused before any plugin");
         // The same packet with pairing off reaches the plugin: the refusal
@@ -2916,7 +2917,7 @@ mod internet_control_tests {
     }
 
     fn paired_with_iroh_key(device_id: &str, key: Option<&iroh::SecretKey>) {
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         let dir = state::state_dir().unwrap();
         std::fs::create_dir_all(&dir).unwrap();
         TrustStore::update(state::trust_store_path().unwrap(), |store| {
@@ -2932,6 +2933,7 @@ mod internet_control_tests {
 
     #[tokio::test]
     async fn a_paired_phone_with_its_iroh_key_reaches_the_plugins() {
+        let _state = crate::state::use_test_dirs();
         let id = format!("internet-{}", uuid::Uuid::new_v4().simple());
         let key = iroh::SecretKey::generate();
         paired_with_iroh_key(&id, Some(&key));
@@ -2947,6 +2949,7 @@ mod internet_control_tests {
 
     #[test]
     fn a_phone_on_the_internet_road_receives_pushes_only_with_its_key() {
+        let _state = crate::state::use_test_dirs();
         let id = format!("internet-{}", uuid::Uuid::new_v4().simple());
         let key = iroh::SecretKey::generate();
         paired_with_iroh_key(&id, Some(&key));
@@ -2964,6 +2967,7 @@ mod internet_control_tests {
 
     #[tokio::test]
     async fn another_key_or_no_registered_key_is_refused_before_the_desktop_names_itself() {
+        let _state = crate::state::use_test_dirs();
         let refused = |outcome: &std::result::Result<usize, String>| matches!(outcome, Err(e) if e.contains(pocketdesk_core::protocol::HANDSHAKE_REFUSED));
         let id = format!("internet-{}", uuid::Uuid::new_v4().simple());
         paired_with_iroh_key(&id, Some(&iroh::SecretKey::generate()));
@@ -2999,7 +3003,7 @@ mod vector_tests {
     /// A control port served by the real handler, the real plugins and the
     /// computer's real identity packet, over a throwaway state folder.
     async fn real_port() -> std::net::SocketAddr {
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let desktop = CertManager::new().unwrap();
@@ -3183,6 +3187,7 @@ mod vector_tests {
 
     #[tokio::test]
     async fn a_second_identity_naming_a_paired_phone_borrows_nothing() {
+        let _state = crate::state::use_test_dirs();
         let addr = real_port().await;
         // A phone paired in the throwaway state folder, whose id a stranger
         // names after its own handshake.
@@ -3198,9 +3203,9 @@ mod vector_tests {
             "type": "kdeconnect.pocketdesk.monitors",
             "body": { "request": true }
         });
-        // The control: the paired phone itself is answered. The lib tests
-        // share one throwaway state folder, so another may rewrite the trust
-        // store meanwhile: pair again and retry before calling it a failure.
+        // The control: the paired phone itself is answered. The state folder
+        // is this test's alone while it holds its turn; pairing again and
+        // retrying stays as a margin for a slow handshake.
         let mut answered = false;
         for _ in 0..3 {
             pair();
@@ -3262,6 +3267,7 @@ mod vector_tests {
 
     #[tokio::test]
     async fn every_control_vector_holds_against_the_real_handler() {
+        let _state = crate::state::use_test_dirs();
         let vectors: Value = serde_json::from_str(VECTORS).unwrap();
         assert_eq!(vectors["version"], 1);
         let addr = real_port().await;
@@ -3375,7 +3381,7 @@ mod close_tests {
     /// another packet.
     #[tokio::test]
     async fn a_removed_device_s_connection_closes_at_once_saying_not_paired() {
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         let device = "0d7c3a52-91e4-4b6f-8a2e-00000000c105";
         let (client, server) = tokio::io::duplex(64 * 1024);
         let registry = Arc::new(PluginRegistry::new());

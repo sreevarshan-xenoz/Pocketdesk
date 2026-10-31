@@ -904,7 +904,8 @@ mod tests {
     /// device's list and removal are both refused as off, and nothing goes.
     #[tokio::test]
     async fn turned_off_an_owner_device_lists_and_removes_nothing() {
-        let dir = crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
+        let dir: &std::path::Path = &_state;
         let trust = dir.join("trusted_devices.json");
         TrustStore::update(&trust, |s| {
             s.trust_phone("off-owner", true)?;
@@ -1053,7 +1054,8 @@ mod tests {
     /// connection as on a link, and nothing changes.
     #[tokio::test]
     async fn a_forged_ask_from_a_device_not_the_owners_is_refused() {
-        let dir = crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
+        let dir: &std::path::Path = &_state;
         let trust = dir.join("trusted_devices.json");
         TrustStore::update(&trust, |s| {
             s.trust_phone("forge-owner", true)?;
@@ -1099,7 +1101,8 @@ mod tests {
     /// An owner phone's removal ends the removed device's connections.
     #[tokio::test]
     async fn a_removal_closes_the_removed_device_s_connections() {
-        let dir = crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
+        let dir: &std::path::Path = &_state;
         let trust = dir.join("trusted_devices.json");
         TrustStore::update(&trust, |s| {
             s.trust_phone("ends-owner", true)?;

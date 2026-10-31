@@ -18,15 +18,88 @@ use tokio::sync::Mutex;
 ///
 /// Resolves to `$XDG_STATE_HOME/pocketdesk` (or equivalent on the current OS).
 pub fn state_dir() -> Result<PathBuf> {
+    #[cfg(test)]
+    test_dirs_first();
     // The shared resolver, which also moves a folder from before the rename.
     pocketdesk_core::local::paths::state_dir().context("unable to determine local state directory")
 }
 
 /// For tests: this process's throwaway state and config folders
-/// ([`pocketdesk_core::local::paths::use_test_dirs`]); returns the state one.
+/// ([`pocketdesk_core::local::paths::use_test_dirs`]), held by the calling
+/// test alone until the guard drops. The folders are one for the process
+/// (the trust store, the pairing PIN, device keys, the peer list), and
+/// tests that changed them side by side lost each other's changes; each
+/// test that reaches them keeps the guard for its whole body. The turn is
+/// per thread: a helper called on the test's own thread may take it again.
+/// Derefs to the state folder.
 #[cfg(test)]
-pub(crate) fn use_test_dirs() -> &'static std::path::Path {
-    pocketdesk_core::local::paths::use_test_dirs("server-tests")
+pub(crate) fn use_test_dirs() -> TestState {
+    let me = std::thread::current().id();
+    let mut turn = TEST_TURN.lock().unwrap_or_else(|e| e.into_inner());
+    while turn.holder.is_some_and(|holder| holder != me) {
+        turn = TEST_TURN_FREED
+            .wait(turn)
+            .unwrap_or_else(|e| e.into_inner());
+    }
+    turn.holder = Some(me);
+    turn.depth += 1;
+    TestState {
+        dir: pocketdesk_core::local::paths::use_test_dirs("server-tests"),
+        _not_send: std::marker::PhantomData,
+    }
+}
+
+/// Which test thread holds the shared state folder, and how many times.
+#[cfg(test)]
+struct TestTurn {
+    holder: Option<std::thread::ThreadId>,
+    depth: usize,
+}
+
+#[cfg(test)]
+static TEST_TURN: std::sync::Mutex<TestTurn> = std::sync::Mutex::new(TestTurn {
+    holder: None,
+    depth: 0,
+});
+
+#[cfg(test)]
+static TEST_TURN_FREED: std::sync::Condvar = std::sync::Condvar::new();
+
+/// A test's hold on the shared state folder ([`use_test_dirs`]). It stays
+/// on the thread that took it, as the turn is that thread's.
+#[cfg(test)]
+#[must_use = "the state folder is this test's only while the guard lives"]
+pub(crate) struct TestState {
+    dir: &'static std::path::Path,
+    _not_send: std::marker::PhantomData<*const ()>,
+}
+
+#[cfg(test)]
+impl std::ops::Deref for TestState {
+    type Target = std::path::Path;
+
+    fn deref(&self) -> &std::path::Path {
+        self.dir
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestState {
+    fn drop(&mut self) {
+        let mut turn = TEST_TURN.lock().unwrap_or_else(|e| e.into_inner());
+        turn.depth -= 1;
+        if turn.depth == 0 {
+            turn.holder = None;
+            TEST_TURN_FREED.notify_all();
+        }
+    }
+}
+
+/// In tests, every path below resolves inside the throwaway folders, never
+/// the owner's, even for a test that reaches one before taking its turn.
+#[cfg(test)]
+fn test_dirs_first() {
+    pocketdesk_core::local::paths::use_test_dirs("server-tests");
 }
 
 /// Where this session keeps the screen-sharing portal's grant (N8), read

@@ -924,7 +924,7 @@ mod tests {
     #[tokio::test]
     async fn a_refused_privacy_request_is_answered_with_why() {
         // The answer asks the trust store whether it is a computer.
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         let phone = Phone(Default::default());
         let asked =
             NetworkPacket::new(PRIVACY).with_body(json!({"action": "status", "lock": true}));

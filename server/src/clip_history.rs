@@ -296,7 +296,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_text_goes_to_its_phone_only_with_clipboard_on() {
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         let a = Arc::new(Phone {
             id: "phone-a",
             sent: Mutex::default(),

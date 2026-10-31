@@ -1296,7 +1296,7 @@ mod tests {
         use std::sync::Arc;
         use std::sync::atomic::AtomicBool;
 
-        crate::state::use_test_dirs();
+        let _state = crate::state::use_test_dirs();
         assert_eq!(desk(), Some(Desk::Hyprland), "run on a Hyprland session");
         let names = |all: Vec<Output>| all.into_iter().map(|o| o.name).collect::<Vec<_>>();
         let before = names(outputs().unwrap());
