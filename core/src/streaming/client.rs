@@ -115,6 +115,12 @@ pub const SCREEN_FEATURE_MIC_SAID: u8 = 16;
 /// microphone" is on for this device, and, for another computer, the
 /// session takes its input.
 pub const SCREEN_FEATURE_MIC: u8 = 32;
+/// The computer lands this session's absolute moves on the screen it shows
+/// (PC11 on Linux), so another window onto another of its screens may take
+/// control. Windows always has; computers before it do not say it, and a
+/// Linux computer whose input backend spans its desktop in a way it cannot
+/// place (an X server's enigo) leaves it off.
+pub const SCREEN_FEATURE_PER_SCREEN: u8 = 64;
 
 /// A remote's ready stream carries one byte of what the computer offers
 /// it (G4): this bit marks the byte as said. Computers before G4 send a
@@ -159,6 +165,16 @@ pub fn screen_takes_input(features: u8) -> Option<bool> {
 pub fn screen_runs_windows(features: u8) -> Option<bool> {
     (features & SCREEN_FEATURES_SAID != 0 && features & SCREEN_FEATURE_SYSTEM_SAID != 0)
         .then_some(features & SCREEN_FEATURE_WINDOWS != 0)
+}
+
+/// Whether the computer lands a screen session's absolute moves on the
+/// screen it shows, from what its ready stream said ([`screen_features`]):
+/// `None` until it says. Windows always has, so a computer that runs it
+/// (PC4) counts though it is from before the bit.
+pub fn screen_input_per_screen(features: u8) -> Option<bool> {
+    (features & SCREEN_FEATURES_SAID != 0).then_some(
+        features & SCREEN_FEATURE_PER_SCREEN != 0 || screen_runs_windows(features) == Some(true),
+    )
 }
 
 /// Whether the computer plays a screen session's microphone, from what its

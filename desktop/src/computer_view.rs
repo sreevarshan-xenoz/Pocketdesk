@@ -998,19 +998,21 @@ pub fn window_title(name: &str, screen: u32, mic_on: bool) -> String {
     }
 }
 
-/// Whether a window after the first, of a computer that runs Windows
-/// (`windows`, as its session said) or not, opens View only (PR #570
-/// review I4): only Windows maps a session's clicks onto the screen it
-/// shows; elsewhere they land over its first screen.
-pub fn extra_view_only(windows: Option<bool>) -> bool {
-    windows != Some(true)
+/// Whether a window after the first opens View only (PR #570 review I4):
+/// unless the computer, as its session said, lands a session's clicks on
+/// the screen it shows (`per_screen`: Windows always, Linux where its
+/// input backend spans its compositor's layout, PC11), they land over its
+/// first screen. A computer that does not say it counts as landing them
+/// per screen only if it runs Windows.
+pub fn extra_view_only(status: &ViewStatus) -> bool {
+    status.per_screen.or(status.windows) != Some(true)
 }
 
 /// Whether a window says [`EXTRA_INPUT_WORDS`]: of a computer whose
 /// clicks land over its first screen ([`extra_view_only`]), a later
 /// window, or one showing another screen than the first (re-review M-b).
-pub fn says_first_screen(windows: Option<bool>, later: bool, monitor: u32) -> bool {
-    extra_view_only(windows) && (later || monitor != 0)
+pub fn says_first_screen(status: &ViewStatus, later: bool, monitor: u32) -> bool {
+    extra_view_only(status) && (later || monitor != 0)
 }
 
 /// What a window of such a computer says on its bar while it shows another
@@ -1442,10 +1444,10 @@ impl ComputerView {
         state.keys_by_position = from.keys_by_position;
         state.position_hint = from.position_hint;
         state.later = true;
-        // A computer that is not Windows takes a window's clicks over its
-        // first screen whatever screen the window shows (PR #570 review
-        // I4): another window of it opens View only, said on its bar.
-        state.view_only = state.view_only || extra_view_only(from.status.windows);
+        // A computer that does not land a window's clicks on the screen it
+        // shows takes them over its first screen (PR #570 review I4):
+        // another window of it opens View only, said on its bar.
+        state.view_only = state.view_only || extra_view_only(&from.status);
         state.hevc_refused = false;
         #[cfg(windows)]
         {
@@ -2647,7 +2649,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                         }
                     });
                 }
-                if ended.is_none() && says_first_screen(status.windows, later, wanted.monitor) {
+                if ended.is_none() && says_first_screen(&status, later, wanted.monitor) {
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(EXTRA_INPUT_WORDS).color(egui::Color32::LIGHT_GRAY),
@@ -6103,16 +6105,32 @@ mod tests {
             "eDP-1 (1920x1080) (Ctrl+Alt+Shift+1). Right-click to open it in a new window."
         );
         assert!(!screen_hint("Screen 10", 9).contains("Ctrl"));
-        // PR #570 review I4: later windows of a computer not Windows (or
-        // not said) open View only.
-        assert!(!extra_view_only(Some(true)));
-        assert!(extra_view_only(Some(false)));
-        assert!(extra_view_only(None));
+        // PR #570 review I4: later windows of a computer that does not
+        // land clicks on their screen (or does not say) open View only.
+        let said = |windows, per_screen| ViewStatus {
+            windows,
+            per_screen,
+            ..Default::default()
+        };
+        assert!(
+            !extra_view_only(&said(Some(true), None)),
+            "Windows before PC11's bit"
+        );
+        assert!(extra_view_only(&said(Some(false), None)));
+        assert!(extra_view_only(&said(None, None)));
+        assert!(
+            extra_view_only(&said(Some(false), Some(false))),
+            "Linux before the remap"
+        );
+        // PC11 on Linux: a computer that lands them per screen takes control.
+        assert!(!extra_view_only(&said(Some(false), Some(true))));
         // Re-review M-b: the first window says it too on another screen.
-        assert!(says_first_screen(Some(false), false, 1));
-        assert!(says_first_screen(Some(false), true, 0));
-        assert!(!says_first_screen(Some(false), false, 0));
-        assert!(!says_first_screen(Some(true), true, 1));
+        let linux = said(Some(false), Some(false));
+        assert!(says_first_screen(&linux, false, 1));
+        assert!(says_first_screen(&linux, true, 0));
+        assert!(!says_first_screen(&linux, false, 0));
+        assert!(!says_first_screen(&said(Some(true), None), true, 1));
+        assert!(!says_first_screen(&said(Some(false), Some(true)), true, 1));
     }
 
     /// PC11: a computer two windows show is told apart from one shown once.

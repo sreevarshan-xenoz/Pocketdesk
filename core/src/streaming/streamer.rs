@@ -110,13 +110,18 @@ impl Drop for CastEnded {
 /// is taken at all (BK7: another computer's window says it is view-only),
 /// and which system this computer runs (PC4: that window offers its keys),
 /// and whether its microphone is played here (PC10 review: that window
-/// says why nothing is heard).
-fn screen_feature_byte(input: bool, mic: bool) -> u8 {
+/// says why nothing is heard), and whether its absolute moves land on the
+/// screen it shows (PC11 on Linux: another window of that computer may
+/// then take control).
+fn screen_feature_byte(input: bool, mic: bool, per_screen: bool) -> u8 {
     let mut byte = super::client::SCREEN_FEATURES_SAID
         | super::client::SCREEN_FEATURE_SYSTEM_SAID
         | super::client::SCREEN_FEATURE_MIC_SAID;
     if mic {
         byte |= super::client::SCREEN_FEATURE_MIC;
+    }
+    if per_screen {
+        byte |= super::client::SCREEN_FEATURE_PER_SCREEN;
     }
     if cfg!(windows) {
         byte |= super::client::SCREEN_FEATURE_WINDOWS;
@@ -159,6 +164,55 @@ fn about_the_stream(packet: &InputPacket, sound: bool) -> bool {
     }
 }
 
+/// A rectangle as `(x, y, width, height)`.
+pub type Rect = (i32, i32, u32, u32);
+
+/// Where this computer's input backend lands an absolute move
+/// (`InputPacket::MouseMoveAbs`, 0..=65535 per axis), for the session
+/// showing one screen. The server's injector knows it, so the server says
+/// it through [`set_absolute_space`]; Windows needs no word (its
+/// `SendInput` always spans the desktop layout).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AbsoluteSpace {
+    /// Not known (an X server's enigo, or no injector yet): the move goes on
+    /// as it came, over the whole desktop, and the session does not say its
+    /// clicks land on its screen.
+    Unknown,
+    /// The move already lands on the session's screen: the desktop has one
+    /// screen, or the backend injects per screen (the RemoteDesktop
+    /// portal's stream).
+    Screen,
+    /// The backend spans `layout`, the box around every screen, and the
+    /// session's screen is `monitor` in it, both in the same units (a
+    /// Wayland compositor's logical pixels).
+    Layout { monitor: Rect, layout: Rect },
+}
+
+/// What the server's injector says of a session's screen ([`AbsoluteSpace`]).
+/// A session is bound to the output its monitor index names when it starts
+/// (`bind`, to a key for that output, such as its name), as its capture is,
+/// and then asks where that output is for each absolute move (`space`), so
+/// a screen moved, rescaled or reordered is followed and the clicks stay on
+/// the screen the picture shows. Both must answer at once, from what the
+/// server already knows (never a compositor round trip): `bind` says `None`
+/// while it cannot tell which output the index names, and `space` says
+/// [`AbsoluteSpace::Unknown`] while a change is not yet read, or once the
+/// output is gone or its name is not its own.
+#[derive(Debug, Clone, Copy)]
+pub struct AbsoluteSpaces {
+    pub bind: fn(u32) -> Option<u32>,
+    pub space: fn(u32) -> AbsoluteSpace,
+}
+
+static ABSOLUTE_SPACE: std::sync::OnceLock<AbsoluteSpaces> = std::sync::OnceLock::new();
+
+/// Name where the server's input backend lands an absolute move (Linux:
+/// the per-screen remap of a computer's screen windows, PC11). Set once at
+/// start; later calls change nothing.
+pub fn set_absolute_space(spaces: AbsoluteSpaces) {
+    let _ = ABSOLUTE_SPACE.set(spaces);
+}
+
 /// Where a whole-monitor session's absolute pointer input has to land.
 ///
 /// The phone normalizes such a tap over the video frame, which is one
@@ -166,27 +220,50 @@ fn about_the_stream(packet: &InputPacket, sound: bool) -> bool {
 /// so with two monitors a tap in the middle of the stream landed in the
 /// middle of *both* screens. A cropped (single-window) session needs no
 /// remap: the phone already normalizes those over the layout box the
-/// server reports. Linux keeps the frame-normalized value — whether its
-/// uinput absolute device spans the layout on a multi-monitor desktop has
-/// not been measured.
+/// server reports. Linux's uinput absolute device and the compositor's
+/// virtual pointer span the compositor's layout too, in logical pixels,
+/// so the server says the session's screen there ([`AbsoluteSpace`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct PointerSpace {
-    monitor: (i32, i32, u32, u32),
-    layout: (i32, i32, u32, u32),
+    monitor: Rect,
+    layout: Rect,
 }
 
 impl PointerSpace {
-    /// The space for a session capturing monitor `index`; `None` when the
-    /// injector's space already is the frame.
+    /// The space for a session capturing monitor `index` on Windows (`None`
+    /// when the frame already is the whole layout), from xcap's rectangles
+    /// at the session's start.
     fn for_monitor(index: u32) -> Option<Self> {
-        if !cfg!(windows) {
-            return None;
-        }
         let space = Self {
             monitor: capture::monitor_rect(index)?,
             layout: capture::layout_rect()?,
         };
         (space.monitor != space.layout).then_some(space)
+    }
+
+    /// The space for what the injector said: a layout remaps
+    /// unless the screen is the whole of it; a layout with no area, or a
+    /// screen outside it, is not trusted.
+    fn from_space(space: AbsoluteSpace) -> (Option<Self>, bool) {
+        match space {
+            AbsoluteSpace::Unknown => (None, false),
+            AbsoluteSpace::Screen => (None, true),
+            AbsoluteSpace::Layout { monitor, layout } => {
+                let inside = |start: i32, len: u32, outer: i32, outer_len: u32| {
+                    let end = i64::from(start) + i64::from(len);
+                    len > 0
+                        && i64::from(start) >= i64::from(outer)
+                        && end <= i64::from(outer) + i64::from(outer_len)
+                };
+                if !(inside(monitor.0, monitor.2, layout.0, layout.2)
+                    && inside(monitor.1, monitor.3, layout.1, layout.3))
+                {
+                    return (None, false);
+                }
+                let space = Self { monitor, layout };
+                ((monitor != layout).then_some(space), true)
+            }
+        }
     }
 
     /// A frame-normalized point (0..=65535 per axis) as a layout-normalized one.
@@ -200,6 +277,106 @@ impl PointerSpace {
         let (mx, my, mw, mh) = self.monitor;
         let (lx, ly, lw, lh) = self.layout;
         (axis(x_norm, mx, mw, lx, lw), axis(y_norm, my, mh, ly, lh))
+    }
+
+    /// [`Self::remap`] for a Wayland compositor (Linux; Windows keeps the
+    /// formula above). Each of the 65536 values is a cell of the screen,
+    /// taken at its middle and given as the nearest of the layout's values
+    /// that lands on the screen (a compositor, and libinput for an absolute
+    /// device, land `v` at `v / 65536` of the layout), so the frame's first
+    /// and last values are the screen's first and last pixels, never one of
+    /// the screen beside it.
+    fn remap_cells(&self, x_norm: u16, y_norm: u16) -> (u16, u16) {
+        fn axis(norm: u16, start: i32, len: u32, space_start: i32, space_len: u32) -> u16 {
+            const CELLS: i64 = 65536;
+            let space = i64::from(space_len.max(1));
+            let pixel = f64::from(start) + (f64::from(norm) + 0.5) / CELLS as f64 * f64::from(len);
+            let near = ((pixel - f64::from(space_start)) / space as f64 * CELLS as f64).round();
+            // The values landing on this screen: from the first at or past
+            // its start to the last before its end.
+            let offset = i64::from(start) - i64::from(space_start);
+            let first = (offset * CELLS + space - 1).div_euclid(space);
+            let last = ((offset + i64::from(len)) * CELLS + space - 1).div_euclid(space) - 1;
+            (near as i64)
+                .clamp(first, last.max(first))
+                .clamp(0, i64::from(u16::MAX)) as u16
+        }
+        let (mx, my, mw, mh) = self.monitor;
+        let (lx, ly, lw, lh) = self.layout;
+        (axis(x_norm, mx, mw, lx, lw), axis(y_norm, my, mh, ly, lh))
+    }
+}
+
+/// Where a session's absolute moves are remapped from.
+#[derive(Clone, Copy)]
+enum PointerSource {
+    /// Not remapped: no picture, one screen on Windows, or nothing known of
+    /// the backend.
+    Off,
+    /// Windows: the rectangles read at the session's start, its formula.
+    Fixed(PointerSpace),
+    /// Linux: the output the session is bound to (its key), asked of the
+    /// server's injector at each move, so a change of screens is followed;
+    /// while it says nothing is known, moves go on as they came (over the
+    /// whole desktop, as before), never to a screen that has moved or gone.
+    /// A session that could not be bound at its start (the server had not
+    /// read its screens yet) binds its index at its first move that can.
+    Live {
+        index: u32,
+        bound: Option<u32>,
+        spaces: AbsoluteSpaces,
+    },
+}
+
+impl PointerSource {
+    /// The source for a session showing monitor `index`, and whether its
+    /// moves land on that screen now (Windows: always).
+    fn start(index: u32) -> (Self, bool) {
+        if cfg!(windows) {
+            let source = PointerSpace::for_monitor(index).map_or(Self::Off, Self::Fixed);
+            return (source, true);
+        }
+        match ABSOLUTE_SPACE.get().copied() {
+            Some(spaces) => Self::live(index, spaces),
+            None => (Self::Off, false),
+        }
+    }
+
+    fn live(index: u32, spaces: AbsoluteSpaces) -> (Self, bool) {
+        let bound = (spaces.bind)(index);
+        let per_screen = bound.is_some_and(|key| PointerSpace::from_space((spaces.space)(key)).1);
+        (
+            Self::Live {
+                index,
+                bound,
+                spaces,
+            },
+            per_screen,
+        )
+    }
+
+    /// `(x_norm, y_norm)` as the backend takes it now.
+    fn remap(&mut self, x_norm: u16, y_norm: u16) -> (u16, u16) {
+        match self {
+            Self::Off => (x_norm, y_norm),
+            Self::Fixed(space) => space.remap(x_norm, y_norm),
+            Self::Live {
+                index,
+                bound,
+                spaces,
+            } => {
+                if bound.is_none() {
+                    *bound = (spaces.bind)(*index);
+                }
+                let Some(key) = *bound else {
+                    return (x_norm, y_norm);
+                };
+                match PointerSpace::from_space((spaces.space)(key)).0 {
+                    Some(space) => space.remap_cells(x_norm, y_norm),
+                    None => (x_norm, y_norm),
+                }
+            }
+        }
     }
 }
 
@@ -679,6 +856,14 @@ impl StreamingServer {
                 phone_sound: allow_phone_sound,
             },
         );
+        // Where this session's absolute moves land (PC11 on Linux): read
+        // before the ready stream, which says whether they land on its
+        // screen.
+        let (mut pointer, per_screen) = if no_picture {
+            (PointerSource::Off, false)
+        } else {
+            PointerSource::start(self.config.monitor_index)
+        };
         // An input-only session says it was admitted, so the phone shows its
         // controls only now: taps made while the owner decided are not
         // queued and injected at once later.
@@ -736,7 +921,7 @@ impl StreamingServer {
                         timestamp_us: 0,
                     };
                     let mut said = header.as_bytes().to_vec();
-                    said.push(screen_feature_byte(!force_view_only, allow_mic));
+                    said.push(screen_feature_byte(!force_view_only, allow_mic, per_screen));
                     if let Err(e) = ready.write_all(&said).await {
                         debug!(error = %e, "Could not say what this computer takes");
                     }
@@ -1542,12 +1727,16 @@ impl StreamingServer {
         } else {
             64 * 1024
         };
-        let pointer_space = PointerSpace::for_monitor(self.config.monitor_index);
-        if let Some(space) = pointer_space {
-            info!(
+        match pointer {
+            PointerSource::Fixed(space) => info!(
                 ?space,
                 "Absolute input is remapped from the monitor onto the desktop layout"
-            );
+            ),
+            PointerSource::Live { .. } => info!(
+                per_screen,
+                "Absolute input follows this screen's place in the compositor's layout"
+            ),
+            PointerSource::Off => {}
         }
         // The client's own measurements land in the session record, so the
         // monitor needs the recorder the encode task shares.
@@ -1749,23 +1938,21 @@ impl StreamingServer {
                                                     debug!("View-only: dropping input packet");
                                                     continue;
                                                 }
-                                                let packet = match (packet, pointer_space) {
-                                                    (
-                                                        InputPacket::MouseMoveAbs { x_norm, y_norm },
-                                                        Some(space),
-                                                    ) if !cropped => {
-                                                        let (x_norm, y_norm) = space.remap(x_norm, y_norm);
+                                                let packet = match packet {
+                                                    InputPacket::MouseMoveAbs { x_norm, y_norm }
+                                                        if !cropped =>
+                                                    {
+                                                        let (x_norm, y_norm) =
+                                                            pointer.remap(x_norm, y_norm);
                                                         InputPacket::MouseMoveAbs { x_norm, y_norm }
                                                     }
                                                     // A pen lands where a tap would (E3).
-                                                    (InputPacket::Pen(mut pen), Some(space))
-                                                        if !cropped =>
-                                                    {
+                                                    InputPacket::Pen(mut pen) if !cropped => {
                                                         (pen.x_norm, pen.y_norm) =
-                                                            space.remap(pen.x_norm, pen.y_norm);
+                                                            pointer.remap(pen.x_norm, pen.y_norm);
                                                         InputPacket::Pen(pen)
                                                     }
-                                                    (packet, _) => packet,
+                                                    packet => packet,
                                                 };
                                                 // Forward to input injector via channel
                                                 if let Some(ref tx) = input_tx {
@@ -2447,6 +2634,224 @@ mod tests {
         assert!((x - 4608).abs() <= 1 && (y - 1061).abs() <= 1, "{x},{y}");
     }
 
+    /// Where `norm` lands as a compositor maps it: `v / 65536` of the
+    /// layout, the pixel holding that point (wlroots' and Hyprland's
+    /// virtual pointer, and an absolute device spanning the layout).
+    fn landed(norm: (u16, u16), layout: Rect) -> (i32, i32) {
+        let (lx, ly, lw, lh) = layout;
+        let px = |n: u16, start: i32, len: u32| {
+            start + (f64::from(n) / 65536.0 * f64::from(len)).floor() as i32
+        };
+        (px(norm.0, lx, lw), px(norm.1, ly, lh))
+    }
+
+    /// Each corner of the frame, as `(norm, the screen's pixel)`.
+    fn corners(screen: Rect) -> [((u16, u16), (i32, i32)); 4] {
+        let (x, y, w, h) = screen;
+        let (right, bottom) = (x + w as i32 - 1, y + h as i32 - 1);
+        [
+            ((0, 0), (x, y)),
+            ((65535, 0), (right, y)),
+            ((0, 65535), (x, bottom)),
+            ((65535, 65535), (right, bottom)),
+        ]
+    }
+
+    fn bounds(screens: &[Rect]) -> Rect {
+        let left = screens.iter().map(|s| s.0).min().unwrap();
+        let top = screens.iter().map(|s| s.1).min().unwrap();
+        let right = screens.iter().map(|s| s.0 + s.2 as i32).max().unwrap();
+        let bottom = screens.iter().map(|s| s.1 + s.3 as i32).max().unwrap();
+        (left, top, (right - left) as u32, (bottom - top) as u32)
+    }
+
+    /// Every corner of every screen lands on that screen's own corner
+    /// pixel: none spills onto the screen beside it.
+    fn assert_corners(screens: &[Rect]) {
+        let layout = bounds(screens);
+        for &monitor in screens {
+            let (space, per_screen) =
+                PointerSpace::from_space(AbsoluteSpace::Layout { monitor, layout });
+            assert!(per_screen, "{monitor:?}");
+            let space = space.expect("several screens remap");
+            for (norm, want) in corners(monitor) {
+                assert_eq!(
+                    landed(space.remap_cells(norm.0, norm.1), layout),
+                    want,
+                    "{monitor:?} at {norm:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn two_screens_side_by_side_each_take_their_own_corners() {
+        assert_corners(&[(0, 0, 1920, 1080), (1920, 0, 1280, 1024)]);
+    }
+
+    /// Fractional scaling: a 2880x1800 panel at 1.5 is 1920x1200 logical
+    /// beside a 2560x1440 one at 1.25 (2048x1152), as both Hyprland and
+    /// sway lay them out; the layout and the screen are in the same
+    /// logical units, so the corners hold.
+    #[test]
+    fn fractional_scales_land_in_logical_pixels() {
+        assert_corners(&[(0, 0, 1920, 1200), (1920, 0, 2048, 1152)]);
+        // A scale that leaves a ragged size (1920 / 1.33 is 1443.6, said
+        // as 1444).
+        assert_corners(&[(0, 0, 1444, 812), (1444, 100, 1920, 1080)]);
+    }
+
+    /// A monitor left of and above the primary: negative origins.
+    #[test]
+    fn a_screen_left_of_or_above_the_primary_has_a_negative_origin() {
+        assert_corners(&[(-1280, 0, 1280, 1024), (0, 0, 1920, 1080)]);
+        assert_corners(&[(0, -1080, 1920, 1080), (0, 0, 1920, 1080)]);
+        assert_corners(&[
+            (-1920, -300, 1920, 1080),
+            (0, 0, 1536, 864),
+            (1536, 0, 1080, 1920),
+        ]);
+    }
+
+    #[test]
+    fn the_middle_of_the_frame_is_the_middle_of_its_screen() {
+        let screens = [(-1280, 0, 1280, 1024), (0, 0, 1920, 1080)];
+        let layout = bounds(&screens);
+        let (space, _) = PointerSpace::from_space(AbsoluteSpace::Layout {
+            monitor: screens[0],
+            layout,
+        });
+        let (x, y) = landed(space.unwrap().remap_cells(32768, 32768), layout);
+        assert!((x - -640).abs() <= 1 && (y - 512).abs() <= 1, "{x},{y}");
+    }
+
+    /// One screen, the portal's per-stream moves, or no word: nothing is
+    /// remapped, so a single screen behaves as before; only an unknown
+    /// space leaves the session not saying its clicks land on its screen.
+    #[test]
+    fn one_screen_or_an_unknown_space_is_not_remapped() {
+        let one = (0, 0, 1920, 1080);
+        assert_eq!(
+            PointerSpace::from_space(AbsoluteSpace::Layout {
+                monitor: one,
+                layout: one
+            }),
+            (None, true)
+        );
+        assert_eq!(
+            PointerSpace::from_space(AbsoluteSpace::Screen),
+            (None, true)
+        );
+        assert_eq!(
+            PointerSpace::from_space(AbsoluteSpace::Unknown),
+            (None, false)
+        );
+        // A screen outside the layout said, or one with no area, is not
+        // trusted.
+        for monitor in [(1920, 0, 1920, 1080), (0, 0, 0, 1080), (-1, 0, 100, 100)] {
+            assert_eq!(
+                PointerSpace::from_space(AbsoluteSpace::Layout {
+                    monitor,
+                    layout: (0, 0, 1920, 1080)
+                }),
+                (None, false),
+                "{monitor:?}"
+            );
+        }
+    }
+
+    /// The stand-in server's state: 0 screen B (key 7) beside screen A
+    /// (key 3), B at index 1; 1 B moved left of A; 2 a change not yet read;
+    /// 3 the outputs reordered (index 1 now names A); 4 B gone.
+    static LIVE_SPACE: AtomicU8 = AtomicU8::new(0);
+
+    fn live_bind(index: u32) -> Option<u32> {
+        match (LIVE_SPACE.load(Ordering::SeqCst), index) {
+            (2, _) => None,
+            (3, 0) => Some(7),
+            (3, 1) => Some(3),
+            (_, 0) => Some(3),
+            (_, 1) => Some(7),
+            _ => None,
+        }
+    }
+
+    fn live_space(key: u32) -> AbsoluteSpace {
+        let a = (0, 0, 1920, 1080);
+        let b = |x| (x, 0, 1280, 1024);
+        let beside = (0, 0, 3200, 1080);
+        match (LIVE_SPACE.load(Ordering::SeqCst), key) {
+            (0 | 3, 3) => AbsoluteSpace::Layout {
+                monitor: a,
+                layout: beside,
+            },
+            (0 | 3, 7) => AbsoluteSpace::Layout {
+                monitor: b(1920),
+                layout: beside,
+            },
+            (1, 7) => AbsoluteSpace::Layout {
+                monitor: b(-1280),
+                layout: (-1280, 0, 3200, 1080),
+            },
+            _ => AbsoluteSpace::Unknown,
+        }
+    }
+
+    const LIVE: AbsoluteSpaces = AbsoluteSpaces {
+        bind: live_bind,
+        space: live_space,
+    };
+
+    /// Review I1, I4: the mapping follows the bound screen through a move,
+    /// and through a reorder that gives its index to another screen (the
+    /// picture stays on the screen the session started on); while a change
+    /// is not yet read, or once the screen is gone, moves go on as they
+    /// came (the old whole-desktop behaviour), never to where it was.
+    #[test]
+    fn a_live_source_follows_its_screen_through_moves_and_reorders() {
+        let beside = (0, 0, 3200, 1080);
+        LIVE_SPACE.store(0, Ordering::SeqCst);
+        let (mut source, per_screen) = PointerSource::live(1, LIVE);
+        assert!(per_screen);
+        assert_eq!(landed(source.remap(0, 0), beside), (1920, 0));
+        LIVE_SPACE.store(2, Ordering::SeqCst);
+        assert_eq!(source.remap(0, 0), (0, 0), "unread: as it came");
+        assert_eq!(source.remap(40000, 50), (40000, 50));
+        LIVE_SPACE.store(1, Ordering::SeqCst);
+        let left = (-1280, 0, 3200, 1080);
+        assert_eq!(landed(source.remap(0, 0), left), (-1280, 0));
+        assert_eq!(landed(source.remap(65535, 65535), left), (-1, 1023));
+        // Reordered: index 1 names A now, but the session still shows B.
+        LIVE_SPACE.store(3, Ordering::SeqCst);
+        assert_eq!(landed(source.remap(0, 0), beside), (1920, 0), "still B");
+        // B gone: as it came, not onto whatever has its index.
+        LIVE_SPACE.store(4, Ordering::SeqCst);
+        assert_eq!(source.remap(0, 0), (0, 0));
+        // A session started before anything was known says no bit, and
+        // binds at its first move that can.
+        LIVE_SPACE.store(2, Ordering::SeqCst);
+        let (mut late, per_screen) = PointerSource::live(1, LIVE);
+        assert!(!per_screen);
+        assert_eq!(late.remap(9, 9), (9, 9));
+        LIVE_SPACE.store(0, Ordering::SeqCst);
+        assert_eq!(landed(late.remap(0, 0), beside), (1920, 0));
+    }
+
+    /// The ready byte says whether a session's moves land on its screen.
+    #[test]
+    fn the_ready_byte_says_whether_moves_land_on_the_screen() {
+        use super::super::client::{screen_features, screen_input_per_screen};
+        let said = |per_screen| {
+            screen_input_per_screen(screen_features(&[screen_feature_byte(
+                true, false, per_screen,
+            )]))
+        };
+        assert_eq!(said(true), Some(true));
+        // Windows always does (PC4's bit counts for a computer before it).
+        assert_eq!(said(false), Some(cfg!(windows)));
+        assert_eq!(screen_input_per_screen(0), None, "nothing said");
+    }
+
     #[test]
     fn test_streaming_server_creation() {
         let config = StreamingConfig::default();
@@ -2792,11 +3197,11 @@ mod tests {
     fn a_pen_is_offered_only_to_a_phone_whose_input_is_taken() {
         use super::super::client::{SCREEN_FEATURE_PEN, screen_features};
         assert_eq!(
-            screen_features(&[screen_feature_byte(true, true)]) & SCREEN_FEATURE_PEN,
+            screen_features(&[screen_feature_byte(true, true, true)]) & SCREEN_FEATURE_PEN,
             SCREEN_FEATURE_PEN
         );
         assert_eq!(
-            screen_features(&[screen_feature_byte(false, false)]) & SCREEN_FEATURE_PEN,
+            screen_features(&[screen_feature_byte(false, false, true)]) & SCREEN_FEATURE_PEN,
             0,
             "said, and no pen"
         );
@@ -2808,11 +3213,11 @@ mod tests {
     fn a_screen_session_hears_whether_its_input_is_taken() {
         use super::super::client::{SCREEN_FEATURE_INPUT, screen_features};
         assert_eq!(
-            screen_features(&[screen_feature_byte(true, true)]) & SCREEN_FEATURE_INPUT,
+            screen_features(&[screen_feature_byte(true, true, true)]) & SCREEN_FEATURE_INPUT,
             SCREEN_FEATURE_INPUT
         );
         assert_eq!(
-            screen_features(&[screen_feature_byte(false, false)]) & SCREEN_FEATURE_INPUT,
+            screen_features(&[screen_feature_byte(false, false, true)]) & SCREEN_FEATURE_INPUT,
             0,
             "said, and view-only"
         );
@@ -2824,7 +3229,7 @@ mod tests {
         use super::super::client::{screen_features, screen_runs_windows};
         for input in [true, false] {
             assert_eq!(
-                screen_runs_windows(screen_features(&[screen_feature_byte(input, input)])),
+                screen_runs_windows(screen_features(&[screen_feature_byte(input, input, true)])),
                 Some(cfg!(windows))
             );
         }
@@ -2837,7 +3242,7 @@ mod tests {
         use super::super::client::{screen_features, screen_takes_mic};
         for mic in [true, false] {
             assert_eq!(
-                screen_takes_mic(screen_features(&[screen_feature_byte(true, mic)])),
+                screen_takes_mic(screen_features(&[screen_feature_byte(true, mic, true)])),
                 Some(mic)
             );
         }

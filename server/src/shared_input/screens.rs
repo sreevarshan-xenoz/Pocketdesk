@@ -93,13 +93,15 @@ pub struct WaylandOutput {
     pub turned: bool,
     pub logical_at: Option<(i32, i32)>,
     pub logical_size: Option<(i32, i32)>,
+    /// Its name (`wl_output` version 4, or `xdg_output`'s): `eDP-1`.
+    pub name: Option<String>,
 }
 
 impl WaylandOutput {
     /// The output as laid out, in logical pixels: xdg-output's box (which
     /// knows a fractional scale), else the mode over the whole scale, on
     /// its side when turned. `None` before it said a size.
-    fn screen(&self) -> Option<Screen> {
+    pub fn screen(&self) -> Option<Screen> {
         let size = |(w, h): (i32, i32)| {
             let w = u32::try_from(w).ok().filter(|w| *w > 0)?;
             let h = u32::try_from(h).ok().filter(|h| *h > 0)?;
@@ -605,6 +607,7 @@ mod tests {
             turned: false,
             logical_at: Some((0, 0)),
             logical_size: Some((1920, 1080)),
+            name: None,
         };
         // A fractional 1.5 screen to its right: only xdg-output knows its
         // logical size (wl_output's scale is a whole 2).
@@ -615,6 +618,7 @@ mod tests {
             turned: false,
             logical_at: Some((1920, 0)),
             logical_size: Some((1707, 1067)),
+            name: None,
         };
         // No xdg-output: the mode over the scale, turned on its side.
         let turned = WaylandOutput {

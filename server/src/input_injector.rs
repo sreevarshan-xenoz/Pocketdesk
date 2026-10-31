@@ -218,6 +218,48 @@ enum InputBackend {
     Portal,
 }
 
+/// Where an absolute move lands with the backend made last (PC11), for a
+/// computer's screen windows: each window's session remaps its moves onto
+/// its own screen only where the backend spans the compositor's layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AbsoluteKind {
+    /// No backend yet, or one whose span is not placed: enigo's X screen,
+    /// the RemoteDesktop portal, whose moves go to the stream of whichever
+    /// capture runs its session, and any backend on GNOME or KDE (not
+    /// measured with two screens).
+    Unknown = 0,
+    /// The compositor's layout, in its logical pixels: uinput's absolute
+    /// device and wlroots' (or Hyprland's) virtual pointer.
+    Layout = 1,
+}
+
+static ABSOLUTE_KIND: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// [`AbsoluteKind`] of the injector made last in this process.
+pub fn absolute_kind() -> AbsoluteKind {
+    match ABSOLUTE_KIND.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => AbsoluteKind::Layout,
+        _ => AbsoluteKind::Unknown,
+    }
+}
+
+#[cfg(not(windows))]
+fn note_absolute_kind(backend: &InputBackend) {
+    let kind = match backend {
+        #[cfg(target_os = "linux")]
+        // GNOME's and KDE's own mapping of an absolute device is not
+        // measured: left as before there.
+        InputBackend::Uinput(_) | InputBackend::Wlr(_) if !portal_desktop() => AbsoluteKind::Layout,
+        _ => AbsoluteKind::Unknown,
+    };
+    ABSOLUTE_KIND.store(kind as u8, std::sync::atomic::Ordering::Relaxed);
+    // Follow the screens from now, so the first session finds them read.
+    #[cfg(target_os = "linux")]
+    if kind == AbsoluteKind::Layout {
+        crate::pointer_space::ensure_watching();
+    }
+}
+
 /// Send `event` to the capture's RemoteDesktop session (N8). With none (a
 /// remote, which captures nothing) the input goes nowhere: said once, not
 /// for every packet.
@@ -518,7 +560,13 @@ impl InputInjector {
             })
         }
         #[cfg(not(windows))]
-        Self::new_desktop()
+        {
+            let made = Self::new_desktop();
+            if let Ok(injector) = &made {
+                note_absolute_kind(&injector.backend);
+            }
+            made
+        }
     }
 
     /// The Linux/X11 constructor: uinput under Wayland, else enigo, else uinput.
