@@ -3195,40 +3195,31 @@ mod vector_tests {
         let _state = crate::state::use_test_dirs();
         let addr = real_port().await;
         // A phone paired in the throwaway state folder, whose id a stranger
-        // names after its own handshake.
-        let pair = || {
-            pocketdesk_core::protocol::kdeconnect::TrustStore::load_or_create(
-                crate::state::trust_store_path().unwrap(),
-            )
-            .unwrap()
-            .trust_device("vector-paired-phone")
-            .unwrap();
-        };
+        // names after its own handshake. The folder is this test's while it
+        // holds its turn, so one try each is the test: nothing else unpairs
+        // the phone meanwhile.
+        pocketdesk_core::protocol::kdeconnect::TrustStore::update(
+            crate::state::trust_store_path().unwrap(),
+            |store| store.trust_device("vector-paired-phone"),
+        )
+        .unwrap();
         let request = serde_json::json!({
             "type": "kdeconnect.pocketdesk.monitors",
             "body": { "request": true }
         });
-        // The control: the paired phone itself is answered. The state folder
-        // is this test's alone while it holds its turn; pairing again and
-        // retrying stays as a margin for a slow handshake.
+        // The control: the paired phone itself is answered.
         let mut answered = false;
-        for _ in 0..3 {
-            pair();
-            let mut paired = open_as(addr, true, true, "vector-paired-phone").await;
-            write_line(&mut paired, &request.to_string()).await;
-            // Its seed pushes come first; then the answer.
-            for _ in 0..10 {
-                match read_line(&mut paired, 5000).await {
-                    Some(line) if line.contains("\"kdeconnect.pocketdesk.monitors\"") => {
-                        answered = true;
-                        break;
-                    }
-                    Some(line) if line != CLOSED => continue,
-                    _ => break,
+        let mut paired = open_as(addr, true, true, "vector-paired-phone").await;
+        write_line(&mut paired, &request.to_string()).await;
+        // Its seed pushes come first; then the answer.
+        for _ in 0..10 {
+            match read_line(&mut paired, 5000).await {
+                Some(line) if line.contains("\"kdeconnect.pocketdesk.monitors\"") => {
+                    answered = true;
+                    break;
                 }
-            }
-            if answered {
-                break;
+                Some(line) if line != CLOSED => continue,
+                _ => break,
             }
         }
         assert!(answered, "the paired phone is answered");
@@ -3236,38 +3227,26 @@ mod vector_tests {
             "type": "kdeconnect.identity",
             "body": { "deviceId": "vector-paired-phone", "deviceName": "Borrowed" }
         });
-        // The stranger's silence counts only while the phone it names stayed
-        // paired throughout: otherwise it would be unanswered for the wrong
-        // reason, so try again.
-        let still_paired = || {
-            pocketdesk_core::protocol::kdeconnect::TrustStore::load_or_create(
-                crate::state::trust_store_path().unwrap(),
+        let mut stream = open(addr, true, true).await;
+        write_line(&mut stream, &identity.to_string()).await;
+        write_line(&mut stream, &request.to_string()).await;
+        let reply = read_line(&mut stream, 1000).await;
+        assert!(
+            pocketdesk_core::protocol::kdeconnect::TrustStore::read(
+                crate::state::trust_store_path().unwrap()
             )
             .unwrap()
-            .is_trusted("vector-paired-phone")
-        };
-        let mut judged = false;
-        for _ in 0..3 {
-            pair();
-            let mut stream = open(addr, true, true).await;
-            write_line(&mut stream, &identity.to_string()).await;
-            write_line(&mut stream, &request.to_string()).await;
-            let reply = read_line(&mut stream, 1000).await;
-            if !still_paired() {
-                continue;
-            }
-            // Told it is not paired (BB1), never answered.
-            let answered = reply.as_deref().is_some_and(|line| {
-                !line.contains(pocketdesk_core::protocol::connection::NOT_PAIRED)
-            });
-            assert!(
-                !answered,
-                "still the stranger it opened as: a paired phone's request would be answered"
-            );
-            judged = true;
-            break;
-        }
-        assert!(judged, "the phone stayed paired through none of the tries");
+            .is_trusted("vector-paired-phone"),
+            "the phone it names stayed paired"
+        );
+        // Told it is not paired (BB1), never answered.
+        let answered = reply
+            .as_deref()
+            .is_some_and(|line| !line.contains(pocketdesk_core::protocol::connection::NOT_PAIRED));
+        assert!(
+            !answered,
+            "still the stranger it opened as: a paired phone's request would be answered"
+        );
     }
 
     #[tokio::test]
