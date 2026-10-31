@@ -192,6 +192,11 @@ fn presses(
 /// The line that marks a desktop file as one this program wrote.
 const STUB_MARK: &str = "X-Pocketdesk-Stub=true";
 
+/// The hidden desktop file earlier trays wrote (its `Exec=` aside), which
+/// named the tray and hid the packaged menu entry behind it.
+const OLD_STUB: &str =
+    "[Desktop Entry]\nType=Application\nName=Pocketdesk\nExec=\nNoDisplay=true\n";
+
 /// What to do with the desktop file of [`APP_ID`] in the owner's own
 /// applications folder.
 #[derive(Debug, PartialEq, Eq)]
@@ -201,80 +206,140 @@ enum Stub {
     Remove,
 }
 
-/// The desktop file this program writes where no package installed one: it
-/// starts the app, as the packaged one does, and is marked as ours.
-fn stub_entry(app: &str) -> String {
+/// The desktop file this program writes where no package installed one,
+/// with `exec` as its `Exec=` value: it starts the app, as the packaged one
+/// does, and is marked as ours.
+fn stub_with_exec(exec: &str) -> String {
     format!(
         "[Desktop Entry]\nType=Application\nName=Pocketdesk\nComment=Your computer, on your \
-         Android phone\nExec={}\nIcon=pocketdesk\nTerminal=false\nCategories=Network;RemoteAccess;\n\
-         {STUB_MARK}\n",
-        exec_quoted(app)
+         Android phone\nExec={exec}\nIcon=pocketdesk\nTerminal=false\nCategories=Network;RemoteAccess;\n\
+         {STUB_MARK}\n"
     )
 }
 
-/// `path` as one argument of a desktop file's `Exec`: quoted, with the
-/// characters the spec reserves inside quotes escaped.
-fn exec_quoted(path: &str) -> String {
-    let mut out = String::from("\"");
-    for c in path.chars() {
-        if matches!(c, '"' | '`' | '$' | '\\') {
-            out.push('\\');
-        }
-        out.push(c);
-    }
-    out.push('"');
-    out
+/// Our desktop file starting `app`; none for a path a desktop file cannot
+/// carry (a line break in it).
+fn stub_entry(app: &str) -> Option<String> {
+    exec_value(app).map(|exec| stub_with_exec(&exec))
 }
 
-/// Whether `content` is a desktop file this program wrote: one marked so,
-/// or the hidden one earlier trays wrote, which named the tray and hid the
-/// packaged menu entry behind it.
-fn is_ours(content: &str) -> bool {
-    if content.lines().any(|l| l.trim() == STUB_MARK) {
-        return true;
+/// `path` as a desktop file's `Exec=` value, one argument: quoted, with the
+/// characters the spec reserves inside quotes (`"`, a backtick, `$` and the
+/// backslash) escaped by a backslash; then each backslash doubled, as a
+/// desktop file's strings escape it, and `%` doubled, as it is not a field
+/// code (review N7). None for a path with a line break.
+fn exec_value(path: &str) -> Option<String> {
+    if path.contains(['\n', '\r']) {
+        return None;
     }
-    let lines: Vec<&str> = content.lines().collect();
-    content.ends_with('\n')
-        && lines.len() == 5
-        && lines[0] == "[Desktop Entry]"
-        && lines[1] == "Type=Application"
-        && lines[2] == "Name=Pocketdesk"
-        && lines[3].starts_with("Exec=")
-        && lines[4] == "NoDisplay=true"
+    let backslash = char::from(92u8);
+    let mut quoted = String::from("\"");
+    for c in path.chars() {
+        if matches!(c, '"' | '`' | '$') || c == backslash {
+            quoted.push(backslash);
+        }
+        quoted.push(c);
+    }
+    quoted.push('"');
+    let mut value = String::new();
+    for c in quoted.chars() {
+        match c {
+            '%' => value.push_str("%%"),
+            c if c == backslash => {
+                value.push(backslash);
+                value.push(backslash);
+            }
+            c => value.push(c),
+        }
+    }
+    Some(value)
+}
+
+/// `content` with its `Exec=` line's value left out, so two desktop files
+/// that differ only in the program they start compare equal.
+fn without_exec(content: &str) -> String {
+    content
+        .split_inclusive('\n')
+        .map(|line| {
+            if line.starts_with("Exec=") {
+                if line.ends_with('\n') {
+                    "Exec=\n"
+                } else {
+                    "Exec="
+                }
+            } else {
+                line
+            }
+        })
+        .collect()
+}
+
+/// Whether `content` is a desktop file this program wrote and no one has
+/// changed since: our marked entry or the old hidden one, exactly, but for
+/// the program it starts. Anything else, an entry of ours the owner edited
+/// in a menu editor among them, is the owner's (review I5).
+fn is_ours(content: &str) -> bool {
+    let content = without_exec(content);
+    content == without_exec(&stub_with_exec("")) || content == OLD_STUB
 }
 
 /// The portal names a host program only when a desktop file of its id is
 /// installed. A packaged one (in a system data folder) is never shadowed:
-/// ours is removed when one is there, and a file the owner wrote is never
-/// touched. Otherwise ours is written, or replaced when it is out of date.
-fn plan_stub(own: Option<&str>, packaged: bool, app: &str) -> Stub {
+/// ours is removed when one is there, and a file the owner wrote or edited
+/// is never touched. Otherwise ours is written, or replaced when it starts
+/// another program; `app` is None when its path is not one a desktop file
+/// can carry, and then nothing is written.
+fn plan_stub(own: Option<&str>, packaged: bool, app: Option<&str>) -> Stub {
     match own {
-        Some(content) if !is_ours(content) => Stub::Leave,
-        Some(_) if packaged => Stub::Remove,
-        None if packaged => Stub::Leave,
-        Some(content) if content == stub_entry(app) => Stub::Leave,
-        _ => Stub::Write(stub_entry(app)),
+        Some(content) if !is_ours(content) => return Stub::Leave,
+        Some(_) if packaged => return Stub::Remove,
+        None if packaged => return Stub::Leave,
+        _ => {}
+    }
+    match app.and_then(stub_entry) {
+        Some(entry) if own != Some(entry.as_str()) => Stub::Write(entry),
+        _ => Stub::Leave,
     }
 }
 
-/// The owner's own data folder, and the system ones, as XDG names them.
-fn data_dirs() -> (Option<std::path::PathBuf>, Vec<std::path::PathBuf>) {
-    let home = std::env::var_os("XDG_DATA_HOME")
-        .filter(|d| !d.is_empty())
-        .map(std::path::PathBuf::from)
+/// The owner's own data folder: `XDG_DATA_HOME` when it is absolute, else
+/// `~/.local/share`.
+fn data_home(xdg_data_home: Option<&str>, home: Option<&str>) -> Option<std::path::PathBuf> {
+    xdg_data_home
+        .map(std::path::Path::new)
+        .filter(|d| d.is_absolute())
+        .map(std::path::Path::to_path_buf)
         .or_else(|| {
-            std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".local/share"))
-        });
-    let system = std::env::var("XDG_DATA_DIRS")
-        .ok()
+            home.map(std::path::Path::new)
+                .filter(|h| h.is_absolute())
+                .map(|h| h.join(".local/share"))
+        })
+}
+
+/// The system data folders from `XDG_DATA_DIRS` (its default when unset or
+/// empty): absolute ones only, as the spec says, and never the owner's own,
+/// which some sessions list there too, so our own file is not taken for a
+/// packaged one (review N8).
+fn system_data_dirs(
+    xdg_data_dirs: Option<&str>,
+    own: Option<&std::path::Path>,
+) -> Vec<std::path::PathBuf> {
+    let same = |a: &std::path::Path, b: &std::path::Path| {
+        a == b
+            || matches!(
+                (a.canonicalize(), b.canonicalize()),
+                (Ok(a), Ok(b)) if a == b
+            )
+    };
+    xdg_data_dirs
         .filter(|d| !d.is_empty())
-        .unwrap_or_else(|| "/usr/local/share:/usr/share".to_string());
-    let system = system
+        .unwrap_or("/usr/local/share:/usr/share")
         .split(':')
-        .filter(|d| !d.is_empty())
-        .map(std::path::PathBuf::from)
-        .collect();
-    (home, system)
+        .map(std::path::Path::new)
+        .filter(|d| d.is_absolute())
+        .filter(|d| !own.is_some_and(|own| same(d, own)))
+        .map(std::path::Path::to_path_buf)
+        .collect()
 }
 
 /// Name this program to the portal, as a sandboxed app is named by its
@@ -283,21 +348,25 @@ fn data_dirs() -> (Option<std::path::PathBuf>, Vec<std::path::PathBuf>) {
 /// it themselves.
 fn register_host(conn: &Connection) {
     let file_name = format!("{APP_ID}.desktop");
-    let (home, system) = data_dirs();
-    let packaged = system
+    let var = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
+    let home = data_home(var("XDG_DATA_HOME").as_deref(), var("HOME").as_deref());
+    let packaged = system_data_dirs(var("XDG_DATA_DIRS").as_deref(), home.as_deref())
         .iter()
         .any(|d| d.join("applications").join(&file_name).is_file());
     if let Some(dir) = home.map(|h| h.join("applications")) {
         let file = dir.join(&file_name);
-        // The app beside this tray, as the packages install them.
-        let app = std::env::current_exe()
+        // The app beside this tray, as the packages install them; a path
+        // that is not UTF-8 is not written into the file.
+        let beside = std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(|d| d.join("pocketdesk-app")))
-            .filter(|p| p.is_file())
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "pocketdesk-app".to_string());
+            .filter(|p| p.is_file());
+        let app = match &beside {
+            Some(path) => path.to_str().map(str::to_string),
+            None => Some("pocketdesk-app".to_string()),
+        };
         let own = std::fs::read_to_string(&file).ok();
-        match plan_stub(own.as_deref(), packaged, &app) {
+        match plan_stub(own.as_deref(), packaged, app.as_deref()) {
             Stub::Leave => {}
             Stub::Remove => {
                 let _ = std::fs::remove_file(&file);
@@ -445,60 +514,113 @@ fn close(conn: &Connection, session: &OwnedObjectPath) {
 mod tests {
     use super::*;
 
-    const OLD_STUB: &str = "[Desktop Entry]\nType=Application\nName=Pocketdesk\nExec=/opt/pd/pocketdesk-tray\nNoDisplay=true\n";
+    const OLD: &str = "[Desktop Entry]\nType=Application\nName=Pocketdesk\nExec=/opt/pd/pocketdesk-tray\nNoDisplay=true\n";
 
-    #[test]
-    fn a_packaged_desktop_file_is_never_shadowed() {
-        // Nothing of ours and a packaged one: nothing written.
-        assert_eq!(
-            plan_stub(None, true, "/usr/bin/pocketdesk-app"),
-            Stub::Leave
-        );
-        // The hidden one an earlier tray wrote goes, so the menu entry shows.
-        assert_eq!(
-            plan_stub(Some(OLD_STUB), true, "/usr/bin/pocketdesk-app"),
-            Stub::Remove
-        );
-        // So does a stub of ours, once a package is installed.
-        let ours = stub_entry("/opt/pd/pocketdesk-app");
-        assert_eq!(
-            plan_stub(Some(&ours), true, "/usr/bin/pocketdesk-app"),
-            Stub::Remove
-        );
+    fn ours(app: &str) -> String {
+        stub_entry(app).expect("a path a desktop file carries")
     }
 
     #[test]
-    fn a_desktop_file_the_owner_wrote_is_never_touched() {
-        let edited =
+    fn a_packaged_desktop_file_is_never_shadowed() {
+        let app = Some("/usr/bin/pocketdesk-app");
+        // Nothing of ours and a packaged one: nothing written.
+        assert_eq!(plan_stub(None, true, app), Stub::Leave);
+        // The hidden one an earlier tray wrote goes, so the menu entry shows.
+        assert_eq!(plan_stub(Some(OLD), true, app), Stub::Remove);
+        // So does an entry of ours, once a package is installed, whatever
+        // program it started.
+        let earlier = ours("/opt/pd/pocketdesk-app");
+        assert_eq!(plan_stub(Some(&earlier), true, app), Stub::Remove);
+    }
+
+    #[test]
+    fn a_desktop_file_the_owner_wrote_or_edited_is_never_touched() {
+        let app = Some("pocketdesk-app");
+        let written =
             "[Desktop Entry]\nType=Application\nName=My Pocketdesk\nExec=pocketdesk-app --x\n";
-        assert_eq!(
-            plan_stub(Some(edited), false, "pocketdesk-app"),
-            Stub::Leave
-        );
-        assert_eq!(plan_stub(Some(edited), true, "pocketdesk-app"), Stub::Leave);
-        // The old stub's shape, with a line more, is not ours either.
-        let more = format!("{OLD_STUB}Icon=x\n");
-        assert_eq!(plan_stub(Some(&more), true, "pocketdesk-app"), Stub::Leave);
+        // Ours, edited in a menu editor (the mark kept): renamed, hidden,
+        // or with a line more. Neither rewritten nor removed.
+        let renamed = ours("pocketdesk-app").replace("Name=Pocketdesk", "Name=My Pocketdesk");
+        let hidden = format!("{}Hidden=true\n", ours("pocketdesk-app"));
+        let old_more = format!("{OLD}Icon=x\n");
+        for edited in [written, &renamed, &hidden, &old_more] {
+            assert_eq!(plan_stub(Some(edited), false, app), Stub::Leave, "{edited}");
+            assert_eq!(plan_stub(Some(edited), true, app), Stub::Leave, "{edited}");
+        }
     }
 
     #[test]
     fn with_no_package_ours_starts_the_app_and_shows_in_menus() {
         let app = "/home/me/pd build/target/release/pocketdesk-app";
-        let Stub::Write(entry) = plan_stub(None, false, app) else {
+        let Stub::Write(entry) = plan_stub(None, false, Some(app)) else {
             panic!("nothing written");
         };
         assert!(entry.contains("Exec=\"/home/me/pd build/target/release/pocketdesk-app\"\n"));
         assert!(!entry.contains("NoDisplay"));
         assert!(!entry.contains("pocketdesk-tray"));
         assert!(is_ours(&entry));
-        // Up to date: left alone; the old hidden one is replaced.
-        assert_eq!(plan_stub(Some(&entry), false, app), Stub::Leave);
-        assert_eq!(plan_stub(Some(OLD_STUB), false, app), Stub::Write(entry));
+        // Up to date: left alone. The old hidden one, or ours starting
+        // another program, is replaced.
+        assert_eq!(plan_stub(Some(&entry), false, Some(app)), Stub::Leave);
+        assert_eq!(
+            plan_stub(Some(OLD), false, Some(app)),
+            Stub::Write(entry.clone())
+        );
+        let moved = ours("/elsewhere/pocketdesk-app");
+        assert_eq!(
+            plan_stub(Some(&moved), false, Some(app)),
+            Stub::Write(entry)
+        );
+        // A path a desktop file cannot carry: nothing written.
+        assert_eq!(plan_stub(None, false, None), Stub::Leave);
+        assert_eq!(plan_stub(None, false, Some("/a/b\nc")), Stub::Leave);
     }
 
     #[test]
-    fn exec_quotes_reserved_characters() {
-        assert_eq!(exec_quoted("/a b/c"), "\"/a b/c\"");
-        assert_eq!(exec_quoted(r#"/a"$`\b"#), r#""/a\"\$\`\\b""#);
+    fn exec_escapes_quotes_then_the_strings_backslashes_and_percent() {
+        let b = char::from(92u8).to_string();
+        // A space: quoted only.
+        assert_eq!(exec_value("/a b/app").unwrap(), "\"/a b/app\"");
+        // `$`, a backtick and `"` get a backslash inside the quotes, and
+        // that backslash is doubled as a string escape: two in the file.
+        assert_eq!(
+            exec_value("/a$b`c\"d").unwrap(),
+            format!("\"/a{b}{b}$b{b}{b}`c{b}{b}\"d\"")
+        );
+        // A backslash: escaped inside the quotes (two), each doubled (four).
+        assert_eq!(
+            exec_value(&format!("/a{b}x")).unwrap(),
+            format!("\"/a{b}{b}{b}{b}x\"")
+        );
+        // `%` is doubled, so it is not a field code.
+        assert_eq!(exec_value("/50%/app").unwrap(), "\"/50%%/app\"");
+        // A line break: refused.
+        assert_eq!(exec_value("/a\rb"), None);
+    }
+
+    #[test]
+    fn only_absolute_system_folders_count_and_never_the_owners_own() {
+        let home = data_home(Some("/home/me/.local/share"), Some("/home/me"));
+        assert_eq!(
+            home.as_deref(),
+            Some(std::path::Path::new("/home/me/.local/share"))
+        );
+        // A relative XDG_DATA_HOME is ignored for the default.
+        let home = data_home(Some("rel/share"), Some("/home/me")).unwrap();
+        assert_eq!(home, std::path::Path::new("/home/me/.local/share"));
+        let dirs = system_data_dirs(
+            Some("/home/me/.local/share:relative/share::/usr/share"),
+            Some(&home),
+        );
+        assert_eq!(dirs, vec![std::path::PathBuf::from("/usr/share")]);
+        // Unset or empty: the spec's default.
+        assert_eq!(
+            system_data_dirs(None, Some(&home)),
+            vec![
+                std::path::PathBuf::from("/usr/local/share"),
+                std::path::PathBuf::from("/usr/share")
+            ]
+        );
+        assert_eq!(system_data_dirs(Some(""), None).len(), 2);
     }
 }
