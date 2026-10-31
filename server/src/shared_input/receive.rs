@@ -1163,10 +1163,6 @@ fn drives_now(msg: &Msg, from: &str, allowed: bool, driver: Option<&str>) -> boo
         }
 }
 
-/// The receiving side, for the server's life: take what other computers
-/// send ([`link::incoming`]) and act on it, keep this computer awake while
-/// someone drives it, and keep `shared_screens.json`. Not run with
-/// `POCKETDESK_SHARE_TEST` set, whose recorder takes what arrives instead.
 /// The most messages taken off the link at once, for [`stale_moves`].
 const BATCH_MOST: usize = 256;
 
@@ -1206,6 +1202,10 @@ fn stale_moves<'a>(batch: impl DoubleEndedIterator<Item = (&'a str, &'a Msg)>) -
     stale
 }
 
+/// The receiving side, for the server's life: take what other computers
+/// send ([`link::incoming`]) and act on it, keep this computer awake while
+/// someone drives it, and keep `shared_screens.json`. Not run with
+/// `POCKETDESK_SHARE_TEST` set, whose recorder takes what arrives instead.
 pub async fn run() {
     let mut arriving = link::incoming();
     let state_dir = crate::state::state_dir().ok();
