@@ -39,13 +39,24 @@ fi
 
 cargo +"$toolchain" fuzz build --target "$host" --sanitizer "$sanitizer" --debug-assertions
 
+# The longest input tried, per target: long enough to cross every limit it
+# reads (a shared-input frame's 65,535 bytes, another computer's 256 KiB
+# clipboard), and no longer, since a longer one slows every run.
+max_len() {
+    case "$1" in
+        shared_input_wire) echo 70000 ;;
+        computer_link | clipboard_push) echo 270000 ;;
+        *) echo 20000 ;;
+    esac
+}
+
 failed=()
 for target in "${targets[@]}"; do
     mkdir -p "corpus/$target"
     echo "== $target: ${seconds}s"
     if ! cargo +"$toolchain" fuzz run --target "$host" --sanitizer "$sanitizer" --debug-assertions "$target" \
         "corpus/$target" "seeds/$target" -- \
-        -max_total_time="$seconds" -max_len=20000 -timeout=10 -print_final_stats=1; then
+        -max_total_time="$seconds" -max_len="$(max_len "$target")" -timeout=10 -print_final_stats=1; then
         failed+=("$target")
     fi
 done

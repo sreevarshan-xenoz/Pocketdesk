@@ -56,10 +56,13 @@ fn computer_link_body(packet: &NetworkPacket) {
 }
 
 /// The clipboard push's body, as the computer link and the control channel
-/// read it: its text, its image, its marks.
+/// read it: its text (held to `MAX_PUSH`), its image and its marks.
 pub fn clipboard_body(body: &serde_json::Value) {
-    if let Some(content) = body.get("content").and_then(|v| v.as_str()) {
-        let _ = content.len() > crate::clipboard_push::MAX_PUSH;
+    if let Ok(Some(text)) = crate::clipboard_push::pushed_text(body) {
+        assert!(
+            text.len() <= crate::clipboard_push::MAX_PUSH,
+            "a text over the limit taken"
+        );
     }
     let _ = crate::clipboard_push::told_image(body);
     let _ = crate::clipboard_push::marked(body);
