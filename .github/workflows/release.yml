@@ -77,11 +77,28 @@ jobs:
         run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod* && sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update && sudo apt-get install -y --no-install-recommends libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
 
       # Two builds, so the server's zbus `tokio` is not unified into the
-      # window's: AccessKit runs zbus on async-io there (N10).
+      # window's: AccessKit runs zbus on async-io there (N10). The tarball's
+      # server is a third, without the in-process encoder (`inproc`): it links
+      # no FFmpeg library, whose sonames change with each FFmpeg major, and
+      # encodes through the system `ffmpeg` program instead, so it runs on
+      # Arch's or Fedora's FFmpeg as well as this runner's. The .deb, built for
+      # this Ubuntu, keeps the in-process encoder.
       - name: Build release binaries
         run: |
+          cargo build --release -p pocketdesk-server --no-default-features --bin pocketdesk
+          mkdir -p portable && cp target/release/pocketdesk portable/
           cargo build --release --bin pocketdesk
           cargo build --release -p pocketdesk-desktop --bin pocketdesk-app --bin pocketdesk-tray
+
+      - name: Check the tarball's programs link no FFmpeg library
+        run: |
+          for bin in portable/pocketdesk target/release/pocketdesk-app target/release/pocketdesk-tray; do
+            echo "$bin:"; readelf -d "$bin" | grep NEEDED
+            if readelf -d "$bin" | grep -E 'NEEDED.*\[lib(av|sw|postproc)'; then
+              echo "$bin links an FFmpeg library; the tarball's programs must not" >&2
+              exit 1
+            fi
+          done
 
       - name: Run tests
         run: cargo test --workspace
@@ -90,10 +107,37 @@ jobs:
         run: |
           name="pocketdesk-${{ needs.version.outputs.name }}-linux-x86_64"
           mkdir -p "release/$name"
-          cp target/release/pocketdesk target/release/pocketdesk-app target/release/pocketdesk-tray "release/$name/"
+          cp portable/pocketdesk target/release/pocketdesk-app target/release/pocketdesk-tray "release/$name/"
           cp config.toml.example pocketdesk.service README.md SECURITY.md LICENSE-MIT LICENSE-APACHE "release/$name/"
           cp -r man "release/$name/"
           tar -C release -czf "release/$name.tar.gz" "$name"
+
+      # The tarball is meant to unpack and run on other distros: unpack it in
+      # Arch and Fedora containers, with the distro's own libraries and FFmpeg,
+      # check every library resolves, and run the server's --version and
+      # capabilities. On Arch, also a software encode through that FFmpeg
+      # (Fedora's own ffmpeg-free has no libx264).
+      - name: Run the tarball on Arch and Fedora
+        timeout-minutes: 20
+        run: |
+          tarball=$(ls release/pocketdesk-*-linux-x86_64.tar.gz)
+          check='set -e
+            mkdir /pd && tar -C /pd -xzf /r/tarball.tar.gz && cd /pd/pocketdesk-*
+            for bin in pocketdesk pocketdesk-app pocketdesk-tray; do
+              if ldd "$bin" | grep "not found"; then echo "$bin: missing libraries" >&2; exit 1; fi
+            done
+            ./pocketdesk --version
+            ./pocketdesk capabilities > /dev/null && echo "capabilities: ok"
+            if [ "$BENCH" = 1 ]; then
+              ./pocketdesk bench --target software --frames 60 --repeat 1 --json > /tmp/bench.json
+              grep -q "\"backend\": *\"ffmpeg-sidecar\"" /tmp/bench.json
+              echo "software encode through the system ffmpeg: ok"
+            fi'
+          cp "$tarball" "$RUNNER_TEMP/tarball.tar.gz"
+          docker run --rm -e BENCH=1 -v "$RUNNER_TEMP:/r:ro" archlinux:latest sh -c \
+            "pacman -Syu --noconfirm --needed pipewire wayland mesa libglvnd libxkbcommon libxcb opus ffmpeg >/dev/null && $check"
+          docker run --rm -e BENCH=0 -v "$RUNNER_TEMP:/r:ro" fedora:latest sh -c \
+            "dnf install -y -q pipewire-libs libwayland-client mesa-libgbm mesa-libEGL libxkbcommon libxcb opus ffmpeg-free >/dev/null && $check"
 
       # The Debian/Ubuntu package (BH2): packaging/linux/build-deb.sh, its
       # Depends worked out from the libraries these binaries link to.

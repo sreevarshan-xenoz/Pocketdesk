@@ -44,6 +44,20 @@ ISCC packaging\windows\pocketdesk.iss /DAppVersion=v0.7.0 /DNumericVersion=0.7.0
 
 The output goes to `release\`. `/DSourceDir=` takes the executables from another folder. The wizard's images (`wizard-*.bmp`) are rendered from `assets/brand/pocketdesk-mark-512.png`, and the icon from `pocketdesk-icon-1024.png`.
 
+## The Linux tarball
+
+`pocketdesk-<version>-linux-x86_64.tar.gz` holds the server, the desktop app and the tray, unpacked and run where they are (`scripts/install.sh` installs from it). It is built on Ubuntu like the .deb, but meant for any distro, so its server is built without the in-process encoder (`cargo build -p pocketdesk-server --no-default-features`, which leaves out the `inproc` feature):
+
+- **Why:** the in-process encoder links the build machine's FFmpeg libraries, and their sonames change with every FFmpeg major (Ubuntu 24.04's FFmpeg 6 is `libavutil.so.58`, Arch's FFmpeg 9 `libavutil.so.61`). 0.8.3's tarball linked them and did not start on Arch.
+- **How it encodes:** through the system `ffmpeg` program (the sidecar, as on Windows), whose command line works across versions. VAAPI hardware encoding still works: the sidecar binds to the render node whose kernel driver has a VA-API encoder (Intel or AMD, never NVIDIA's own), and software encoding (libx264) is the fallback. NVENC goes through the same program.
+- **What it needs:** the `ffmpeg` program (Arch's `ffmpeg`; on Fedora `ffmpeg-free`, or RPM Fusion's `ffmpeg` for libx264), PipeWire, Wayland, Mesa's GBM and EGL, and glibc 2.39 or newer (the build runner's, Ubuntu 24.04; Fedora 40 and Arch have newer ones). The release workflow checks that none of the tarball's programs links an FFmpeg library.
+- **Checked on other distros:** the workflow unpacks it in `archlinux` and `fedora` containers, checks every library resolves, and runs `pocketdesk --version` and `pocketdesk capabilities` (on Arch also a software encode through its FFmpeg). The release checklist adds a run on a real Arch or Fedora machine.
+- **What it gives up:** the in-process encoder's keyframe on request (the sidecar's next keyframe is up to two seconds away, its fixed interval, so a lost frame takes longer to recover from) and its bitrate changes in place (the sidecar restarts FFmpeg for one).
+
+The .deb (below) and the AUR package keep the in-process encoder: each is built against the FFmpeg of the distro it installs on.
+
+Other ways were weighed: loading FFmpeg at run time with `dlopen` (`ffmpeg-next` binds its symbols at link time, and the structures it reads change layout between majors, so it would mean a second encoder against per-version layouts); a static minimal LGPL FFmpeg (libx264 is GPL, so only VAAPI would be left, LGPL static linking would oblige us to ship object files for relinking, and it adds a C build of FFmpeg to the release); bundling Ubuntu's `.so` files beside the binary (dozens of libraries down the chain, and Ubuntu's FFmpeg is a GPL build, so the bundle would carry GPL code beside our MIT/Apache binaries).
+
 ## The Debian/Ubuntu package
 
 `packaging/linux/build-deb.sh <release> <binaries> <output>` builds `pocketdesk-<release>-linux-amd64.deb`. The release workflow runs it on Ubuntu after the release build. Its `Depends` come from `dpkg-shlibdeps`, so they are the libraries the binaries were linked to, and the package fits that Ubuntu release and newer ones that keep those libraries.

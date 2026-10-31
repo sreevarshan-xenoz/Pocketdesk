@@ -856,6 +856,17 @@ _build_dep_list() {
       ;;
   esac
 
+  # The server encodes video through the system `ffmpeg` program; the
+  # release tarball links no FFmpeg library, so it works with any version.
+  # Fedora's own build is ffmpeg-free (RPM Fusion's ffmpeg adds libx264).
+  if ! command -v ffmpeg &>/dev/null; then
+    case "$PKG_MANAGER" in
+      apt|pacman|apk) _deps+=("ffmpeg") ;;
+      dnf) _deps+=("ffmpeg-free") ;;
+      *) warn "Install FFmpeg (the ffmpeg program): the server encodes video with it." ;;
+    esac
+  fi
+
   # Compositor-specific portal backends
   if [ "$SESSION_TYPE" = "wayland" ]; then
     case "$PKG_MANAGER" in

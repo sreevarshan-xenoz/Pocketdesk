@@ -269,6 +269,8 @@ curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/s
 curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh | bash -s -- --dry-run
 ```
 
+The script installs the release's `linux-x86_64` tarball, which runs on any distro with glibc 2.39 or newer. It encodes video through the system `ffmpeg` program, so it works with whichever FFmpeg your distro has; the script installs FFmpeg if it is missing (on Fedora `ffmpeg-free`; RPM Fusion's `ffmpeg` adds the software encoder).
+
 ### Debian and Ubuntu: the .deb
 
 From 0.7.0 on, each release has `pocketdesk-<version>-linux-amd64.deb`, built on Ubuntu. Install it with:
