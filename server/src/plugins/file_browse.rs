@@ -402,19 +402,21 @@ mod tests {
         assert!(!truncated);
     }
 
-    fn temp_home(name: &str) -> PathBuf {
+    /// A throwaway home, and the test's turn on the state folder, held by
+    /// the caller as long as it browses.
+    fn temp_home(name: &str) -> (crate::state::TestState, PathBuf) {
         // Browsing reads where the state and config folders are, to keep
         // them out: the throwaways, never the owner's.
-        let _state = crate::state::use_test_dirs();
+        let state = crate::state::use_test_dirs();
         let dir = std::env::temp_dir().join(format!("ll-browse-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("docs")).unwrap();
-        dir
+        (state, dir)
     }
 
     #[test]
     fn only_real_folders_inside_home_can_be_listed() {
-        let home = temp_home("inside");
+        let (_state, home) = temp_home("inside");
         let docs = home.join("docs");
         let real_docs = docs.canonicalize().unwrap();
         assert_eq!(
@@ -444,7 +446,7 @@ mod tests {
 
     #[test]
     fn network_and_device_paths_are_refused_without_being_opened() {
-        let home = temp_home("unc");
+        let (_state, home) = temp_home("unc");
         for path in [
             r"\\192.0.2.1\share",
             r"\\?\UNC\192.0.2.1\share",
@@ -471,7 +473,7 @@ mod tests {
 
     #[test]
     fn a_reply_says_where_it_is_and_how_to_go_up() {
-        let home = temp_home("where");
+        let (_state, home) = temp_home("where");
         std::fs::write(home.join("a.txt"), "a").unwrap();
         std::fs::write(home.join("docs").join("b.txt"), "bb").unwrap();
 
@@ -496,7 +498,7 @@ mod tests {
 
     #[test]
     fn nothing_hidden_can_be_opened_or_fetched_by_path() {
-        let home = temp_home("hiddenpath");
+        let (_state, home) = temp_home("hiddenpath");
         std::fs::create_dir_all(home.join(".ssh")).unwrap();
         std::fs::write(home.join(".ssh").join("id_ed25519"), "secret").unwrap();
         std::fs::write(home.join("docs").join(".env"), "secret").unwrap();
@@ -513,7 +515,7 @@ mod tests {
     fn a_folder_windows_marks_hidden_cannot_be_opened_by_path() {
         use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, SetFileAttributesW};
         use windows::core::HSTRING;
-        let home = temp_home("winhiddenpath");
+        let (_state, home) = temp_home("winhiddenpath");
         let app_data = home.join("AppData");
         std::fs::create_dir_all(app_data.join("Local")).unwrap();
         std::fs::write(app_data.join("Local").join("key"), "secret").unwrap();
@@ -526,7 +528,7 @@ mod tests {
 
     #[test]
     fn the_servers_own_files_cannot_be_fetched() {
-        let home = temp_home("private");
+        let (_state, home) = temp_home("private");
         let state = home.join("docs").join("pocketdesk");
         std::fs::create_dir_all(state.join("certs")).unwrap();
         std::fs::write(state.join("certs").join("identity.key"), "secret").unwrap();
@@ -540,7 +542,7 @@ mod tests {
 
     #[test]
     fn a_windows_device_name_below_home_is_refused_as_text() {
-        let home = temp_home("devices");
+        let (_state, home) = temp_home("devices");
         for name in ["COM1", "lpt1.txt", "CONIN$", "nul"] {
             let path = home.join("docs").join(name);
             assert!(names_a_device(&home, path.to_str().unwrap()), "{name}");
@@ -556,7 +558,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn a_junction_to_a_folder_is_listed_as_a_folder() {
-        let home = temp_home("junction");
+        let (_state, home) = temp_home("junction");
         let target = home.join("docs");
         let link = home.join("Pictures");
         let made = std::process::Command::new(r"C:\Windows\System32\cmd.exe")
@@ -579,7 +581,7 @@ mod tests {
 
     #[test]
     fn hidden_entries_are_not_listed() {
-        let home = temp_home("hidden");
+        let (_state, home) = temp_home("hidden");
         std::fs::create_dir(home.join(".cache")).unwrap();
         std::fs::write(home.join(".bashrc"), "x").unwrap();
         std::fs::write(home.join("notes.txt"), "x").unwrap();
@@ -591,7 +593,7 @@ mod tests {
     fn a_file_windows_marks_hidden_is_not_listed() {
         use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, SetFileAttributesW};
         use windows::core::HSTRING;
-        let home = temp_home("winhidden");
+        let (_state, home) = temp_home("winhidden");
         let secret = home.join("desktop.ini");
         std::fs::write(&secret, "x").unwrap();
         // SAFETY: a plain call with a valid, NUL-terminated path.
@@ -602,7 +604,7 @@ mod tests {
 
     #[test]
     fn folders_come_first_then_names_regardless_of_case() {
-        let home = temp_home("sort");
+        let (_state, home) = temp_home("sort");
         std::fs::create_dir(home.join("Zeta")).unwrap();
         for f in ["b.txt", "A.txt", "c.txt"] {
             std::fs::write(home.join(f), "x").unwrap();
@@ -615,7 +617,7 @@ mod tests {
 
     #[test]
     fn a_missing_folder_answers_an_error_that_keeps_the_way_up() {
-        let home = temp_home("missing");
+        let (_state, home) = temp_home("missing");
         let missing = home.join("docs").join("gone");
         let reply = browse_reply(&home, missing.to_str().unwrap());
         assert!(reply["error"].is_string());
@@ -629,7 +631,7 @@ mod tests {
 
     #[test]
     fn only_a_regular_file_inside_home_can_be_fetched() {
-        let home = temp_home("fetch");
+        let (_state, home) = temp_home("fetch");
         std::fs::write(home.join("a.txt"), "abc").unwrap();
         let a = home.join("a.txt");
         assert_eq!(
@@ -653,7 +655,7 @@ mod tests {
 
     #[test]
     fn a_file_of_an_asked_folder_is_checked_again_when_fetched() {
-        let home = temp_home("still-within");
+        let (_state, home) = temp_home("still-within");
         let root = home.join("docs");
         std::fs::create_dir_all(root.join("a")).unwrap();
         std::fs::create_dir_all(root.join(".h")).unwrap();
@@ -679,7 +681,7 @@ mod tests {
 
     #[test]
     fn only_a_real_folder_below_home_can_be_asked_for_whole() {
-        let home = temp_home("fetch-folder");
+        let (_state, home) = temp_home("fetch-folder");
         std::fs::write(home.join("a.txt"), "abc").unwrap();
         std::fs::create_dir_all(home.join(".secret")).unwrap();
         let docs = home.join("docs");
@@ -702,7 +704,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_link_cannot_fetch_a_file_outside_home() {
-        let home = temp_home("fetchlink");
+        let (_state, home) = temp_home("fetchlink");
         let link = home.join("passwd");
         std::os::unix::fs::symlink("/etc/passwd", &link).unwrap();
         assert!(resolve_file_in(&home, link.to_str().unwrap()).is_err());
@@ -711,7 +713,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_symlink_inside_home_cannot_lead_out_of_it() {
-        let home = temp_home("link");
+        let (_state, home) = temp_home("link");
         let link = home.join("escape");
         std::os::unix::fs::symlink("/", &link).unwrap();
         assert_eq!(

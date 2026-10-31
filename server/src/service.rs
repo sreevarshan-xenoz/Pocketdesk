@@ -2492,8 +2492,9 @@ mod control_tls_tests {
     async fn counting_port(
         pairing_required: bool,
     ) -> (std::net::SocketAddr, Arc<std::sync::atomic::AtomicUsize>) {
-        // The gates read a throwaway state folder, never the user's.
-        let _state = crate::state::use_test_dirs();
+        // The gates read a throwaway state folder, never the user's: the
+        // calling test holds its turn on it.
+        crate::state::assert_test_turn();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let desktop = CertManager::new().unwrap();
@@ -2921,7 +2922,7 @@ mod internet_control_tests {
     }
 
     fn paired_with_iroh_key(device_id: &str, key: Option<&iroh::SecretKey>) {
-        let _state = crate::state::use_test_dirs();
+        crate::state::assert_test_turn();
         let dir = state::state_dir().unwrap();
         std::fs::create_dir_all(&dir).unwrap();
         TrustStore::update(state::trust_store_path().unwrap(), |store| {
@@ -3007,7 +3008,7 @@ mod vector_tests {
     /// A control port served by the real handler, the real plugins and the
     /// computer's real identity packet, over a throwaway state folder.
     async fn real_port() -> std::net::SocketAddr {
-        let _state = crate::state::use_test_dirs();
+        crate::state::assert_test_turn();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let desktop = CertManager::new().unwrap();
