@@ -682,33 +682,79 @@ pub(crate) fn may_drive_here(device_id: &str) -> bool {
     crate::events::current_config().shared_input && standing_now(device_id).allowed
 }
 
-/// The setting and each computer's standing, read again at most once a
-/// [`RECHECK`] (they are files: config.toml and the trust store).
-#[derive(Default)]
+/// `shared_input`, `shared_input_clipboard` and `shared_input_low_latency`.
+type Settings = (bool, bool, bool);
+
+/// The settings as read now (a file: blocking).
+fn settings_now() -> Settings {
+    let config = crate::events::current_config();
+    (
+        config.shared_input,
+        config.shared_input_clipboard,
+        config.shared_input_low_latency,
+    )
+}
+
+/// The setting and each computer's standing, read again once a
+/// [`RECHECK`] (they are files: config.toml and the trust store). Only the
+/// first read of each is waited for: after that one past its [`RECHECK`]
+/// is read again on a blocking thread while the loop goes on with the
+/// value it has, so a slow disk never holds up an injection (it waited
+/// for the read once a second before).
 struct Gate {
-    /// `shared_input`, `shared_input_clipboard` and
-    /// `shared_input_low_latency`, and when read.
-    on: Option<((bool, bool, bool), Instant)>,
+    on: Option<(Settings, Instant)>,
     standings: HashMap<String, (Standing, Instant)>,
+    /// The settings' read under way, and each computer's.
+    reading_on: Option<tokio::task::JoinHandle<Settings>>,
+    reading: HashMap<String, tokio::task::JoinHandle<Standing>>,
+    read_on: std::sync::Arc<dyn Fn() -> Settings + Send + Sync>,
+    read_standing: std::sync::Arc<dyn Fn(&str) -> Standing + Send + Sync>,
+}
+
+impl Default for Gate {
+    fn default() -> Gate {
+        Gate::with(settings_now, standing_now)
+    }
 }
 
 impl Gate {
-    async fn settings(&mut self) -> (bool, bool, bool) {
-        if let Some((on, at)) = self.on
-            && at.elapsed() < RECHECK
+    /// A gate reading the settings with `read_on` and a computer's
+    /// standing with `read_standing` (seams for the tests).
+    fn with(
+        read_on: impl Fn() -> Settings + Send + Sync + 'static,
+        read_standing: impl Fn(&str) -> Standing + Send + Sync + 'static,
+    ) -> Gate {
+        Gate {
+            on: None,
+            standings: HashMap::new(),
+            reading_on: None,
+            reading: HashMap::new(),
+            read_on: std::sync::Arc::new(read_on),
+            read_standing: std::sync::Arc::new(read_standing),
+        }
+    }
+
+    async fn settings(&mut self) -> Settings {
+        if self.reading_on.as_ref().is_some_and(|r| r.is_finished())
+            && let Some(read) = self.reading_on.take()
+            && let Ok(on) = read.await
         {
+            self.on = Some((on, Instant::now()));
+        }
+        if let Some((on, at)) = self.on {
+            if at.elapsed() >= RECHECK && self.reading_on.is_none() {
+                let read = std::sync::Arc::clone(&self.read_on);
+                self.reading_on = Some(tokio::task::spawn_blocking(move || read()));
+            }
             return on;
         }
-        let on = tokio::task::spawn_blocking(|| {
-            let config = crate::events::current_config();
-            (
-                config.shared_input,
-                config.shared_input_clipboard,
-                config.shared_input_low_latency,
-            )
-        })
-        .await
-        .unwrap_or((false, false, false));
+        // The first read: nothing to go on meanwhile.
+        let read = std::sync::Arc::clone(&self.read_on);
+        let reading = self
+            .reading_on
+            .take()
+            .unwrap_or_else(|| tokio::task::spawn_blocking(move || read()));
+        let on = reading.await.unwrap_or((false, false, false));
         self.on = Some((on, Instant::now()));
         on
     }
@@ -740,15 +786,31 @@ impl Gate {
         if !self.on().await {
             return Standing::default();
         }
-        if let Some((standing, at)) = self.standings.get(device_id)
-            && at.elapsed() < RECHECK
+        if self.reading.get(device_id).is_some_and(|r| r.is_finished())
+            && let Some(read) = self.reading.remove(device_id)
+            && let Ok(standing) = read.await
         {
-            return *standing;
+            self.standings
+                .insert(device_id.to_string(), (standing, Instant::now()));
         }
-        let id = device_id.to_string();
-        let standing = tokio::task::spawn_blocking(move || standing_now(&id))
-            .await
-            .unwrap_or_default();
+        let start = |gate: &Gate| {
+            let read = std::sync::Arc::clone(&gate.read_standing);
+            let id = device_id.to_string();
+            tokio::task::spawn_blocking(move || read(&id))
+        };
+        if let Some(&(standing, at)) = self.standings.get(device_id) {
+            if at.elapsed() >= RECHECK && !self.reading.contains_key(device_id) {
+                let reading = start(self);
+                self.reading.insert(device_id.to_string(), reading);
+            }
+            return standing;
+        }
+        // The first read for this computer: nothing to go on meanwhile.
+        let reading = match self.reading.remove(device_id) {
+            Some(reading) => reading,
+            None => start(self),
+        };
+        let standing = reading.await.unwrap_or_default();
         self.standings
             .insert(device_id.to_string(), (standing, Instant::now()));
         standing
@@ -1119,6 +1181,8 @@ pub async fn run() {
     let mut status_every = tokio::time::interval(STATUS_EVERY);
     status_every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_status: Option<shared_input::StatusFile> = None;
+    let mut status_writing: Option<tokio::task::JoinHandle<Option<shared_input::StatusFile>>> =
+        None;
     // The link the driving computer's cursor arrived on.
     let mut driver_link: Option<usize> = None;
     // Whether sharing was on when the status was last kept, and when.
@@ -1346,6 +1410,14 @@ pub async fn run() {
                 let linked = link::linked();
                 heard_refusals.keep_linked(&linked);
                 told_refusals.keep_linked(&linked);
+                // The last one kept, once its write is done; while it is
+                // still going this tick is skipped, never waited for.
+                if let Some(writing) = status_writing.take_if(|w| w.is_finished()) {
+                    last_status = writing.await.unwrap_or(None);
+                }
+                if status_writing.is_some() {
+                    continue;
+                }
                 let Some(dir) = state_dir.clone() else { continue };
                 let sharing_on = gate.on().await;
                 let due = status_due(
@@ -1358,7 +1430,11 @@ pub async fn run() {
                 }
                 status_kept = Some((sharing_on, Instant::now()));
                 let mut last = last_status.take();
-                last_status = tokio::task::spawn_blocking(move || {
+                // Kept on a blocking thread the loop does not wait for: it
+                // read the computers, the trust store and the screens file
+                // every second while sharing was on, holding up whatever
+                // input came meanwhile.
+                status_writing = Some(tokio::task::spawn_blocking(move || {
                     let paired = status::paired_computers(&dir);
                     let mut now = status::now(paired.as_ref().unwrap_or(&BTreeSet::new()));
                     // BK5: each phone said as a screen, and whether it
@@ -1379,9 +1455,7 @@ pub async fn run() {
                     });
                     status::write_if_changed(&dir, now, kept.as_ref(), sharing_on, &mut last);
                     last
-                })
-                .await
-                .unwrap_or(None);
+                }));
             }
         }
     }
@@ -1392,6 +1466,77 @@ pub async fn run() {
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+
+    /// The gate waits only for the first read of the settings and of each
+    /// computer's standing; one past its recheck is read again in the
+    /// background while the loop goes on with what it had, however slow
+    /// the read, and the new value is taken once it is in.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_gate_reads_again_in_the_background() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        static READS: AtomicUsize = AtomicUsize::new(0);
+        static STANDINGS: AtomicUsize = AtomicUsize::new(0);
+        static ALLOWED: AtomicBool = AtomicBool::new(true);
+        static SLOW: AtomicBool = AtomicBool::new(false);
+        let mut gate = Gate::with(
+            || {
+                READS.fetch_add(1, Ordering::SeqCst);
+                if SLOW.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(300));
+                }
+                (true, false, true)
+            },
+            |_| {
+                STANDINGS.fetch_add(1, Ordering::SeqCst);
+                if SLOW.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(300));
+                }
+                let allowed = ALLOWED.load(Ordering::SeqCst);
+                Standing {
+                    computer: true,
+                    allowed,
+                }
+            },
+        );
+        // The first reads are waited for.
+        assert!(gate.standing("aaaa").await.allowed);
+        assert_eq!(READS.load(Ordering::SeqCst), 1);
+        assert_eq!(STANDINGS.load(Ordering::SeqCst), 1);
+        // Within the recheck: no read at all.
+        assert!(gate.standing("aaaa").await.allowed);
+        assert_eq!(READS.load(Ordering::SeqCst), 1);
+        assert_eq!(STANDINGS.load(Ordering::SeqCst), 1);
+        // Past it, with a slow disk and the permission taken away: the
+        // old value at once, the reads under way.
+        let past = Instant::now().checked_sub(RECHECK * 2).unwrap();
+        gate.on = gate.on.map(|(on, _)| (on, past));
+        for (_, at) in gate.standings.values_mut() {
+            *at = past;
+        }
+        SLOW.store(true, Ordering::SeqCst);
+        ALLOWED.store(false, Ordering::SeqCst);
+        let asked = Instant::now();
+        assert!(gate.standing("aaaa").await.allowed, "the value it had");
+        assert!(
+            asked.elapsed() < Duration::from_millis(150),
+            "not waited for: {:?}",
+            asked.elapsed()
+        );
+        // One read each under way, not one a message.
+        for _ in 0..5 {
+            gate.standing("aaaa").await;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(READS.load(Ordering::SeqCst), 2);
+        assert_eq!(STANDINGS.load(Ordering::SeqCst), 2);
+        // Once in, the new value is taken.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while gate.standing("aaaa").await.allowed {
+            assert!(Instant::now() < deadline, "the new standing never came");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(STANDINGS.load(Ordering::SeqCst), 2);
+    }
 
     #[derive(Debug, Clone, PartialEq)]
     enum Call {
