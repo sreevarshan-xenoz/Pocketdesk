@@ -55,7 +55,7 @@ pub(crate) fn is_owner_device(store: &TrustStore, file: &ComputersFile, device_i
 /// itself (a stolen phone could call itself anything): the owner's rename
 /// here, else a listed computer's name, with its kind and the start of
 /// its id, as the Activity page names it.
-fn asker_name(store: &TrustStore, file: &ComputersFile, device_id: &str) -> String {
+pub(crate) fn asker_name(store: &TrustStore, file: &ComputersFile, device_id: &str) -> String {
     let kind = if store.is_computer(device_id) {
         "computer"
     } else {
@@ -246,7 +246,15 @@ pub(crate) fn remove_in(
         .exists()
     {
         let mut written = None;
-        let held = computers::update(dir, |file| written = Some(decide(file)));
+        let held = computers::update(dir, |file| {
+            let outcome = decide(file);
+            // A computer that removed a phone introduced between the two
+            // (ecosystem phase 4) is owed no removal back.
+            if matches!(outcome, Ok(Ok(_))) {
+                crate::introductions::forget_in(file, target, asker);
+            }
+            written = Some(outcome);
+        });
         match (held, written) {
             (Ok(()), Some(written)) => written,
             _ => {
@@ -354,10 +362,34 @@ async fn answer_with(asker: &str, body: &Value, enabled: bool) -> Option<Value> 
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .take(asker, Instant::now());
-            let outcome = if paced {
-                remove(&dir, &trust, asker, &device_id).await
+            // A removal another computer owed this one for a phone
+            // introduced between the two (ecosystem phase 4) is taken only
+            // for such a phone; one that has not paired yet has its waiting
+            // PIN dropped instead (PR #581 I1, N3).
+            let owed = body.get("introduced").and_then(Value::as_bool) == Some(true)
+                && store.is_computer(asker);
+            let gate = if owed {
+                let (dir, trust, asker, target) = (
+                    dir.clone(),
+                    trust.clone(),
+                    asker.to_string(),
+                    device_id.clone(),
+                );
+                tokio::task::spawn_blocking(move || {
+                    crate::introductions::owed_gate_in(&dir, &trust, &asker, &target)
+                })
+                .await
+                .unwrap_or(crate::introductions::OwedGate::NotIntroduced)
             } else {
-                Err(Refusal::TooMany)
+                crate::introductions::OwedGate::Remove
+            };
+            let outcome = match gate {
+                crate::introductions::OwedGate::Cancelled => Ok(()),
+                crate::introductions::OwedGate::NotIntroduced => Err(Refusal::NotPaired),
+                crate::introductions::OwedGate::Remove if paced => {
+                    remove(&dir, &trust, asker, &device_id).await
+                }
+                crate::introductions::OwedGate::Remove => Err(Refusal::TooMany),
             };
             Some(wire::remove_answer(&request.request, &device_id, outcome))
         }
@@ -539,7 +571,7 @@ fn not_sent(file: &mut ComputersFile, computer: &str, request: &str) {
 /// Send `packet` to the computer `computer`: on the link this computer
 /// keeps to it, else on its connection here (the link it keeps). Whether
 /// it went.
-async fn send_to_computer(computer: &str, packet: NetworkPacket) -> bool {
+pub(crate) async fn send_to_computer(computer: &str, packet: NetworkPacket) -> bool {
     if let Some(link) = crate::peer_computers::live_link(computer) {
         link.send(packet);
         return true;
@@ -563,6 +595,11 @@ pub(crate) async fn heard(from: &str, body: &Value) {
     let from = from.to_string();
     let now = pocketdesk_core::local::pin::now_unix();
     let _ = tokio::task::spawn_blocking(move || {
+        // A removal owed for a phone introduced between the two (ecosystem
+        // phase 4), else the app's own ask.
+        if crate::introductions::answered(&dir, &from, &request, &answer) {
+            return Ok(());
+        }
         computers::update(&dir, |file| take_answer(file, &from, &request, answer, now))
     })
     .await;

@@ -51,6 +51,10 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.pocketdesk.hyprland.state` |  | yes |  | server |
 | `kdeconnect.pocketdesk.in_use` | yes |  | Notifications | in_use |
 | `kdeconnect.pocketdesk.in_use_answer` |  | yes |  | in_use |
+| `kdeconnect.pocketdesk.introduce` | yes |  | none (an owner phone only) | introductions |
+| `kdeconnect.pocketdesk.introduce_answer` |  | yes |  | introductions |
+| `kdeconnect.pocketdesk.introduce_phone` | yes | yes | none (a computer paired both ways only) | introductions |
+| `kdeconnect.pocketdesk.introduce_phone_answer` | yes | yes | none (only the computer asked, for the introduction waiting) | introductions |
 | `kdeconnect.pocketdesk.link` | yes | yes | Links | links |
 | `kdeconnect.pocketdesk.link_role` | yes |  | none (any paired phone) | link_role |
 | `kdeconnect.pocketdesk.monitors` | yes | yes | none (any paired phone) | monitors |

@@ -381,15 +381,11 @@ class MainActivity : ComponentActivity() {
                                 scanned = pairLinkScanned.value,
                                 onPaired = { link, address, serverId ->
                                     val ctx = this@MainActivity
-                                    HostStore.save(
-                                        ctx,
-                                        HostStore.Host(address, link.streamPort, link.controlPort),
-                                    )
-                                    HostStore.savePairedDesktop(ctx, address, serverId)
                                     // U3: the name the code carried, until a
                                     // connection says it again.
-                                    HostStore.saveClaimedName(ctx, address, link.name)
-                                    link.endpoint?.let { HostStore.saveWanIdentity(ctx, address, it) }
+                                    dev.pocketdesk.android.pair.savePaired(ctx, link, address, serverId)
+                                    // Ecosystem phase 4: Home offers its other computers next.
+                                    Prefs.markIntroducePending(ctx, address)
                                     pairLink.value = null
                                     maybeRequestNotificationPermission()
                                     sessionKey = "$address|${link.streamPort}|${link.controlPort}"

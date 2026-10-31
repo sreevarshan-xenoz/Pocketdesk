@@ -1066,6 +1066,15 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
     // later in a packet.
     let phone_id = conn.to_string();
 
+    // Ecosystem phase 4: a PIN this computer handed another of the owner's
+    // computers for a phone it introduced, for this id and the key that
+    // computer named only, pairs that phone as an owner phone once.
+    if let Some(intro) = crate::introductions::take_pin(&phone_id, sender.peer_key().as_ref(), pin)
+    {
+        crate::introductions::pair_introduced(&phone_id, packet, sender, intro).await;
+        return;
+    }
+
     let matches_pending = pins()
         .lock()
         .expect("pair state")
@@ -1303,6 +1312,12 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
                 respond_pair(sender, false, "").await;
             }
         }
+    } else if crate::introductions::miss(&phone_id, sender.peer_key().as_ref()) {
+        // Ecosystem phase 4 (PR #581 I1): a wrong PIN from a phone an
+        // introduction PIN waits for is that PIN's miss alone (it goes after
+        // three), never the owner's own PIN's.
+        tracing::warn!("Pairing attempt from {conn} with a wrong introduction PIN");
+        respond_pair(sender, false, "").await;
     } else {
         tracing::warn!("Pairing attempt from {conn} with a wrong/expired PIN");
         let current = cli_pin().map(|cli| cli.pin);
@@ -1526,7 +1541,7 @@ fn guest_may_pair_in(
     }
 }
 
-async fn respond_pair(sender: &dyn DeviceSender, paired: bool, server_id: &str) {
+pub(crate) async fn respond_pair(sender: &dyn DeviceSender, paired: bool, server_id: &str) {
     respond_pair_as(sender, paired, server_id, false).await;
 }
 
@@ -2561,6 +2576,12 @@ forged log line"
             // holds the gate); an answer is taken only for the ask waiting.
             "kdeconnect.pocketdesk.remote_devices",
             "kdeconnect.pocketdesk.remote_devices_answer",
+            // Ecosystem phase 4: an owner phone's ask (the plugin holds the
+            // gate), a computer's introduction (a computer paired both ways
+            // only) and its answer (only for the introduction waiting).
+            "kdeconnect.pocketdesk.introduce",
+            "kdeconnect.pocketdesk.introduce_phone",
+            "kdeconnect.pocketdesk.introduce_phone_answer",
         ];
         for packet_type in ALWAYS_ALLOWED {
             assert!(
@@ -2775,6 +2796,133 @@ mod owner_mark_tests {
         })
         .unwrap();
         for n in 1..=5 {
+            let _ = pocketdesk_core::local::device_keys::clear(&dir, &id(n));
+        }
+    }
+
+    /// Ecosystem phase 4 (PR #581 N6): an introduction PIN through
+    /// `handle_pair` pairs only its phone on its key, as a phone only, and
+    /// three wrong PINs from that phone discard it without touching the
+    /// owner's own PIN.
+    #[tokio::test]
+    // The PIN turn is held through the test on purpose.
+    #[allow(clippy::await_holding_lock)]
+    async fn an_introduction_pin_pairs_through_handle_pair_and_its_misses_are_its_own() {
+        let _turn = crate::introductions::PIN_TURN
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        crate::introductions::PINS.lock().unwrap().clear();
+        let dir = state::use_test_dirs().to_path_buf();
+        let introducer = "0d7c3a52-91e4-4b6f-8a2e-0000000a1a01";
+        let id = |n: u8| format!("0d7c3a52-91e4-4b6f-8a2e-0000000a1b{n:02x}");
+        let hex_of = |k: u8| format!("{k:02x}").repeat(32);
+        // The introducer, paired both ways here.
+        TrustStore::update(state::trust_store_path().unwrap(), |s| {
+            s.trust_computer(introducer)
+        })
+        .unwrap();
+        pocketdesk_core::local::computers::update(&dir, |file| {
+            file.computers
+                .push(pocketdesk_core::local::computers::PeerComputer {
+                    device_id: introducer.to_string(),
+                    name: "Introducer".to_string(),
+                    addresses: vec!["192.0.2.40".to_string()],
+                    control_port: 1716,
+                    stream_port: 4716,
+                    fingerprint: "ab".repeat(32),
+                    endpoint: None,
+                    paired_unix: 1,
+                    link: String::new(),
+                    link_unix: 0,
+                    lets_drive: false,
+                    mine: true,
+                    wake: None,
+                    viewed_unix: 0,
+                    keys_by_position: None,
+                });
+        })
+        .unwrap();
+        let introduce = |phone: &str, key: u8| {
+            crate::introductions::mint(
+                introducer,
+                pocketdesk_core::protocol::introductions::Introduction {
+                    request: format!("req-{phone}"),
+                    phone: pocketdesk_core::protocol::introductions::IntroducedPhone {
+                        device_id: phone.to_string(),
+                        name: "Pixel".to_string(),
+                        tls: hex_of(key),
+                        iroh: None,
+                    },
+                    permissions: DevicePermissions::default(),
+                },
+            )
+            .unwrap()
+        };
+
+        // Its own phone, on its own key: paired, an owner phone introduced.
+        let pin = introduce(&id(1), 0x61);
+        assert_eq!(pair_with(&id(1), 0x61, &pin).await, (true, true));
+        let store = TrustStore::read(state::trust_store_path().unwrap()).unwrap();
+        assert_eq!(store.introducer(&id(1)), Some(introducer));
+
+        // Another key: the PIN is not taken (and is that phone's miss).
+        let pin = introduce(&id(2), 0x62);
+        assert_eq!(pair_with(&id(2), 0x63, &pin).await, (false, false));
+
+        // Asked as a computer: refused, nothing trusted.
+        let pin = introduce(&id(3), 0x64);
+        let phone = Phone {
+            id: id(3),
+            key: [0x64; 32],
+            sent: Default::default(),
+        };
+        let packet = NetworkPacket::new("kdeconnect.pair")
+            .with_body(json!({ "pin": pin, "computer": true }));
+        handle_pair(&id(3), &packet, &phone).await;
+        assert!(
+            !TrustStore::read(state::trust_store_path().unwrap())
+                .unwrap()
+                .is_trusted(&id(3))
+        );
+
+        // Three wrong PINs discard it, never charged to the owner's own
+        // PIN's count (which other tests may share: compared, not set).
+        let pin = introduce(&id(4), 0x65);
+        let wrong = if pin == "000000" { "000001" } else { "000000" };
+        let before = guesses().lock().unwrap().wrong;
+        for _ in 0..crate::introductions::PIN_MISSES {
+            assert_eq!(pair_with(&id(4), 0x65, wrong).await, (false, false));
+        }
+        assert_eq!(
+            guesses().lock().unwrap().wrong,
+            before,
+            "the owner's own PIN was never charged"
+        );
+        assert!(
+            !crate::introductions::PINS
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|p| p.phone.device_id == id(4)),
+            "the third discarded it"
+        );
+
+        crate::introductions::PINS.lock().unwrap().clear();
+        TrustStore::update(state::trust_store_path().unwrap(), |s| {
+            s.untrust_device(introducer)?;
+            for n in 1..=4 {
+                s.untrust_device(&id(n))?;
+            }
+            Ok(())
+        })
+        .unwrap();
+        pocketdesk_core::local::computers::update(&dir, |file| {
+            file.computers.retain(|c| c.device_id != introducer);
+            file.introduced.retain(|i| i.computer != introducer);
+            file.owed_confirmations.retain(|i| i.computer != introducer);
+        })
+        .unwrap();
+        for n in 1..=4 {
             let _ = pocketdesk_core::local::device_keys::clear(&dir, &id(n));
         }
     }
