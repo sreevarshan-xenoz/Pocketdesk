@@ -434,12 +434,14 @@ async fn start_remote_desktop_capture(
     tokio::spawn(async move {
         let _registered = registered;
         let mut said = false;
+        let wheel = crate::streaming::portal_input::session_wheel_style();
+        info!(?wheel, "Portal wheel notches");
         loop {
             tokio::select! {
                 _ = worker_cancel.cancelled() => break,
                 event = rx.recv() => match event {
                     Some(event) => {
-                        if let Err(e) = apply_portal_event(&remote, &session, node_id, size, event).await {
+                        if let Err(e) = apply_portal_event(&remote, &session, node_id, size, wheel, event).await {
                             // Said once a session: input dead and silent
                             // is worse than one line (N8 review).
                             if !std::mem::replace(&mut said, true) {
@@ -468,10 +470,11 @@ async fn apply_portal_event(
     session: &ashpd::desktop::Session<ashpd::desktop::remote_desktop::RemoteDesktop>,
     stream: u32,
     size: (u32, u32),
+    wheel: crate::streaming::portal_input::WheelStyle,
     event: crate::streaming::portal_input::PortalEvent,
 ) -> ashpd::Result<()> {
-    use crate::streaming::portal_input::{PortalEvent, absolute_position};
-    use ashpd::desktop::remote_desktop::{Axis, KeyState};
+    use crate::streaming::portal_input::{PortalEvent, WheelCall, absolute_position, wheel_call};
+    use ashpd::desktop::remote_desktop::{Axis, KeyState, NotifyPointerAxisOptions};
     let state = |pressed: bool| {
         if pressed {
             KeyState::Pressed
@@ -496,16 +499,23 @@ async fn apply_portal_event(
                 .notify_pointer_button(session, code, state(pressed), Default::default())
                 .await
         }
-        PortalEvent::Scroll { axis, steps } => {
-            let axis = if axis == 0 {
-                Axis::Vertical
-            } else {
-                Axis::Horizontal
-            };
-            remote
-                .notify_pointer_axis_discrete(session, axis, steps, Default::default())
-                .await
-        }
+        PortalEvent::Scroll { axis, steps } => match wheel_call(wheel, axis, steps) {
+            None => Ok(()),
+            Some(WheelCall::Discrete { axis, steps }) => {
+                let axis = if axis == 0 {
+                    Axis::Vertical
+                } else {
+                    Axis::Horizontal
+                };
+                remote
+                    .notify_pointer_axis_discrete(session, axis, steps, Default::default())
+                    .await
+            }
+            Some(WheelCall::Smooth { dx, dy }) => {
+                let options = NotifyPointerAxisOptions::default().set_finish(true);
+                remote.notify_pointer_axis(session, dx, dy, options).await
+            }
+        },
         PortalEvent::Key { code, pressed } => {
             remote
                 .notify_keyboard_keycode(session, code, state(pressed), Default::default())

@@ -71,4 +71,81 @@ object IntroduceRule {
         val kind = Kind.entries.firstOrNull { it.name == parts[0] } ?: return null
         return Outcome(kind, parts[2], parts[1])
     }
+
+    /** How long a computer's own offer stays quiet after Not now (in ms). */
+    const val NOT_NOW_QUIET_MS = 30 * 60_000L
+
+    /**
+     * One "Also pair with" sheet at a time, and Not now heard: once the
+     * owner passes a computer's offer made by itself after pairing, that
+     * computer does not offer again by itself for [quietMs] on this run
+     * of the app (a second sheet followed Not now once on the OPPO). The
+     * card's menu still asks whenever it is tapped, but never over a sheet
+     * already open. Kept in memory: a new run of the app may offer again.
+     */
+    class Gate(private val quietMs: Long = NOT_NOW_QUIET_MS) {
+        private var open: String? = null
+        private val passed = mutableMapOf<String, Long>()
+
+        /** Whether the computer at [address] may offer by itself at [now]. */
+        @Synchronized
+        fun mayOfferByItself(address: String, now: Long): Boolean {
+            if (open != null) return false
+            val at = passed[address] ?: return true
+            return now - at >= quietMs || now < at
+        }
+
+        /** How long [address]'s own offer stays quiet from [now] (0: not quiet). */
+        @Synchronized
+        fun quietLeftMs(address: String, now: Long): Long {
+            val at = passed[address] ?: return 0
+            if (now < at) return 0
+            return (at + quietMs - now).coerceAtLeast(0)
+        }
+
+        /** Whether a sheet for [address] may open now; if so, it is the open one. */
+        @Synchronized
+        fun open(address: String): Boolean {
+            if (open != null && open != address) return false
+            open = address
+            return true
+        }
+
+        /** The sheet for [address] closed. */
+        @Synchronized
+        fun closed(address: String) {
+            if (open == address) open = null
+        }
+
+        /** The owner said Not now to [address]'s offer (or closed it unanswered) at [now]. */
+        @Synchronized
+        fun notNow(address: String, now: Long) {
+            passed[address] = now
+        }
+    }
+
+    /** What to do with an offer waiting to be made by itself after pairing. */
+    sealed interface Pending {
+        /** The owner turned these offers off: forget it. */
+        data object Drop : Pending
+
+        /** A sheet is open: keep it until that one closes. */
+        data object Hold : Pending
+
+        /** Quiet after Not now: keep it, and look again in [ms]. */
+        data class After(val ms: Long) : Pending
+
+        /** Show it now. */
+        data object Now : Pending
+    }
+
+    fun pendingStep(offerOn: Boolean, sheetOpen: Boolean, quietLeftMs: Long): Pending = when {
+        !offerOn -> Pending.Drop
+        sheetOpen -> Pending.Hold
+        quietLeftMs > 0 -> Pending.After(quietLeftMs)
+        else -> Pending.Now
+    }
+
+    /** This run of the app's [Gate]. */
+    val gate = Gate()
 }

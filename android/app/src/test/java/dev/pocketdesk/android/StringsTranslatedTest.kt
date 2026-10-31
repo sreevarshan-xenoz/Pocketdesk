@@ -1,6 +1,7 @@
 package dev.pocketdesk.android
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
@@ -38,5 +39,24 @@ class StringsTranslatedTest {
             val mismatched = english.filter { (name, held) -> translated[name] != held }.keys
             assertEquals("placeholders differ in $language", emptySet<String>(), mismatched)
         }
+    }
+
+    /**
+     * Spanish says "equipo" for a computer everywhere (R5) and "emparejar"
+     * for pairing: "ordenador", "computadora" and "vincular" crept back in
+     * with later features, more than one word for one thing.
+     */
+    @Test
+    fun spanishSaysEquipoAndEmparejar() {
+        val xml = File("src/main/res/values-es/strings.xml").readText().replace(comment, "")
+        val strings = entry.findAll(xml).toList()
+        // Not passed for reading nothing (PR #585 review N3).
+        assertTrue("too few Spanish strings read: ${strings.size}", strings.size > 500)
+        assertTrue("no string says equipo", strings.count { it.groupValues[4].contains("equipo") } > 100)
+        val other = Regex("""(?i)(ordenador|computadora|vincul)""")
+        val found = strings
+            .filter { other.containsMatchIn(it.groupValues[4]) }
+            .map { it.groupValues[2] }
+        assertEquals("strings not saying equipo or emparejar", emptyList<String>(), found)
     }
 }
