@@ -544,10 +544,8 @@ fn run_pipewire_capture(
         .connect(None)
         .context("Failed to connect to PipeWire daemon")?;
 
-    // Create stream properties for video capture.
-    // The stream properties guide the format negotiation.
-    // We don't pass explicit format params to connect(); instead,
-    // we learn the negotiated format from the param_changed callback.
+    // Create stream properties for video capture. The formats are offered
+    // to connect() below; the one chosen comes in param_changed.
     let stream_props = pipewire::properties::properties! {
         *pipewire::keys::MEDIA_TYPE => "Video",
         *pipewire::keys::MEDIA_CATEGORY => "Capture",
@@ -572,6 +570,15 @@ fn run_pipewire_capture(
         .add_local_listener_with_user_data(user_data)
         .param_changed(|_stream, ud, id, param| {
             on_param_changed(id, param, ud);
+        })
+        .state_changed(|_stream, ud, _old, new| {
+            if let Some(why) = stream_failed(&new) {
+                // A link that cannot agree a format (a portal offering none of
+                // BGRx and BGRA) or that breaks: said, and the capture ends,
+                // rather than an active stream with no frame (review N2).
+                error!("{why}");
+                ud.cancel.cancel();
+            }
         })
         .process(|stream, ud| {
             on_process(stream, ud);
@@ -683,6 +690,16 @@ fn video_format_pod(config: &StreamingConfig) -> Result<Vec<u8>> {
     )
     .map_err(|e| anyhow::anyhow!("The capture's video format did not serialize: {e:?}"))?;
     Ok(cursor.into_inner())
+}
+
+/// What to say when the stream reached `state` and failed.
+fn stream_failed(state: &pipewire::stream::StreamState) -> Option<String> {
+    match state {
+        pipewire::stream::StreamState::Error(why) => Some(format!(
+            "The screen's PipeWire stream failed ({why}); it offers BGRx and BGRA only"
+        )),
+        _ => None,
+    }
 }
 
 /// Handle the param_changed callback to learn the negotiated video format.
@@ -1238,6 +1255,16 @@ mod tests {
         assert_eq!(chunk_pixels(4096, 0, 4096, 512, 128, true), None);
         assert_eq!(chunk_pixels(4096, 0, 0, 512, 128, false), None);
         assert_eq!(chunk_pixels(4096, 5000, 10, 512, 128, false), None);
+    }
+
+    #[test]
+    fn a_failed_stream_is_said_and_others_are_not() {
+        use pipewire::stream::StreamState;
+        let why = stream_failed(&StreamState::Error("no more input formats".into()))
+            .expect("an error is said");
+        assert!(why.contains("no more input formats"));
+        assert_eq!(stream_failed(&StreamState::Streaming), None);
+        assert_eq!(stream_failed(&StreamState::Paused), None);
     }
 
     #[test]
