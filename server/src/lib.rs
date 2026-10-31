@@ -65,6 +65,8 @@ pub mod pen;
 pub mod phone_sound;
 pub mod platform;
 pub mod plugins;
+#[cfg(target_os = "linux")]
+pub mod pointer_space;
 pub mod privacy;
 pub mod quiet_hours;
 pub mod quiet_phone;

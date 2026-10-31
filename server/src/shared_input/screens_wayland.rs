@@ -44,16 +44,24 @@ struct State {
 /// with no Wayland display, no outputs, or no answer by [`DEADLINE`].
 /// Blocking.
 pub fn screens() -> Option<Vec<Screen>> {
+    let screens = from_wayland(&outputs()?);
+    (!screens.is_empty()).then_some(screens)
+}
+
+/// Every output as it said itself, in the compositor's (the registry's)
+/// order, the one a capture without X counts a monitor index in, with
+/// each one's name; `None` as for [`screens`]. Blocking.
+pub fn outputs() -> Option<Vec<WaylandOutput>> {
     let deadline = Instant::now() + DEADLINE;
     let conn = Connection::from_socket(connect()?).ok()?;
-    screens_on(&conn, deadline)
+    outputs_on(&conn, deadline)
 }
 
 /// The compositor's socket as `Connection::connect_to_env` finds it
 /// (`WAYLAND_DISPLAY`, absolute or under `XDG_RUNTIME_DIR`; `wayland-0`
 /// when unset), connected without waiting. `WAYLAND_SOCKET` is never
 /// taken: that fd is the process's to use once.
-fn connect() -> Option<UnixStream> {
+pub(crate) fn connect() -> Option<UnixStream> {
     let name =
         PathBuf::from(std::env::var_os("WAYLAND_DISPLAY").unwrap_or_else(|| "wayland-0".into()));
     let path = if name.is_absolute() {
@@ -111,8 +119,8 @@ fn connect_now(path: &Path) -> Option<UnixStream> {
     (connected == 0).then(|| UnixStream::from(socket))
 }
 
-/// [`screens`] on `conn`, answered by `deadline`.
-fn screens_on(conn: &Connection, deadline: Instant) -> Option<Vec<Screen>> {
+/// [`outputs`] on `conn`, answered by `deadline`.
+fn outputs_on(conn: &Connection, deadline: Instant) -> Option<Vec<WaylandOutput>> {
     let mut queue: EventQueue<State> = conn.new_event_queue();
     let qh = queue.handle();
     let registry = conn.display().get_registry(&qh, ());
@@ -143,8 +151,7 @@ fn screens_on(conn: &Connection, deadline: Instant) -> Option<Vec<Screen>> {
         bound.push((output, xdg));
     }
     roundtrip(conn, &mut queue, &mut state, deadline)?;
-    let screens = from_wayland(&state.outputs);
-    (!screens.is_empty()).then_some(screens)
+    Some(state.outputs)
 }
 
 /// Ask the compositor for a sync and read until it answers, by `deadline`:
@@ -271,6 +278,8 @@ impl Dispatch<WlOutput, usize> for State {
                 }
             }
             wl_output::Event::Scale { factor } => output.scale = factor,
+            // Version 4; xdg-output's own name, where said, is the same.
+            wl_output::Event::Name { name } => output.name = Some(name),
             _ => {}
         }
     }
@@ -293,6 +302,7 @@ impl Dispatch<ZxdgOutputV1, usize> for State {
             zxdg_output_v1::Event::LogicalSize { width, height } => {
                 output.logical_size = Some((width, height));
             }
+            zxdg_output_v1::Event::Name { name } => output.name = Some(name),
             _ => {}
         }
     }
@@ -313,7 +323,7 @@ mod tests {
         let conn = Connection::from_socket(ours).unwrap();
         let started = Instant::now();
         let wait = Duration::from_millis(200);
-        assert_eq!(screens_on(&conn, started + wait), None);
+        assert_eq!(outputs_on(&conn, started + wait), None);
         let took = started.elapsed();
         assert!(took >= wait && took < Duration::from_secs(2), "{took:?}");
 
@@ -321,7 +331,7 @@ mod tests {
         drop(theirs);
         let conn = Connection::from_socket(ours).unwrap();
         let started = Instant::now();
-        assert_eq!(screens_on(&conn, started + Duration::from_secs(5)), None);
+        assert_eq!(outputs_on(&conn, started + Duration::from_secs(5)), None);
         assert!(started.elapsed() < Duration::from_secs(1));
     }
 

@@ -128,6 +128,12 @@ pub struct ViewStatus {
     /// keys. `None` until it says, or from a computer before PC4.
     #[serde(default)]
     pub windows: Option<bool>,
+    /// Whether the other computer lands this window's clicks on the screen
+    /// it shows (PC11: Windows always; Linux where its input backend spans
+    /// its compositor's layout). `None` until it says, or from a computer
+    /// before it that does not run Windows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub per_screen: Option<bool>,
     /// Whether the other computer plays this one's microphone in this
     /// session (PC10 review): its "Use the phone as a microphone" for this
     /// computer, and control. `None` until it says, or from a computer
