@@ -521,11 +521,15 @@ fn run_pipewire_capture(
         .register()
         .context("Failed to register stream listener")?;
 
-    // Connect the stream to the specific PipeWire node.
-    // We pass an empty params array -- the format will be negotiated
-    // automatically based on stream properties and server capabilities.
-    // The actual format is learned via the param_changed callback.
-    let mut params: [&libspa::pod::Pod; 0] = [];
+    // Connect the stream to the specific PipeWire node, offering the formats
+    // the encoder takes. A stream that offers none is never given one: the
+    // link stays unnegotiated and no frame ever comes (seen on KDE Plasma
+    // 6.8, 2026-10-31). Memory buffers, as no modifier is offered; the
+    // format chosen is learned in the param_changed callback.
+    let format = video_format_pod(config)?;
+    let format =
+        libspa::pod::Pod::from_bytes(&format).context("The capture's video format is not a pod")?;
+    let mut params = [format];
     stream
         .connect(
             libspa::utils::Direction::Input,
@@ -558,6 +562,69 @@ fn run_pipewire_capture(
     let _ = stream.disconnect();
 
     Ok(())
+}
+
+/// The `EnumFormat` the capture offers: raw video in the byte orders the
+/// encoder reads as `bgra` (BGRx first, as compositors share no alpha), any
+/// size, any rate up to 1000 fps, preferring the configured ones.
+fn video_format_pod(config: &StreamingConfig) -> Result<Vec<u8>> {
+    use libspa::param::format::{FormatProperties, MediaSubtype, MediaType};
+    use libspa::param::video::VideoFormat;
+    use libspa::utils::{Fraction, Rectangle};
+    let object = libspa::pod::object!(
+        libspa::utils::SpaTypes::ObjectParamFormat,
+        libspa::param::ParamType::EnumFormat,
+        libspa::pod::property!(FormatProperties::MediaType, Id, MediaType::Video),
+        libspa::pod::property!(FormatProperties::MediaSubtype, Id, MediaSubtype::Raw),
+        libspa::pod::property!(
+            FormatProperties::VideoFormat,
+            Choice,
+            Enum,
+            Id,
+            VideoFormat::BGRx,
+            VideoFormat::BGRx,
+            VideoFormat::BGRA
+        ),
+        libspa::pod::property!(
+            FormatProperties::VideoSize,
+            Choice,
+            Range,
+            Rectangle,
+            Rectangle {
+                width: config.width.max(1),
+                height: config.height.max(1)
+            },
+            Rectangle {
+                width: 1,
+                height: 1
+            },
+            Rectangle {
+                width: 16384,
+                height: 16384
+            }
+        ),
+        libspa::pod::property!(
+            FormatProperties::VideoFramerate,
+            Choice,
+            Range,
+            Fraction,
+            Fraction {
+                num: config.fps.max(1),
+                denom: 1
+            },
+            Fraction { num: 0, denom: 1 },
+            Fraction {
+                num: 1000,
+                denom: 1
+            }
+        ),
+    );
+    let (cursor, _) = libspa::pod::serialize::PodSerializer::serialize(
+        std::io::Cursor::new(Vec::new()),
+        &libspa::pod::Value::Object(object),
+    )
+    .map_err(|e| anyhow::anyhow!("The capture's video format did not serialize: {e:?}"))?;
+    Ok(cursor.into_inner())
 }
 
 /// Handle the param_changed callback to learn the negotiated video format.
@@ -905,6 +972,74 @@ fn run_x11_capture_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_capture_offers_raw_bgr_video_at_the_configured_size_and_rate() {
+        use libspa::param::format::{FormatProperties, MediaSubtype, MediaType};
+        use libspa::param::video::VideoFormat;
+        use libspa::pod::{ChoiceValue, Value};
+        use libspa::utils::{Choice, ChoiceEnum, Fraction, Id, Rectangle};
+        let config = StreamingConfig {
+            width: 1280,
+            height: 720,
+            fps: 30,
+            ..StreamingConfig::default()
+        };
+        let bytes = video_format_pod(&config).unwrap();
+        let (_, value) =
+            libspa::pod::deserialize::PodDeserializer::deserialize_any_from(&bytes).unwrap();
+        let Value::Object(object) = value else {
+            panic!("not an object: {value:?}");
+        };
+        assert_eq!(object.id, libspa::param::ParamType::EnumFormat.as_raw());
+        let find = |key: FormatProperties| {
+            object
+                .properties
+                .iter()
+                .find(|p| p.key == key.as_raw())
+                .map(|p| p.value.clone())
+                .unwrap_or_else(|| panic!("no {key:?}"))
+        };
+        assert_eq!(
+            find(FormatProperties::MediaType),
+            Value::Id(Id(MediaType::Video.as_raw()))
+        );
+        assert_eq!(
+            find(FormatProperties::MediaSubtype),
+            Value::Id(Id(MediaSubtype::Raw.as_raw()))
+        );
+        let Value::Choice(ChoiceValue::Id(Choice(
+            _,
+            ChoiceEnum::Enum {
+                default,
+                alternatives,
+            },
+        ))) = find(FormatProperties::VideoFormat)
+        else {
+            panic!("the formats are not an enum");
+        };
+        assert_eq!(default, Id(VideoFormat::BGRx.as_raw()));
+        assert!(alternatives.contains(&Id(VideoFormat::BGRA.as_raw())));
+        let Value::Choice(ChoiceValue::Rectangle(Choice(_, ChoiceEnum::Range { default, .. }))) =
+            find(FormatProperties::VideoSize)
+        else {
+            panic!("the size is not a range");
+        };
+        assert_eq!(
+            default,
+            Rectangle {
+                width: 1280,
+                height: 720
+            }
+        );
+        let Value::Choice(ChoiceValue::Fraction(Choice(_, ChoiceEnum::Range { default, min, .. }))) =
+            find(FormatProperties::VideoFramerate)
+        else {
+            panic!("the rate is not a range");
+        };
+        assert_eq!(default, Fraction { num: 30, denom: 1 });
+        assert_eq!(min, Fraction { num: 0, denom: 1 });
+    }
 
     #[test]
     fn pick_stream_matches_position() {
