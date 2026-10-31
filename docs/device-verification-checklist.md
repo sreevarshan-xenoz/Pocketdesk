@@ -3352,6 +3352,22 @@ Built 2026-10-31. Diagnostics' Firewall row reads plain nftables and iptables ru
 - [ ] Arch's stock `/etc/nftables.conf` loaded: the row names "Arch's stock rules, which let in ssh only". (where: linux)
 - [ ] The hint's `nft insert` lines run by hand: the row turns green and a phone pairs. (where: linux)
 - [ ] iptables (`iptables.service` with a DROP policy): the row is red with the `iptables -I INPUT` lines. (where: linux)
+## 247. Shared input A: the receiving end, measured end to end
+
+Built 2026-10-31. `share-test` stamps each key and move as the script captures it and prints each stage end to end at p50, p95, p99 and the most (captured to the link, the network one way, off the link to injected), with how many moves were injected. The computer driven no longer waits on a file read before injecting (the settings, each computer's standing and the status are read and written in the background), injects only the newest of moves queued behind each other, writes each uinput frame in one `write(2)` with one SYN_REPORT, keeps the X11 display size, and takes a click's last move on the stream ahead of the click.
+
+- [x] Two throwaway servers on the Linux laptop's loopback, the receiver injecting into a headless sway (its virtual pointer, and its Xwayland through enigo), `share-test --keys 500 --moves 2000`, before and after each change (2026-10-31; numbers in the status history).
+- [ ] Windows driving the Linux laptop for real (the owner's mouse and keyboard, not the script): `share-test --keys 500 --moves 2000` from Windows to the laptop, before and after this build, and a feel check that the pointer keeps up and clicks land where it is. (where: second computer)
+- [ ] The uinput path on a Linux computer where `/dev/uinput` is writable: the same run, the receiver's write calls per move a quarter of before. (where: linux)
+
+## 248. Software encoding through OpenH264 on stock Fedora
+
+Built 2026-10-31. The sidecar's software rung, reached by an explicit Software config and by the default Auto config when no hardware encoder runs, takes libx264, else libopenh264 (after a one-frame encode, at most 5 s, proves it is not Fedora's `noopenh264` stub), else fails saying what to install. `ffmpeg -hide_banner -encoders` is remembered for 10 minutes or until the binary changes; the libopenh264 check for an hour if it passed, 5 minutes if it failed. OpenH264 runs as Constrained Baseline, bitrate rate control, `-g` at two seconds, frame skipping off. `pocketdesk capabilities` names the software encoder; a session on it records `ffmpeg-sidecar-openh264`.
+- [x] Fedora 44's `ffmpeg-free` 8.1.3 (a throwaway `systemd-nspawn` container on the Linux laptop, no GPU bound in) with the `noopenh264` stub: `pocketdesk capabilities` says "none: the system ffmpeg lists libopenh264 but cannot open it (…sudo dnf install openh264…)". (where: linux)
+      (2026-10-31, the tarball-style build: `pocketdesk-server --no-default-features`.)
+- [x] The same container after `dnf install openh264`, all on the default Auto config except the bench: the ignored live test `openh264_sidecar_encodes_frames_a_phone_decodes` opens the default config through `VideoEncoder::new`, lands on `ffmpeg-sidecar-openh264`, and ffprobe reads its 60 frames back as Constrained Baseline H.264, every access unit decoded; the real streaming server's session on the test pattern (`computer_view_real_session`, `StreamingConfig::default()`) delivered 60 frames at 640x360, its ffmpeg calls (logged by a wrapper) being the NVENC check, the libopenh264 check and the sidecar on `libopenh264 -profile:v constrained_baseline -rc_mode bitrate -b:v 8000000 -maxrate 8000000 -g 120 -allow_skip_frames 0`; `capabilities` says libopenh264; `pocketdesk bench --target software --frames 60` (the bench pins its rung, it has no Auto) records `ffmpeg-sidecar-openh264`, 1280x720 at 5 Mbit/s, p50 9 ms, 1.25 MB for 2 s, no frame without a packet. (where: linux)
+- [ ] A phone session against the tarball's server on a real stock Fedora machine with no working hardware encoder and `ffmpeg-free` plus `openh264`: the picture appears and stays, Diagnostics' last session names `ffmpeg-sidecar-openh264`, and the picture quality at the default bitrate is acceptable. (where: linux)
+- [ ] install.sh on a fresh stock Fedora: it lists `ffmpeg-free` and `openh264` and, once they are installed, `pocketdesk capabilities` names libopenh264; with `fedora-cisco-openh264` disabled it says how to enable it and enables nothing. (where: linux)
 
 ## Recording results
 

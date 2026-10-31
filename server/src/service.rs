@@ -2006,12 +2006,16 @@ pub async fn print_capabilities(json: bool, markdown: bool) -> Result<()> {
         bail!("--json and --markdown are mutually exclusive");
     }
     let capabilities = pocketdesk_core::capabilities::Capabilities::collect();
-    if json {
-        println!("{}", capabilities.render_json());
+    if markdown {
+        // The generated doc describes the build, not this machine's ffmpeg.
+        print!("{}", capabilities.render_markdown());
         return Ok(());
     }
-    if markdown {
-        print!("{}", capabilities.render_markdown());
+    let capabilities = capabilities.with_sidecar_software_h264(
+        pocketdesk_core::streaming::encoder::describe_sidecar_software_h264(),
+    );
+    if json {
+        println!("{}", capabilities.render_json());
         return Ok(());
     }
     print!("{}", capabilities.render_text());

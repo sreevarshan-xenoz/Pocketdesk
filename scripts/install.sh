@@ -859,16 +859,34 @@ _build_dep_list() {
   # The server encodes video through the system `ffmpeg` program; the
   # release tarball links no FFmpeg library, so it works with any version.
   # Fedora's own build is ffmpeg-free (RPM Fusion's ffmpeg adds libx264).
+  local fedora_ffmpeg_free=0
   if ! command -v ffmpeg &>/dev/null; then
     case "$PKG_MANAGER" in
       apt|pacman|apk) _deps+=("ffmpeg") ;;
       dnf)
         _deps+=("ffmpeg-free")
-        warn "Fedora's ffmpeg-free has the VAAPI and NVENC encoders but no libx264, Pocketdesk's software encoder, and Fedora's own Mesa (AMD) does not encode H.264 through VAAPI."
-        warn "Without an NVIDIA card, add RPM Fusion's ffmpeg ('sudo dnf swap ffmpeg-free ffmpeg --allowerasing') or its freeworld VA drivers."
+        fedora_ffmpeg_free=1
         ;;
       *) warn "Install FFmpeg (the ffmpeg program): the server encodes video with it." ;;
     esac
+  elif [[ "$PKG_MANAGER" == "dnf" ]] && rpm -q ffmpeg-free &>/dev/null; then
+    fedora_ffmpeg_free=1
+  fi
+  # ffmpeg-free has no libx264, so its libopenh264 is the software encoder,
+  # and it encodes only once Cisco's OpenH264 replaces Fedora's noopenh264
+  # stub. The library comes from Fedora's fedora-cisco-openh264 repository,
+  # asked for only where that repository is enabled (read from the local
+  # cache, no network); the script never enables a repository itself.
+  if [[ "$fedora_ffmpeg_free" == 1 ]]; then
+    if ! rpm -q openh264 &>/dev/null; then
+      if dnf -C repolist --enabled 2>/dev/null | grep -q 'fedora-cisco-openh264'; then
+        _deps+=("openh264")
+      else
+        warn "Fedora's fedora-cisco-openh264 repository is off, so Cisco's OpenH264 is not installed: enable it ('sudo dnf config-manager setopt fedora-cisco-openh264.enabled=1'), then 'sudo dnf install openh264'."
+      fi
+    fi
+    warn "Fedora's ffmpeg-free has no libx264: software encoding goes through libopenh264 (Cisco's OpenH264, 'sudo dnf install openh264'), at lower quality per bitrate than libx264. Its VAAPI and NVENC encoders work in hardware, but Fedora's own Mesa (AMD) does not encode H.264 through VAAPI."
+    warn "For libx264, add RPM Fusion's ffmpeg ('sudo dnf swap ffmpeg-free ffmpeg --allowerasing'); for AMD hardware encoding, its freeworld VA drivers."
   fi
 
   # Compositor-specific portal backends

@@ -82,8 +82,9 @@ pub use pocketdesk_core::local::shared_input::LatencyReport as Report;
 
 /// One key or move as this computer sent it: a move (`n` its `seq`) or a
 /// key (`n` the count since the cursor arrived, 1 the first), when the
-/// script took it and when it was handed to the link, on this computer's
-/// clock ([`link::now_us`]).
+/// script captured it (as a hook would take it, before the loop's other
+/// work for that event: the nudge, a ping, an activity note) and when it
+/// was handed to the link, on this computer's clock ([`link::now_us`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Sent {
     moved: bool,
@@ -122,6 +123,55 @@ fn offset_near(pongs: &[Pong], at_us: u64) -> Option<i64> {
     clock_offset(&near).or_else(|| clock_offset(pongs))
 }
 
+/// One stage's times over a run, in microseconds: the median, the 95th and
+/// 99th percentiles and the most.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Stage {
+    pub p50_us: u64,
+    pub p95_us: u64,
+    pub p99_us: u64,
+    pub max_us: u64,
+}
+
+impl Stage {
+    /// The stage over `sorted` times.
+    fn of(sorted: &[u64]) -> Stage {
+        Stage {
+            p50_us: percentile(sorted, 50),
+            p95_us: percentile(sorted, 95),
+            p99_us: percentile(sorted, 99),
+            max_us: sorted.last().copied().unwrap_or(0),
+        }
+    }
+}
+
+impl std::fmt::Display for Stage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "p50 {} µs, p95 {} µs, p99 {} µs, most {} µs",
+            self.p50_us, self.p95_us, self.p99_us, self.max_us
+        )
+    }
+}
+
+/// Each stage of a run, end to end: captured to handed to the link here,
+/// the network one way, off the link to injected there, and all three; and
+/// how many keys and moves were sent and injected (a move the computer
+/// driven dropped as stale, or one lost on the way, is sent and not
+/// injected).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Stages {
+    pub sending: Stage,
+    pub network: Stage,
+    pub receiving: Stage,
+    pub total: Stage,
+    pub keys_sent: u32,
+    pub keys_injected: u32,
+    pub moves_sent: u32,
+    pub moves_injected: u32,
+}
+
 /// The `pct`th percentile of `sorted` (nearest rank); 0 for none.
 fn percentile(sorted: &[u64], pct: usize) -> u64 {
     let rank = (sorted.len() * pct).div_ceil(100).max(1);
@@ -136,15 +186,37 @@ fn percentile(sorted: &[u64], pct: usize) -> u64 {
 /// link to injected there) and the network's (handed to the link here to
 /// off it there, one way; under 0, by the clocks' error, is 0). None when
 /// nothing was timed on both sides.
+#[cfg(test)]
 fn split(sent: &[Sent], timings: &[Timing], pongs: &[Pong], now_unix: u64) -> Option<Report> {
+    split_stages(sent, timings, pongs, now_unix).map(|(report, _)| report)
+}
+
+/// [`split`], with each stage's percentiles and the counts ([`Stages`]).
+fn split_stages(
+    sent: &[Sent],
+    timings: &[Timing],
+    pongs: &[Pong],
+    now_unix: u64,
+) -> Option<(Report, Stages)> {
     let there: std::collections::HashMap<(bool, u32), &Timing> =
         timings.iter().map(|t| ((t.moved, t.n), t)).collect();
-    let (mut ours, mut network, mut sending, mut receiving) =
-        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut ours, mut network, mut sending, mut receiving, mut total) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut stages = Stages::default();
     for s in sent {
+        if s.moved {
+            stages.moves_sent += 1;
+        } else {
+            stages.keys_sent += 1;
+        }
         let Some(t) = there.get(&(s.moved, s.n)) else {
             continue;
         };
+        if s.moved {
+            stages.moves_injected += 1;
+        } else {
+            stages.keys_injected += 1;
+        }
         let Some(offset_us) = offset_near(pongs, s.sent_us) else {
             continue;
         };
@@ -155,14 +227,25 @@ fn split(sent: &[Sent], timings: &[Timing], pongs: &[Pong], now_unix: u64) -> Op
         receiving.push(u64::from(t.took_us));
         ours.push(here + u64::from(t.took_us));
         network.push(away);
+        total.push(here + away + u64::from(t.took_us));
     }
     if ours.is_empty() {
         return None;
     }
-    for times in [&mut ours, &mut network, &mut sending, &mut receiving] {
+    for times in [
+        &mut ours,
+        &mut network,
+        &mut sending,
+        &mut receiving,
+        &mut total,
+    ] {
         times.sort_unstable();
     }
-    Some(Report {
+    stages.sending = Stage::of(&sending);
+    stages.network = Stage::of(&network);
+    stages.receiving = Stage::of(&receiving);
+    stages.total = Stage::of(&total);
+    let report = Report {
         network_p50_us: percentile(&network, 50),
         network_p95_us: percentile(&network, 95),
         ours_p50_us: percentile(&ours, 50),
@@ -171,7 +254,8 @@ fn split(sent: &[Sent], timings: &[Timing], pongs: &[Pong], now_unix: u64) -> Op
         receiving_p95_us: percentile(&receiving, 95),
         samples: u32::try_from(ours.len()).unwrap_or(u32::MAX),
         measured_unix: now_unix,
-    })
+    };
+    Some((report, stages))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -211,6 +295,9 @@ struct Outcome {
     /// timings back.
     #[serde(default)]
     latency: Option<Report>,
+    /// Each stage end to end, with the 99th percentile and the most.
+    #[serde(default)]
+    stages: Option<Stages>,
     /// Why there is no `latency`.
     #[serde(default)]
     unmeasured: Option<String>,
@@ -354,6 +441,21 @@ fn report(outcome: &Outcome) -> String {
         )),
         (None, Some(why)) => out.push_str(&format!("latency: not measured: {why}\n")),
         (None, None) => {}
+    }
+    if let Some(st) = &outcome.stages {
+        out.push_str(&format!(
+            "end to end, captured to injected: {}\n  captured to the link here: {}\n  \
+             the network (one way): {}\n  off the link to injected there: {}\n  \
+             injected: {} of {} keys, {} of {} moves\n",
+            st.total,
+            st.sending,
+            st.network,
+            st.receiving,
+            st.keys_injected,
+            st.keys_sent,
+            st.moves_injected,
+            st.moves_sent,
+        ));
     }
     out
 }
@@ -529,6 +631,9 @@ async fn run_one(dir: &Path, request: &Request) -> Outcome {
                 }
             }
             tokio::time::sleep_until(due).await;
+            // Captured, as a hook takes a key or move: the loop's other
+            // work for it below counts, as a driver's does.
+            let taken_us = link::now_us();
             nudge.follow(following);
             if pinging.is_none() && i % PING_EVERY == 0 {
                 ping(&mut channel, &mut outcome)?;
@@ -539,9 +644,6 @@ async fn run_one(dir: &Path, request: &Request) -> Outcome {
                 outcome.sent += 1;
                 active_due = now + ACTIVE_EVERY;
             }
-            // As a driver takes a key or move from its hook, to its handing
-            // over to the link.
-            let taken_us = link::now_us();
             channel.send(msg)?;
             let sent_us = link::now_us();
             outcome.sent += 1;
@@ -592,11 +694,12 @@ async fn run_one(dir: &Path, request: &Request) -> Outcome {
              records it, or runs an older Pocketdesk)"
                 .to_string(),
         ),
-        (Some(_), Some(timings)) => split(&sent, &timings, &pongs, now_unix())
+        (Some(_), Some(timings)) => split_stages(&sent, &timings, &pongs, now_unix())
             .ok_or_else(|| "no key or move was timed on both computers".to_string()),
     };
     match measured {
-        Ok(report) => {
+        Ok((report, stages)) => {
+            outcome.stages = Some(stages);
             if let Err(e) = pocketdesk_core::local::shared_input::write_latency(dir, &report) {
                 tracing::warn!("share-test: the latency could not be kept: {e}");
             }
@@ -828,6 +931,7 @@ mod tests {
                 samples: 200,
                 measured_unix: 1,
             }),
+            stages: None,
             unmeasured: None,
             quick: true,
         };
@@ -969,6 +1073,29 @@ mod tests {
         assert_eq!(report.sending_p95_us, 10);
         assert_eq!(report.receiving_p95_us, 100);
         assert_eq!(report.measured_unix, 1_700_000_000);
+        // Each stage end to end, with the counts: the stale move is sent
+        // and not injected.
+        let (_, stages) = split_stages(&sent, &timings, &pongs, 0).expect("timed");
+        assert_eq!((stages.keys_sent, stages.keys_injected), (20, 20));
+        assert_eq!((stages.moves_sent, stages.moves_injected), (2, 1));
+        assert_eq!(stages.sending.max_us, 20);
+        assert_eq!(stages.receiving.p99_us, 2_000);
+        assert_eq!(stages.receiving.max_us, 2_000);
+        assert_eq!(stages.network.max_us, 3_000);
+        // The move: 20 here, 3000 on the way, 2000 there.
+        assert_eq!(stages.total.max_us, 5_020);
+        let said = super::report(&Outcome {
+            sent: 1,
+            round_trips_us: vec![1],
+            pings: 1,
+            stages: Some(stages),
+            ..Outcome::default()
+        });
+        assert!(
+            said.contains("injected: 20 of 20 keys, 1 of 2 moves"),
+            "{said}"
+        );
+        assert!(said.contains("most 5020 µs"), "{said}");
         // Nothing timed on both sides: no report.
         assert_eq!(split(&sent, &[], &pongs, 0), None);
         assert_eq!(split(&sent, &timings, &[], 0), None, "no clock to line up");
