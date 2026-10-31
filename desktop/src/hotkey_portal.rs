@@ -189,13 +189,31 @@ fn presses(
     }
 }
 
-/// The line that marks a desktop file as one this program wrote.
-const STUB_MARK: &str = "X-Pocketdesk-Stub=true";
-
 /// The hidden desktop file earlier trays wrote (its `Exec=` aside), which
 /// named the tray and hid the packaged menu entry behind it.
-const OLD_STUB: &str =
+const OLD_HIDDEN_STUB: &str =
     "[Desktop Entry]\nType=Application\nName=Pocketdesk\nExec=\nNoDisplay=true\n";
+
+/// The desktop file this program writes now (its `Exec=` aside). When it
+/// changes, the text it had joins [`PAST_STUBS`], so the files earlier
+/// releases wrote are still known as ours (review N10).
+const CURRENT_STUB: &str = "[Desktop Entry]\nType=Application\nName=Pocketdesk\nComment=Your computer, on your Android phone\nExec=\nIcon=pocketdesk\nTerminal=false\nCategories=Network;RemoteAccess;\nX-Pocketdesk-Stub=true\n";
+
+/// What an `Exec=` value of ours looks like in each template.
+#[derive(Debug, Clone, Copy)]
+enum ExecShape {
+    /// The old tray's own path, unquoted, with no argument.
+    OldTray,
+    /// One quoted path, as [`exec_value`] writes it, with nothing after it.
+    OneQuotedPath,
+}
+
+/// Every desktop file this program has written, with the shape of its
+/// `Exec=` value: a file is ours only when it is one of these exactly.
+const PAST_STUBS: &[(&str, ExecShape)] = &[
+    (OLD_HIDDEN_STUB, ExecShape::OldTray),
+    (CURRENT_STUB, ExecShape::OneQuotedPath),
+];
 
 /// What to do with the desktop file of [`APP_ID`] in the owner's own
 /// applications folder.
@@ -210,11 +228,7 @@ enum Stub {
 /// with `exec` as its `Exec=` value: it starts the app, as the packaged one
 /// does, and is marked as ours.
 fn stub_with_exec(exec: &str) -> String {
-    format!(
-        "[Desktop Entry]\nType=Application\nName=Pocketdesk\nComment=Your computer, on your \
-         Android phone\nExec={exec}\nIcon=pocketdesk\nTerminal=false\nCategories=Network;RemoteAccess;\n\
-         {STUB_MARK}\n"
-    )
+    CURRENT_STUB.replacen("Exec=\n", &format!("Exec={exec}\n"), 1)
 }
 
 /// Our desktop file starting `app`; none for a path a desktop file cannot
@@ -274,13 +288,72 @@ fn without_exec(content: &str) -> String {
         .collect()
 }
 
+/// The `Exec=` value of `content`'s first `Exec=` line.
+fn exec_of(content: &str) -> Option<&str> {
+    content.lines().find_map(|line| line.strip_prefix("Exec="))
+}
+
+/// The path an [`exec_value`] value names: its two escaping layers undone,
+/// and none unless writing that path again gives the very same value (one
+/// quoted argument, nothing added).
+fn exec_path(value: &str) -> Option<String> {
+    let backslash = char::from(92u8);
+    // The string layer: `%%` and doubled backslashes.
+    let mut unstrung = String::new();
+    let mut chars = value.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '%' => {
+                if chars.next() != Some('%') {
+                    return None;
+                }
+                unstrung.push('%');
+            }
+            c if c == backslash => {
+                if chars.next() != Some(backslash) {
+                    return None;
+                }
+                unstrung.push(backslash);
+            }
+            c => unstrung.push(c),
+        }
+    }
+    // The quoting layer.
+    let inner = unstrung.strip_prefix('"')?.strip_suffix('"')?;
+    let mut path = String::new();
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        if c == backslash {
+            path.push(chars.next()?);
+        } else {
+            path.push(c);
+        }
+    }
+    (exec_value(&path).as_deref() == Some(value)).then_some(path)
+}
+
+/// Whether `value` has the shape of an `Exec=` value of ours (review I6:
+/// an owner's added argument makes the file the owner's).
+fn exec_is_ours(value: &str, shape: ExecShape) -> bool {
+    match shape {
+        ExecShape::OldTray => value == "pocketdesk-tray" || value.ends_with("/pocketdesk-tray"),
+        ExecShape::OneQuotedPath => exec_path(value).is_some(),
+    }
+}
+
 /// Whether `content` is a desktop file this program wrote and no one has
-/// changed since: our marked entry or the old hidden one, exactly, but for
-/// the program it starts. Anything else, an entry of ours the owner edited
-/// in a menu editor among them, is the owner's (review I5).
+/// changed since: one of [`PAST_STUBS`] exactly, starting a program the way
+/// that one did. Anything else, an entry of ours the owner edited in a menu
+/// editor among them (its name, a line more, an argument), is the owner's
+/// (review I5, I6).
 fn is_ours(content: &str) -> bool {
-    let content = without_exec(content);
-    content == without_exec(&stub_with_exec("")) || content == OLD_STUB
+    let Some(exec) = exec_of(content) else {
+        return false;
+    };
+    let blank = without_exec(content);
+    PAST_STUBS
+        .iter()
+        .any(|(template, shape)| blank == *template && exec_is_ours(exec, *shape))
 }
 
 /// The portal names a host program only when a desktop file of its id is
@@ -547,6 +620,49 @@ mod tests {
             assert_eq!(plan_stub(Some(edited), false, app), Stub::Leave, "{edited}");
             assert_eq!(plan_stub(Some(edited), true, app), Stub::Leave, "{edited}");
         }
+    }
+
+    #[test]
+    fn an_argument_the_owner_added_makes_the_file_the_owners() {
+        let app = "/opt/pd/pocketdesk-app";
+        let entry = ours(app);
+        let exec = exec_value(app).unwrap();
+        let minimized = entry.replace(&exec, &format!("{exec} --minimized"));
+        assert_eq!(plan_stub(Some(&minimized), false, Some(app)), Stub::Leave);
+        assert_eq!(plan_stub(Some(&minimized), true, Some(app)), Stub::Leave);
+        let wrapped = entry.replace(&exec, &format!("env FOO=1 {exec}"));
+        assert_eq!(plan_stub(Some(&wrapped), true, Some(app)), Stub::Leave);
+        // The old hidden one, with an argument added: the owner's too.
+        let old_minimized = OLD.replace("pocketdesk-tray", "pocketdesk-tray --minimized");
+        assert_eq!(
+            plan_stub(Some(&old_minimized), true, Some(app)),
+            Stub::Leave
+        );
+        // Ours as written, any path: still ours.
+        for path in ["/a b/pocketdesk-app", "/50%/x$y/pocketdesk-app"] {
+            assert_eq!(exec_path(&exec_value(path).unwrap()).as_deref(), Some(path));
+        }
+    }
+
+    #[test]
+    fn the_template_written_now_is_pinned_and_listed() {
+        // Changing it fails here until the text it had joins PAST_STUBS.
+        let expected = [
+            "[Desktop Entry]",
+            "Type=Application",
+            "Name=Pocketdesk",
+            "Comment=Your computer, on your Android phone",
+            "Exec=",
+            "Icon=pocketdesk",
+            "Terminal=false",
+            "Categories=Network;RemoteAccess;",
+            "X-Pocketdesk-Stub=true",
+            "",
+        ]
+        .join("\n");
+        assert_eq!(CURRENT_STUB, expected);
+        assert!(PAST_STUBS.iter().any(|(t, _)| *t == CURRENT_STUB));
+        assert!(PAST_STUBS.iter().any(|(t, _)| *t == OLD_HIDDEN_STUB));
     }
 
     #[test]
