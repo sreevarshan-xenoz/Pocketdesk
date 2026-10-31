@@ -147,7 +147,7 @@ jobs:
             done
             ./pocketdesk --version
             ./pocketdesk capabilities > /dev/null && echo "capabilities: ok"
-            echo "this distro ffmpeg's H.264/HEVC encoders:"
+            echo "H.264 and HEVC encoders in the distro ffmpeg:"
             ffmpeg -hide_banner -encoders 2>/dev/null | grep -E " (libx264|libx265|libopenh264|h264_vaapi|hevc_vaapi|h264_nvenc|hevc_nvenc)( |$)" || echo "  (none of them)"
             if [ "$BENCH" = 1 ]; then
               ./pocketdesk bench --target software --frames 60 --repeat 1 --json > /tmp/bench.json
