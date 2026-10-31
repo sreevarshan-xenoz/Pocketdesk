@@ -17,7 +17,9 @@ path = "src/main.rs"
 # Notifications' icons and pictures come as base64 (K3).
 base64 = "0.22"
 anyhow.workspace = true
-pocketdesk-core = { path = "../core", features = ["wan", "local"] }
+# Core's `inproc` (the in-process Linux encoders) comes through this crate's
+# own default feature, so the portable tarball can build without it.
+pocketdesk-core = { path = "../core", default-features = false, features = ["server", "wan", "local"] }
 serde.workspace = true
 # Same version core already uses: the OS CSPRNG for pairing PINs.
 rand = "0.8"
@@ -113,7 +115,7 @@ windows-future = "0.3"
 
 [dev-dependencies]
 # Tests never reach the owner's state or config folder (core `test-harness`).
-pocketdesk-core = { path = "../core", features = ["test-harness"] }
+pocketdesk-core = { path = "../core", default-features = false, features = ["test-harness"] }
 rustls.workspace = true
 # A local Mainline DHT for the N3 publishing test (no internet).
 n0-mainline = "0.7"
@@ -125,6 +127,11 @@ sha2 = "0.10"
 libc.workspace = true
 
 [features]
+default = ["inproc"]
+# The in-process Linux encoders, linking the build machine's FFmpeg libraries.
+# The release tarball builds with `--no-default-features` and encodes through
+# the system `ffmpeg` program instead, so it runs on any FFmpeg major.
+inproc = ["pocketdesk-core/inproc"]
 # BG8: the in-process Windows encoder (needs FFmpeg's development files to
 # build and its DLLs to run; docs/development-setup.md).
 inproc-windows = ["pocketdesk-core/inproc-windows"]
