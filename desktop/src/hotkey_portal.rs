@@ -189,26 +189,122 @@ fn presses(
     }
 }
 
-/// Name this program to the portal, with a desktop file of its id (hidden
-/// from menus), as a sandboxed app is named by its package. Portals older
-/// than the registry have none, which is no loss: they name it themselves.
-fn register_host(conn: &Connection) {
-    let dir = std::env::var_os("XDG_DATA_HOME")
+/// The line that marks a desktop file as one this program wrote.
+const STUB_MARK: &str = "X-Pocketdesk-Stub=true";
+
+/// What to do with the desktop file of [`APP_ID`] in the owner's own
+/// applications folder.
+#[derive(Debug, PartialEq, Eq)]
+enum Stub {
+    Leave,
+    Write(String),
+    Remove,
+}
+
+/// The desktop file this program writes where no package installed one: it
+/// starts the app, as the packaged one does, and is marked as ours.
+fn stub_entry(app: &str) -> String {
+    format!(
+        "[Desktop Entry]\nType=Application\nName=Pocketdesk\nComment=Your computer, on your \
+         Android phone\nExec={}\nIcon=pocketdesk\nTerminal=false\nCategories=Network;RemoteAccess;\n\
+         {STUB_MARK}\n",
+        exec_quoted(app)
+    )
+}
+
+/// `path` as one argument of a desktop file's `Exec`: quoted, with the
+/// characters the spec reserves inside quotes escaped.
+fn exec_quoted(path: &str) -> String {
+    let mut out = String::from("\"");
+    for c in path.chars() {
+        if matches!(c, '"' | '`' | '$' | '\\') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push('"');
+    out
+}
+
+/// Whether `content` is a desktop file this program wrote: one marked so,
+/// or the hidden one earlier trays wrote, which named the tray and hid the
+/// packaged menu entry behind it.
+fn is_ours(content: &str) -> bool {
+    if content.lines().any(|l| l.trim() == STUB_MARK) {
+        return true;
+    }
+    let lines: Vec<&str> = content.lines().collect();
+    content.ends_with('\n')
+        && lines.len() == 5
+        && lines[0] == "[Desktop Entry]"
+        && lines[1] == "Type=Application"
+        && lines[2] == "Name=Pocketdesk"
+        && lines[3].starts_with("Exec=")
+        && lines[4] == "NoDisplay=true"
+}
+
+/// The portal names a host program only when a desktop file of its id is
+/// installed. A packaged one (in a system data folder) is never shadowed:
+/// ours is removed when one is there, and a file the owner wrote is never
+/// touched. Otherwise ours is written, or replaced when it is out of date.
+fn plan_stub(own: Option<&str>, packaged: bool, app: &str) -> Stub {
+    match own {
+        Some(content) if !is_ours(content) => Stub::Leave,
+        Some(_) if packaged => Stub::Remove,
+        None if packaged => Stub::Leave,
+        Some(content) if content == stub_entry(app) => Stub::Leave,
+        _ => Stub::Write(stub_entry(app)),
+    }
+}
+
+/// The owner's own data folder, and the system ones, as XDG names them.
+fn data_dirs() -> (Option<std::path::PathBuf>, Vec<std::path::PathBuf>) {
+    let home = std::env::var_os("XDG_DATA_HOME")
         .filter(|d| !d.is_empty())
         .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".local/share")))
-        .map(|d| d.join("applications"));
-    if let Some(dir) = dir {
-        let exe = std::env::current_exe()
+        .or_else(|| {
+            std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".local/share"))
+        });
+    let system = std::env::var("XDG_DATA_DIRS")
+        .ok()
+        .filter(|d| !d.is_empty())
+        .unwrap_or_else(|| "/usr/local/share:/usr/share".to_string());
+    let system = system
+        .split(':')
+        .filter(|d| !d.is_empty())
+        .map(std::path::PathBuf::from)
+        .collect();
+    (home, system)
+}
+
+/// Name this program to the portal, as a sandboxed app is named by its
+/// package, keeping a desktop file of its id where none is installed.
+/// Portals older than the registry have none, which is no loss: they name
+/// it themselves.
+fn register_host(conn: &Connection) {
+    let file_name = format!("{APP_ID}.desktop");
+    let (home, system) = data_dirs();
+    let packaged = system
+        .iter()
+        .any(|d| d.join("applications").join(&file_name).is_file());
+    if let Some(dir) = home.map(|h| h.join("applications")) {
+        let file = dir.join(&file_name);
+        // The app beside this tray, as the packages install them.
+        let app = std::env::current_exe()
             .ok()
+            .and_then(|p| p.parent().map(|d| d.join("pocketdesk-app")))
+            .filter(|p| p.is_file())
             .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "pocketdesk-tray".to_string());
-        let entry = format!(
-            "[Desktop Entry]\nType=Application\nName=Pocketdesk\nExec={exe}\nNoDisplay=true\n"
-        );
-        let file = dir.join(format!("{APP_ID}.desktop"));
-        if std::fs::read_to_string(&file).ok().as_deref() != Some(entry.as_str()) {
-            let _ = std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&file, entry));
+            .unwrap_or_else(|| "pocketdesk-app".to_string());
+        let own = std::fs::read_to_string(&file).ok();
+        match plan_stub(own.as_deref(), packaged, &app) {
+            Stub::Leave => {}
+            Stub::Remove => {
+                let _ = std::fs::remove_file(&file);
+            }
+            Stub::Write(entry) => {
+                let _ = std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&file, entry));
+            }
         }
     }
     if let Ok(registry) = Proxy::new(
@@ -342,5 +438,67 @@ fn close(conn: &Connection, session: &OwnedObjectPath) {
         "org.freedesktop.portal.Session",
     ) {
         let _ = proxy.call_method("Close", &());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const OLD_STUB: &str = "[Desktop Entry]\nType=Application\nName=Pocketdesk\nExec=/opt/pd/pocketdesk-tray\nNoDisplay=true\n";
+
+    #[test]
+    fn a_packaged_desktop_file_is_never_shadowed() {
+        // Nothing of ours and a packaged one: nothing written.
+        assert_eq!(
+            plan_stub(None, true, "/usr/bin/pocketdesk-app"),
+            Stub::Leave
+        );
+        // The hidden one an earlier tray wrote goes, so the menu entry shows.
+        assert_eq!(
+            plan_stub(Some(OLD_STUB), true, "/usr/bin/pocketdesk-app"),
+            Stub::Remove
+        );
+        // So does a stub of ours, once a package is installed.
+        let ours = stub_entry("/opt/pd/pocketdesk-app");
+        assert_eq!(
+            plan_stub(Some(&ours), true, "/usr/bin/pocketdesk-app"),
+            Stub::Remove
+        );
+    }
+
+    #[test]
+    fn a_desktop_file_the_owner_wrote_is_never_touched() {
+        let edited =
+            "[Desktop Entry]\nType=Application\nName=My Pocketdesk\nExec=pocketdesk-app --x\n";
+        assert_eq!(
+            plan_stub(Some(edited), false, "pocketdesk-app"),
+            Stub::Leave
+        );
+        assert_eq!(plan_stub(Some(edited), true, "pocketdesk-app"), Stub::Leave);
+        // The old stub's shape, with a line more, is not ours either.
+        let more = format!("{OLD_STUB}Icon=x\n");
+        assert_eq!(plan_stub(Some(&more), true, "pocketdesk-app"), Stub::Leave);
+    }
+
+    #[test]
+    fn with_no_package_ours_starts_the_app_and_shows_in_menus() {
+        let app = "/home/me/pd build/target/release/pocketdesk-app";
+        let Stub::Write(entry) = plan_stub(None, false, app) else {
+            panic!("nothing written");
+        };
+        assert!(entry.contains("Exec=\"/home/me/pd build/target/release/pocketdesk-app\"\n"));
+        assert!(!entry.contains("NoDisplay"));
+        assert!(!entry.contains("pocketdesk-tray"));
+        assert!(is_ours(&entry));
+        // Up to date: left alone; the old hidden one is replaced.
+        assert_eq!(plan_stub(Some(&entry), false, app), Stub::Leave);
+        assert_eq!(plan_stub(Some(OLD_STUB), false, app), Stub::Write(entry));
+    }
+
+    #[test]
+    fn exec_quotes_reserved_characters() {
+        assert_eq!(exec_quoted("/a b/c"), "\"/a b/c\"");
+        assert_eq!(exec_quoted(r#"/a"$`\b"#), r#""/a\"\$\`\\b""#);
     }
 }

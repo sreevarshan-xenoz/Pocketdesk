@@ -516,8 +516,11 @@ lingering first: `sudo loginctl enable-linger $USER`.
 ### KDE Plasma: No Dialog at All
 
 The server names itself to the desktop portal as `dev.pocketdesk.Pocketdesk`,
-the desktop file the .deb and the AUR package install (run from a source
-build without it, Plasma's dialog calls it "an unidentifiable application").
+the desktop file the .deb and the AUR package install. A build from source
+has none until its tray program has run on a desktop with the GlobalShortcuts
+portal: the tray then writes one in your own `~/.local/share/applications`
+that starts the app, never where a package installed one. Without either,
+Plasma's dialog calls it "an unidentifiable application".
 Plasma 6 can then allow it ahead, as it allows KRdp, so its screen-sharing
 dialog never shows.
 
