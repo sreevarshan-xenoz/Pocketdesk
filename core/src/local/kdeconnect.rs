@@ -49,6 +49,8 @@ pub fn read(state_dir: &Path) -> Vec<SeenDevice> {
 /// note of the same id, and the list keeps [`KEEP`].
 pub fn record(state_dir: &Path, device: SeenDevice) -> io::Result<()> {
     // One writer at a time: links come and go side by side.
+    // Keeps this file's writes in turn. On Windows a contended save holds it up to
+    // about half a second (`atomic_file::replace` waits out another handle).
     static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _one = WRITING.lock().unwrap_or_else(|e| e.into_inner());
     let mut devices = read(state_dir);
@@ -57,7 +59,7 @@ pub fn record(state_dir: &Path, device: SeenDevice) -> io::Result<()> {
     devices.truncate(KEEP);
     let json = serde_json::to_string_pretty(&SeenFile { devices }).map_err(io::Error::other)?;
     let path = state_dir.join(KDECONNECT_SEEN_FILE);
-    let tmp = path.with_extension("json.tmp");
+    let tmp = crate::atomic_file::temp_beside(&path);
     std::fs::create_dir_all(state_dir)?;
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
     crate::atomic_file::replace(&tmp, &path)

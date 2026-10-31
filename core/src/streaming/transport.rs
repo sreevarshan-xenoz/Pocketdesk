@@ -494,10 +494,9 @@ fn update_pins(
         uuid::Uuid::new_v4()
     ));
     std::fs::write(&tmp, serde_json::to_string_pretty(&pins)?)?;
-    if let Err(e) = crate::atomic_file::replace(&tmp, path) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e).context("Failed to save known peers");
-    }
+    // Under `PINS_FILE`, which keeps this file's writes in turn: on Windows
+    // a contended replace holds it up to about half a second.
+    crate::atomic_file::replace(&tmp, path).context("Failed to save known peers")?;
     Ok(pins)
 }
 

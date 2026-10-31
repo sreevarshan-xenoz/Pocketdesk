@@ -1365,7 +1365,7 @@ mod tests {
             .open(&path)
             .unwrap();
         let release = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(200));
+            std::thread::sleep(std::time::Duration::from_millis(100));
             drop(holder);
         });
         TrustStore::update(&path, |s| s.untrust_device("lost-phone")).unwrap();

@@ -150,6 +150,10 @@ pub fn jpeg_size(bytes: &[u8]) -> Option<(u32, u32)> {
     None
 }
 
+// Keeps this file's writes in turn. On Windows a contended save holds it up to
+
+// about half a second (`atomic_file::replace` waits out another handle).
+
 static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Keep `photos` as `device_id`'s last answer: its thumbnails written, the
@@ -246,7 +250,7 @@ pub fn keep(
     );
     let json = serde_json::to_string(&PhotosFile { phones }).map_err(io::Error::other)?;
     let path = state_dir.join(PHONE_PHOTOS_FILE);
-    let tmp = path.with_extension("json.tmp");
+    let tmp = crate::atomic_file::temp_beside(&path);
     // What is on a phone: owner-only.
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
     crate::atomic_file::replace(&tmp, &path)

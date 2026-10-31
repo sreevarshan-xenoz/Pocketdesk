@@ -108,7 +108,7 @@ pub fn read_status(state_dir: &Path) -> Option<Status> {
 pub fn write_status(state_dir: &Path, status: &Status) -> io::Result<()> {
     let json = serde_json::to_string(status).map_err(io::Error::other)?;
     let path = state_dir.join(HOME_ASSISTANT_FILE);
-    let tmp = path.with_extension("json.tmp");
+    let tmp = crate::atomic_file::temp_beside(&path);
     std::fs::create_dir_all(state_dir)?;
     std::fs::write(&tmp, json)?;
     crate::atomic_file::replace(&tmp, &path)

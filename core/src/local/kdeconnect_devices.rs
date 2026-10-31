@@ -231,11 +231,13 @@ pub struct KdeRequest {
 }
 
 /// The server's writes, one at a time.
+// Keeps this file's writes in turn. On Windows a contended save holds it up to
+// about half a second (`atomic_file::replace` waits out another handle).
 static WRITING: Mutex<()> = Mutex::new(());
 
 fn write_private_json<T: Serialize>(path: &Path, value: &T) -> io::Result<()> {
     let json = serde_json::to_string_pretty(value).map_err(io::Error::other)?;
-    let tmp = path.with_extension("json.tmp");
+    let tmp = crate::atomic_file::temp_beside(path);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }

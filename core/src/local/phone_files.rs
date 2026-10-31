@@ -38,6 +38,10 @@ pub fn read(state_dir: &Path) -> BTreeMap<String, Kept> {
         .unwrap_or_default()
 }
 
+// Keeps this file's writes in turn. On Windows a contended save holds it up to
+
+// about half a second (`atomic_file::replace` waits out another handle).
+
 static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Keep `listing` as `device_id`'s last, dropping the listings of phones
@@ -61,7 +65,7 @@ pub fn keep(
     );
     let json = serde_json::to_string(&FilesFile { phones }).map_err(io::Error::other)?;
     let path = state_dir.join(PHONE_FILES_FILE);
-    let tmp = path.with_extension("json.tmp");
+    let tmp = crate::atomic_file::temp_beside(&path);
     std::fs::create_dir_all(state_dir)?;
     // What is on a phone: owner-only.
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;

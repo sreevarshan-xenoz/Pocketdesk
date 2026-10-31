@@ -43,6 +43,10 @@ struct CardsFile {
     cards: Vec<LiveCard>,
 }
 
+// Keeps this file's writes in turn. On Windows a contended save holds it up to
+
+// about half a second (`atomic_file::replace` waits out another handle).
+
 static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// The cards kept, newest last; none when there is no file or it does not read.
@@ -57,7 +61,7 @@ pub fn read(state_dir: &Path) -> Vec<LiveCard> {
 fn write(state_dir: &Path, cards: Vec<LiveCard>) -> io::Result<()> {
     let json = serde_json::to_string(&CardsFile { cards }).map_err(io::Error::other)?;
     let path = state_dir.join(PHONE_LIVE_FILE);
-    let tmp = path.with_extension("json.tmp");
+    let tmp = crate::atomic_file::temp_beside(&path);
     std::fs::create_dir_all(state_dir)?;
     // What a phone's apps are doing: owner-only.
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;

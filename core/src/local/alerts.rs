@@ -128,10 +128,7 @@ pub fn request(state_dir: &Path, title: &str, text: &str, now_unix: u64) -> io::
     let json = serde_json::to_string(&alert).map_err(io::Error::other)?;
     let tmp = file.with_extension("json.tmp");
     std::fs::write(&tmp, json)?;
-    if let Err(e) = crate::atomic_file::replace(&tmp, &file) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e);
-    }
+    crate::atomic_file::replace(&tmp, &file)?;
     Ok(alert)
 }
 

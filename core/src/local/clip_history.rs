@@ -92,7 +92,7 @@ pub fn write(state_dir: &Path, entries: &[ClipEntry]) -> io::Result<()> {
     })
     .map_err(io::Error::other)?;
     let path = state_dir.join(CLIP_HISTORY_FILE);
-    let tmp = path.with_extension("json.tmp");
+    let tmp = crate::atomic_file::temp_beside(&path);
     std::fs::create_dir_all(state_dir)?;
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
     crate::atomic_file::replace(&tmp, &path)
