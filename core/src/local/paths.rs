@@ -414,6 +414,73 @@ fn app_dir(base: &std::path::Path) -> PathBuf {
     }
 }
 
+/// Whether `name` is a state or config file saved through
+/// `atomic_file::temp_beside` (its temp files are named after it), for the
+/// startup sweep of what a crash left. A name left out is never swept.
+pub fn is_temp_beside_file(name: &str) -> bool {
+    const NAMES: &[&str] = &[
+        CONFIG_FILE,
+        TRUST_FILE,
+        LIVE_FILE,
+        CAST_FILE,
+        VIEW_FILE,
+        ENDPOINT_FILE,
+        RECEIVED_FILE,
+        CLIP_HISTORY_FILE,
+        KDECONNECT_SEEN_FILE,
+        KDECONNECT_DEVICES_FILE,
+        KDECONNECT_PAIRING_FILE,
+        COMPUTERS_FILE,
+        SHARED_SCREENS_FILE,
+        SHARED_LAYOUT_FILE,
+        SHARED_INPUT_STATUS_FILE,
+        SHARED_INPUT_LATENCY_FILE,
+        SENT_FILE,
+        TRANSFERS_FILE,
+        HOME_ASSISTANT_FILE,
+        PHONE_STATUS_FILE,
+        PHONE_SWITCHES_FILE,
+        PHONE_QUIET_FILE,
+        PHONE_MEDIA_FILE,
+        PHONE_LIVE_FILE,
+        PHONE_FILES_FILE,
+        DRIVE_FILE,
+        PHONE_PHOTOS_FILE,
+        APP_OPEN_FILE,
+        PHONE_NOTES_FILE,
+        NOTIFICATION_ANSWERS_FILE,
+        DEVICE_KEYS_FILE,
+        WAN_STATUS_FILE,
+        super::sms::SMS_FILE,
+        "virtual_screens.json",
+    ];
+    // The extra windows' `view-<n>.json`.
+    let window = name
+        .strip_prefix("view-")
+        .and_then(|r| r.strip_suffix(".json"))
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+    window || NAMES.contains(&name)
+}
+
+/// Sweep the temp files a crash left in the state and config folders (see
+/// `atomic_file::sweep_leftovers`); run once as the server starts. Returns
+/// how many went.
+pub fn sweep_temp_leftovers() -> usize {
+    let now = std::time::SystemTime::now();
+    [state_dir(), config_dir()]
+        .into_iter()
+        .flatten()
+        .map(|dir| {
+            crate::atomic_file::sweep_leftovers(
+                &dir,
+                is_temp_beside_file,
+                now,
+                crate::atomic_file::LEFTOVER_AGE,
+            )
+        })
+        .sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -534,5 +601,27 @@ mod tests {
     fn a_fresh_install_uses_the_new_name() {
         let base = base("fresh");
         assert_eq!(app_dir(&base), base.join(DIR_NAME));
+    }
+
+    #[test]
+    fn only_known_state_files_have_their_leftovers_swept() {
+        for ok in [
+            "computers.json",
+            "trusted_devices.json",
+            "view-2.json",
+            "sms.json",
+        ] {
+            assert!(is_temp_beside_file(ok), "{ok}");
+        }
+        for no in [
+            "",
+            "view-.json",
+            "view-x.json",
+            "notes.txt",
+            "crash.log",
+            "certs",
+        ] {
+            assert!(!is_temp_beside_file(no), "{no}");
+        }
     }
 }
