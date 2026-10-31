@@ -638,17 +638,19 @@ const TICK: Duration = Duration::from_millis(100);
 const SCREENS_EVERY: Duration = Duration::from_secs(5);
 
 /// How long the setting and a computer's standing are taken as read,
-/// counted from when their read started.
+/// counted from when their read started: past it a read again starts.
 const RECHECK: Duration = Duration::from_secs(1);
 
-/// A value this old (from when its read started) is not used while its
-/// read again is under way: that read is waited for, up to [`READ_HUNG`].
-const STALE_MOST: Duration = Duration::from_millis(1500);
+/// With no read come back for this long, the gate fails closed (sharing
+/// off, no computer allowed) until one does: a wedged disk. Above the
+/// slowest disk that still works (steady 2.5 s reads come back about every
+/// 2.5 s and stay open), so a true hang closes within this.
+const FAIL_AFTER: Duration = Duration::from_millis(3500);
 
-/// A read under way this long is taken as hung (a wedged disk): the gate
-/// fails closed (sharing off, no computer allowed) until a read comes back,
-/// and starts one read again at most this often.
-const READ_HUNG: Duration = Duration::from_secs(2);
+/// How long the first read of a value (nothing to go on yet, or the last
+/// value is past [`FAIL_AFTER`] with no read under way) is waited for
+/// before the gate refuses.
+const FIRST_WAIT: Duration = Duration::from_secs(2);
 
 /// What a computer may do here.
 #[derive(Debug, Clone, Copy, Default)]
@@ -719,10 +721,12 @@ fn settings_now() -> Settings {
     )
 }
 
-/// A value read from files on a blocking thread, kept with when its read
-/// started, and the read again under way with when it started.
+/// A value read from files on a blocking thread: the latest that came back,
+/// with when its read started and when it came back, and the one read
+/// under way (never more than one, and never let go of: whenever it comes
+/// back, its value is used).
 struct Fresh<T> {
-    value: Option<(T, tokio::time::Instant)>,
+    value: Option<(T, tokio::time::Instant, tokio::time::Instant)>,
     reading: Option<(tokio::task::JoinHandle<T>, tokio::time::Instant)>,
 }
 
@@ -736,62 +740,55 @@ impl<T> Default for Fresh<T> {
 }
 
 impl<T: Copy> Fresh<T> {
-    /// The value now: the one read under [`RECHECK`] ago at once; past it,
-    /// the one it has while it is under [`STALE_MOST`] old, with a read
-    /// again started; older (or none), that read waited for until it is
-    /// [`READ_HUNG`] old, and `closed` if it is not back by then. A read
-    /// past [`READ_HUNG`] is let go of and one started again.
+    /// The value now, never waiting on a read while there is a value to go
+    /// on: the latest value that came back, while one came back within
+    /// [`FAIL_AFTER`], else `closed`. A read again starts once that value's
+    /// read is [`RECHECK`] old and none is under way. With no value yet
+    /// (or the last past [`FAIL_AFTER`] with no read under way: a computer
+    /// quiet a while), the read is waited for until it is [`FIRST_WAIT`]
+    /// old, then `closed`.
     async fn get(&mut self, closed: T, start: impl FnOnce() -> tokio::task::JoinHandle<T>) -> T {
         let now = tokio::time::Instant::now();
-        self.take_done().await;
-        if let Some((value, at)) = self.value
-            && now.saturating_duration_since(at) < RECHECK
+        self.take_done(now).await;
+        let current = self
+            .value
+            .filter(|(_, _, back)| now.saturating_duration_since(*back) < FAIL_AFTER);
+        if self.reading.is_none()
+            && current
+                .is_none_or(|(_, started, _)| now.saturating_duration_since(started) >= RECHECK)
         {
+            self.reading = Some((start(), now));
+        }
+        if let Some((value, _, _)) = current {
             return value;
         }
-        if self
-            .reading
-            .as_ref()
-            .is_some_and(|(_, at)| now.saturating_duration_since(*at) >= READ_HUNG)
-        {
-            // Hung: let go of it (a blocking read cannot be stopped) and
-            // start one again, at most once a READ_HUNG.
-            self.reading = Some((start(), now));
+        if self.value.is_some() && self.reading.as_ref().is_some_and(|(_, at)| *at < now) {
+            // Values came back before and none has for FAIL_AFTER, the
+            // read under way older than this call: hung. Closed, no wait.
             return closed;
         }
-        let started = match &self.reading {
-            Some((_, at)) => *at,
-            None => {
-                self.reading = Some((start(), now));
-                now
-            }
+        let Some((reading, started)) = self.reading.as_mut() else {
+            return closed;
         };
-        if let Some((value, at)) = self.value
-            && now.saturating_duration_since(at) < STALE_MOST
-        {
-            return value;
-        }
-        let left = READ_HUNG.saturating_sub(now.saturating_duration_since(started));
-        if let Some((reading, _)) = self.reading.as_mut()
-            && let Ok(done) = tokio::time::timeout(left, reading).await
-        {
+        let started = *started;
+        let left = FIRST_WAIT.saturating_sub(now.saturating_duration_since(started));
+        if let Ok(done) = tokio::time::timeout(left, reading).await {
             self.reading = None;
             if let Ok(value) = done {
-                self.value = Some((value, started));
+                self.value = Some((value, started, tokio::time::Instant::now()));
                 return value;
             }
         }
         closed
     }
 
-    /// Take the read under way's value once it is done, stamped with when
-    /// it started.
-    async fn take_done(&mut self) {
+    /// Take the read under way's value once it is done.
+    async fn take_done(&mut self, now: tokio::time::Instant) {
         if self.reading.as_ref().is_some_and(|(r, _)| r.is_finished())
             && let Some((reading, started)) = self.reading.take()
             && let Ok(value) = reading.await
         {
-            self.value = Some((value, started));
+            self.value = Some((value, started, now));
         }
     }
 }
@@ -802,12 +799,14 @@ type ReadSettings = std::sync::Arc<dyn Fn() -> tokio::task::JoinHandle<Settings>
 type ReadStanding = std::sync::Arc<dyn Fn(&str) -> tokio::task::JoinHandle<Standing> + Send + Sync>;
 
 /// The setting and each computer's standing (they are files: config.toml,
-/// the trust store and `computers.json`), read on a blocking thread so a
-/// slow disk does not hold up an injection while what the gate has is
-/// fresh ([`Fresh::get`]). A value counts from when its read started, so
-/// a permission taken away or sharing turned off stops input within about
-/// [`RECHECK`] and a read; a read that hangs fails closed within
-/// [`READ_HUNG`], and sharing last read as off stays off meanwhile.
+/// the trust store and `computers.json`), read on a blocking thread, one
+/// read at a time each, so a disk never holds up an injection while the
+/// gate has a value to go on ([`Fresh::get`]). A read again starts once a
+/// value's read is [`RECHECK`] old, so on a healthy disk a permission
+/// taken away or sharing turned off stops input within about a second
+/// and a read; on a slow disk, when the read after it comes back. With no
+/// read come back for [`FAIL_AFTER`] the gate fails closed until one does,
+/// and sharing last read as off stays off meanwhile.
 struct Gate {
     on: Fresh<Settings>,
     standings: HashMap<String, Fresh<Standing>>,
@@ -1750,188 +1749,259 @@ mod tests {
         assert_eq!(injected(&[mvp(10, 100), mvp(9, 90)]), [Call::Move(100, 2)]);
     }
 
-    /// The reads behind a test gate: what they say, whether they hang,
-    /// and how many were started.
+    /// The reads behind a test gate: what they say, how long a read takes,
+    /// whether reads hang (until let go of), how many were started and the
+    /// most under way at once.
     #[derive(Default)]
     struct Disk {
         sharing: bool,
         allowed: bool,
+        read_time: Duration,
         hang_config: bool,
         hang_trust: bool,
         settings_reads: usize,
         standing_reads: usize,
+        under_way: [usize; 2],
+        most_under_way: [usize; 2],
+    }
+
+    /// One read as a test task: counted, `read_time` long (or hung until
+    /// let go of), saying what the disk said as it started.
+    async fn read_on_disk<T>(d: Arc<Mutex<Disk>>, which: usize, say: impl Fn(&mut Disk) -> T) -> T {
+        let (time, value) = {
+            let mut d = d.lock().unwrap();
+            d.under_way[which] += 1;
+            d.most_under_way[which] = d.most_under_way[which].max(d.under_way[which]);
+            let time = d.read_time;
+            (time, say(&mut d))
+        };
+        let hung = |d: &Disk| {
+            if which == 0 {
+                d.hang_config
+            } else {
+                d.hang_trust
+            }
+        };
+        tokio::time::sleep(time).await;
+        while hung(&d.lock().unwrap()) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        d.lock().unwrap().under_way[which] -= 1;
+        value
     }
 
     fn test_gate(disk: &Arc<Mutex<Disk>>) -> Gate {
         let (d1, d2) = (Arc::clone(disk), Arc::clone(disk));
         Gate::with(
             move || {
-                let d = Arc::clone(&d1);
-                tokio::spawn(async move {
-                    let (hang, on) = {
-                        let mut d = d.lock().unwrap();
-                        d.settings_reads += 1;
-                        (d.hang_config, d.sharing)
-                    };
-                    if hang {
-                        std::future::pending::<()>().await;
-                    }
-                    (on, false, true)
-                })
+                tokio::spawn(read_on_disk(Arc::clone(&d1), 0, |d| {
+                    d.settings_reads += 1;
+                    (d.sharing, false, true)
+                }))
             },
             move |_| {
-                let d = Arc::clone(&d2);
-                tokio::spawn(async move {
-                    let (hang, allowed) = {
-                        let mut d = d.lock().unwrap();
-                        d.standing_reads += 1;
-                        (d.hang_trust, d.allowed)
-                    };
-                    if hang {
-                        std::future::pending::<()>().await;
-                    }
+                tokio::spawn(read_on_disk(Arc::clone(&d2), 1, |d| {
+                    d.standing_reads += 1;
                     Standing {
                         computer: true,
-                        allowed,
+                        allowed: d.allowed,
                     }
-                })
+                }))
             },
         )
     }
 
-    fn disk(sharing: bool, allowed: bool) -> Arc<Mutex<Disk>> {
+    fn disk(sharing: bool, allowed: bool, read_ms: u64) -> Arc<Mutex<Disk>> {
         Arc::new(Mutex::new(Disk {
             sharing,
             allowed,
+            read_time: Duration::from_millis(read_ms),
             ..Disk::default()
         }))
     }
 
-    /// Let the reads started finish (they are tasks on this runtime).
+    /// Let the reads that are done finish (they are tasks on this runtime).
     async fn settle() {
         for _ in 0..10 {
             tokio::task::yield_now().await;
         }
     }
 
-    /// The first reads are waited for; within the recheck nothing is read;
-    /// past it the value it has comes at once with one read started, and a
-    /// permission taken away just after that read started stops input
-    /// within about a recheck of it (its value counts from its start).
-    #[tokio::test(start_paused = true)]
-    async fn the_gate_reads_again_in_the_background_and_a_revoke_lands_in_a_second() {
-        let d = disk(true, true);
-        let mut gate = test_gate(&d);
-        assert!(gate.standing("aaaa").await.allowed);
-        assert_eq!(d.lock().unwrap().standing_reads, 1);
-        tokio::time::advance(Duration::from_millis(500)).await;
-        assert!(gate.standing("aaaa").await.allowed);
-        assert_eq!(d.lock().unwrap().standing_reads, 1, "fresh: no read");
-        // Past the recheck: the old value at once, one read under way.
-        tokio::time::advance(Duration::from_millis(600)).await;
-        let revoked_at = tokio::time::Instant::now();
-        assert!(gate.standing("aaaa").await.allowed);
-        // Taken away just after that read started: it still says allowed.
-        settle().await;
-        d.lock().unwrap().allowed = false;
-        let mut allowed = true;
-        while allowed {
-            allowed = gate.standing("aaaa").await.allowed;
+    /// Run the gate as the loop does, a call every 100 ms (the tick's), for
+    /// `for_ms`: each call's answer, and that no call waited.
+    async fn drive(gate: &mut Gate, for_ms: u64) -> Vec<bool> {
+        let mut seen = Vec::new();
+        for _ in 0..for_ms / 100 {
+            let asked = tokio::time::Instant::now();
+            seen.push(gate.standing("aaaa").await.allowed);
+            assert_eq!(asked.elapsed(), Duration::ZERO, "a call waited");
+            tokio::time::advance(Duration::from_millis(100)).await;
             settle().await;
-            if allowed {
-                tokio::time::advance(Duration::from_millis(100)).await;
-            }
         }
-        let lag = revoked_at.elapsed();
-        assert!(lag <= Duration::from_millis(1200), "revoked after {lag:?}");
-        assert!(
-            lag >= RECHECK,
-            "the value read before it counts its recheck"
-        );
+        seen
     }
 
-    /// I1: a computer quiet for a while is read afresh and allowed at once,
-    /// never refused on an old value.
+    /// Run the gate as the loop does for `for_ms` while the first reads
+    /// come in (those may wait).
+    async fn warm(gate: &mut Gate, for_ms: u64) {
+        let until = tokio::time::Instant::now() + Duration::from_millis(for_ms);
+        while tokio::time::Instant::now() < until {
+            gate.standing("aaaa").await;
+            tokio::time::advance(Duration::from_millis(100)).await;
+            settle().await;
+        }
+    }
+
+    /// The first read is waited for; then nothing is waited for, a read
+    /// again starts once a second, and a permission taken away on a
+    /// healthy disk (50 ms reads) stops input within about 1.5 s.
     #[tokio::test(start_paused = true)]
-    async fn a_computer_quiet_a_while_is_read_afresh_and_allowed() {
-        let d = disk(true, false);
+    async fn a_revoke_on_a_healthy_disk_lands_within_a_second_and_a_half() {
+        let d = disk(true, true, 50);
+        let mut gate = test_gate(&d);
+        assert!(gate.standing("aaaa").await.allowed, "the first read");
+        assert!(drive(&mut gate, 3_000).await.iter().all(|a| *a));
+        d.lock().unwrap().allowed = false;
+        let seen = drive(&mut gate, 3_000).await;
+        let lag = seen.iter().position(|a| !a).expect("revoked") as u64 * 100;
+        assert!(lag <= 1_500, "revoked after {lag} ms");
+        assert!(seen[lag as usize / 100..].iter().all(|a| !a));
+        let d = d.lock().unwrap();
+        assert_eq!(d.most_under_way, [1, 1], "one read at a time");
+        assert!(d.standing_reads <= 8, "{} reads in 6 s", d.standing_reads);
+    }
+
+    /// A slow disk that works (1.6 s and 2.5 s reads): once the first read
+    /// is in, never waited for and never closed.
+    #[tokio::test(start_paused = true)]
+    async fn steady_slow_reads_never_stall_or_close() {
+        for read_ms in [1_600, 2_500] {
+            let d = disk(true, true, read_ms);
+            let mut gate = test_gate(&d);
+            // A first read past FIRST_WAIT is refused; open once it is in.
+            warm(&mut gate, 8_000).await;
+            assert!(
+                drive(&mut gate, 20_000).await.iter().all(|a| *a),
+                "{read_ms} ms reads stay open"
+            );
+            assert_eq!(d.lock().unwrap().most_under_way, [1, 1]);
+        }
+    }
+
+    /// On a 2.5 s disk a revoke lands when the read after it comes back:
+    /// within two reads, and closed from then on.
+    #[tokio::test(start_paused = true)]
+    async fn on_a_slow_disk_a_revoke_lands_after_a_read() {
+        let d = disk(true, true, 2_500);
+        let mut gate = test_gate(&d);
+        warm(&mut gate, 8_000).await;
+        assert!(gate.standing("aaaa").await.allowed, "open once read");
+        d.lock().unwrap().allowed = false;
+        let seen = drive(&mut gate, 8_000).await;
+        let lag = seen.iter().position(|a| !a).expect("revoked") as u64 * 100;
+        assert!(lag <= 5_200, "revoked after {lag} ms");
+        assert!(seen[lag as usize / 100..].iter().all(|a| !a));
+    }
+
+    /// A trust store that hangs: closed within FAIL_AFTER of the last read
+    /// that came back, no call waiting and no read started again while it
+    /// hangs (one thread at most); open again as soon as it comes back.
+    #[tokio::test(start_paused = true)]
+    async fn a_hung_read_closes_then_reopens_when_it_comes_back() {
+        let d = disk(true, true, 50);
+        let mut gate = test_gate(&d);
+        assert!(gate.standing("aaaa").await.allowed);
+        drive(&mut gate, 2_000).await;
+        d.lock().unwrap().hang_trust = true;
+        let seen = drive(&mut gate, 10_000).await;
+        let closed = seen.iter().position(|a| !a).expect("closed") as u64 * 100;
+        assert!(closed <= 3_600, "closed after {closed} ms");
+        assert!(seen[closed as usize / 100..].iter().all(|a| !a));
+        let reads = d.lock().unwrap().standing_reads;
+        drive(&mut gate, 10_000).await;
+        assert_eq!(
+            d.lock().unwrap().standing_reads,
+            reads,
+            "none started again"
+        );
+        assert_eq!(d.lock().unwrap().most_under_way[1], 1);
+        // The disk answers: the read under way comes back, and the very
+        // next call is open.
+        d.lock().unwrap().hang_trust = false;
+        tokio::time::advance(Duration::from_millis(20)).await;
+        settle().await;
+        assert!(gate.standing("aaaa").await.allowed, "open again");
+    }
+
+    /// The first read hanging is waited for FIRST_WAIT, then refused, and
+    /// not waited for again; a computer quiet a while is read afresh and
+    /// allowed at once.
+    #[tokio::test(start_paused = true)]
+    async fn a_first_read_is_waited_for_a_bounded_time() {
+        let d = disk(true, true, 50);
+        let mut gate = test_gate(&d);
+        assert!(gate.on().await);
+        d.lock().unwrap().hang_trust = true;
+        let asked = tokio::time::Instant::now();
+        assert!(!gate.standing("aaaa").await.allowed);
+        assert_eq!(asked.elapsed(), FIRST_WAIT);
+        let asked = tokio::time::Instant::now();
+        assert!(!gate.standing("aaaa").await.allowed);
+        assert_eq!(asked.elapsed(), Duration::ZERO, "not waited for again");
+        d.lock().unwrap().hang_trust = false;
+        tokio::time::advance(Duration::from_millis(20)).await;
+        settle().await;
+        assert!(gate.standing("aaaa").await.allowed);
+        // Quiet 30 s, the permission given meanwhile: read afresh.
+        let d = disk(true, false, 50);
         let mut gate = test_gate(&d);
         assert!(!gate.standing("aaaa").await.allowed);
-        // Allowed again while it was quiet, 30 s on.
         d.lock().unwrap().allowed = true;
         tokio::time::advance(Duration::from_secs(30)).await;
         assert!(gate.standing("aaaa").await.allowed, "the fresh read");
     }
 
-    /// A trust-store read that hangs: the old value while it is under
-    /// STALE_MOST old, then closed by READ_HUNG from the read's start
-    /// (without waiting each message), and allowed again once a read comes
-    /// back.
-    #[tokio::test(start_paused = true)]
-    async fn a_hung_permission_read_fails_closed_within_two_seconds() {
-        let d = disk(true, true);
-        let mut gate = test_gate(&d);
-        assert!(gate.standing("aaaa").await.allowed);
-        // The settings read is fine; the trust store hangs.
-        d.lock().unwrap().hang_trust = true;
-        tokio::time::advance(RECHECK).await;
-        let started = tokio::time::Instant::now();
-        assert!(gate.standing("aaaa").await.allowed, "under STALE_MOST");
-        settle().await;
-        tokio::time::advance(Duration::from_millis(600)).await;
-        assert!(!gate.standing("aaaa").await.allowed, "hung: closed");
-        assert!(
-            started.elapsed() <= READ_HUNG,
-            "closed within READ_HUNG of the read's start: {:?}",
-            started.elapsed()
-        );
-        // Each message after: closed at once, not waited for again.
-        let asked = tokio::time::Instant::now();
-        assert!(!gate.standing("aaaa").await.allowed);
-        assert!(asked.elapsed() < Duration::from_millis(1));
-        // The read started again then hangs too.
-        settle().await;
-        // The disk comes back: a read started again succeeds.
-        d.lock().unwrap().hang_trust = false;
-        tokio::time::advance(READ_HUNG).await;
-        assert!(!gate.standing("aaaa").await.allowed, "the hung one let go");
-        settle().await;
-        assert!(gate.standing("aaaa").await.allowed, "allowed again");
-    }
-
-    /// A config read that hangs turns sharing off within READ_HUNG, so
+    /// A config read that hangs turns sharing off within FAIL_AFTER, so
     /// every computer is refused; sharing last read as off stays off
-    /// through a hang, and turning it off lands within about a second.
+    /// through a hang; turning it off lands within about 1.5 s.
     #[tokio::test(start_paused = true)]
     async fn a_hung_config_read_turns_sharing_off() {
-        let d = disk(true, true);
+        let d = disk(true, true, 50);
         let mut gate = test_gate(&d);
         assert!(gate.on().await);
         d.lock().unwrap().hang_config = true;
-        tokio::time::advance(Duration::from_millis(1600)).await;
-        assert!(!gate.on().await, "hung: off");
-        assert!(!gate.standing("aaaa").await.allowed);
+        let mut off_after = None;
+        for i in 0..60 {
+            tokio::time::advance(Duration::from_millis(100)).await;
+            settle().await;
+            if !gate.on().await {
+                off_after = Some(i * 100 + 100);
+                break;
+            }
+        }
+        assert!(off_after.is_some_and(|ms| ms <= 3_600), "{off_after:?}");
         assert_eq!(gate.refusal("aaaa").await, Some(wire::REFUSE_SHARING_OFF));
         // Off, then a hang: still off.
-        let d = disk(false, true);
+        let d = disk(false, true, 50);
         let mut gate = test_gate(&d);
         assert!(!gate.on().await);
         d.lock().unwrap().hang_config = true;
-        for _ in 0..40 {
+        for _ in 0..60 {
             tokio::time::advance(Duration::from_millis(100)).await;
+            settle().await;
             assert!(!gate.on().await, "off stays off");
         }
-        // Turned off, reads healthy: off within about a second.
-        let d = disk(true, true);
+        // Turned off, reads healthy: off within about 1.5 s.
+        let d = disk(true, true, 50);
         let mut gate = test_gate(&d);
         assert!(gate.on().await);
         d.lock().unwrap().sharing = false;
         let turned = tokio::time::Instant::now();
         while gate.on().await {
-            settle().await;
             tokio::time::advance(Duration::from_millis(100)).await;
+            settle().await;
         }
-        assert!(turned.elapsed() <= Duration::from_millis(1200));
+        assert!(turned.elapsed() <= Duration::from_millis(1_500));
     }
 
     #[derive(Debug, Clone, PartialEq)]
