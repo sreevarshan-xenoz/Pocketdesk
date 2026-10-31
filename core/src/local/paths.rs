@@ -169,7 +169,9 @@ pub fn config_dir() -> io::Result<PathBuf> {
     if let Some(dir) = dir_from_env(CONFIG_DIR_VAR, std::env::var_os(CONFIG_DIR_VAR)) {
         return dir;
     }
-    refuse_in_tests("config");
+    if let Some(dir) = instead_in_tests("config", true) {
+        return Ok(dir);
+    }
     Ok(app_dir(
         &dirs::config_dir().ok_or_else(|| missing("config"))?,
     ))
@@ -213,13 +215,54 @@ pub fn use_test_dirs(name: &str) -> &'static std::path::Path {
     dir
 }
 
-/// A test of this crate that reaches the owner's folder fails loudly
-/// instead (the other crates' tests call [`use_test_dirs`]; `cfg(test)` does
-/// not reach them).
-fn refuse_in_tests(what: &str) {
+/// A test that reaches the owner's folder never gets it. One of this crate
+/// fails loudly (it must call [`use_test_dirs`] first); any other test
+/// process (another crate's, where `cfg(test)` does not reach) is turned to
+/// throwaway folders of its own, `pd-harness-<pid>`, so a test that skipped
+/// [`use_test_dirs`] can never read the owner's settings or write beside
+/// the owner's pairings. `Some` is then the folder to use (state or config,
+/// as `config` says); `None` outside tests.
+fn instead_in_tests(what: &str, config: bool) -> Option<PathBuf> {
     if cfg!(test) {
         panic!("a test reached the owner's {what} folder: call use_test_dirs first");
     }
+    if !is_test_harness() {
+        return None;
+    }
+    let state = use_test_dirs("harness");
+    Some(if config {
+        CONFIG_DIR_OVERRIDE
+            .get()
+            .map_or_else(|| state.join("config"), Clone::clone)
+    } else {
+        state.to_path_buf()
+    })
+}
+
+/// Whether this process is a Cargo test binary, read once from its own path.
+fn is_test_harness() -> bool {
+    static HARNESS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *HARNESS.get_or_init(|| {
+        std::env::current_exe()
+            .ok()
+            .is_some_and(|exe| is_harness_path(&exe))
+    })
+}
+
+/// Cargo builds every test binary as `target/<profile>/deps/<crate>-<16 hex
+/// digits>` (`.exe` on Windows); an installed or `cargo run` binary is
+/// never in a `deps` folder under a hashed name.
+fn is_harness_path(exe: &std::path::Path) -> bool {
+    let in_deps = exe
+        .parent()
+        .and_then(|p| p.file_name())
+        .is_some_and(|name| name == "deps");
+    let hashed = exe
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .and_then(|s| s.rsplit_once('-'))
+        .is_some_and(|(_, hash)| hash.len() == 16 && hash.bytes().all(|b| b.is_ascii_hexdigit()));
+    in_deps && hashed
 }
 
 /// `<state dir>/pocketdesk`, falling back to local data (`%LOCALAPPDATA%` on
@@ -232,7 +275,9 @@ pub fn state_dir() -> io::Result<PathBuf> {
     if let Some(dir) = dir_from_env(STATE_DIR_VAR, std::env::var_os(STATE_DIR_VAR)) {
         return dir;
     }
-    refuse_in_tests("state");
+    if let Some(dir) = instead_in_tests("state", false) {
+        return Ok(dir);
+    }
     Ok(app_dir(
         &dirs::state_dir()
             .or_else(dirs::data_local_dir)
@@ -308,6 +353,22 @@ fn app_dir(base: &std::path::Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_test_binary_is_told_from_an_installed_one() {
+        use std::path::Path;
+        assert!(is_harness_path(Path::new(
+            "/w/target/debug/deps/pocketdesk_server-afd6384e55342381"
+        )));
+        assert!(is_harness_path(Path::new(
+            "E:/w/target/debug/deps/pocketdesk_server-afd6384e55342381.exe"
+        )));
+        // `cargo run`, an install, and a hashless name in a deps folder.
+        assert!(!is_harness_path(Path::new("/w/target/debug/pocketdesk")));
+        assert!(!is_harness_path(Path::new("/usr/bin/pocketdesk")));
+        assert!(!is_harness_path(Path::new("/opt/deps/pocketdesk")));
+        assert!(!is_harness_path(Path::new("/opt/deps/pocketdesk-server")));
+    }
 
     #[cfg(unix)]
     #[test]
