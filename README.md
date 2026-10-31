@@ -81,9 +81,9 @@ Something not working? The desktop app's **Diagnostics** page checks the server,
 | Feature | Pocketdesk | RustDesk | Sunshine / Moonlight | KDE Connect | Phone Link | LocalSend | Deskflow | scrcpy |
 |---------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | See and drive the computer from a phone | ✅ | ✅ | ✅ | ⚠️ keyboard and touchpad only | ❌ | ❌ | ❌ | ❌ |
-| See and drive the phone from the computer | ✅ | ⚠️ | ❌ | ❌ | ✅ supported phones | ❌ | ❌ | ✅ |
-| Phone's notifications, texts and calls on the computer | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Clipboard and files, both ways | ✅ | ✅ | ⚠️ | ✅ | ⚠️ | ⚠️ files and text | ⚠️ clipboard | ⚠️ |
+| See and drive the phone from the computer | ✅ | ⚠️ Android only, needs permissions | ❌ | ❌ | ✅ supported phones | ❌ | ❌ | ✅ |
+| Phone's notifications, texts and calls on the computer | ✅ checked on Windows, not yet on Linux | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Clipboard and files, both ways | ✅ checked on Windows, files not yet on Linux | ✅ | ⚠️ | ✅ | ⚠️ | ⚠️ files and text | ⚠️ clipboard | ⚠️ |
 | One keyboard and mouse across computers | ✅ partly device-checked | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
 | One computer's screen in a window on another | ✅ partly device-checked | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | From outside without a port forward or VPN | ✅ after one session at home | ✅ | ⚠️ UPnP or a forward | ❌ | ⚠️ through a Microsoft account | ❌ | ❌ | ❌ |
@@ -93,7 +93,7 @@ Something not working? The desktop app's **Diagnostics** page checks the server,
 | Works with KDE Connect devices | ⚠️ Pairs, ping, clipboard, battery, ring, notifications, files both ways | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Open source | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ |
 
-The other columns come from those projects' public documentation and may be out of date. Each tool is good at what it was made for, and some do things Pocketdesk does not: Phone Link and scrcpy are mature at showing a phone on a computer, and LocalSend and Deskflow are small and focused. If a cell is wrong, [open an issue](https://github.com/sreevarshan-xenoz/Pocketdesk/issues/new/choose).
+Last checked against each project's documentation on 2026-10-31. The other columns come from those projects' public documentation and may be out of date. Each tool is good at what it was made for, and some do things Pocketdesk does not: Phone Link and scrcpy are mature at showing a phone on a computer, and LocalSend and Deskflow are small and focused. If a cell is wrong, [open an issue](https://github.com/sreevarshan-xenoz/Pocketdesk/issues/new/choose).
 
 **Status: beta.** 0.8.3 is the latest release; main has since fixed the Linux tarball on other distros (it did not start on Arch) and added the Fedora OpenH264 fallback and the firewall check, which ship with the next release. Partly device-checked: Hyprland on a laptop and Sway in a VM (on Linux, not yet files, notifications or sound), and Windows with a Galaxy A71 and an OPPO phone. KDE Plasma 6 has been checked headless only (the screen, input and remembered grants through its portal, with no phone); GNOME is supported but not yet checked. Your computers paired both ways and their window onto each other's screen (new in 0.8.3, with its extras) have run between throwaway servers and from the Linux laptop viewing Windows, view-only; at a desk with two real computers, not yet. The shared keyboard and mouse (new in 0.8, with Linux driving too from 0.8.2) is checked only in parts: from scripts, its receiving end on the Linux laptop and the phone as a screen, and live on Hyprland, Linux driving through its portal; two real computers at a desk, and Linux driving on GNOME and KDE, are not yet. [What works where](docs/guide.md#what-works-where) has the details, and [the checklist](docs/device-verification-checklist.md) every check still open.
 
