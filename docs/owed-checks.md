@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1074 open items.
+1076 open items.
 
 | Where | Items |
 |---|---|
@@ -12,8 +12,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 146 |
-| A Linux desktop (the Azure VM serves for some) | 174 |
+| A second computer | 147 |
+| A Linux desktop (the Azure VM serves for some) | 175 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
 
@@ -1102,6 +1102,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - An older server on one side (the last release): the phone says the computer did not answer, and nothing is added. (where: second computer)
 - On the laptop, turn Control off for the Windows throwaway on its Devices page, then introduce the OPPO: the OPPO's entry there has Control off. Unpair the Windows throwaway on the laptop: within seconds the laptop says the OPPO is no longer treated as yours, `pocketdesk devices --json` keeps it with `"owner": false`. (where: second computer) Partly checked 2026-10-31: input was off for A on B and for the phone on A, so B's entry for the phone had it off too (not a test of the narrowing alone). Unpairing A on B: `"owner": false` for the phone, kept, and "A phone is no longer treated as yours", which called A a phone (fixed in this PR: a listed computer is named a computer).
 
+**246. Shared input A: the receiving end, measured end to end**
+
+- Windows driving the Linux laptop for real (the owner's mouse and keyboard, not the script): `share-test --keys 500 --moves 2000` from Windows to the laptop, before and after this build, and a feel check that the pointer keeps up and clicks land where it is. (where: second computer)
+
 ## A Linux desktop (the Azure VM serves for some)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1577,6 +1581,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - From a phone on the laptop: "Add a screen for this phone" in the picker, the session switches to it and a window dragged onto it shows on the phone; the screen goes about 10 s after the phone leaves. (where: linux)
 - A Hyprland whose config has a monitor rule for every output (`output = ""` with a fixed position): the phone's screen still lands right of the others. (where: linux)
+
+**246. Shared input A: the receiving end, measured end to end**
+
+- The uinput path on a Linux computer where `/dev/uinput` is writable: the same run, the receiver's write calls per move a quarter of before. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

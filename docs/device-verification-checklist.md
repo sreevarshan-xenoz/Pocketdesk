@@ -3342,6 +3342,14 @@ Built 2026-10-31. On Hyprland 0.56 a phone's screen is a headless output named `
 - [ ] From a phone on the laptop: "Add a screen for this phone" in the picker, the session switches to it and a window dragged onto it shows on the phone; the screen goes about 10 s after the phone leaves. (where: linux)
 - [ ] A Hyprland whose config has a monitor rule for every output (`output = ""` with a fixed position): the phone's screen still lands right of the others. (where: linux)
 
+## 246. Shared input A: the receiving end, measured end to end
+
+Built 2026-10-31. `share-test` stamps each key and move as the script captures it and prints each stage end to end at p50, p95, p99 and the most (captured to the link, the network one way, off the link to injected), with how many moves were injected. The computer driven no longer waits on a file read before injecting (the settings, each computer's standing and the status are read and written in the background), injects only the newest of moves queued behind each other, writes each uinput frame in one `write(2)` with one SYN_REPORT, keeps the X11 display size, and takes a click's last move on the stream ahead of the click.
+
+- [x] Two throwaway servers on the Linux laptop's loopback, the receiver injecting into a headless sway (its virtual pointer, and its Xwayland through enigo), `share-test --keys 500 --moves 2000`, before and after each change (2026-10-31; numbers in the status history).
+- [ ] Windows driving the Linux laptop for real (the owner's mouse and keyboard, not the script): `share-test --keys 500 --moves 2000` from Windows to the laptop, before and after this build, and a feel check that the pointer keeps up and clicks land where it is. (where: second computer)
+- [ ] The uinput path on a Linux computer where `/dev/uinput` is writable: the same run, the receiver's write calls per move a quarter of before. (where: linux)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
