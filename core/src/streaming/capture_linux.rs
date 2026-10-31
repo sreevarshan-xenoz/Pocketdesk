@@ -466,11 +466,18 @@ async fn start_remote_desktop_capture(
     Ok(CaptureSession::new(config, cancel))
 }
 
-/// Make the portal call that turns the wheel, if any.
+/// Make the portal call that turns the wheel, if any. A smooth call says
+/// `finish` (the end of a series, no kinetic scroll after it) for a whole
+/// notch, which is a series of its own; a fine turn is one of many, so it
+/// does not. xdg-desktop-portal-kde, the only backend told smooth calls
+/// (`WheelStyle::Smooth`), reads no options at all (its
+/// `NotifyPointerAxis` passes `dx`, `dy` to KWin's fake input and nothing
+/// else), so there is no series to end there.
 async fn turn_portal_wheel(
     remote: &ashpd::desktop::remote_desktop::RemoteDesktop,
     session: &ashpd::desktop::Session<ashpd::desktop::remote_desktop::RemoteDesktop>,
     call: Option<crate::streaming::portal_input::WheelCall>,
+    finish: bool,
 ) -> ashpd::Result<()> {
     use crate::streaming::portal_input::WheelCall;
     use ashpd::desktop::remote_desktop::{Axis, NotifyPointerAxisOptions};
@@ -487,7 +494,7 @@ async fn turn_portal_wheel(
                 .await
         }
         Some(WheelCall::Smooth { dx, dy }) => {
-            let options = NotifyPointerAxisOptions::default().set_finish(true);
+            let options = NotifyPointerAxisOptions::default().set_finish(finish);
             remote.notify_pointer_axis(session, dx, dy, options).await
         }
     }
@@ -532,10 +539,16 @@ async fn apply_portal_event(
                 .await
         }
         PortalEvent::Scroll { axis, steps } => {
-            turn_portal_wheel(remote, session, wheel_call(wheel, axis, steps)).await
+            turn_portal_wheel(remote, session, wheel_call(wheel, axis, steps), true).await
         }
         PortalEvent::FineScroll { axis, v120 } => {
-            turn_portal_wheel(remote, session, fine_wheel_call(wheel, axis, v120, rest)).await
+            turn_portal_wheel(
+                remote,
+                session,
+                fine_wheel_call(wheel, axis, v120, rest),
+                false,
+            )
+            .await
         }
         PortalEvent::Key { code, pressed } => {
             remote
