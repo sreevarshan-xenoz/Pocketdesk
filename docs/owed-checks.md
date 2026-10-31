@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1082 open items.
+1075 open items.
 
 | Where | Items |
 |---|---|
@@ -10,12 +10,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 168 |
 | A phone with a SIM | 39 |
-| A second phone | 16 |
+| A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 147 |
-| A Linux desktop (the Azure VM serves for some) | 181 |
+| A second computer | 143 |
+| A Linux desktop (the Azure VM serves for some) | 180 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 374 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -129,7 +129,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **242. One version across my devices**
 
-- The OPPO on this build with a throwaway server on this build: after a connection, the computer's card on Home says "runs <this release>" in the muted colour, and the server's `pocketdesk devices --json` lists the phone's `version` as the app's. Then the phone on 0.8.2 from F-Droid or a release APK: the card says nothing (the server on 0.8.2 sends no release), and a 0.8.2 phone against this build's server leaves the phone's `version` null. (where: here) Half checked 2026-10-31: A's card says "runs 0.8.2" in the muted colour and A's `devices --json` lists the phone's `version` 0.8.2. Not run: a 0.8.2 phone from F-Droid or a release APK (a differently signed APK needs an uninstall, which wipes the phone's pairings).
+- The OPPO on this build with a throwaway server on this build: after a connection, the computer's card on Home says "runs <this release>" in the muted colour, and the server's `pocketdesk devices --json` lists the phone's `version` as the app's. Then the phone on 0.8.2 from F-Droid or a release APK: the card says nothing (the server on 0.8.2 sends no release), and a 0.8.2 phone against this build's server leaves the phone's `version` null. (where: here) Half checked 2026-10-31: A's card says "runs 0.8.2" in the muted colour and A's `devices --json` lists the phone's `version` 0.8.2. Not run: a 0.8.2 phone from F-Droid or a release APK (a differently signed APK needs an uninstall, which wipes the phone's pairings). 2026-10-31 second batch: this build's phone against a 0.8.2 throwaway (built from the tag on the laptop): the card shows no release line, and "runs 0.8.3" for the 0.8.3 throwaway. Still not run: a 0.8.2 phone.
 - A throwaway server whose `pocketdeskVersion` differs from the phone's (a build from a commit with the workspace version raised, say 0.9.0): the card says "runs 0.9.0, newer than this app: update this app" in the tertiary colour; with Settings → Pairing's switch off it says "runs 0.9.0" only. Its Devices page lists the phone with "older than this one: update it" in the warning colour, and plainly with Settings → Phones' switch off. (where: here) Phone half checked 2026-10-31 against B built at 0.9.0: "runs 0.9.0, newer than this app: update this app" in the tertiary colour, "runs 0.9.0" alone with Settings → Pairing's switch off. B's `devices --json` lists the phone at 0.8.2; its desktop Devices page was not opened.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
@@ -723,10 +723,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Two real targets (the OPPO and a second computer, or two phones): both offered, each its own row in the sent list.
 
-**241. Remove a lost device from another of yours (remote revoke)**
-
-- Pair a second device (a guest grant, `pocketdesk pair --grant 15m`, from a scripted client or a second phone) and Remove it from the OPPO: the dialog names it, Remove takes it off at once (`pocketdesk devices --json` no longer lists it), its open session and control connection end within a second, and the throwaway computer shows "<OPPO's name> removed <device> from this computer" once; `pocketdesk events` shows `device_removed` with `by` the OPPO's id. Partly checked 2026-10-31 with seeded trust-store entries (no scripted client): the dialog named the guest, it went at once, `device_removed` with `by` the OPPO's id, and A logged "A phone (<id>) removed <guest> from this computer" (the asker is named by this computer's rename only, as N3 rules). Not seen: an open session or control connection of the removed device ending (none existed), and the Windows toast.
-
 ## Away from home: another network, or through a router
 
 **8. Notifications + find-my-device (R3#11c, Tier-2 #11)**
@@ -1088,19 +1084,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **241. Remove a lost device from another of yours (remote revoke)**
 
-- Two computers paired both ways (Windows and the Linux laptop): at the laptop, Settings → Other computers → Windows → Devices there… lists Windows' devices, the laptop marked "this computer"; Remove… a throwaway device there: it goes from Windows' Devices page, and Windows notifies. Do it once with the laptop keeping the link and once with Windows keeping it (pair again from the other side). (where: second computer) Partly checked 2026-10-31 through B's `computers_out/` asks (what the desktop page sends), with B keeping the link: `devices_there` listed A's devices with B marked as the asker, `remove_there` took a seeded device off A (`removed: <name>`), and A logged "Dchk B (computer <id>) removed …". Not run: the desktop page itself, the Windows toast, and the direction with Windows keeping the link.
-- A computer paired one way (no "Mine" tick): its Other computers card has no Devices there…; a scripted `remote_devices` ask from it on its link is answered `refused: not_owner`. (where: second computer)
+- Two computers paired both ways (Windows and the Linux laptop): at the laptop, Settings → Other computers → Windows → Devices there… lists Windows' devices, the laptop marked "this computer"; Remove… a throwaway device there: it goes from Windows' Devices page, and Windows notifies. Do it once with the laptop keeping the link and once with Windows keeping it (pair again from the other side). (where: second computer) Partly checked 2026-10-31 through B's `computers_out/` asks (what the desktop page sends), with B keeping the link: `devices_there` listed A's devices with B marked as the asker, `remove_there` took a seeded device off A (`removed: <name>`), and A logged "Dchk B (computer <id>) removed …". Not run: the desktop page itself, the Windows toast, and the direction with Windows keeping the link. 2026-10-31 second batch: the other direction too, A keeping the link (A pasted B's link): B's `devices_there` listed A's devices (B `you`, the phone yours, C a computer not yours), `remove_there` took C off A (`removed: Dchk C`) and A notified "Dchk B (computer <id>) removed Dchk C from this computer". Still not run: the desktop page itself (the headless app's Settings opened, but the headless compositor took no clicks to open Other computers).
+- A computer paired one way (no "Mine" tick): its Other computers card has no Devices there…; a scripted `remote_devices` ask from it on its link is answered `refused: not_owner`. (where: second computer) Half checked 2026-10-31: C paired one way with A, a scripted `devices_there` ask from C answered `refused: not_owner` and A logged the refusal. Not seen: C's desktop card.
 
 **242. One version across my devices**
 
 - Windows and the Linux laptop paired both ways, one on this build and one a release behind: each one's Settings → Other computers shows the other's release, with the advice on the newer one's row only pointing at the older; on the computer that dials the link it comes from `computers.json`, on the other from the trust store. (where: second computer) Data checked 2026-10-31 (A 0.8.2, B 0.9.0, B dials): B's `computers.json` `versions` has A at 0.8.2, A's trust store has B at 0.9.0. The desktop Settings rows were not opened.
-
-**244. One pairing for all my devices: a computer introduces the phone**
-
-- Two throwaway servers paired both ways (Windows and the Linux laptop), input off on both. Pair the OPPO with the Windows throwaway's own code: Home then shows "Also pair with <laptop>?". Pair: the laptop's `pocketdesk devices --json` lists the OPPO with `"owner": true`, the laptop notifies "<Windows> added <phone> to this computer" once, `pocketdesk events` shows `device_introduced` with `by` the Windows throwaway's id, and a view-only session from the OPPO to the laptop opens. Counts only. (where: second computer) Mostly checked 2026-10-31: Home offered "Also pair with Dchk B?" (after the session that pairing opened was left); Pair: B lists the OPPO `"owner": true` with nothing A does not give it (input off), `device_introduced` with `by` A's id, and a view-only session to B opened. The laptop's firewall drops LAN connections except ssh, so the phone reached B through `adb reverse` and an ssh tunnel, with A's record of B's address set to 127.0.0.1 first. Not watched: B's "added" notification.
-- The OPPO paired with the Windows throwaway as someone else's, or with a guest grant: the offer says only a phone paired with the computer's own code can be introduced, and the laptop gets nothing. A computer paired one way is never offered. (where: second computer) Half checked 2026-10-31 (`--someone-else`): "Only a phone paired with the computer's own code can be introduced", B's events unchanged. Not run: a computer paired one way.
-- An older server on one side (the last release): the phone says the computer did not answer, and nothing is added. (where: second computer)
-- On the laptop, turn Control off for the Windows throwaway on its Devices page, then introduce the OPPO: the OPPO's entry there has Control off. Unpair the Windows throwaway on the laptop: within seconds the laptop says the OPPO is no longer treated as yours, `pocketdesk devices --json` keeps it with `"owner": false`. (where: second computer) Partly checked 2026-10-31: input was off for A on B and for the phone on A, so B's entry for the phone had it off too (not a test of the narrowing alone). Unpairing A on B: `"owner": false` for the phone, kept, and "A phone is no longer treated as yours", which called A a phone (fixed in this PR: a listed computer is named a computer).
 
 **247. Shared input A: the receiving end, measured end to end**
 
@@ -1584,8 +1573,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **246. Linux firewall: nftables and iptables, said at pairing**
 
-- The desktop app on the laptop: the Pair page (Phone and Computer) and Settings → Other computers show the firewall line, and it goes within 30 s of the ports being opened. (where: linux)
-- Arch's stock `/etc/nftables.conf` loaded: the row names "Arch's stock rules, which let in ssh only". (where: linux)
+- The desktop app on the laptop: the Pair page (Phone and Computer) and Settings → Other computers show the firewall line, and it goes within 30 s of the ports being opened. (where: linux) Half checked 2026-10-31: the desktop app for a throwaway in a headless sway on the laptop, its Pair page's Phone tab: "This computer's firewall (nftables) does not let other devices in on 1736/tcp and 4736/udp, so pairing will time out…" (its own ports). Not seen: the Computer tab and Settings (no clicks in the headless rig), and the line going (the laptop's firewall is never changed).
 - The hint's `nft insert` lines run by hand: the row turns green and a phone pairs. (where: linux)
 - iptables (`iptables.service` with a DROP policy): the row is red with the `iptables -I INPUT` lines. (where: linux)
 
@@ -2651,6 +2639,5 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **243. The card menu, window chips and font scale (Android UX 2)**
 
-- Show camera, then Stop, with a computer whose card had no time: its card then says "Used just now"; the same for Show screen. (where: OPPO + throwaway) Partly checked 2026-10-31: a camera session to B stamps the card at Ready and again as it ends (ended with `pocketdesk kick`, as ColorOS folds the low-importance cast notification out of adb's reach). Found: the card kept its old text while Home stayed resumed (fixed in this PR: `HostStore.usedStamps`). Show screen not run.
 - The same for "Play this phone's sound there" (it makes sound, so never in a script run). (where: by hand)
 - TalkBack on the card menu: the two headings are read as headings, Manage as collapsed and then expanded; on a window chip, the whole title and the "Show the full title" action. (where: by hand)
