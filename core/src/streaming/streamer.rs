@@ -189,8 +189,11 @@ pub enum AbsoluteSpace {
 }
 
 /// What the server's injector says of a session's screen ([`AbsoluteSpace`]),
-/// by the session's monitor index. Called off the async runtime, so it may
-/// block briefly (a compositor round trip).
+/// by the session's monitor index, as things stand now. Asked at the
+/// session's start and again for each absolute move, so a change of screens
+/// is followed: it must answer at once, from what it already knows (never a
+/// compositor round trip), and say [`AbsoluteSpace::Unknown`] while a change
+/// is not yet read.
 pub type AbsoluteSpaceFn = fn(u32) -> AbsoluteSpace;
 
 static ABSOLUTE_SPACE: std::sync::OnceLock<AbsoluteSpaceFn> = std::sync::OnceLock::new();
@@ -219,28 +222,18 @@ struct PointerSpace {
 }
 
 impl PointerSpace {
-    /// The space for a session capturing monitor `index` (`None` when the
-    /// injector's space already is the frame, or is not known), and whether
-    /// its absolute moves land on that screen. Windows: always, from xcap's
-    /// rectangles. Elsewhere: as the server's injector says.
-    async fn resolve(index: u32) -> (Option<Self>, bool) {
-        if cfg!(windows) {
-            let space = capture::monitor_rect(index)
-                .zip(capture::layout_rect())
-                .map(|(monitor, layout)| Self { monitor, layout })
-                .filter(|space| space.monitor != space.layout);
-            return (space, true);
-        }
-        let Some(said) = ABSOLUTE_SPACE.get().copied() else {
-            return (None, false);
+    /// The space for a session capturing monitor `index` on Windows (`None`
+    /// when the frame already is the whole layout), from xcap's rectangles
+    /// at the session's start.
+    fn for_monitor(index: u32) -> Option<Self> {
+        let space = Self {
+            monitor: capture::monitor_rect(index)?,
+            layout: capture::layout_rect()?,
         };
-        let space = tokio::task::spawn_blocking(move || said(index))
-            .await
-            .unwrap_or(AbsoluteSpace::Unknown);
-        Self::from_space(space)
+        (space.monitor != space.layout).then_some(space)
     }
 
-    /// [`Self::resolve`] for what the injector said: a layout remaps
+    /// The space for what the injector said: a layout remaps
     /// unless the screen is the whole of it; a layout with no area, or a
     /// screen outside it, is not trusted.
     fn from_space(space: AbsoluteSpace) -> (Option<Self>, bool) {
@@ -266,14 +259,26 @@ impl PointerSpace {
     }
 
     /// A frame-normalized point (0..=65535 per axis) as a layout-normalized one.
-    ///
-    /// Each of the 65536 values is a cell of the screen, taken at its
-    /// middle and given as the nearest of the layout's values that lands on
-    /// the screen (a compositor, and libinput for an absolute device, land
-    /// `v` at `v / 65536` of the layout), so the frame's first and last
-    /// values are the screen's first and last pixels, never one of the
-    /// screen beside it.
     fn remap(&self, x_norm: u16, y_norm: u16) -> (u16, u16) {
+        fn axis(norm: u16, start: i32, len: u32, space_start: i32, space_len: u32) -> u16 {
+            let max = f64::from(u16::MAX);
+            let pixel = f64::from(start) + f64::from(norm) / max * f64::from(len);
+            let scaled = (pixel - f64::from(space_start)) / f64::from(space_len.max(1)) * max;
+            scaled.round().clamp(0.0, max) as u16
+        }
+        let (mx, my, mw, mh) = self.monitor;
+        let (lx, ly, lw, lh) = self.layout;
+        (axis(x_norm, mx, mw, lx, lw), axis(y_norm, my, mh, ly, lh))
+    }
+
+    /// [`Self::remap`] for a Wayland compositor (Linux; Windows keeps the
+    /// formula above). Each of the 65536 values is a cell of the screen,
+    /// taken at its middle and given as the nearest of the layout's values
+    /// that lands on the screen (a compositor, and libinput for an absolute
+    /// device, land `v` at `v / 65536` of the layout), so the frame's first
+    /// and last values are the screen's first and last pixels, never one of
+    /// the screen beside it.
+    fn remap_cells(&self, x_norm: u16, y_norm: u16) -> (u16, u16) {
         fn axis(norm: u16, start: i32, len: u32, space_start: i32, space_len: u32) -> u16 {
             const CELLS: i64 = 65536;
             let space = i64::from(space_len.max(1));
@@ -291,6 +296,53 @@ impl PointerSpace {
         let (mx, my, mw, mh) = self.monitor;
         let (lx, ly, lw, lh) = self.layout;
         (axis(x_norm, mx, mw, lx, lw), axis(y_norm, my, mh, ly, lh))
+    }
+}
+
+/// Where a session's absolute moves are remapped from.
+#[derive(Clone, Copy)]
+enum PointerSource {
+    /// Not remapped: no picture, one screen on Windows, or nothing known of
+    /// the backend.
+    Off,
+    /// Windows: the rectangles read at the session's start, its formula.
+    Fixed(PointerSpace),
+    /// Linux: asked of the server's injector at each move, so a change of
+    /// screens is followed; while it says nothing is known, moves go on as
+    /// they came (over the whole desktop, as before), never to a screen
+    /// that has moved or gone.
+    Live { index: u32, said: AbsoluteSpaceFn },
+}
+
+impl PointerSource {
+    /// The source for a session showing monitor `index`, and whether its
+    /// moves land on that screen now (Windows: always).
+    fn start(index: u32) -> (Self, bool) {
+        if cfg!(windows) {
+            let source = PointerSpace::for_monitor(index).map_or(Self::Off, Self::Fixed);
+            return (source, true);
+        }
+        match ABSOLUTE_SPACE.get().copied() {
+            Some(said) => Self::live(index, said),
+            None => (Self::Off, false),
+        }
+    }
+
+    fn live(index: u32, said: AbsoluteSpaceFn) -> (Self, bool) {
+        let (_, per_screen) = PointerSpace::from_space(said(index));
+        (Self::Live { index, said }, per_screen)
+    }
+
+    /// `(x_norm, y_norm)` as the backend takes it now.
+    fn remap(&self, x_norm: u16, y_norm: u16) -> (u16, u16) {
+        match self {
+            Self::Off => (x_norm, y_norm),
+            Self::Fixed(space) => space.remap(x_norm, y_norm),
+            Self::Live { index, said } => match PointerSpace::from_space(said(*index)).0 {
+                Some(space) => space.remap_cells(x_norm, y_norm),
+                None => (x_norm, y_norm),
+            },
+        }
     }
 }
 
@@ -773,10 +825,10 @@ impl StreamingServer {
         // Where this session's absolute moves land (PC11 on Linux): read
         // before the ready stream, which says whether they land on its
         // screen.
-        let (pointer_space, per_screen) = if no_picture {
-            (None, false)
+        let (pointer, per_screen) = if no_picture {
+            (PointerSource::Off, false)
         } else {
-            PointerSpace::resolve(self.config.monitor_index).await
+            PointerSource::start(self.config.monitor_index)
         };
         // An input-only session says it was admitted, so the phone shows its
         // controls only now: taps made while the owner decided are not
@@ -1641,11 +1693,16 @@ impl StreamingServer {
         } else {
             64 * 1024
         };
-        if let Some(space) = pointer_space {
-            info!(
+        match pointer {
+            PointerSource::Fixed(space) => info!(
                 ?space,
                 "Absolute input is remapped from the monitor onto the desktop layout"
-            );
+            ),
+            PointerSource::Live { .. } => info!(
+                per_screen,
+                "Absolute input follows this screen's place in the compositor's layout"
+            ),
+            PointerSource::Off => {}
         }
         // The client's own measurements land in the session record, so the
         // monitor needs the recorder the encode task shares.
@@ -1847,23 +1904,21 @@ impl StreamingServer {
                                                     debug!("View-only: dropping input packet");
                                                     continue;
                                                 }
-                                                let packet = match (packet, pointer_space) {
-                                                    (
-                                                        InputPacket::MouseMoveAbs { x_norm, y_norm },
-                                                        Some(space),
-                                                    ) if !cropped => {
-                                                        let (x_norm, y_norm) = space.remap(x_norm, y_norm);
+                                                let packet = match packet {
+                                                    InputPacket::MouseMoveAbs { x_norm, y_norm }
+                                                        if !cropped =>
+                                                    {
+                                                        let (x_norm, y_norm) =
+                                                            pointer.remap(x_norm, y_norm);
                                                         InputPacket::MouseMoveAbs { x_norm, y_norm }
                                                     }
                                                     // A pen lands where a tap would (E3).
-                                                    (InputPacket::Pen(mut pen), Some(space))
-                                                        if !cropped =>
-                                                    {
+                                                    InputPacket::Pen(mut pen) if !cropped => {
                                                         (pen.x_norm, pen.y_norm) =
-                                                            space.remap(pen.x_norm, pen.y_norm);
+                                                            pointer.remap(pen.x_norm, pen.y_norm);
                                                         InputPacket::Pen(pen)
                                                     }
-                                                    (packet, _) => packet,
+                                                    packet => packet,
                                                 };
                                                 // Forward to input injector via channel
                                                 if let Some(ref tx) = input_tx {
@@ -2587,7 +2642,7 @@ mod tests {
             let space = space.expect("several screens remap");
             for (norm, want) in corners(monitor) {
                 assert_eq!(
-                    landed(space.remap(norm.0, norm.1), layout),
+                    landed(space.remap_cells(norm.0, norm.1), layout),
                     want,
                     "{monitor:?} at {norm:?}"
                 );
@@ -2632,7 +2687,7 @@ mod tests {
             monitor: screens[0],
             layout,
         });
-        let (x, y) = landed(space.unwrap().remap(32768, 32768), layout);
+        let (x, y) = landed(space.unwrap().remap_cells(32768, 32768), layout);
         assert!((x - -640).abs() <= 1 && (y - 512).abs() <= 1, "{x},{y}");
     }
 
@@ -2669,6 +2724,51 @@ mod tests {
                 "{monitor:?}"
             );
         }
+    }
+
+    static LIVE_SPACE: AtomicU8 = AtomicU8::new(0);
+
+    /// A stand-in for the server's injector: screen 2 beside screen 1,
+    /// then moved left of it, then a change not yet read.
+    fn live_space(index: u32) -> AbsoluteSpace {
+        let screen = |x| (x, 0, 1280, 1024);
+        match (LIVE_SPACE.load(Ordering::SeqCst), index) {
+            (0, 1) => AbsoluteSpace::Layout {
+                monitor: screen(1920),
+                layout: (0, 0, 3200, 1080),
+            },
+            (1, 1) => AbsoluteSpace::Layout {
+                monitor: screen(-1280),
+                layout: (-1280, 0, 3200, 1080),
+            },
+            _ => AbsoluteSpace::Unknown,
+        }
+    }
+
+    /// Review I1: the mapping follows a change of screens mid-session, and
+    /// while the change is not yet read, moves go on as they came (the old
+    /// whole-desktop behaviour), never to where the screen was.
+    #[test]
+    fn a_live_source_follows_a_change_of_screens() {
+        LIVE_SPACE.store(0, Ordering::SeqCst);
+        let (source, per_screen) = PointerSource::live(1, live_space);
+        assert!(per_screen);
+        let beside = (0, 0, 3200, 1080);
+        assert_eq!(landed(source.remap(0, 0), beside), (1920, 0));
+        LIVE_SPACE.store(2, Ordering::SeqCst);
+        assert_eq!(source.remap(0, 0), (0, 0), "unread: as it came");
+        assert_eq!(source.remap(40000, 50), (40000, 50));
+        LIVE_SPACE.store(1, Ordering::SeqCst);
+        let left = (-1280, 0, 3200, 1080);
+        assert_eq!(landed(source.remap(0, 0), left), (-1280, 0));
+        assert_eq!(landed(source.remap(65535, 65535), left), (-1, 1023));
+        // A session started before anything was known says no bit, and
+        // still follows once the injector knows.
+        LIVE_SPACE.store(2, Ordering::SeqCst);
+        let (late, per_screen) = PointerSource::live(1, live_space);
+        assert!(!per_screen);
+        LIVE_SPACE.store(0, Ordering::SeqCst);
+        assert_eq!(landed(late.remap(0, 0), beside), (1920, 0));
     }
 
     /// The ready byte says whether a session's moves land on its screen.

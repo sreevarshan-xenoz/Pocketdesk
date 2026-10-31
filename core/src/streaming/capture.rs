@@ -47,17 +47,15 @@ impl Drop for CaptureSession {
 
 /// Each monitor's name in the xcap enumeration (the order a session's
 /// monitor index counts in): under Xwayland, the Wayland output's own name
-/// (`eDP-1`, `HEADLESS-2`). Empty when xcap finds none (no X server); a
-/// monitor whose name cannot be read is said as empty.
-pub fn monitor_names() -> Vec<String> {
-    xcap::Monitor::all()
-        .map(|monitors| {
-            monitors
-                .iter()
-                .map(|m| m.name().unwrap_or_default())
-                .collect()
-        })
-        .unwrap_or_default()
+/// (`eDP-1`, `HEADLESS-2`). `None` when xcap cannot list them (no X server,
+/// or an error); a monitor whose name cannot be read is said as empty.
+pub fn monitor_names() -> Option<Vec<String>> {
+    xcap::Monitor::all().ok().map(|monitors| {
+        monitors
+            .iter()
+            .map(|m| m.name().unwrap_or_default())
+            .collect()
+    })
 }
 
 /// Capture rect for `index` in the xcap enumeration — the *same* ordering the

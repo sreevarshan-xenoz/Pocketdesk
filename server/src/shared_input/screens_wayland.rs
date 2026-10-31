@@ -61,7 +61,7 @@ pub fn outputs() -> Option<Vec<WaylandOutput>> {
 /// (`WAYLAND_DISPLAY`, absolute or under `XDG_RUNTIME_DIR`; `wayland-0`
 /// when unset), connected without waiting. `WAYLAND_SOCKET` is never
 /// taken: that fd is the process's to use once.
-fn connect() -> Option<UnixStream> {
+pub(crate) fn connect() -> Option<UnixStream> {
     let name =
         PathBuf::from(std::env::var_os("WAYLAND_DISPLAY").unwrap_or_else(|| "wayland-0".into()));
     let path = if name.is_absolute() {
