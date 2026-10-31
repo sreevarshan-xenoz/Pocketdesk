@@ -95,6 +95,14 @@ object IntroduceRule {
             return now - at >= quietMs || now < at
         }
 
+        /** How long [address]'s own offer stays quiet from [now] (0: not quiet). */
+        @Synchronized
+        fun quietLeftMs(address: String, now: Long): Long {
+            val at = passed[address] ?: return 0
+            if (now < at) return 0
+            return (at + quietMs - now).coerceAtLeast(0)
+        }
+
         /** Whether a sheet for [address] may open now; if so, it is the open one. */
         @Synchronized
         fun open(address: String): Boolean {
@@ -114,6 +122,28 @@ object IntroduceRule {
         fun notNow(address: String, now: Long) {
             passed[address] = now
         }
+    }
+
+    /** What to do with an offer waiting to be made by itself after pairing. */
+    sealed interface Pending {
+        /** The owner turned these offers off: forget it. */
+        data object Drop : Pending
+
+        /** A sheet is open: keep it until that one closes. */
+        data object Hold : Pending
+
+        /** Quiet after Not now: keep it, and look again in [ms]. */
+        data class After(val ms: Long) : Pending
+
+        /** Show it now. */
+        data object Now : Pending
+    }
+
+    fun pendingStep(offerOn: Boolean, sheetOpen: Boolean, quietLeftMs: Long): Pending = when {
+        !offerOn -> Pending.Drop
+        sheetOpen -> Pending.Hold
+        quietLeftMs > 0 -> Pending.After(quietLeftMs)
+        else -> Pending.Now
     }
 
     /** This run of the app's [Gate]. */

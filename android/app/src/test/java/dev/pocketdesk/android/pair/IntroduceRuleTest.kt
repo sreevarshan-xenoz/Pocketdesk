@@ -96,6 +96,26 @@ class IntroduceRuleTest {
     }
 
     @Test
+    fun anOfferThatMustWaitIsKeptNotLost() {
+        assertEquals(IntroduceRule.Pending.Now, IntroduceRule.pendingStep(offerOn = true, sheetOpen = false, quietLeftMs = 0))
+        assertEquals(IntroduceRule.Pending.Hold, IntroduceRule.pendingStep(offerOn = true, sheetOpen = true, quietLeftMs = 0))
+        assertEquals(IntroduceRule.Pending.Hold, IntroduceRule.pendingStep(offerOn = true, sheetOpen = true, quietLeftMs = 5))
+        assertEquals(IntroduceRule.Pending.After(5), IntroduceRule.pendingStep(offerOn = true, sheetOpen = false, quietLeftMs = 5))
+        assertEquals(IntroduceRule.Pending.Drop, IntroduceRule.pendingStep(offerOn = false, sheetOpen = true, quietLeftMs = 5))
+    }
+
+    @Test
+    fun quietLeftCountsDownFromNotNow() {
+        val gate = IntroduceRule.Gate(quietMs = 1_000)
+        assertEquals(0L, gate.quietLeftMs("192.0.2.1", now = 0))
+        gate.notNow("192.0.2.1", now = 100)
+        assertEquals(1_000L, gate.quietLeftMs("192.0.2.1", now = 100))
+        assertEquals(400L, gate.quietLeftMs("192.0.2.1", now = 700))
+        assertEquals(0L, gate.quietLeftMs("192.0.2.1", now = 1_100))
+        assertEquals("a clock set back", 0L, gate.quietLeftMs("192.0.2.1", now = 50))
+    }
+
+    @Test
     fun twoSheetsNeverStack() {
         val gate = IntroduceRule.Gate()
         assertTrue(gate.open("192.0.2.1"))

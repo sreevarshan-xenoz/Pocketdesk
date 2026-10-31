@@ -61,13 +61,21 @@ fun IntroduceSheet(
     val context = LocalContext.current.applicationContext
     // One sheet at a time (IntroduceRule.Gate): another already open keeps
     // this one from showing at all.
-    val mine = remember(address) { IntroduceRule.gate.open(address) }
+    // Taken in an effect, so only a sheet that was really shown holds the
+    // slot, and it is freed as the sheet goes (PR #585 review I1).
+    var mine by remember(address) { mutableStateOf<Boolean?>(null) }
     DisposableEffect(address) {
-        onDispose { if (mine) IntroduceRule.gate.closed(address) }
+        val took = IntroduceRule.gate.open(address)
+        mine = took
+        onDispose { if (took) IntroduceRule.gate.closed(address) }
     }
-    if (!mine) {
-        LaunchedEffect(address) { onDismiss() }
-        return
+    when (mine) {
+        null -> return
+        false -> {
+            LaunchedEffect(address) { onDismiss() }
+            return
+        }
+        true -> {}
     }
     var offers by remember { mutableStateOf<List<IntroduceRule.Offer>?>(null) }
     var at by remember { mutableIntStateOf(0) }

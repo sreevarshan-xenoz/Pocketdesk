@@ -315,6 +315,10 @@ object Prefs {
         prefs(ctx).edit { putString(KEY_INTRODUCE_PENDING, address) }
     }
 
+    /** The computer just paired with, left in place (its offer may have to wait). */
+    fun peekIntroducePending(ctx: Context): String? =
+        prefs(ctx).getString(KEY_INTRODUCE_PENDING, null)?.takeIf { it.isNotBlank() }
+
     /** The computer just paired with, taken (offered once). */
     fun takeIntroducePending(ctx: Context): String? {
         val address = prefs(ctx).getString(KEY_INTRODUCE_PENDING, null)

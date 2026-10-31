@@ -73,6 +73,7 @@ import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.discovery.FoundComputer
 import dev.pocketdesk.android.discovery.FoundComputers
 import dev.pocketdesk.android.discovery.rememberFoundComputers
+import dev.pocketdesk.android.pair.IntroduceRule
 import dev.pocketdesk.android.doctor.BackgroundLimit
 import dev.pocketdesk.android.doctor.Health
 import dev.pocketdesk.android.doctor.HealthCheck
@@ -210,15 +211,31 @@ fun HomeScreen(
     // Ecosystem phase 4: the computer whose other computers are offered,
     // and whether it was offered by itself after pairing.
     var introduceFor by remember { mutableStateOf<Pair<HostStore.Host, Boolean>?>(null) }
-    LaunchedEffect(hosts) {
-        val pending = Prefs.takeIntroducePending(context) ?: return@LaunchedEffect
-        if (!Prefs.offerMyComputers(context)) return@LaunchedEffect
-        // Never over a sheet already open, nor again soon after Not now.
-        if (introduceFor != null) return@LaunchedEffect
-        if (!dev.pocketdesk.android.pair.IntroduceRule.gate.mayOfferByItself(pending, System.currentTimeMillis())) {
-            return@LaunchedEffect
+    // Never over a sheet already open, nor again soon after Not now: such
+    // an offer waits, kept, and shows once it may (PR #585 review I2).
+    LaunchedEffect(hosts, introduceFor) {
+        while (true) {
+            val pending = Prefs.peekIntroducePending(context) ?: return@LaunchedEffect
+            val step = IntroduceRule.pendingStep(
+                offerOn = Prefs.offerMyComputers(context),
+                sheetOpen = introduceFor != null,
+                quietLeftMs = IntroduceRule.gate.quietLeftMs(pending, System.currentTimeMillis()),
+            )
+            when (step) {
+                IntroduceRule.Pending.Drop -> {
+                    Prefs.takeIntroducePending(context)
+                    return@LaunchedEffect
+                }
+                // Started again as the open sheet closes.
+                IntroduceRule.Pending.Hold -> return@LaunchedEffect
+                is IntroduceRule.Pending.After -> delay(step.ms)
+                IntroduceRule.Pending.Now -> {
+                    Prefs.takeIntroducePending(context)
+                    hosts.firstOrNull { it.address == pending }?.let { introduceFor = it to true }
+                    return@LaunchedEffect
+                }
+            }
         }
-        hosts.firstOrNull { it.address == pending }?.let { introduceFor = it to true }
     }
     var names by remember { mutableIntStateOf(0) }
     // Item 4: this app's release, to set each computer's beside.
