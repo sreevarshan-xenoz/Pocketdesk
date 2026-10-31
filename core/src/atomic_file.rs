@@ -69,6 +69,65 @@ pub fn temp_beside(dest: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
+/// A finished or crashed save's temp file is never reused (each save names
+/// its own), so one a crash left behind sits there holding a copy of the
+/// file's data. Only ones this old are swept: a save in flight in another
+/// process (the desktop app beside the server) is young.
+pub const LEFTOVER_AGE: Duration = Duration::from_secs(10 * 60);
+
+/// Whether `name` is `<known file>.<pid>.<n>.tmp`, a [`temp_beside`] name;
+/// returns the pid. `known` says which file names count.
+fn leftover_pid(name: &str, known: &impl Fn(&str) -> bool) -> Option<u32> {
+    let rest = name.strip_suffix(".tmp")?;
+    let (rest, n) = rest.rsplit_once('.')?;
+    let (stem, pid) = rest.rsplit_once('.')?;
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    if !digits(n) || !digits(pid) || !known(stem) {
+        return None;
+    }
+    pid.parse().ok()
+}
+
+/// Delete the temp files a crash left in `dir`: regular files named
+/// `<known file>.<digits>.<digits>.tmp`, last written at least `min_age`
+/// before `now`, whose pid is not this process's. Nothing else is touched
+/// (no folders, no other names). Returns how many went.
+pub fn sweep_leftovers(
+    dir: &Path,
+    known: impl Fn(&str) -> bool,
+    now: std::time::SystemTime,
+    min_age: Duration,
+) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut swept = 0;
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let Some(pid) = leftover_pid(&name, &known) else {
+            continue;
+        };
+        if pid == std::process::id() {
+            continue;
+        }
+        // `symlink_metadata`: a link is not a file of ours to follow.
+        let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
+            continue;
+        };
+        let old = meta
+            .modified()
+            .ok()
+            .and_then(|m| now.duration_since(m).ok())
+            .is_some_and(|age| age >= min_age);
+        if meta.is_file() && old && std::fs::remove_file(entry.path()).is_ok() {
+            swept += 1;
+        }
+    }
+    swept
+}
+
 /// What a failed rename calls for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Retry {
@@ -353,6 +412,71 @@ mod tests {
         );
         assert!(!tmp.exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn known(name: &str) -> bool {
+        matches!(name, "computers.json" | "trusted_devices.json")
+    }
+
+    fn old_file(dir: &Path, name: &str) {
+        let path = dir.join(name);
+        std::fs::write(&path, b"x").unwrap();
+        let f = std::fs::File::options().write(true).open(&path).unwrap();
+        f.set_modified(std::time::SystemTime::now() - Duration::from_secs(3600))
+            .unwrap();
+    }
+
+    #[test]
+    fn the_sweep_takes_old_leftovers_of_known_files_only() {
+        let dir = temp_dir("sweep");
+        let other = std::process::id().wrapping_add(1);
+        let gone = [
+            format!("computers.json.{other}.0.tmp"),
+            format!("trusted_devices.json.{other}.17.tmp"),
+        ];
+        let kept = [
+            // not a known file
+            format!("notes.json.{other}.0.tmp"),
+            // near misses of the shape
+            format!("computers.json.{other}.tmp"),
+            format!("computers.json.{other}.x.tmp"),
+            "computers.json.x.1.tmp".to_string(),
+            "computers.json..1.tmp".to_string(),
+            format!("computers.json.{other}.1.tmp.bak"),
+            format!("computers.json.{other}.1"),
+            format!("xcomputers.json.{other}.1.tmp"),
+            format!("computers.json.{other}.1.2.tmp"),
+            "computers.json".to_string(),
+            "computers.json.tmp".to_string(),
+            // this process's own, even old
+            format!("computers.json.{}.3.tmp", std::process::id()),
+        ];
+        for n in gone.iter().chain(&kept) {
+            old_file(&dir, n);
+        }
+        // a young one, as a save in flight is
+        let young = format!("computers.json.{other}.9.tmp");
+        std::fs::write(dir.join(&young), b"x").unwrap();
+        // a folder with a leftover's name
+        let folder = format!("computers.json.{other}.5.tmp");
+        std::fs::create_dir(dir.join(&folder)).unwrap();
+
+        let n = sweep_leftovers(&dir, known, std::time::SystemTime::now(), LEFTOVER_AGE);
+        assert_eq!(n, gone.len());
+        for n in &gone {
+            assert!(!dir.join(n).exists(), "{n} should go");
+        }
+        for n in kept.iter().chain([&young, &folder]) {
+            assert!(dir.join(n).exists(), "{n} should stay");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_sweep_of_a_missing_folder_is_nothing() {
+        let dir = temp_dir("sweep-missing").join("absent");
+        let n = sweep_leftovers(&dir, known, std::time::SystemTime::now(), LEFTOVER_AGE);
+        assert_eq!(n, 0);
     }
 
     #[test]

@@ -147,6 +147,12 @@ async fn run(command: cli::Commands, config: config::Config) -> Result<()> {
             // R4 A2: register the session-outcome telemetry sink before any
             // streaming pipeline can run.
             session_telemetry::init();
+            // Temp files a crashed save left (they hold a copy of a state
+            // file's data).
+            let swept = pocketdesk_core::local::paths::sweep_temp_leftovers();
+            if swept > 0 {
+                tracing::info!("Removed {swept} leftover temp file(s) from the state folders");
+            }
             service::run(config).await
         }
         cli::Commands::Stop => service::stop().await,
