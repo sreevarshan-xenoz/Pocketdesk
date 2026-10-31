@@ -476,8 +476,8 @@
     <string name="doctor_not_checked">Sin comprobar.</string>
     <string name="doctor_key_matches">Es tu equipo: la clave de seguridad coincide.</string>
     <string name="doctor_key_changed">La clave de seguridad de este equipo ha cambiado.</string>
-    <string name="doctor_key_changed_fix">Si reinstalaste Pocketdesk allí, quita este equipo y escanea de nuevo su código de vinculación. Si no, no te conectes: puede haber alguien en medio.</string>
-    <string name="doctor_not_paired">Aún no vinculado desde este teléfono.</string>
+    <string name="doctor_key_changed_fix">Si reinstalaste Pocketdesk allí, quita este equipo y escanea de nuevo su código de emparejamiento. Si no, no te conectes: puede haber alguien en medio.</string>
+    <string name="doctor_not_paired">Aún no emparejado desde este teléfono.</string>
     <string name="doctor_not_pocketdesk">Otra cosa responde en esta dirección.</string>
     <string name="doctor_not_pocketdesk_fix">Puede que la dirección del equipo haya cambiado. Búscalo de nuevo en esta red o escanea su código QR.</string>
     <string name="doctor_key_not_checked">Clave de seguridad sin comprobar.</string>
@@ -504,7 +504,7 @@
     <string name="doctor_connect_failed">La conexión con el equipo falló.</string>
     <string name="doctor_denied_fix">Puede que una app de VPN o cortafuegos de este teléfono lo bloquee.</string>
     <string name="doctor_video_closed_fix">Pocketdesk responde, pero no en su puerto de vídeo. Revisa el puerto de transmisión guardado para este equipo, o reinicia Pocketdesk allí.</string>
-    <string name="doctor_scan_again_title">¿Escanear de nuevo su código de vinculación?</string>
+    <string name="doctor_scan_again_title">¿Escanear de nuevo su código de emparejamiento?</string>
     <string name="doctor_scan_again_text">Esto quita el equipo y su clave de seguridad guardada de este teléfono y abre el escáner. Hazlo solo si reinstalaste Pocketdesk allí.</string>
     <!-- Staying connected in the background (T2) -->
     <string name="bg_optimized">Android puede frenar Pocketdesk mientras el teléfono duerme</string>
@@ -584,7 +584,7 @@
     <string name="settings_capture_mouse">Usar un ratón conectado en el equipo</string>
     <string name="settings_capture_mouse_summary">Durante una sesión, un ratón conectado a este teléfono (USB o Bluetooth) mueve el cursor del equipo y hace clic allí</string>
     <string name="send_clipboard_label">Enviar portapapeles</string>
-    <string name="send_clipboard_no_computer">Primero vincula un equipo</string>
+    <string name="send_clipboard_no_computer">Primero empareja un equipo</string>
     <string name="send_clipboard_empty">El portapapeles no tiene texto para enviar</string>
     <string name="send_clipboard_too_long">El texto del portapapeles es demasiado largo para enviarlo</string>
     <string name="send_clipboard_sent">Portapapeles enviado a %1$s</string>
@@ -948,7 +948,7 @@
     <string name="allowed_hint">Una función va cuando está activada aquí y el equipo la permite.</string>
     <string name="allowed_asking">Preguntando al equipo…</string>
     <string name="allowed_failed">El equipo no respondió. Uno con un Pocketdesk más antiguo no puede decir qué permite.</string>
-    <string name="allowed_not_paired">El equipo no conoce este teléfono. Vuelve a vincularlo.</string>
+    <string name="allowed_not_paired">El equipo no conoce este teléfono. Vuelve a emparejarlo.</string>
     <string name="allowed_phone_on">Este teléfono: activado</string>
     <string name="allowed_phone_off">Este teléfono: desactivado</string>
     <string name="allowed_phone_android">Este teléfono: activado, pero Android no lo permite</string>
@@ -1118,7 +1118,7 @@
     <string name="introduce_last_expired">el código de %1$s caducó</string>
     <string name="card_devices_there">Dispositivos en este equipo</string>
     <string name="there_title">Dispositivos en %1$s</string>
-    <string name="there_hint">Los teléfonos y equipos emparejados con él. Quita uno perdido o robado: pierde todo acceso allí al instante, y el equipo dice quién lo quitó. No se puede deshacer; vuelve emparejándose de nuevo.</string>
+    <string name="there_hint">Los teléfonos y equipos emparejados con él. Quita uno perdido o robado: pierde todo acceso allí al instante, y el equipo dice quién lo quitó. No se puede deshacer; vuelve a emparejarse.</string>
     <string name="there_asking">Preguntando al equipo…</string>
     <string name="there_no_answer">El equipo no respondió. Uno con un Pocketdesk anterior no puede listar sus dispositivos.</string>
     <string name="there_no_answer_remove">El equipo no respondió sobre %1$s. Abre la lista de nuevo para ver si se quitó.</string>
