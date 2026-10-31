@@ -83,6 +83,41 @@ jobs:
   # three the bridge/WAN/encode paths use, and the portable tarball's server
   # (no in-process encoder) — and a cfg mistake in one is invisible to the
   # others, so each profile gets its own job.
+  # The server as the release tarball builds it: without the in-process
+  # encoder (`inproc`), so it links no FFmpeg library. Its own runner, since
+  # the rust job's disk is already near full with the default build.
+  portable-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # Keep the packages apt fetched between runs: the mirror has been
+      # slow enough to run past the step's 30 minutes.
+      - name: Keep apt's packages between runs
+        uses: actions/cache@v4
+        with:
+          path: ~/apt-archives
+          key: apt-${{ runner.os }}-${{ github.job }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-${{ runner.os }}-${{ github.job }}-
+      - name: Install system dependencies
+        # The runner's Microsoft package source has hung or failed this step
+        # for an hour at a time; nothing here comes from it. Recommends are left
+        # out: the slow mirror took 15 minutes on them alone.
+        timeout-minutes: 30
+        run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod* && sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update && mkdir -p ~/apt-archives/partial && sudo apt-get -o Dir::Cache::Archives=$HOME/apt-archives install -y --no-install-recommends libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev && sudo chown -R "$USER" ~/apt-archives
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Clippy (pocketdesk-server --no-default-features)
+        run: cargo clippy -p pocketdesk-server --no-default-features --all-targets -- -D warnings
+
+      - name: Tests (pocketdesk-server --no-default-features, lib)
+        run: cargo test -p pocketdesk-server --no-default-features --lib
+
   profiles:
     runs-on: ubuntu-latest
     strategy:
