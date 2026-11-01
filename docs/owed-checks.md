@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1183 open items.
+1176 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 62 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 60 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 17 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 188 |
 | A phone with a SIM | 40 |
@@ -14,8 +14,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | Away from home: another network, or through a router | 39 |
 | A second computer | 155 |
 | A Linux desktop (the Azure VM serves for some) | 212 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 66 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 388 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 65 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 384 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -142,11 +142,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The same with the computer on Exact and the phone's "Exact location" on (accuracy of tens of metres, GPS), and with only one of the two on (the phone still gives the city). (where: here) Not run 2026-11-01: blocked by the two bugs above (no answer reaches the computer, and no fix was to be had).
 - The phone in the pocket with the screen off: with "Allow all the time" the ask is answered; without it the phone answers `background` and the computer logs "no fix" and tries again a minute later; with Pocketdesk open it is answered. (where: here) Partly checked 2026-11-01 (the phone's own decisions, from its log; the answers themselves did not arrive, see the first item): with "Give my computer my location" on, only the approximate-location permission (no "Allow all the time") and location services off, an ask with Pocketdesk not on screen was decided `background`; with Pocketdesk open the same ask was decided `unavailable`. A real fix with the screen off, and with "Allow all the time", was not seen.
 - The switch off on the phone answers `off` at once (no wait of 30 s); location permission taken away in Android settings answers `permission`; location turned off for the phone answers `unavailable`. (where: here) Partly checked 2026-11-01: the switch off was decided `off` within 1.0 s of the computer's ask (the phone's log), and location services off was decided `unavailable` (Pocketdesk open); but neither answer reached the computer (the first item's bug 1), so the computer waited the full 30 s. `permission` was not tried: revoking a runtime permission by adb ends the app's process, and Pocketdesk's control service must not be cut off.
-
-**258. Open any phone app from the computer (Phone apps page, Apps part 1)**
-
-- The page lists the apps with their icons within a few seconds of opening, Pocketdesk itself left out; opening it again sends no icons (the phone's log says "0 of 0 app icons" or none), and after one app is updated (or its icon file deleted from the throwaway state folder) only that one comes. (where: OPPO)
-- "Let the computer open my apps" off on the phone: the page says the phone keeps its apps to itself and names the setting; turned on, "Ask again" lists them. A computer that is not the phone's own gets no word from it at all. (where: OPPO)
 
 **259. Hands-free apps: a paused share, the screen-sharing question accepted, a lock swiped away**
 
@@ -1963,7 +1958,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **258. Open any phone app from the computer (Phone apps page, Apps part 1)**
 
-- Whether a background start by the control service itself works on the OPPO (ColorOS 14) and, if it can, on a phone with Android 15 or 16: the app starts from the service's own context with the phone's screen on another app. If it only appears behind, the fallback (N3's opt-in) is the next thing to try. (where: other hardware)
 - Whether a background start by the control service itself works on the OPPO (ColorOS 14) and, if it can, on a phone with Android 15 or 16: the app starts from the service's own context with the phone's screen on another app. If it only appears behind, the fallback (N3's opt-in) is the next thing to try. (where: other hardware) Partly checked 2026-11-01 on the OPPO (ColorOS 14, Android 14): yes — with Calculator in front and the cast shown, an open of Settings from the control service's own context brought Settings to the front (`opened`). Android 15 or 16 hardware was not available.
 
 **260. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
@@ -2821,13 +2815,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **258. Open any phone app from the computer (Phone apps page, Apps part 1)**
 
-- A click on an app with the control service on and a screen already shown (Show the screen from the phone's Cast first): the app is in front on the phone within a second or two, the screen window here comes up in front, and Android showed no consent question. (where: OPPO)
-- A click with no screen shown yet: the page says to tap the notification; the phone shows "Tap to show your screen and open …", its tap brings Android's one screen-capture question, and after Start the app opens and the window here shows it. A second app then opens with no question and no notification (the one consent serves the connection). With Android 14's "single app" choice picked in the question: what the window shows (the app chosen, not what is opened after) is noted, nothing depends on it. (where: OPPO)
-- The control service off: a click is answered `control_off`, the page says to turn on Pocketdesk control in Android's Accessibility settings, and nothing is asked of the phone's owner by itself. (where: OPPO)
-- The phone locked (a secure lock) and asleep: "locked" and "unlock the phone once", then the same click works after the unlock. A swipe-only lock is dismissed by Hands-free (see section 259), not answered "locked". (where: OPPO)
 - A click with no screen shown yet: the page says to tap the notification; the phone shows "Tap to show your screen and open …", its tap brings Android's one screen-capture question, and after Start the app opens and the window here shows it. A second app then opens with no question and no notification (the one consent serves the connection). With Android 14's "single app" choice picked in the question: what the window shows (the app chosen, not what is opened after) is noted, nothing depends on it. (where: OPPO) Partly checked 2026-11-01 (the OPPO): with no screen shown, the open was answered `needs_screen` and the phone posted "Tap to show your screen and open Settings"; its tap brought Android's one screen-capture question ("Start recording or casting with Pocketdesk?", Cancel and "Start now" only: ColorOS 14's question has no single-app choice, so that part has nothing to note), and after "Start now" Settings opened (`opened`); a second open (Calculator) then opened with no question and no notification. The window here was not looked at.
 - The control service off: a click is answered `control_off`, the page says to turn on Pocketdesk control in Android's Accessibility settings, and nothing is asked of the phone's owner by itself. (where: OPPO) Partly checked 2026-11-01 (the OPPO, Pocketdesk control found off in Accessibility settings): an open asked of the phone was answered `control_off` at once. Found: beside it the phone also posted a "Tap to open: Settings" notification (the P2 fallback, `PhoneActions.open` for the plain, no-screen ask, for ten minutes) — by design in the code, but the item's "nothing is asked of the phone's owner by itself" is true only of dialogs, not of that notification; decide which the item means. The page's wording is desktop UI, not looked at.
-- The phone locked (a secure lock) and asleep: "locked" and "unlock the phone once", then the same click works after the unlock. A swipe-only lock is also answered "locked" (it is not dismissed). (where: OPPO) Partly checked 2026-11-01 (the OPPO has a swipe-only lock, no secure lock to try): asleep with the lock screen up, awake with the lock screen up, an open was answered `locked` both times (the swipe lock was not dismissed); after swiping it away the same open was `opened`. A secure lock and its "unlock the phone once" wording were not tried.
+- The phone locked (a secure lock) and asleep: "locked" and "unlock the phone once", then the same click works after the unlock. A swipe-only lock is dismissed by Hands-free (see section 259), not answered "locked". (where: OPPO) Partly checked 2026-11-01 (the OPPO has a swipe-only lock, no secure lock to try): asleep with the lock screen up, awake with the lock screen up, an open was answered `locked` both times (the swipe lock was not dismissed); after swiping it away the same open was `opened`. A secure lock and its "unlock the phone once" wording were not tried.
 - The page by hand on Windows and on Linux: the search narrows as it is typed, "Opened from here" shows the last apps in the order opened, the phone's name picker with two phones, the layout in a narrow window, and Settings' "Show the Phone apps page" off takes the page out of the list. (where: by hand)
 
 **259. Hands-free apps: a paused share, the screen-sharing question accepted, a lock swiped away**
