@@ -20,8 +20,7 @@ interface IWindowHost {
     // Give the display back (the app on it ends with it).
     void release(int displayId) = 3;
 
-    // One touch at pixel (x, y) of the display; action is Android's MotionEvent action.
-    boolean injectTouch(int displayId, int action, float x, float y, long downTime) = 4;
+    // Transaction 4 was a single-finger touch; fingers now go together (below).
 
     // One wheel step at pixel (x, y); `vscroll` is Android's vertical scroll amount.
     boolean injectScroll(int displayId, float x, float y, float vscroll) = 5;
@@ -31,4 +30,9 @@ interface IWindowHost {
 
     // Typed text (what the keyboard's character map can make of it).
     boolean injectText(int displayId, String text) = 7;
+
+    // Every finger down on the display at once (keys to taps): `action` is
+    // Android's MotionEvent action with the changing finger's index in its
+    // high bits; finger i has id ids[i] and pixel (xs[i], ys[i]).
+    boolean injectPointers(int displayId, int action, in int[] ids, in float[] xs, in float[] ys, long downTime) = 8;
 }

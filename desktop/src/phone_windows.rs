@@ -114,6 +114,8 @@ pub struct Windows {
     views: [Option<CastView>; MAX_WINDOWS as usize],
     /// The app each window was asked for, for its title.
     names: [Option<String>; MAX_WINDOWS as usize],
+    /// The package of that app, for its keymap (keys to taps).
+    packages: [Option<String>; MAX_WINDOWS as usize],
     /// Windows asked for whose picture has not come.
     reserved: [Option<Instant>; MAX_WINDOWS as usize],
     /// The windows whose files were there at the last look.
@@ -137,11 +139,12 @@ impl Windows {
         self.used().len()
     }
 
-    /// Window `id` was asked for, to show `app`'s name.
-    pub fn reserve(&mut self, id: u8, name: &str) {
+    /// Window `id` was asked for, to show the app `package`, named `name`.
+    pub fn reserve(&mut self, id: u8, name: &str, package: &str) {
         if let Some(slot) = slot(id) {
             self.reserved[slot] = Some(Instant::now());
             self.names[slot] = Some(name.to_string());
+            self.packages[slot] = Some(package.to_string());
         }
     }
 
@@ -166,7 +169,12 @@ impl Windows {
             if there {
                 self.reserved[slot] = None;
                 if self.views[slot].is_none() {
-                    self.views[slot] = Some(CastView::for_window(ctx, state_dir.to_path_buf(), id));
+                    self.views[slot] = Some(CastView::for_window(
+                        ctx,
+                        state_dir.to_path_buf(),
+                        id,
+                        self.packages[slot].as_deref(),
+                    ));
                 }
             }
         }
@@ -177,12 +185,13 @@ impl Windows {
         self.count() > 0
     }
 
-    /// Show each window that has a cast.
-    pub fn show(&self, ctx: &egui::Context, devices: &[Device], control: bool) {
+    /// Show each window that has a cast; `keymaps` is this computer's
+    /// "Keymaps for phone apps".
+    pub fn show(&self, ctx: &egui::Context, devices: &[Device], control: bool, keymaps: bool) {
         for (slot, view) in self.views.iter().enumerate() {
             if let Some(view) = view {
                 let name = self.names[slot].as_deref().unwrap_or("Phone app");
-                view.show_window(ctx, devices, control, name);
+                view.show_window(ctx, devices, control, name, keymaps);
             }
         }
     }
@@ -237,12 +246,12 @@ mod tests {
     fn an_id_asked_for_is_held_until_its_picture_comes_or_it_is_given_up() {
         let mut windows = Windows::default();
         assert!(windows.used().is_empty());
-        windows.reserve(2, "Notes");
+        windows.reserve(2, "Notes", "org.example.notes");
         assert_eq!(windows.used(), vec![2]);
         windows.release(2);
         assert!(windows.used().is_empty());
         windows.present[0] = true;
-        windows.reserve(9, "No such window");
+        windows.reserve(9, "No such window", "org.example.none");
         assert_eq!(windows.used(), vec![1], "an id past the cap holds nothing");
         assert_eq!(windows.count(), 1);
         assert!(windows.busy());

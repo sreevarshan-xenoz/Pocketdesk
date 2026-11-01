@@ -63,6 +63,9 @@ class WindowHostService() : IWindowHost.Stub() {
 
     private val displays = ConcurrentHashMap<Int, VirtualDisplay>()
 
+    /** Each display's width and height in pixels, for holding touch points to it. */
+    private val displaySizes = ConcurrentHashMap<Int, IntArray>()
+
     /** A context whose package is the shell's, so the display service accepts the calls. */
     private val shellContext: Context? by lazy {
         runCatching {
@@ -90,6 +93,7 @@ class WindowHostService() : IWindowHost.Stub() {
                 ?: return -1
             val id = display.display.displayId
             displays[id] = display
+            displaySizes[id] = intArrayOf(width, height)
             id
         }.onFailure { Log.w(TAG, "no display", it) }.getOrDefault(-1)
     }
@@ -114,15 +118,40 @@ class WindowHostService() : IWindowHost.Stub() {
 
     override fun release(displayId: Int) {
         guard()
+        displaySizes.remove(displayId)
         displays.remove(displayId)?.let { runCatching { it.release() } }
     }
 
-    override fun injectTouch(displayId: Int, action: Int, x: Float, y: Float, downTime: Long): Boolean {
+    override fun injectPointers(
+        displayId: Int,
+        action: Int,
+        ids: IntArray?,
+        xs: FloatArray?,
+        ys: FloatArray?,
+        downTime: Long,
+    ): Boolean {
         guard()
-        if (!(action == WindowInput.ACTION_DOWN || action == WindowInput.ACTION_UP || action == WindowInput.ACTION_MOVE)) return false
-        if (!displays.containsKey(displayId)) return false
-        val event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, x, y, 0)
-        event.source = InputDevice.SOURCE_TOUCHSCREEN
+        val dims = displaySizes[displayId] ?: return false
+        if (!displays.containsKey(displayId) || ids == null || xs == null || ys == null) return false
+        // Checked again here: whatever the app sent, only a sound finger set reaches the input service.
+        if (!WindowRule.pointersOk(action, ids, xs, ys, dims[0], dims[1])) return false
+        val count = ids.size
+        val properties = Array(count) { i ->
+            MotionEvent.PointerProperties().apply { id = ids[i]; toolType = MotionEvent.TOOL_TYPE_FINGER }
+        }
+        val coords = Array(count) { i ->
+            MotionEvent.PointerCoords().apply {
+                x = WindowRule.clampPixel(xs[i], dims[0])
+                y = WindowRule.clampPixel(ys[i], dims[1])
+                pressure = 1f
+                this.size = 1f
+            }
+        }
+        val now = SystemClock.uptimeMillis()
+        val event = MotionEvent.obtain(
+            downTime.coerceAtMost(now), now, action, count, properties, coords, 0, 0, 1f, 1f, 0, 0,
+            InputDevice.SOURCE_TOUCHSCREEN, 0,
+        )
         return inject(event, displayId)
     }
 

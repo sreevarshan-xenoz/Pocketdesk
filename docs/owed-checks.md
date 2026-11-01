@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1230 open items.
+1245 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 74 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 76 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 189 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 197 |
 | A phone with a SIM | 40 |
 | A second phone | 20 |
 | Away from home: another network, or through a router | 43 |
 | A second computer | 160 |
 | A Linux desktop (the Azure VM serves for some) | 214 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 76 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 395 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 78 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 398 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -191,6 +191,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Turn the switch off with windows open, then separately stop Shizuku, then turn off "Let the computer open my apps", then unpair: each gives every window back within a second and the computer's windows close. (where: OPPO)
 - A foreground service start from the background: with Pocketdesk not in front and the screen off or on another app, a window ask starts the cast service; if Android refuses, the page falls back to opening the app on the phone's screen (`windows_unavailable`) and the log says why. The notification says "Showing app windows on <computer>". (where: OPPO)
 - The deny-list: Settings, the package installer, the permission screens, Play Store, the Shizuku manager and Pocketdesk, asked for in a window from the Phone apps page, are not opened in a window (the page opens them on the phone's screen under the usual rules, or says so); in a session of windows alone a screen-control batch from the computer does nothing to the phone's screen. (where: OPPO)
+
+**265. Keys to taps: a phone game played from the keyboard and mouse (Settings, Keymaps for phone apps)**
+
+- A stick: the Stick tool, WASD: W puts a finger down in the stick's middle and moves it up by its reach, W with D moves it on a diagonal of the same reach, letting go lifts it from where it was; opposite keys together leave the finger in the middle; the reach slider changes how far it goes. The stick is round on a tall phone window. (where: OPPO)
+- Without Shizuku nothing changes: with the phone's "Separate windows" off or Shizuku stopped, apps open on the phone's screen, its window shows no keys, and the bar says keys to taps works in an app window only; stopping Shizuku with keys held gives the windows back within a second and nothing stays down. (where: OPPO)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -664,6 +669,17 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **263. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
 
 - Touch, scroll, Back and typing in a window (a notes app, a browser with a made-up page): each reaches only that window's app, even with two windows open; Home and Recents are not offered; a letter outside the keyboard's map is skipped, not typed wrong. Watch only (the window's bar) stops input. (where: OPPO)
+
+**265. Keys to taps: a phone game played from the keyboard and mouse (Settings, Keymaps for phone apps)**
+
+- Off by default: with the setting off an app window's bar has no "Keys to taps" and typing, touch and scroll work as in section 263; the phone's own screen window says nothing about keys. Turn the setting on: each app window's bar shows "Keys to taps" and the warning that some online games flag injected input; the phone's own screen window says keys to taps works in an app window only. (where: OPPO)
+- A tap: Edit keys, Tap, click a point on the picture, press a key, Done, turn the keys on: holding the key shows one touch at that point in "Pointer location" and the app reacts as to a finger; letting go lifts it. The mark was drawn over the picture while editing and not afterwards. (where: OPPO)
+- Several fingers at once: hold W (stick), a tap key and the aim together: "Pointer location" shows three pointers at once, each moving on its own, and a drawing app or a map pinch (two taps either side of a point moving apart) responds as to a real multi-touch; releasing them in any order leaves nothing stuck. (where: OPPO)
+- Nothing stuck: with a key, the stick and the aim held, switch to another window (Alt+Tab), turn "Keys to taps" off, open the editor, turn control off, close the window, kill the desktop app: each lifts every finger within a moment (no touch stays in "Pointer location"); the helper's display going with the window ends them anyway. (where: OPPO)
+- The injection stays on the window: with keys held in a window, the phone's own screen shows no touch of them (its own touches in "Show taps" are none), on every Android at hand (14 first; 10 to 13 owed as for section 263); two windows with two different keymaps play only their own app. (where: OPPO)
+- Held fingers survive nothing: hold a mapped key, then pull the desktop's network cable or kill the desktop app, stop the control stream (stop the relay), turn the phone's "Separate windows" off, stop Shizuku, and just stay still with a key held for longer than two seconds (it stays down, kept by the half-second keep-alive in "Pointer location"): after a dropped stream, the switch off or two seconds of silence the touch is gone; with a helper killed (`kill` its process) the next open window works without a phantom touch. (where: OPPO)
+- The limits: a desktop test loop sending 1000 finger downs a second to one window lets about 100 through a second (the rest are not seen in "Pointer location"), finger lifts of fingers that were down always arrive, no finger stays down afterwards, and ordinary aiming at 144 Hz is not cut. (where: OPPO)
+- The typing rule: with keys on, letters typed in the window go nowhere (not to the phone's text fields), Backspace and Enter and Escape (Back) still work when not mapped, and Ctrl+key shortcuts are not taken as keys. (where: OPPO)
 
 ## A phone with a SIM
 
@@ -2055,6 +2071,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Battery and idle: with the setting on and the phone idle overnight, the tile still works in the morning and the phone's battery stats show no wake lock for Pocketdesk's Bluetooth service; the tile's own connect ends within the timeout and leaves no open socket on the phone (`adb shell dumpsys bluetooth_manager` shows none after a press). (where: other hardware)
 - The size: the release watch APK is about 1 MB; note the installed size on a watch. (where: other hardware)
 
+**265. Keys to taps: a phone game played from the keyboard and mouse (Settings, Keymaps for phone apps)**
+
+- Aiming: with an Aim area, "Aim with the mouse" (and Ctrl+Alt+Shift+M) hides and locks the pointer to the window; moving the mouse drags one finger around the area (a camera in a 3D game or a map pans); still for a moment lifts it, moving again puts it down in the middle; running to the area's edge lifts and puts it down in the middle again; a mouse button mapped as a key taps; Ctrl+Alt+Shift+M again or Ctrl+Alt+Shift alone frees the pointer. Try a 1000 Hz mouse and a 144 Hz screen: no lag builds up and the phone logs no flood. (where: other hardware)
+- An older phone (a build before this change) with a keymap played: it ignores the finger batches and still takes touch and typing; the desktop does not break. (where: other hardware)
+
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -2940,3 +2961,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **264. Wear OS tile, complication and list (Settings, Watch controls; `android/wear`)**
 
 - Ring: the tile's "Ring phone" makes the phone sound the alarm for 30 s with Stop on the phone; the notification says "Your watch is ringing this phone"; a second press within a minute says "Too soon, wait a moment". (where: by hand)
+
+**265. Keys to taps: a phone game played from the keyboard and mouse (Settings, Keymaps for phone apps)**
+
+- A swipe: the Swipe tool, drag from a start to an end, a key: pressing it draws a swipe from the start to the end over the set time (a list scrolls by the right amount) and lifts at the end; pressing again meanwhile does nothing; the time slider changes its speed. (where: OPPO)
+- The keymap file: one per app in the state folder under `keymaps/`, named `app.<package>.json` (a package such as `con.example` is `app.con.example.json`, a file from before the prefix is renamed as it is read); a second window of the same app opens with it; another app has its own; a file edited into something unsound (a key twice, Escape, a radius out of range, a name with a slash) or past 64 KiB is ignored and the editor starts empty; removing every binding removes the file. No keymap is in any log or sent to the phone. (where: by hand)
+- The Settings row and the bar by hand on Windows and on Linux, light and dark, in a narrow window; the editor's list beside the picture, the markers' labels and the warning; the pointer lock on Windows (confined and recentred) and on a Wayland session (locked). The Settings page's snapshot (`settings_*.png`) shows only the top of the page: confirm by eye the Phones section row, as the snapshot test cannot run without a GPU here. (where: by hand)

@@ -141,6 +141,31 @@ object WindowRule {
     fun callerAllowed(caller: Int, expected: Int, destroy: Boolean): Boolean =
         (expected >= 0 && caller == expected) || (destroy && (caller == UID_SHELL || caller == UID_ROOT))
 
+    /**
+     * Whether a set of fingers is one the helper injects: [action] is Android's with the changing
+     * finger's index in its high bits. A first DOWN or last UP has one finger; a POINTER_DOWN or
+     * POINTER_UP has two to [WindowInput.MAX_POINTERS] and an index among them; a MOVE has any,
+     * at index 0. Ids are distinct and below the cap, and every point is a number on a
+     * [width] by [height] display (a point past an edge is held to it, see [clampPixel]).
+     */
+    fun pointersOk(action: Int, ids: IntArray, xs: FloatArray, ys: FloatArray, width: Int, height: Int): Boolean {
+        val count = ids.size
+        if (count !in 1..WindowInput.MAX_POINTERS || xs.size != count || ys.size != count) return false
+        if (width < 1 || height < 1) return false
+        if (ids.any { it !in 0 until WindowInput.MAX_POINTERS } || ids.toSet().size != count) return false
+        if (!xs.all { it.isFinite() } || !ys.all { it.isFinite() }) return false
+        val index = action shr WindowInput.ACTION_POINTER_INDEX_SHIFT
+        return when (action and WindowInput.ACTION_MASK) {
+            WindowInput.ACTION_DOWN, WindowInput.ACTION_UP -> count == 1 && index == 0
+            WindowInput.ACTION_MOVE -> index == 0
+            WindowInput.ACTION_POINTER_DOWN, WindowInput.ACTION_POINTER_UP -> count >= 2 && index in 0 until count
+            else -> false
+        }
+    }
+
+    /** A point's coordinate held to a display [size] pixels on that side. */
+    fun clampPixel(v: Float, size: Int): Float = v.coerceIn(0f, (size - 1).coerceAtLeast(0).toFloat())
+
     /** The only keys the helper presses: Back, Enter and Delete. */
     fun keyAllowed(code: Int): Boolean =
         code == WindowInput.KEYCODE_BACK || code == WindowInput.KEYCODE_ENTER || code == WindowInput.KEYCODE_DEL
