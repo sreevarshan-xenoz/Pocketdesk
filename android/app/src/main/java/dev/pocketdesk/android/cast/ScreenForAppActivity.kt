@@ -5,7 +5,7 @@ import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
-import dev.pocketdesk.android.Prefs
+import dev.pocketdesk.android.control.AppOpenRule
 import dev.pocketdesk.android.control.PhoneActions
 
 /**
@@ -38,8 +38,9 @@ class ScreenForAppActivity : ComponentActivity() {
         port = intent.getIntExtra(ScreenForApp.EXTRA_PORT, 0)
         controlPort = intent.getIntExtra(ScreenForApp.EXTRA_CONTROL_PORT, 0)
         pkg = intent.getStringExtra(ScreenForApp.EXTRA_APP).orEmpty()
-        // The switch turned off since the ask: nothing opens.
-        if (!Prefs.appsFromComputer(this) || address.isEmpty() || pkg.isEmpty()) {
+        // The switch turned off, or the computer changed, since the ask:
+        // nothing opens (review).
+        if (address.isEmpty() || pkg.isEmpty() || PhoneActions.stillRefused(this, address) == AppOpenRule.OFF) {
             finish()
             return
         }

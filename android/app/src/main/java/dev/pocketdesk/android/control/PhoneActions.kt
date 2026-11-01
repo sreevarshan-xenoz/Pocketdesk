@@ -159,13 +159,28 @@ object PhoneActions {
             val until = SystemClock.elapsedRealtime() + SHOW_WAIT_MS
             while (SystemClock.elapsedRealtime() < until) {
                 if (dev.pocketdesk.android.cast.CastService.screenTo == address && ControlService.instance != null) {
-                    report(address, controlPort, "open", pkg, launchFromService(app, pkg))
+                    // Asked again now, not only before the consent and the
+                    // wait: the switch, the lock and the computer (review).
+                    val result = stillRefused(app, address) ?: launchFromService(app, pkg)
+                    report(address, controlPort, "open", pkg, result)
                     return@Thread
                 }
                 Thread.sleep(250)
             }
             report(address, controlPort, "open", pkg, if (ControlService.instance == null) AppOpenRule.CONTROL_OFF else AppOpenRule.FAILED)
         }.start()
+    }
+
+    /**
+     * Why an open asked earlier may not go ahead now, or null when it may: the
+     * switch turned off, the phone locked, or [address] no longer the computer
+     * the phone works with.
+     */
+    internal fun stillRefused(context: Context, address: String): String? = when {
+        !Prefs.appsFromComputer(context) -> AppOpenRule.OFF
+        context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked ?: true -> AppOpenRule.LOCKED
+        dev.pocketdesk.android.notify.PhoneLink.target(context)?.address != address -> AppOpenRule.OFF
+        else -> null
     }
 
     /** How long an open waits for the screen to be shown first. */
