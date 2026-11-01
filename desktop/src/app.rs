@@ -509,6 +509,9 @@ pub struct PocketdeskApp {
     overview_link_focus: bool,
     /// The Phone apps page (Apps part 1, over P2's box).
     apps_page: crate::apps_view::AppsPage,
+    /// A phone's app asked for by a pinned shortcut or a notification, and
+    /// the phone's word on it (Apps part 2).
+    phone_open: crate::phone_open::OpenWatch,
     /// A "Choose file…" dialog that is open.
     picking: Option<std::thread::JoinHandle<Option<PathBuf>>>,
     /// The Diagnostics tab (F10).
@@ -611,6 +614,7 @@ impl PocketdeskApp {
             overview_link: None,
             overview_link_focus: false,
             apps_page: Default::default(),
+            phone_open: Default::default(),
             picking: None,
             diagnostics: Default::default(),
             messages: Default::default(),
@@ -1066,6 +1070,15 @@ impl PocketdeskApp {
             }
             return;
         }
+        // Apps part 2: a pinned phone app. It brings up no page and does not
+        // raise this window: the phone's screen window comes up when the app
+        // has opened.
+        if open.page == pocketdesk_core::local::app_open::PHONE_APP {
+            if let (Some(phone), Some(app)) = (&open.phone, &open.app) {
+                self.open_phone_app(phone, app);
+            }
+            return;
+        }
         // N9: the typing window, from the tray program or its key.
         if open.page == pocketdesk_core::local::app_open::TYPE {
             if let Some(id) = &open.phone {
@@ -1087,6 +1100,46 @@ impl PocketdeskApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    }
+
+    /// Ask `phone` to open its app `app`, from a pinned shortcut or a
+    /// notification (Apps part 2): only an app the phone listed, as the
+    /// Phone apps page's click does, with the phone's screen shown here too.
+    fn open_phone_app(&mut self, phone: &str, app: &str) {
+        let who = crate::model::device_label(&self.snapshot.devices, phone);
+        let list = pocketdesk_core::local::phone_apps::read(&self.state_dir).remove(phone);
+        let device = self.snapshot.devices.iter().find(|d| d.id == phone);
+        let started = crate::phone_open::check(device, list.as_ref(), app, &who).and_then(|name| {
+            self.phone_open
+                .start(&self.state_dir, phone, &who, app, &name, now_unix())
+                .map(|()| name)
+        });
+        self.notice = match started {
+            Ok(name) => {
+                crate::notice::Notice::working(format!("Asking {who} to open {name}\u{2026}"))
+            }
+            Err(e) => crate::notice::Notice::error(e),
+        };
+    }
+
+    /// Look at the phone's word on the app asked for (Apps part 2), and
+    /// bring up the phone's screen window when it opened.
+    fn watch_phone_open(&mut self, ctx: &egui::Context) {
+        if !self.phone_open.waiting() {
+            return;
+        }
+        let done = self.phone_open.tick(&self.state_dir, now_unix());
+        if let Some(notice) = done.notice {
+            self.notice = Some(notice);
+        }
+        if done.raise
+            && let Some(cast) = &self.cast
+        {
+            cast.raise(ctx);
+        }
+        if self.phone_open.waiting() {
+            ctx.request_repaint_after(Duration::from_secs(1));
+        }
     }
 
     /// Show the computer `id`'s screen as the tray asked (PC6), from the
@@ -1552,6 +1605,7 @@ impl PocketdeskApp {
             }
             Tab::Apps => {
                 let ctx = ui.ctx().clone();
+                self.apps_page.pins_off = self.config.as_ref().is_some_and(|c| !c.phone_apps_pin);
                 let action =
                     self.apps_page
                         .show(ui, &self.state_dir, &self.snapshot.devices, now_unix());
@@ -4561,6 +4615,7 @@ impl eframe::App for PocketdeskApp {
             {
                 self.open_asked(ctx, open);
             }
+            self.watch_phone_open(ctx);
             self.raise_for_approvals(ctx);
             self.raise_for_tasks(ctx);
             self.update_tray();

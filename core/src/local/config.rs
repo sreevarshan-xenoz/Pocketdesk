@@ -176,6 +176,11 @@ pub struct Config {
     /// phone's own switch still decides whether it may be asked.
     #[serde(default = "default_true")]
     pub phone_apps_page: bool,
+    /// The right-click menu on a phone app to pin it to Start (Windows) or
+    /// the applications menu (Linux) (Apps part 2). Off, the page offers
+    /// no pin; shortcuts already pinned keep working.
+    #[serde(default = "default_true")]
+    pub phone_apps_pin: bool,
     /// Offer phones as this computer's camera (F6 part 2, Linux): a phone
     /// with the Webcam permission, asked from here, is published as a
     /// PipeWire camera apps can open. Off by default: a camera from afar.
@@ -782,6 +787,7 @@ impl Default for Config {
             kept_folders_allow_delete: false,
             cast_control: true,
             phone_apps_page: true,
+            phone_apps_pin: true,
             phone_camera: false,
             phone_camera_lens: default_phone_camera_lens(),
             phone_camera_height: default_phone_camera_height(),
@@ -1074,6 +1080,7 @@ impl Config {
         "kept_folders_allow_delete",
         "cast_control",
         "phone_apps_page",
+        "phone_apps_pin",
         "phone_camera",
         "phone_camera_lens",
         "phone_camera_height",
