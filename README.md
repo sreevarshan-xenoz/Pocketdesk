@@ -8,7 +8,7 @@
 Its live screen under your fingers, its sound, and the clipboard, files, notifications and texts moving both ways: on your network, through Tailscale, or over the internet with no port forward and no account.</p>
 
 <p align="center">
-  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-orange?logo=rust" alt="Written in Rust"></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/server%20and%20desktop%20app-Rust-orange?logo=rust" alt="Server and desktop app written in Rust"></a>
   <a href="#license"><img src="https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue" alt="License: MIT OR Apache-2.0"></a>
   <a href="https://github.com/sreevarshan-xenoz/Pocketdesk/actions"><img src="https://github.com/sreevarshan-xenoz/Pocketdesk/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/sreevarshan-xenoz/Pocketdesk/issues"><img src="https://img.shields.io/github/issues/sreevarshan-xenoz/Pocketdesk" alt="Issues"></a>
@@ -22,7 +22,7 @@ Its live screen under your fingers, its sound, and the clipboard, files, notific
 
 ## What is Pocketdesk?
 
-A server for Linux (Wayland-native, Hyprland first) and Windows 10/11, a desktop app to manage it, and a native Android app. It is written in Rust and uses FFmpeg for video encoding. Together they give you:
+A server for Linux (Wayland-native, Hyprland first) and Windows 10/11, a desktop app to manage it, and a native Android app. The server and desktop app are written in Rust and the phone app in Kotlin with a Rust bridge. Video encoding uses FFmpeg, as a library or as the `ffmpeg` program (Windows needs `ffmpeg.exe`). Together they give you:
 
 **Your computer on your phone**
 - **The screen at low latency:** hardware H.264/HEVC over QUIC, decoded by the phone's MediaCodec, with the computer's sound.
@@ -104,7 +104,7 @@ Something not working? The desktop app's **Diagnostics** page checks the server,
 
 Close calls were checked against each project's documentation on 2026-10-31 (the rest were not rechecked). The other columns come from those projects' public documentation and may be out of date. Each tool is good at what it was made for, and some do things Pocketdesk does not: Phone Link and scrcpy are mature at showing a phone on a computer, and LocalSend and Deskflow are small and focused. If a cell is wrong, [open an issue](https://github.com/sreevarshan-xenoz/Pocketdesk/issues/new/choose).
 
-**Status: beta.** 0.8.3 is the latest release; main has since fixed the Linux tarball on other distros (it did not start on Arch) and added the Fedora OpenH264 fallback and the firewall check, which ship with the next release. Partly device-checked: Hyprland on a laptop and Sway in a VM (on Linux, not yet files, notifications or sound), and Windows with a Galaxy A71 and an OPPO phone. KDE Plasma 6 has been checked headless only (the screen, input and remembered grants through its portal, with no phone); GNOME is supported but not yet checked. Your computers paired both ways and their window onto each other's screen (new in 0.8.3, with its extras) have run between throwaway servers and from the Linux laptop viewing Windows, view-only; at a desk with two real computers, not yet. The shared keyboard and mouse (new in 0.8, with Linux driving too from 0.8.2) is checked only in parts: from scripts, its receiving end on the Linux laptop and the phone as a screen, and live on Hyprland, Linux driving through its portal; two real computers at a desk, and Linux driving on GNOME and KDE, are not yet. [What works where](docs/guide.md#what-works-where) has the details, and [the checklist](docs/device-verification-checklist.md) every check still open.
+**Status: beta.** 0.8.3 is the latest release; main has since fixed the Linux tarball on other distros (it did not start on Arch) and merged everything under "In the next release" above, which ships with the next release (not yet tagged). Partly device-checked: Hyprland on a laptop and Sway in a VM (on Linux, not yet files, notifications or sound), and Windows with a Galaxy A71 and an OPPO phone. KDE Plasma 6 has been checked headless only (the screen, input and remembered grants through its portal, with no phone); GNOME 51 has been checked headless too, and not yet with a phone. Your computers paired both ways and their window onto each other's screen (new in 0.8.3, with its extras) have run between throwaway servers and from the Linux laptop viewing Windows, view-only; at a desk with two real computers, not yet. The shared keyboard and mouse (new in 0.8, with Linux driving too from 0.8.2) is checked only in parts: from scripts, its receiving end on the Linux laptop and the phone as a screen, and live on Hyprland, Linux driving through its portal; two real computers at a desk, and Linux driving on GNOME and KDE, are not yet. [What works where](docs/guide.md#what-works-where) has the details, and [the checklist](docs/device-verification-checklist.md) every check still open.
 
 ## Learn more
 
