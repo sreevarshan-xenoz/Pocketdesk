@@ -4879,6 +4879,11 @@ impl eframe::App for PocketdeskApp {
         if let Some(tab) = self.notes.take_go_to().or(self.phone_files.take_go_to()) {
             self.switch_to(tab);
         }
+        // A notification's "Open app on the phone" (Apps part 2).
+        if let Some((phone, app)) = self.notes.take_open_app() {
+            self.open_phone_app(&phone, &app);
+            ui.ctx().request_repaint();
+        }
         // A page's fix for a control it shows off (UX 1).
         if let Some(ask) = crate::widgets::take_ask(ui.ctx()) {
             self.do_ask(ask);

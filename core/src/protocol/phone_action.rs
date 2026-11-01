@@ -123,6 +123,20 @@ pub fn valid_app_id(id: &str) -> bool {
         })
 }
 
+/// The package an Android notification key names, if it is a valid one:
+/// the key the phone sends as a notification's id is Android's own,
+/// `user|package|id|tag|uid` (the user a number). Anything else, a call's
+/// note or another system's key, names no app.
+pub fn app_of_notification_key(key: &str) -> Option<String> {
+    let mut parts = key.split('|');
+    let user = parts.next()?;
+    let app = parts.next()?;
+    // An id follows the package in every key Android makes.
+    parts.next()?;
+    let user_ok = !user.is_empty() && user.bytes().all(|b| b.is_ascii_digit());
+    (user_ok && valid_app_id(app)).then(|| app.to_string())
+}
+
 /// The apps in a [`PHONE_APPS`] body: those with a valid id, their names
 /// cleaned (one line, the media's limit), each once, at most [`MAX_APPS`].
 pub fn parse_apps(body: &serde_json::Value) -> Vec<PhoneApp> {
@@ -378,6 +392,32 @@ mod tests {
         );
         assert_eq!(PhoneAction::parse("Lock"), None);
         assert_eq!(PhoneAction::parse("unlock"), None);
+    }
+
+    /// Apps part 2: a notification's key names its app only in Android's form.
+    #[test]
+    fn a_notification_key_names_its_app_in_androids_form() {
+        assert_eq!(
+            app_of_notification_key("0|org.example.chat|12|null|10123").as_deref(),
+            Some("org.example.chat")
+        );
+        assert_eq!(
+            app_of_notification_key("10|org.example.chat|7|tag|10123").as_deref(),
+            Some("org.example.chat")
+        );
+        for bad in [
+            "",
+            "org.example.chat",
+            "pocketdesk:call:1",
+            "0|org.example.chat",
+            "x|org.example.chat|1|null|1",
+            "|org.example.chat|1|null|1",
+            "0|nodots|1|null|1",
+            "0|org.example.chat;rm|1|null|1",
+            "0| |1|null|1",
+        ] {
+            assert_eq!(app_of_notification_key(bad), None, "{bad:?}");
+        }
     }
 
     /// P2: an app is named by a package name, and a list keeps the valid ones once.
