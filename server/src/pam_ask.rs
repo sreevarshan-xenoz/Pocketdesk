@@ -132,6 +132,8 @@ pub enum Mode {
     Pin {
         user: String,
         attested: bool,
+        /// Take a debug build of the app (signed with any key).
+        debug_app: bool,
     },
     Unpin(String),
     Help,
@@ -157,10 +159,17 @@ pub fn mode_of(args: &[String], under_pam: bool) -> Mode {
         ["--pin", user] => Mode::Pin {
             user: user.to_string(),
             attested: true,
+            debug_app: false,
+        },
+        ["--pin", user, "--debug-app"] => Mode::Pin {
+            user: user.to_string(),
+            attested: true,
+            debug_app: true,
         },
         ["--pin-without-attestation", user] => Mode::Pin {
             user: user.to_string(),
             attested: false,
+            debug_app: false,
         },
         ["--unpin", user] => Mode::Unpin(user.to_string()),
         ["--help" | "-h"] => Mode::Help,
@@ -756,7 +765,12 @@ pub fn pam_mode(forced: Option<Kind>, env: &PamEnv) -> Result<String, GiveUp> {
     }
     let kind = kind_of(&service, forced).ok_or_else(|| GiveUp::UnknownService(service.clone()))?;
     let requester = env.ruser.clone().filter(|r| !r.is_empty());
-    if requester.as_deref().is_some_and(|r| !is_plain_name(r)) {
+    // Refused before anything is counted (review N11): another user's
+    // request never uses up the user's allowance.
+    if requester
+        .as_deref()
+        .is_some_and(|r| !is_plain_name(r) || r != user)
+    {
         return Err(GiveUp::OtherUser);
     }
     // Read as root, before becoming the user: root's pin, and the asking
@@ -772,8 +786,10 @@ pub fn pam_mode(forced: Option<Kind>, env: &PamEnv) -> Result<String, GiveUp> {
     let tty = shown_text(env.tty.as_deref().unwrap_or(""), MAX_TTY).ok_or(GiveUp::TooLong)?;
     let origin = origin_text(&chain);
     let account = lookup_user(&user).ok_or(GiveUp::NoUser)?;
-    // The count is root's under sudo and polkit: kept before the drop.
-    let rate_key = format!("{service}:{user}");
+    // The count is root's under sudo and polkit: kept before the drop, by
+    // service, user and asking user, once the checks root can make alone
+    // have passed (review N11).
+    let rate_key = format!("{service}:{user}:{}", requester.as_deref().unwrap_or("-"));
     let ask = Ask {
         kind,
         service: &service,
@@ -811,6 +827,7 @@ pub fn pam_mode(forced: Option<Kind>, env: &PamEnv) -> Result<String, GiveUp> {
         command,
         tty,
         origin,
+        pinned: pinned_list(&phones),
         computer: pin.computer.clone(),
         nonce: new_nonce()?,
         issued_unix: now,
@@ -885,6 +902,7 @@ fn test_mode() -> i32 {
         command: "A test from Settings: nothing runs".to_string(),
         tty: String::new(),
         origin: "pocketdesk-app".to_string(),
+        pinned: pinned_list(&phones),
         computer: pin.computer.clone(),
         nonce,
         issued_unix: now,
@@ -971,6 +989,7 @@ fn check_pin_answer(
     expected: &Approval,
     got: &PinAnswer,
     attested: bool,
+    debug_app: bool,
     now_unix: u64,
 ) -> Result<PhoneKey, String> {
     let a = &got.approval;
@@ -1007,7 +1026,8 @@ fn check_pin_answer(
         now_unix as i64,
     )
     .and_then(|(spki, d)| {
-        crate::attestation::check_policy(&d, challenge.as_ref()).map(|level| (spki, d, level))
+        crate::attestation::check_policy(&d, challenge.as_ref(), debug_app)
+            .map(|level| (spki, d, level))
     });
     let (spki, level, biometric_only) = match checked {
         Ok((spki, d, level)) => (
@@ -1045,8 +1065,48 @@ fn check_pin_answer(
     })
 }
 
+/// How many of the key's last hex digits root types at `--pin`.
+pub const CODE_LEN: usize = 8;
+
+/// The code a phone shows for a key: the last [`CODE_LEN`] hex digits of
+/// its SHA-256, in two groups of four.
+pub fn key_code(fingerprint: &str) -> String {
+    let hex: String = fingerprint
+        .chars()
+        .filter(|c| c.is_ascii_hexdigit())
+        .collect();
+    let tail = &hex[hex.len().saturating_sub(CODE_LEN)..];
+    format!(
+        "{} {}",
+        &tail[..tail.len().min(4)],
+        &tail[tail.len().min(4)..]
+    )
+}
+
+/// Whether what root typed is the key's code: its hex digits only, in any
+/// case, all [`CODE_LEN`] of them.
+pub fn code_matches(typed: &str, fingerprint: &str) -> bool {
+    let typed: String = typed
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '-')
+        .collect::<String>()
+        .to_ascii_lowercase();
+    let want: String = key_code(fingerprint).replace(' ', "");
+    typed.len() == CODE_LEN && want.len() == CODE_LEN && typed == want
+}
+
+/// The pinned keys a request may be answered with, as it names them.
+fn pinned_list(phones: &[PhoneKey]) -> String {
+    phones
+        .iter()
+        .map(|k| k.fingerprint.replace(' ', ""))
+        .filter(|f| f.len() == 64)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 /// `--pin USER` as root: ask the phone for an attested key and pin it.
-fn pin_mode(user: &str, attested: bool) -> i32 {
+fn pin_mode(user: &str, attested: bool, debug_app: bool) -> i32 {
     if !is_plain_name(user) {
         eprintln!("Usage: sudo {HELPER_PATH} --pin USER");
         return 2;
@@ -1078,6 +1138,7 @@ fn pin_mode(user: &str, attested: bool) -> i32 {
         command: String::new(),
         tty: String::new(),
         origin: String::new(),
+        pinned: String::new(),
         computer: String::new(),
         nonce,
         issued_unix: now,
@@ -1137,13 +1198,37 @@ fn pin_mode(user: &str, attested: bool) -> i32 {
         eprintln!("Nothing was pinned.");
         return 1;
     };
-    let key = match check_pin_answer(&expected, &got, attested, now_unix()) {
+    let key = match check_pin_answer(&expected, &got, attested, debug_app, now_unix()) {
         Ok(key) => key,
         Err(why) => {
             eprintln!("{why}");
             return 1;
         }
     };
+    // Review I5: attestation proves a key in some phone's hardware, not in
+    // yours; the code your phone shows binds it to yours.
+    println!(
+        "Your phone now shows a code for its new key (also at the end of the key in its Settings)."
+    );
+    print!("Type it here ({CODE_LEN} characters, 0-9 and a-f): ");
+    let _ = std::io::stdout().flush();
+    let mut typed = String::new();
+    // Two minutes to type it; nothing typed pins nothing.
+    let mut ready = libc::pollfd {
+        fd: 0,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: one pollfd for this process's own stdin.
+    if unsafe { libc::poll(&mut ready, 1, 120_000) } > 0 {
+        let _ = std::io::BufRead::read_line(&mut std::io::stdin().lock().take(256), &mut typed);
+    }
+    if !code_matches(&typed, &key.fingerprint) {
+        eprintln!(
+            "That is not the code of the key that answered: nothing was pinned. If your phone shows no code, or another, a key that is not your phone's answered."
+        );
+        return 1;
+    }
     let mut pin = read_pin(user).unwrap_or(Pin {
         user: user.to_string(),
         computer: got.approval.computer.clone(),
@@ -1290,7 +1375,11 @@ pub fn run(args: &[String], vars: &[(String, String)]) -> i32 {
             0
         }
         Mode::Test => test_mode(),
-        Mode::Pin { user, attested } => pin_mode(&user, attested),
+        Mode::Pin {
+            user,
+            attested,
+            debug_app,
+        } => pin_mode(&user, attested, debug_app),
         Mode::Unpin(user) => unpin_mode(&user),
         Mode::Help => {
             usage();
@@ -1456,6 +1545,32 @@ mod tests {
         // Without PAM, the helper's own commands.
         assert_eq!(mode_of(&args(&["--lines"]), false), Mode::Lines);
         assert_eq!(mode_of(&[], false), Mode::Usage);
+    }
+
+    /// Review I5: root types the code the phone shows; anything else
+    /// refuses.
+    #[test]
+    fn the_pin_code_is_the_keys_last_eight_hex_digits() {
+        let fp = "0123 4567 89ab cdef 0123 4567 89ab cdef 0123 4567 89ab cdef 0123 4567 89ab cdef";
+        assert_eq!(key_code(fp), "89ab cdef");
+        assert!(code_matches("89ab cdef\n", fp));
+        assert!(code_matches("89ABCDEF", fp));
+        assert!(code_matches(" 89ab-cdef ", fp));
+        assert!(!code_matches("89abcdee", fp));
+        assert!(!code_matches("9abcdef", fp), "all eight");
+        assert!(!code_matches("", fp));
+        assert!(
+            !code_matches("0123 4567", fp),
+            "the first digits are not the code"
+        );
+        let key = TestPhone::new("phone-a").key();
+        assert_eq!(
+            pinned_list(std::slice::from_ref(&key)),
+            key.fingerprint.replace(' ', "")
+        );
+        assert!(pocketdesk_core::protocol::approve::is_pinned_list(
+            &pinned_list(&[key.clone(), key])
+        ));
     }
 
     /// Review N5: a `PAM_*` item given twice is refused.
@@ -1843,6 +1958,7 @@ mod tests {
             command: String::new(),
             tty: String::new(),
             origin: String::new(),
+            pinned: String::new(),
             computer: String::new(),
             nonce: "01".repeat(32),
             issued_unix: now,
@@ -1866,18 +1982,22 @@ mod tests {
             answer,
             attestation: Some(chain.clone()),
         };
-        let err = check_pin_answer(&expected, &got(Answer::Yes, &expected), true, now).unwrap_err();
+        let err = check_pin_answer(&expected, &got(Answer::Yes, &expected), true, false, now)
+            .unwrap_err();
         assert!(err.contains("does not check"), "{err}");
-        let key = check_pin_answer(&expected, &got(Answer::Yes, &expected), false, now).unwrap();
+        let key =
+            check_pin_answer(&expected, &got(Answer::Yes, &expected), false, false, now).unwrap();
         assert_eq!(key.attested, None);
         assert_eq!(key.fingerprint.len(), 79);
-        assert!(check_pin_answer(&expected, &got(Answer::No, &expected), false, now).is_err());
+        assert!(
+            check_pin_answer(&expected, &got(Answer::No, &expected), false, false, now).is_err()
+        );
         let other = Approval {
             nonce: "02".repeat(32),
             ..expected.clone()
         };
         assert!(
-            check_pin_answer(&expected, &got(Answer::Yes, &other), false, now)
+            check_pin_answer(&expected, &got(Answer::Yes, &other), false, false, now)
                 .unwrap_err()
                 .contains("not for this pin")
         );

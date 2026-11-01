@@ -132,6 +132,12 @@ pub struct Approval {
     /// [`shown_text`], so two requests at once can be told apart.
     #[serde(default)]
     pub origin: String,
+    /// The keys root pinned that the request may be answered with: each
+    /// key's SHA-256 as 64 lowercase hex digits, comma-separated (empty for
+    /// a pin request). A phone that holds a newer key, waiting for root's
+    /// pin, takes it as pinned once a request names it (review N13).
+    #[serde(default)]
+    pub pinned: String,
     /// The computer: lowercase hex SHA-256 of its certificate, which the
     /// phone pinned when it paired. The phone checks it is the computer the
     /// request came from.
@@ -185,8 +191,24 @@ const CLOSE: char = '\u{27E9}';
 pub fn shown_text(raw: &str, max: usize) -> Option<String> {
     let mut out = String::new();
     let mut count = 0usize;
-    for c in raw.chars() {
-        if (' '..='~').contains(&c) {
+    let mut chars = raw.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == ' ' {
+            // A run of spaces long enough to hide what follows below the
+            // fold is written as its count (review N12).
+            let mut run = 1usize;
+            while chars.peek() == Some(&' ') {
+                chars.next();
+                run += 1;
+            }
+            let written = if run >= SPACE_RUN {
+                format!("{OPEN}SPx{run}{CLOSE}")
+            } else {
+                " ".repeat(run)
+            };
+            count += written.chars().count();
+            out.push_str(&written);
+        } else if (' '..='~').contains(&c) {
             out.push(c);
             count += 1;
         } else {
@@ -201,9 +223,16 @@ pub fn shown_text(raw: &str, max: usize) -> Option<String> {
     Some(out)
 }
 
+/// The shortest run of spaces written as its count (`⟨SPx3⟩`).
+pub const SPACE_RUN: usize = 3;
+
 /// Whether `text` is what [`shown_text`] makes, within `max` characters:
-/// printable ASCII and well-formed escapes only.
+/// printable ASCII and well-formed escapes only, and no run of
+/// [`SPACE_RUN`] spaces left as spaces.
 pub fn is_shown_text(text: &str, max: usize) -> bool {
+    if text.contains(&" ".repeat(SPACE_RUN)) {
+        return false;
+    }
     if text.chars().count() > max {
         return false;
     }
@@ -220,11 +249,18 @@ pub fn is_shown_text(text: &str, max: usize) -> bool {
             return false;
         };
         let inner = &rest[OPEN.len_utf8()..end];
-        let ok = inner.strip_prefix("U+").is_some_and(|h| {
+        let code = inner.strip_prefix("U+").is_some_and(|h| {
             (4..=6).contains(&h.len())
                 && h.bytes()
                     .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_lowercase())
         });
+        let spaces = inner.strip_prefix("SPx").is_some_and(|n| {
+            (1..=6).contains(&n.len())
+                && !n.starts_with('0')
+                && n.bytes().all(|b| b.is_ascii_digit())
+                && n.parse::<usize>().is_ok_and(|n| n >= SPACE_RUN)
+        });
+        let ok = code || spaces;
         if !ok {
             return false;
         }
@@ -250,6 +286,7 @@ pub fn approval_of(body: &serde_json::Value) -> Option<Approval> {
         && is_shown_text(&approval.command, MAX_COMMAND)
         && is_shown_text(&approval.tty, MAX_TTY)
         && is_shown_text(&approval.origin, MAX_ORIGIN)
+        && is_pinned_list(&approval.pinned)
         && (approval.kind != Kind::Pin || approval.service == PIN_SERVICE)
         && is_hex(&approval.computer, 64)
         && is_hex(&approval.nonce, NONCE_LEN * 2)
@@ -265,7 +302,7 @@ pub fn approval_of(body: &serde_json::Value) -> Option<Approval> {
 pub fn signed_message(approval: &Approval) -> Vec<u8> {
     let issued = approval.issued_unix.to_string();
     let expires = approval.expires_unix.to_string();
-    let fields: [&str; 15] = [
+    let fields: [&str; 16] = [
         SIGNING_DOMAIN,
         &approval.id,
         approval.kind.word(),
@@ -276,6 +313,7 @@ pub fn signed_message(approval: &Approval) -> Vec<u8> {
         &approval.command,
         &approval.tty,
         &approval.origin,
+        &approval.pinned,
         &approval.computer,
         &approval.nonce,
         &issued,
@@ -290,6 +328,13 @@ pub fn signed_message(approval: &Approval) -> Vec<u8> {
         out.push(b'\n');
     }
     out
+}
+
+/// Whether `list` is up to [`MAX_CHAIN`] keys' SHA-256, as lowercase hex,
+/// comma-separated; empty is none.
+pub fn is_pinned_list(list: &str) -> bool {
+    list.is_empty()
+        || (list.split(',').count() <= MAX_CHAIN && list.split(',').all(|k| is_hex(k, 64)))
 }
 
 fn is_b64(s: &str) -> bool {
@@ -381,6 +426,7 @@ mod tests {
             command: "/usr/bin/sudo pacman -Syu".to_string(),
             tty: "/dev/pts/3".to_string(),
             origin: "sudo(812) < bash(700) < kitty(650)".to_string(),
+            pinned: "cd".repeat(32),
             computer: "ab".repeat(32),
             nonce: "01".repeat(32),
             issued_unix: 1_000,
@@ -393,7 +439,8 @@ mod tests {
         // The Android app's ApproveRuleTest pins the same text.
         let text = String::from_utf8(signed_message(&sample())).unwrap();
         let expected = format!(
-            "21:pocketdesk-approve-v2\n3:a-1\n5:admin\n4:sudo\n5:alice\n5:alice\n0:\n25:/usr/bin/sudo pacman -Syu\n10:/dev/pts/3\n34:sudo(812) < bash(700) < kitty(650)\n64:{}\n64:{}\n4:1000\n4:1020\n3:yes\n",
+            "21:pocketdesk-approve-v2\n3:a-1\n5:admin\n4:sudo\n5:alice\n5:alice\n0:\n25:/usr/bin/sudo pacman -Syu\n10:/dev/pts/3\n34:sudo(812) < bash(700) < kitty(650)\n64:{}\n64:{}\n64:{}\n4:1000\n4:1020\n3:yes\n",
+            "cd".repeat(32),
             "ab".repeat(32),
             "01".repeat(32)
         );
@@ -414,6 +461,16 @@ mod tests {
             Some("a⟨U+202E⟩b⟨U+2800⟩⟨U+3164⟩⟨U+0009⟩⟨U+000A⟩⟨U+00E9⟩⟨U+27E8⟩")
         );
         assert_eq!(shown_text(&"x".repeat(MAX_COMMAND + 1), MAX_COMMAND), None);
+        // Padding of spaces shows as its count; two spaces stay.
+        assert_eq!(
+            shown_text(&format!("rm '{}' -rf /", " ".repeat(3000)), MAX_COMMAND).as_deref(),
+            Some("rm '⟨SPx3000⟩' -rf /")
+        );
+        assert_eq!(shown_text("a  b", 10).as_deref(), Some("a  b"));
+        assert!(is_shown_text("rm '⟨SPx3000⟩' -rf /", 100));
+        assert!(!is_shown_text("a   b", 100), "three spaces left as spaces");
+        assert!(!is_shown_text("⟨SPx2⟩", 100));
+        assert!(!is_shown_text("⟨SPx03⟩", 100));
         assert_eq!(
             shown_text(&"\u{2800}".repeat(600), MAX_COMMAND),
             None,
@@ -450,6 +507,8 @@ mod tests {
             json!({"command": "a\u{202E}b"}),
             json!({"origin": "x".repeat(MAX_ORIGIN + 1)}),
             json!({"tty": "\u{7}"}),
+            json!({"pinned": "cd"}),
+            json!({"pinned": format!("{},", "cd".repeat(32))}),
             json!({"expires_unix": 999}),
             json!({"expires_unix": 1_000 + MAX_TIMEOUT_SECS + 1}),
             json!({"kind": "root"}),

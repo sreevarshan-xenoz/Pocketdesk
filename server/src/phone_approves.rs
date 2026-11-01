@@ -385,6 +385,7 @@ pub(crate) mod tests {
             command: "/usr/bin/sudo pacman -Syu".to_string(),
             tty: "/dev/pts/3".to_string(),
             origin: "sudo(812) < bash(700)".to_string(),
+            pinned: String::new(),
             computer: "ab".repeat(32),
             nonce: nonce_byte.repeat(32),
             issued_unix: 1_000,

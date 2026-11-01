@@ -106,19 +106,36 @@ pub fn set_status(state_dir: &Path, id: &str, status: &Status) -> io::Result<()>
     write(&state_dir.join(APPROVE_STATUS_DIR), id, status)
 }
 
-/// How request `id` went, if the server said.
+/// How a request went, if the server said. Read without following a link
+/// or blocking on a pipe, a regular file of at most 1 MiB (review N10: a
+/// FIFO there must not hang root's `--pin`).
 pub fn status(state_dir: &Path, id: &str) -> Option<Status> {
+    use std::io::Read as _;
     if !is_ask_id(id) {
         return None;
     }
-    let raw = std::fs::read_to_string(
-        state_dir
-            .join(APPROVE_STATUS_DIR)
-            .join(format!("{id}.json")),
-    )
-    .ok()?;
+    let path = state_dir
+        .join(APPROVE_STATUS_DIR)
+        .join(format!("{id}.json"));
+    let mut open = std::fs::OpenOptions::new();
+    open.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        open.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = open.open(&path).ok()?;
+    let meta = file.metadata().ok()?;
+    if !meta.file_type().is_file() || meta.len() > MAX_STATUS {
+        return None;
+    }
+    let mut raw = String::new();
+    file.take(MAX_STATUS).read_to_string(&mut raw).ok()?;
     serde_json::from_str(&raw).ok()
 }
+
+/// The most a status file is read.
+const MAX_STATUS: u64 = 1024 * 1024;
 
 /// Take request `id` and what was said of it away (the helper is done).
 pub fn withdraw(state_dir: &Path, id: &str) {
@@ -182,6 +199,7 @@ mod tests {
             command: String::new(),
             tty: String::new(),
             origin: String::new(),
+            pinned: String::new(),
             computer: "ab".repeat(32),
             nonce: "01".repeat(32),
             issued_unix: issued,
@@ -226,6 +244,15 @@ mod tests {
         assert_eq!(status(&dir, "r-1"), Some(said));
         withdraw(&dir, "r-1");
         assert_eq!(status(&dir, "r-1"), None);
+        // A pipe in its place is not read, and does not block.
+        #[cfg(unix)]
+        {
+            let fifo = dir.join(APPROVE_STATUS_DIR).join("r-2.json");
+            let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+            // SAFETY: a path in the test's own folder.
+            assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+            assert_eq!(status(&dir, "r-2"), None);
+        }
         assert_eq!(status(&dir, "../x"), None);
         let _ = std::fs::remove_dir_all(&dir);
     }

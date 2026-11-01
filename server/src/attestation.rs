@@ -19,6 +19,11 @@ use x509_parser::prelude::*;
 const KEY_DESCRIPTION_OID: &str = "1.3.6.1.4.1.11129.2.1.17";
 /// The app the key must belong to (its debug build carries a suffix).
 const PACKAGE: &str = "dev.pocketdesk.android";
+/// The SHA-256 of the release APK's signing certificate (packaging/README.md),
+/// which the attestation names among the app's signers (review N9). A debug
+/// build is signed with each machine's own debug key, so it is taken only
+/// with `--pin … --debug-app`.
+pub const RELEASE_SIGNER: &str = "3a2452b38b4be5ac8493b330a91ed5a43e8490e6c74b8a7934599bc5e8ac3a0f";
 
 /// Where the key lives, as the attestation says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,8 +66,10 @@ pub struct KeyDescription {
     pub user_auth_type: Option<i64>,
     pub auth_timeout: Option<i64>,
     pub origin: Option<i64>,
-    /// From the software-enforced list: the apps the key belongs to.
+    /// From the software-enforced list: the apps the key belongs to, and
+    /// the SHA-256 of their signing certificates.
     pub packages: Vec<String>,
+    pub signers: Vec<Vec<u8>>,
 }
 
 /// Why a chain or its key is refused.
@@ -204,9 +211,13 @@ pub fn verify_chain(
 }
 
 /// Whether the key may be pinned: in hardware, generated there, for signing,
-/// EC P-256, the user's authentication for each use, Pocketdesk's, with
-/// `challenge`.
-pub fn check_policy(d: &KeyDescription, challenge: &[u8]) -> Result<SecurityLevel, Refused> {
+/// EC P-256, the user's authentication for each use, Pocketdesk's (its
+/// release signer, or with `debug_app` any signer), with `challenge`.
+pub fn check_policy(
+    d: &KeyDescription,
+    challenge: &[u8],
+    debug_app: bool,
+) -> Result<SecurityLevel, Refused> {
     let level = match (d.attestation_level, d.keymint_level) {
         (Some(a), Some(k)) if a == k && a != SecurityLevel::Software => a,
         _ => {
@@ -244,7 +255,19 @@ pub fn check_policy(d: &KeyDescription, challenge: &[u8]) -> Result<SecurityLeve
     {
         return Err(Refused::Policy("the key is not the Pocketdesk app's"));
     }
+    let release = hex_bytes(RELEASE_SIGNER);
+    if !debug_app && !d.signers.contains(&release) {
+        return Err(Refused::Policy(
+            "the app is not signed with Pocketdesk's release key (a debug build needs --debug-app)",
+        ));
+    }
     Ok(level)
+}
+
+fn hex_bytes(hex: &str) -> Vec<u8> {
+    (0..hex.len() / 2)
+        .filter_map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok())
+        .collect()
 }
 
 /// One DER element: class bits, constructed, tag number, contents.
@@ -343,8 +366,12 @@ fn parse_key_description(ext: &[u8]) -> Option<KeyDescription> {
     };
     // softwareEnforced: the app's identity.
     for (class, _, tag, v) in elements(items[6].3)? {
-        if class == CONTEXT && tag == 709 {
-            d.packages = packages(v).unwrap_or_default();
+        if class == CONTEXT
+            && tag == 709
+            && let Some((names, signers)) = app_id(v)
+        {
+            d.packages = names;
+            d.signers = signers;
         }
     }
     // hardwareEnforced (the TEE's or StrongBox's).
@@ -374,16 +401,23 @@ fn parse_key_description(ext: &[u8]) -> Option<KeyDescription> {
 /// The package names in an `attestationApplicationId` ([709] OCTET STRING
 /// holding SEQUENCE { SET OF SEQUENCE { OCTET STRING name, INTEGER
 /// version }, SET OF OCTET STRING }).
-fn packages(v: &[u8]) -> Option<Vec<String>> {
+fn app_id(v: &[u8]) -> Option<(Vec<String>, Vec<Vec<u8>>)> {
     let (_, _, _, octets, _) = tlv(v)?;
     let (_, _, _, seq, _) = tlv(octets)?;
-    let (_, _, _, set, _) = tlv(seq)?;
-    let mut out = Vec::new();
-    for (_, _, _, info) in elements(set)? {
+    let parts = elements(seq)?;
+    let (_, _, _, infos) = *parts.first()?;
+    let mut names = Vec::new();
+    for (_, _, _, info) in elements(infos)? {
         let (_, _, _, name, _) = tlv(info)?;
-        out.push(String::from_utf8(name.to_vec()).ok()?);
+        names.push(String::from_utf8(name.to_vec()).ok()?);
     }
-    Some(out)
+    let mut signers = Vec::new();
+    if let Some((_, _, _, digests)) = parts.get(1) {
+        for (_, _, _, digest) in elements(digests)? {
+            signers.push(digest.to_vec());
+        }
+    }
+    Some((names, signers))
 }
 
 #[cfg(test)]
@@ -444,16 +478,19 @@ mod tests {
         assert_eq!(d.algorithm, Some(3));
         assert_eq!(d.ec_curve, Some(1));
         assert_eq!(d.origin, Some(0));
+        assert!(!d.packages.is_empty(), "the sample names its apps");
+        assert!(d.signers.iter().all(|s| s.len() == 32), "SHA-256 digests");
+        assert_eq!(hex_bytes(RELEASE_SIGNER).len(), 32);
         // This sample key needs no authentication, so it is never pinned.
         assert!(d.no_auth_required);
         assert_eq!(
-            check_policy(&d, b"abc"),
+            check_policy(&d, b"abc", true),
             Err(Refused::Policy(
                 "the key does not need the fingerprint or screen lock"
             ))
         );
         assert_eq!(
-            check_policy(&d, b"abd"),
+            check_policy(&d, b"abd", true),
             Err(Refused::Policy("the challenge is not this pin's"))
         );
         // Tampering with any byte the leaf's signature covers breaks it.
@@ -509,13 +546,20 @@ mod tests {
             auth_timeout: None,
             origin: Some(0),
             packages: vec!["dev.pocketdesk.android".to_string()],
+            signers: vec![hex_bytes(RELEASE_SIGNER)],
         };
-        assert_eq!(check_policy(&good, b"c"), Ok(SecurityLevel::StrongBox));
+        assert_eq!(
+            check_policy(&good, b"c", false),
+            Ok(SecurityLevel::StrongBox)
+        );
+        // A build signed with another key: only a debug pin takes it.
         let debug = KeyDescription {
             packages: vec!["dev.pocketdesk.android.debug".to_string()],
+            signers: vec![vec![7; 32]],
             ..good.clone()
         };
-        assert!(check_policy(&debug, b"c").is_ok());
+        assert!(check_policy(&debug, b"c", false).is_err());
+        assert!(check_policy(&debug, b"c", true).is_ok());
         for bad in [
             KeyDescription {
                 attestation_level: Some(SecurityLevel::Software),
@@ -547,7 +591,7 @@ mod tests {
                 ..good.clone()
             },
         ] {
-            assert!(check_policy(&bad, b"c").is_err(), "{bad:?}");
+            assert!(check_policy(&bad, b"c", true).is_err(), "{bad:?}");
         }
     }
 
