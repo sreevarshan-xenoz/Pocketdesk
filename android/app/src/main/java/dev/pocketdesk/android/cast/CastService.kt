@@ -110,7 +110,7 @@ class CastService : Service() {
         fun resume(context: Context, address: String, port: Int): Boolean {
             val service = current ?: return false
             val own = dev.pocketdesk.android.notify.PhoneLink.target(context)?.address == address
-            return service.resumeFor(address, port, Prefs.appsFromComputer(context), own)
+            return service.resumeFor(address, port, Prefs.appsFromComputer(context), Prefs.autoAcceptScreen(context), own)
         }
 
         /** Whether the camera is the computer's camera now (F6 part 2). */
@@ -226,6 +226,24 @@ class CastService : Service() {
     /** A resumed session not yet admitted: its failure pauses again instead of ending the cast. */
     @Volatile
     private var resuming = false
+
+    /**
+     * While paused, every [CastPauseRule.WATCH_MS]: the share is given back at
+     * once when the apps switch or the opt-in turns off, or the computer is no
+     * longer the phone's own (unpaired), not only when it is next asked for.
+     */
+    private val pauseWatch = object : Runnable {
+        override fun run() {
+            if (!paused || finished) return
+            val own = dev.pocketdesk.android.notify.PhoneLink.target(this@CastService)?.address == address
+            if (!CastPauseRule.kept(Prefs.appsFromComputer(this@CastService), Prefs.autoAcceptScreen(this@CastService), own)) {
+                Log.i(TAG, "A paused screen share is no longer allowed: the capture is given back")
+                finish()
+                return
+            }
+            main.postDelayed(this, CastPauseRule.WATCH_MS)
+        }
+    }
 
     /** Ends a pause that ran out. */
     private val pauseExpiry = Runnable {
@@ -413,6 +431,7 @@ class CastService : Service() {
                             screen = !camera && !soundAlone,
                             shown = showing,
                             appsOn = Prefs.appsFromComputer(this),
+                            optIn = Prefs.autoAcceptScreen(this),
                             ownComputer = dev.pocketdesk.android.notify.PhoneLink.target(this)?.address == address,
                             closed = closed,
                         )
@@ -606,7 +625,9 @@ class CastService : Service() {
             pausedAt = SystemClock.elapsedRealtime()
             showPaused()
             main.removeCallbacks(pauseExpiry)
+            main.removeCallbacks(pauseWatch)
             main.postDelayed(pauseExpiry, CastPauseRule.PAUSE_MS)
+            main.postDelayed(pauseWatch, CastPauseRule.WATCH_MS)
             Thread {
                 capture?.stop()
                 coding?.release()
@@ -627,8 +648,8 @@ class CastService : Service() {
      * Resume a paused screen share to [to] (Hands-free), from any thread, if
      * the rule says so. The same projection and display serve: no consent.
      */
-    private fun resumeFor(to: String, port: Int, appsOn: Boolean, own: Boolean): Boolean {
-        val ok = CastPauseRule.mayResume(pausedFor, to, pausedAt, SystemClock.elapsedRealtime(), appsOn, own)
+    private fun resumeFor(to: String, port: Int, appsOn: Boolean, optIn: Boolean, own: Boolean): Boolean {
+        val ok = CastPauseRule.mayResume(pausedFor, to, pausedAt, SystemClock.elapsedRealtime(), appsOn, optIn, own)
         if (!ok || finished || !paused) return false
         main.post {
             if (finished || !paused || pausedFor != to) return@post
@@ -636,6 +657,7 @@ class CastService : Service() {
             pausedFor = null
             resuming = true
             main.removeCallbacks(pauseExpiry)
+            main.removeCallbacks(pauseWatch)
             address = to
             castingTo = to
             screenTo = to
@@ -648,6 +670,7 @@ class CastService : Service() {
     /** A pause ended on purpose (a new consent came): the old projection is given back. */
     private fun dropPause() {
         main.removeCallbacks(pauseExpiry)
+        main.removeCallbacks(pauseWatch)
         val shownDisplay = display
         val taken = projection
         display = null
@@ -672,7 +695,9 @@ class CastService : Service() {
                 paused = true
                 showPaused()
                 main.removeCallbacks(pauseExpiry)
+                main.removeCallbacks(pauseWatch)
                 main.postDelayed(pauseExpiry, remaining.coerceAtLeast(0L))
+                main.postDelayed(pauseWatch, CastPauseRule.WATCH_MS)
                 Thread {
                     runCatching { RustCore.stopCast() }
                     if (!finished && paused) pausedFor = address
@@ -701,6 +726,7 @@ class CastService : Service() {
         pausedFor = null
         paused = false
         main.removeCallbacks(pauseExpiry)
+        main.removeCallbacks(pauseWatch)
         webcamRunning = false
         if (reached) HostStore.markUsed(this, address)
         // Its sound first, off the main thread (its stop waits for its

@@ -6,7 +6,8 @@ package dev.pocketdesk.android.cast
  * "open this app" needs no new consent from Android. Pure, for JVM tests;
  * [CastService] does it.
  *
- * What is kept is only the owner's earlier consent: the projection and its
+ * It is a hands-free feature: it needs "Let the computer open my apps" and
+ * "Accept screen sharing for my computers" both on. What is kept is only the owner's earlier consent: the projection and its
  * virtual display, with no encoder and no surface, so nothing is captured.
  * It lasts [PAUSE_MS] at most, its notification stays up the whole time, and
  * it resumes for the one computer it was showing, never for another.
@@ -32,11 +33,25 @@ object CastPauseRule {
         screen: Boolean,
         shown: Boolean,
         appsOn: Boolean,
+        optIn: Boolean,
         ownComputer: Boolean,
         closed: String?,
         stoppedByOwner: Boolean = false,
-    ): Boolean = screen && shown && appsOn && ownComputer && !stoppedByOwner &&
+    ): Boolean = screen && shown && kept(appsOn, optIn, ownComputer) && !stoppedByOwner &&
         (closed == null || closed == SESSION_ENDED)
+
+    /** How often a paused share looks at whether it may still be kept. */
+    const val WATCH_MS = 2_000L
+
+    /**
+     * Whether a pause may be kept at all, and goes on being: "Let the
+     * computer open my apps" ([appsOn]) and "Accept screen sharing for my
+     * computers" ([optIn]) are both still on and the computer is still the
+     * phone's own and paired ([ownComputer]). Looked at every [WATCH_MS]: the
+     * moment any turns off, the share is given back.
+     */
+    fun kept(appsOn: Boolean, optIn: Boolean, ownComputer: Boolean): Boolean =
+        appsOn && optIn && ownComputer
 
     /** Whether a pause begun at [pausedAt] has run out at [now] (both a monotonic clock). */
     fun expired(pausedAt: Long, now: Long): Boolean = now - pausedAt >= PAUSE_MS
@@ -52,8 +67,10 @@ object CastPauseRule {
         pausedAt: Long,
         now: Long,
         appsOn: Boolean,
+        optIn: Boolean,
         ownComputer: Boolean,
-    ): Boolean = pausedFor != null && pausedFor == asking && !expired(pausedAt, now) && appsOn && ownComputer
+    ): Boolean = pausedFor != null && pausedFor == asking && !expired(pausedAt, now) &&
+        kept(appsOn, optIn, ownComputer)
 
     /** The whole minutes a pause has left at [now], at least one while it lasts. */
     fun minutesLeft(pausedAt: Long, now: Long): Int =

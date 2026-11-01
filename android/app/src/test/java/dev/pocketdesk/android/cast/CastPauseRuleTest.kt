@@ -10,10 +10,11 @@ class CastPauseRuleTest {
         screen: Boolean = true,
         shown: Boolean = true,
         appsOn: Boolean = true,
+        optIn: Boolean = true,
         own: Boolean = true,
         closed: String? = null,
         stoppedByOwner: Boolean = false,
-    ) = CastPauseRule.pauses(screen, shown, appsOn, own, closed, stoppedByOwner)
+    ) = CastPauseRule.pauses(screen, shown, appsOn, optIn, own, closed, stoppedByOwner)
 
     @Test
     fun `a screen the computer left, or a link that dropped, is paused`() {
@@ -40,6 +41,8 @@ class CastPauseRuleTest {
         assertFalse(pauses(screen = false))
         assertFalse(pauses(shown = false))
         assertFalse(pauses(appsOn = false))
+        // It is a hands-free feature: without the opt-in nothing is kept.
+        assertFalse(pauses(optIn = false))
         assertFalse(pauses(own = false))
         // The owner's Stop, or Android ending the projection, is never paused.
         assertFalse(pauses(stoppedByOwner = true))
@@ -61,8 +64,9 @@ class CastPauseRuleTest {
             asking: String = "192.0.2.10",
             now: Long = soon,
             appsOn: Boolean = true,
+            optIn: Boolean = true,
             own: Boolean = true,
-        ) = CastPauseRule.mayResume(pausedFor, asking, at, now, appsOn, own)
+        ) = CastPauseRule.mayResume(pausedFor, asking, at, now, appsOn, optIn, own)
         assertTrue(resume())
         // Another computer never resumes it.
         assertFalse(resume(asking = "192.0.2.11"))
@@ -72,7 +76,18 @@ class CastPauseRuleTest {
         assertFalse(resume(now = at + CastPauseRule.PAUSE_MS))
         // The switch went off, or the computer is no longer the phone's own.
         assertFalse(resume(appsOn = false))
+        assertFalse(resume(optIn = false))
         assertFalse(resume(own = false))
+    }
+
+    @Test
+    fun `a pause goes on only while the switch, the opt-in and the own computer all hold`() {
+        assertTrue(CastPauseRule.kept(appsOn = true, optIn = true, ownComputer = true))
+        // Looked at every two seconds: any one going (the switch, the opt-in, an unpaired computer) ends it.
+        assertFalse(CastPauseRule.kept(appsOn = false, optIn = true, ownComputer = true))
+        assertFalse(CastPauseRule.kept(appsOn = true, optIn = false, ownComputer = true))
+        assertFalse(CastPauseRule.kept(appsOn = true, optIn = true, ownComputer = false))
+        assertTrue(CastPauseRule.WATCH_MS in 1_000L..5_000L)
     }
 
     @Test
