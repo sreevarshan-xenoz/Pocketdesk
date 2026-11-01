@@ -68,8 +68,8 @@ class WakePlanTest {
     fun offAndRelayAreTheUsersChoice() {
         assertEquals(WakePlan.Plan.Off, plan(WakeSettings(method = WakeMethod.OFF)))
         assertEquals(
-            WakePlan.Plan.Relay("192.168.1.5", "02:11:22:33:44:55", "192.0.2.255"),
-            plan(WakeSettings(method = WakeMethod.RELAY, relay = "192.168.1.5")),
+            WakePlan.Plan.Relay("192.0.2.5", "02:11:22:33:44:55", "192.0.2.255"),
+            plan(WakeSettings(method = WakeMethod.RELAY, relay = "192.0.2.5")),
         )
         assertEquals(WakePlan.Plan.NoRelay, plan(WakeSettings(method = WakeMethod.RELAY)))
     }
