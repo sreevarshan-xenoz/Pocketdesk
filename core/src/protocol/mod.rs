@@ -11,6 +11,7 @@ pub mod file_time;
 pub mod in_use;
 pub mod introductions;
 pub mod kdeconnect;
+pub mod kept;
 pub mod link;
 pub mod live;
 pub mod note;

@@ -171,6 +171,8 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         "kdeconnect.share.request"
         | "kdeconnect.pocketdesk.file_fetch"
         | "kdeconnect.pocketdesk.file_offer_declined"
+        // A phone folder kept on the computer (a run's deletions and end).
+        | crate::protocol::kept::KEEP_RUN
         // The phone's storage on the computer (T10g).
         | crate::protocol::phone_files::LIST
         | crate::protocol::phone_files::LISTING
