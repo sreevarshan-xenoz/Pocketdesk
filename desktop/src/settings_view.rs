@@ -1941,7 +1941,7 @@ impl SettingsForm {
                     );
                     note(
                         ui,
-                        "Off, nothing is ever deleted from a kept folder. On, only files that phone itself kept, in that folder; this and the phone's own Mirror deletions switch must both be on.",
+                        "Off, nothing is ever deleted from a kept folder. On, only plain files inside that phone's own folder here, and only ones it names; this and the phone's own Mirror deletions switch must both be on.",
                     );
                 });
                 // BF4: a file picked for notes from phones fills the box.
