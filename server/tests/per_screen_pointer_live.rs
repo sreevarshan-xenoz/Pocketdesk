@@ -332,6 +332,7 @@ fn each_windows_clicks_land_on_its_own_screen() {
                 monitor: u32::from(window),
                 hevc: false,
                 window,
+                fit: None,
             },
             pin::now_unix(),
         )

@@ -149,6 +149,12 @@ pub struct ViewStatus {
     /// [`MAX_VIEWS`] (PC11); 0 from a server before PC11.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub views: u32,
+    /// How "Fit the screen to this window" stands (item 8 of the plan
+    /// after 0.8.3). Off for a server before it, and for a view that did
+    /// not ask. Boxed so that this status, the largest message of the
+    /// view relay, stays under clippy's size gap between variants.
+    #[serde(default, skip_serializing_if = "ViewFit::is_off")]
+    pub fit: Box<ViewFit>,
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -179,6 +185,32 @@ pub enum ViewPrivacy {
     /// Off, and why: that computer refused it, did not answer, or it ended
     /// (the link or the view dropped, or control was taken away).
     Refused(String),
+}
+
+/// The other computer's screen made to the window's size (item 8), as the
+/// window asked with `ComputerAsk::View::fit`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewFit {
+    /// Not asked for.
+    #[default]
+    Off,
+    /// Asked of that computer; it has not answered yet.
+    Asking,
+    /// That computer made a headless screen of this size, and the view
+    /// shows it.
+    Fitted { width: u32, height: u32 },
+    /// Not made, and why (Windows, a compositor with no headless outputs,
+    /// its owner's switch, the four-screen limit, an older build, no
+    /// answer); the view shows the screen asked for instead.
+    Failed(String),
+}
+
+impl ViewFit {
+    /// Whether nothing was asked (left out of the status).
+    pub fn is_off(&self) -> bool {
+        *self == Self::Off
+    }
 }
 
 /// How a view's picture comes, as the server measures it (PC2). Each field

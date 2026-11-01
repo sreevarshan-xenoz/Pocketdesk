@@ -22,6 +22,7 @@ pub mod done;
 pub(crate) mod drive;
 pub mod driving;
 pub mod events;
+pub mod fit_screen;
 // The fuzz targets' entry points (`fuzz/`), only under `cargo fuzz`.
 #[cfg(target_os = "linux")]
 pub mod attestation;
