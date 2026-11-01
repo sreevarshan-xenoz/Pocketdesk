@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1157 open items.
+1165 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 45 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 50 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 17 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 188 |
 | A phone with a SIM | 39 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 154 |
 | A Linux desktop (the Azure VM serves for some) | 214 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 64 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 381 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 384 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -147,6 +147,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The page lists the apps with their icons within a few seconds of opening, Pocketdesk itself left out; opening it again sends no icons (the phone's log says "0 of 0 app icons" or none), and after one app is updated (or its icon file deleted from the throwaway state folder) only that one comes. (where: OPPO)
 - "Let the computer open my apps" off on the phone: the page says the phone keeps its apps to itself and names the setting; turned on, "Ask again" lists them. A computer that is not the phone's own gets no word from it at all. (where: OPPO)
+
+**259. Hands-free apps: a paused share, the screen-sharing question accepted, a lock swiped away**
+
+- The question was raised for the entire screen on Android 14 and later, with no one-app choice (the question has no chooser); and if the OEM's question has a chooser, entire screen was picked before Start, and a chooser reading as one app was never confirmed. (where: OPPO)
+- Nothing else is ever pressed: with the opt-in on, open a second system dialog (a permission question) during the five seconds, and with no open asked at all, raise Android's screen-sharing question from another app; neither is touched, and with the opt-in off nothing is pressed even for an open. (where: OPPO)
+- The pause is kept only with the apps switch on and for the phone's own computer: turn the switch off while paused and the next ask is refused and does not resume. (where: OPPO)
+- A swipe-only lock (set the lock to "Swipe" in Android's settings), screen off: an open from the Phone apps page wakes the screen, swipes the lock away and opens the app; the log (`KeyguardDismiss`) says "the lock screen was dismissed". With the lock set to a PIN: the page says the phone has a lock Pocketdesk never bypasses and names Extend Unlock / Smart Lock / Trusted devices, the phone stays locked, and the screen is not woken by the ask. (where: OPPO)
+- Extend Unlock: with a trusted device or place keeping the phone unlocked behind a lock screen that still shows, an open swipes it away and opens the app; with the trust gone (PIN needed), it is refused as above. (where: OPPO)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -2793,5 +2801,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A click on an app with the control service on and a screen already shown (Show the screen from the phone's Cast first): the app is in front on the phone within a second or two, the screen window here comes up in front, and Android showed no consent question. (where: OPPO)
 - A click with no screen shown yet: the page says to tap the notification; the phone shows "Tap to show your screen and open …", its tap brings Android's one screen-capture question, and after Start the app opens and the window here shows it. A second app then opens with no question and no notification (the one consent serves the connection). With Android 14's "single app" choice picked in the question: what the window shows (the app chosen, not what is opened after) is noted, nothing depends on it. (where: OPPO)
 - The control service off: a click is answered `control_off`, the page says to turn on Pocketdesk control in Android's Accessibility settings, and nothing is asked of the phone's owner by itself. (where: OPPO)
-- The phone locked (a secure lock) and asleep: "locked" and "unlock the phone once", then the same click works after the unlock. A swipe-only lock is also answered "locked" (it is not dismissed). (where: OPPO)
+- The phone locked (a secure lock) and asleep: "locked" and "unlock the phone once", then the same click works after the unlock. A swipe-only lock is dismissed by Hands-free (see section 259), not answered "locked". (where: OPPO)
 - The page by hand on Windows and on Linux: the search narrows as it is typed, "Opened from here" shows the last apps in the order opened, the phone's name picker with two phones, the layout in a narrow window, and Settings' "Show the Phone apps page" off takes the page out of the list. (where: by hand)
+
+**259. Hands-free apps: a paused share, the screen-sharing question accepted, a lock swiped away**
+
+- Whether ColorOS 14 on the OPPO exposes the screen-sharing question's confirm button to the control service: with "Accept screen sharing for my computers" and "Let the computer open my apps" on and no cast running, a click on an app on the Phone apps page opens the app with no tap; the phone's log (`ConsentPress`) says "pressed after N looks" and nothing of the screen's words. If the question is hidden from accessibility or worded differently, the log says "not_found" and the page says "Tap needed on the phone": that is the expected fallback, and what the OPPO does goes in the results. (where: OPPO)
+- Pause and resume: show an app's screen, close the window on the computer, and the phone's notification says "Paused" with Stop and minutes left; the status bar still shows Android's own sharing indicator. Click an app again within ten minutes: the window comes back and the app opens with no question and no tap, and the encoder started again (the picture is live). A different computer's open (or a second pairing) gets a new question, and the old pause is gone. Stop ends it; after ten minutes it ends by itself; locking the phone ends it (Android stops the projection), and the next open then asks as before. (where: OPPO)
+- The desktop pages by hand: "Tap needed on the phone" appears in the accent colour with the message, and "locked_secure" shows the Extend Unlock sentence, on Windows and on Linux. (where: by hand)
