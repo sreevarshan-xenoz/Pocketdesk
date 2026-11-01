@@ -39,6 +39,8 @@ object Prefs {
     private const val KEY_INTRODUCE_PENDING = "introduce_pending"
     private const val KEY_INTRODUCE_LAST = "introduce_last"
     private const val KEY_QUESTIONS = "questions_from_computer"
+    private const val KEY_APPROVE = "approve_requests"
+    private const val KEY_APPROVE_BIOMETRIC_ONLY = "approve_biometric_only"
     private const val KEY_SHARE_BATTERY = "share_battery"
     private const val KEY_STATE_WIDGET_AUTO = "state_widget_auto"
     private const val KEY_PHONE_MEDIA = "phone_media_on_computer"
@@ -340,6 +342,22 @@ object Prefs {
 
     fun setQuestionsFromComputer(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_QUESTIONS, enabled) }
+        bump()
+    }
+
+    /** Approve my computer's requests (sudo, polkit, the lock screen): off until chosen. */
+    fun approveRequests(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_APPROVE, false)
+
+    fun setApproveRequests(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_APPROVE, enabled) }
+        bump()
+    }
+
+    /** Approvals take the fingerprint only, not the PIN: off. */
+    fun approveBiometricOnly(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_APPROVE_BIOMETRIC_ONLY, false)
+
+    fun setApproveBiometricOnly(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_APPROVE_BIOMETRIC_ONLY, enabled) }
         bump()
     }
 

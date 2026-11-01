@@ -108,7 +108,7 @@ pub fn withdraw(state_dir: &Path, id: &str) {
     }
 }
 
-fn take_files(folder: &Path) -> Vec<(String, String)> {
+pub(super) fn take_files(folder: &Path) -> Vec<(String, String)> {
     let Ok(entries) = std::fs::read_dir(folder) else {
         return Vec::new();
     };
@@ -132,7 +132,7 @@ fn take_files(folder: &Path) -> Vec<(String, String)> {
     taken
 }
 
-fn write<T: Serialize>(folder: &Path, id: &str, value: &T) -> io::Result<()> {
+pub(super) fn write<T: Serialize>(folder: &Path, id: &str, value: &T) -> io::Result<()> {
     let file = path(folder, id)?;
     crate::secure_fs::create_private_dir(folder)?;
     let json = serde_json::to_string(value).map_err(io::Error::other)?;

@@ -212,6 +212,8 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         crate::protocol::peek::PEEK => Capability::Peek,
         // An answer to the computer's question (BF3).
         crate::protocol::ask::ASK_ANSWER => Capability::Ask,
+        // A phone's approval key (approve with my phone), under the same.
+        crate::protocol::approve::APPROVE_KEY => Capability::Ask,
         // A note added to the owner's notes file here (BF4).
         crate::protocol::note::NOTE => Capability::Notes,
         _ => return None,
@@ -704,6 +706,10 @@ mod tests {
     fn answering_the_computers_questions_is_off_until_chosen() {
         assert_eq!(
             capability_for(crate::protocol::ask::ASK_ANSWER),
+            Some(Capability::Ask)
+        );
+        assert_eq!(
+            capability_for(crate::protocol::approve::APPROVE_KEY),
             Some(Capability::Ask)
         );
         assert!(!DevicePermissions::default().allows(Capability::Ask));

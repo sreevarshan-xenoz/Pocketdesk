@@ -46,7 +46,7 @@ The output goes to `release\`. `/DSourceDir=` takes the executables from another
 
 ## The Linux tarball
 
-`pocketdesk-<version>-linux-x86_64.tar.gz` holds the server, the desktop app and the tray, unpacked and run where they are (`scripts/install.sh` installs from it). It is built on Ubuntu like the .deb, but meant for any distro, so its server is built without the in-process encoder (`cargo build -p pocketdesk-server --no-default-features`, which leaves out the `inproc` feature):
+`pocketdesk-<version>-linux-x86_64.tar.gz` holds the server, the desktop app and the tray, unpacked and run where they are (`scripts/install.sh` installs from it), and `pocketdesk-pam-ask`, the PAM helper for "Approve with my phone", which install.sh leaves alone: PAM runs it as root, so it must be root's, outside any folder a user can write to (`sudo install -Dm755 pocketdesk-pam-ask /usr/lib/pocketdesk/pocketdesk-pam-ask`, see docs/guide.md). It is built on Ubuntu like the .deb, but meant for any distro, so its server is built without the in-process encoder (`cargo build -p pocketdesk-server --no-default-features`, which leaves out the `inproc` feature):
 
 - **Why:** the in-process encoder links the build machine's FFmpeg libraries, and their sonames change with every FFmpeg major (Ubuntu 24.04's FFmpeg 6 is `libavutil.so.58`, Arch's FFmpeg 9 `libavutil.so.61`). 0.8.3's tarball linked them and did not start on Arch.
 - **How it encodes:** through the system `ffmpeg` program (the sidecar, as on Windows), whose command line works across versions. VAAPI hardware encoding still works: the sidecar binds to the render node whose kernel driver has a VA-API encoder (Intel or AMD first; NVIDIA's own driver, which has none, last), and software encoding is the fallback: libx264 when the system FFmpeg has it, else libopenh264 (Constrained Baseline H.264, which every phone decodes, at lower quality per bitrate than libx264), else the server says neither is there. Which one this machine's `ffmpeg` gives is in `pocketdesk capabilities` (`software H.264 (system ffmpeg)`), and a session that used OpenH264 records its encoder as `ffmpeg-sidecar-openh264` in Diagnostics. NVENC goes through the same program. The .deb and AUR builds use the same node pick when their in-process VAAPI fails and they fall back to the sidecar.
@@ -65,6 +65,7 @@ Other ways were weighed: loading FFmpeg at run time with `dlopen` (`ffmpeg-next`
 
 What it holds:
 - `/usr/bin`: `pocketdesk`, `pocketdesk-app` and `pocketdesk-tray`.
+- `/usr/lib/pocketdesk/pocketdesk-pam-ask`: the PAM helper for "Approve with my phone", root's. Nothing uses it until the owner adds its line to `/etc/pam.d` themselves; the package never touches PAM, and the smoke test checks `/etc/pam.d` does not name it.
 - The systemd user unit, at `/usr/lib/systemd/user/pocketdesk.service` and pointed at `/usr/bin`.
 - The menu entry, `dev.pocketdesk.Pocketdesk.desktop`.
 - The icon, at 512 px and scalable.
@@ -101,7 +102,7 @@ After that, F-Droid's update check (`UpdateCheckMode: Tags`) picks up each new `
 
 ## AUR (Arch Linux)
 
-`aur/PKGBUILD` builds the release's source tarball as the release workflow does (the server, then the desktop app and the tray), and installs the three programs, the systemd user unit pointed at `/usr/bin`, the menu entry, the icon, the man page and the licences. Tailscale is optional, not a dependency. It is published on the AUR as [`pocketdesk`](https://aur.archlinux.org/packages/pocketdesk) (maintainer `xenoz`, from 0.7.0).
+`aur/PKGBUILD` builds the release's source tarball as the release workflow does (the server, then the desktop app and the tray), and installs the three programs, the PAM helper at `/usr/lib/pocketdesk/pocketdesk-pam-ask` (as the .deb does), the systemd user unit pointed at `/usr/bin`, the menu entry, the icon, the man page and the licences. Tailscale is optional, not a dependency. It is published on the AUR as [`pocketdesk`](https://aur.archlinux.org/packages/pocketdesk) (maintainer `xenoz`, from 0.7.0).
 
 For each release, once its tag is pushed:
 1. In `aur/`, set `pkgver`, run `updpkgsums` (it replaces `SKIP` with the tarball's checksum) and `makepkg --printsrcinfo > .SRCINFO`.
