@@ -13,6 +13,8 @@ import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.files.ScreenshotPrefs
 import dev.pocketdesk.android.notify.NotificationActionRule
+import dev.pocketdesk.android.windows.ShizukuBridge
+import dev.pocketdesk.android.windows.WindowRule
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -137,12 +139,20 @@ object PhoneActions {
     }
 
     /** Tell the computer at [address]:[controlPort] how an ask went, over the link already up to it. */
-    internal fun report(address: String, controlPort: Int, about: String, app: String?, result: String, name: String? = null) {
+    internal fun report(
+        address: String,
+        controlPort: Int,
+        about: String,
+        app: String?,
+        result: String,
+        name: String? = null,
+        window: Int? = null,
+    ) {
         val sent = RustCore.sendPhonePacketOnLink(
             address,
             controlPort,
             PHONE_APP_OPENED,
-            AppOpenRule.report(about, app, result, name).toString(),
+            AppOpenRule.report(about, app, result, name, window).toString(),
         ).isSuccess
         Log.i(TAG, if (sent) "told the computer: $about $result" else "could not tell the computer: $about $result")
     }
@@ -250,8 +260,43 @@ object PhoneActions {
      * An open [PhoneActionRule] allowed: what the computer asked for decides
      * how it goes ([AppOpenRule.plan]), and the computer is told the result.
      */
+    /** Where separate windows stand now (Phone apps tier 2). */
+    internal fun windowMode(context: Context): WindowRule.Mode = WindowRule.mode(
+        Build.VERSION.SDK_INT,
+        ShizukuBridge.running(),
+        ShizukuBridge.permitted(),
+        Prefs.separateWindows(context),
+    )
+
+    /**
+     * An open for an app window (Phone apps tier 2) that [PhoneActionRule]
+     * allowed. The phone's own screen is not shown or touched. A window is
+     * made only with the switch on, Shizuku's permission, the apps switch and
+     * this phone's own computer (asked again right before anything starts),
+     * within the limit; otherwise the computer is told and opens the app the
+     * ordinary way.
+     */
+    private fun openWindowAsked(context: Context, ask: RustCore.PhoneActionAsk, own: HostStore.Host, window: WindowRule.Ask) {
+        val word = when (WindowRule.decide(windowMode(context), window.id, dev.pocketdesk.android.cast.CastService.windowIds)) {
+            WindowRule.Decision.UNAVAILABLE -> AppOpenRule.WINDOWS_UNAVAILABLE
+            WindowRule.Decision.LIMIT -> AppOpenRule.WINDOW_LIMIT
+            // The switch, the lock and the computer, once more before a display is made.
+            WindowRule.Decision.START -> stillRefused(context, own.address)
+        }
+        if (word != null) {
+            Log.i(TAG, "an app window was not made: $word")
+            Thread { report(own.address, own.controlPort, "open", ask.app, word, window = window.id) }.start()
+            return
+        }
+        if (!dev.pocketdesk.android.cast.CastService.openWindow(context, own, ask.app, window)) {
+            Thread { report(own.address, own.controlPort, "open", ask.app, AppOpenRule.WINDOWS_UNAVAILABLE, window = window.id) }.start()
+        }
+    }
+
     private fun openAsked(context: Context, ask: RustCore.PhoneActionAsk, own: HostStore.Host?, service: Boolean) {
         if (own == null) return
+        // Phone apps tier 2: in a window of its own, not on the phone's screen.
+        ask.window?.let { return openWindowAsked(context, ask, own, it) }
         // Hands-free: a lock that guards nothing is swiped away, and a screen
         // that is off woken, first (off this tick: it waits for Android). A
         // secure lock never got here; the window looks again before it acts.
@@ -452,7 +497,7 @@ object PhoneActions {
                             own.address,
                             own.controlPort,
                             PHONE_APPS,
-                            AppsList.listBody(apps).toString(),
+                            AppsList.listBody(apps, WindowRule.listBody(windowMode(app))).toString(),
                         ).isSuccess
                         Log.i(TAG, if (sent) "the apps were listed for the computer" else "the apps could not be sent")
                         // The icons the computer does not keep at these versions, once each, in batches.

@@ -118,6 +118,12 @@ video_quality = "balanced"
 # open my apps" must be on, off by default). Off: a dropped file is only sent.
 # phone_drop_share = true
 
+# Open a phone's app in a window of its own, several at once, when the phone
+# offers it (its "Separate windows (Shizuku)", off by default there, shown
+# only with Shizuku running). Off, or with a phone that does not offer it, an
+# app opens on the phone's own screen as before.
+# phone_app_windows = true
+
 # Linux: offer phones as this computer's camera. A phone with "Use its camera
 # as a webcam" on in the desktop app (Devices) and "Let the computer use
 # my camera" on in its Settings, asked from the Overview, is published as a

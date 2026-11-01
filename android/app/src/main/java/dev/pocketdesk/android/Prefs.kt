@@ -652,6 +652,19 @@ object Prefs {
     }
 
     /**
+     * Phone apps tier 2: the computer may open an app in a window of its own, through
+     * Shizuku (off by default, and shown only while Shizuku runs). It also lets
+     * the computer touch and type in those windows.
+     */
+    fun separateWindows(ctx: Context): Boolean =
+        prefs(ctx).getBoolean("separate_windows", false)
+
+    fun setSeparateWindows(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean("separate_windows", enabled) }
+        bump()
+    }
+
+    /**
      * Hands-free: Pocketdesk accepts Android's own screen-sharing question for
      * the phone's own computer, when that computer asked to open an app (off by
      * default). It needs "Let the computer open my apps" and Pocketdesk control.

@@ -32,6 +32,10 @@ import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.ui.RemoteSession
 import dev.pocketdesk.android.ui.RemoteSession.State
+import dev.pocketdesk.android.windows.ShizukuBridge
+import dev.pocketdesk.android.windows.WindowCast
+import dev.pocketdesk.android.windows.WindowInput
+import dev.pocketdesk.android.windows.WindowRule
 
 /**
  * The phone's screen on the computer (T10k). Started with the owner's
@@ -57,6 +61,15 @@ class CastService : Service() {
         const val EXTRA_HEIGHT = "height"
         const val EXTRA_FPS = "fps"
 
+        /** Phone apps tier 2: open one app in a window of its own. */
+        const val ACTION_OPEN_WINDOW = "dev.pocketdesk.android.action.OPEN_WINDOW"
+        const val EXTRA_CONTROL_PORT = "controlPort"
+        const val EXTRA_APP = "app"
+        const val EXTRA_WINDOW = "window"
+        const val EXTRA_WINDOW_WIDTH = "windowWidth"
+        const val EXTRA_WINDOW_HEIGHT = "windowHeight"
+        const val EXTRA_WINDOW_DPI = "windowDpi"
+
         private const val TAG = "CastService"
         private const val CHANNEL_ID = "pocketdesk-cast"
 
@@ -69,6 +82,9 @@ class CastService : Service() {
         private const val NOTIFICATION_ID = 7
         private const val FAILED_NOTIFICATION_ID = 8
         private const val POLL_MS = 500L
+
+        /** A session of app windows alone ends this long after its last window closed. */
+        private const val EMPTY_GRACE_MS = 3_000L
 
         /** The owner may be asked; the computer gives them 30 s. */
         private const val WAIT_MS = 45_000L
@@ -100,6 +116,52 @@ class CastService : Service() {
 
         @Volatile
         private var current: CastService? = null
+
+        /** The ids of the app windows open or asked for now (Phone apps tier 2), for the limit. */
+        val windowIds: Set<Int>
+            get() = current?.let { service ->
+                service.pendingWindows.map { it.ask.id }.toSet() + (service.windowCast?.ids ?: emptySet())
+            } ?: emptySet()
+
+        /**
+         * Open [pkg] in window [ask] for the computer [own] (Phone apps tier
+         * 2). It rides the cast to that computer if one is up, else starts a
+         * session of app windows alone: no consent is asked, as nothing of the
+         * phone's screen is captured. False when Android would not start the
+         * service (the phone is in the background and not allowed to).
+         */
+        fun openWindow(context: Context, own: HostStore.Host, pkg: String, ask: WindowRule.Ask): Boolean =
+            runCatching {
+                context.startForegroundService(
+                    Intent(context, CastService::class.java)
+                        .setAction(ACTION_OPEN_WINDOW)
+                        .putExtra(EXTRA_ADDRESS, own.address)
+                        .putExtra(EXTRA_PORT, own.port)
+                        .putExtra(EXTRA_CONTROL_PORT, own.controlPort)
+                        .putExtra(EXTRA_APP, pkg)
+                        .putExtra(EXTRA_WINDOW, ask.id)
+                        .putExtra(EXTRA_WINDOW_WIDTH, ask.width)
+                        .putExtra(EXTRA_WINDOW_HEIGHT, ask.height)
+                        .putExtra(EXTRA_WINDOW_DPI, ask.dpi),
+                )
+            }.onFailure { Log.w(TAG, "the window service did not start", it) }.isSuccess
+
+        /** The computer's input to app windows (from [dev.pocketdesk.android.control.ControlRunner]). */
+        fun windowInput(context: Context, events: List<WindowInput.For>) {
+            // Checked again for every batch, not only each half second: the switch, the apps
+            // switch or Shizuku may just have gone.
+            if (!Prefs.separateWindows(context) || !Prefs.appsFromComputer(context) || !ShizukuBridge.running()) return
+            val service = current ?: return
+            val cast = service.windowCast ?: return
+            val now = SystemClock.uptimeMillis()
+            for (one in events) {
+                // A press or release always goes (dropping one leaves a finger down); the rest is limited.
+                val edge = (one.event as? WindowInput.Event.Touch)?.let { it.action != WindowInput.ACTION_MOVE } == true ||
+                    one.event is WindowInput.Event.Close
+                if (!edge && !service.windowRate.take(now)) continue
+                cast.input(one.window, one.event)
+            }
+        }
 
         /**
          * Resume the paused screen share to [address] (Hands-free), when
@@ -201,6 +263,26 @@ class CastService : Service() {
     private var webcam = false
     private var webcamAsk = WebcamAsk.Ask(front = false, height = 1080, fps = 0)
 
+    /** Phone apps tier 2: app windows only, no screen of the phone's. */
+    @Volatile
+    private var windowsOnly = false
+
+    /** The app windows of this cast, made when the first is asked for. */
+    @Volatile
+    private var windowCast: WindowCast? = null
+
+    /** An app window asked for before the cast was admitted. */
+    private class PendingWindow(val ask: WindowRule.Ask, val pkg: String, val controlPort: Int)
+
+    private val pendingWindows = java.util.concurrent.CopyOnWriteArrayList<PendingWindow>()
+
+    /** The most input events a second go to app windows, as to the phone's screen. */
+    private val windowRate = dev.pocketdesk.android.control.ControlPlan.Rate()
+
+    /** The cast was admitted: app windows may be made. */
+    @Volatile
+    private var windowsLive = false
+
     /** M7: the phone's sound alone, no picture. */
     private var soundAlone = false
     private var started = false
@@ -256,6 +338,10 @@ class CastService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             finish()
+            return START_NOT_STICKY
+        }
+        if (intent?.action == ACTION_OPEN_WINDOW) {
+            onOpenWindow(intent)
             return START_NOT_STICKY
         }
         // A new consent while one is kept paused (for another computer, or the
@@ -388,10 +474,10 @@ class CastService : Service() {
     /** The session: connect, wait to be admitted, show, and watch it. */
     private fun run(port: Int) {
         val connected =
-            RustCore.connectCast(address, port, soundAlone, webcam).recoverCatching { lan ->
+            RustCore.connectCast(address, port, soundAlone, webcam, windowsOnly).recoverCatching { lan ->
                 if (finished) throw lan
                 val identity = HostStore.wanIdentity(this, address) ?: throw lan
-                RustCore.connectCastWan(address, identity, soundAlone, webcam).getOrThrow()
+                RustCore.connectCastWan(address, identity, soundAlone, webcam, windowsOnly).getOrThrow()
             }
         if (finished) return
         connected.exceptionOrNull()?.let {
@@ -414,6 +500,9 @@ class CastService : Service() {
                 failOrPause(failed(getString(R.string.cast_no_answer)))
                 return
             }
+            // Phone apps tier 2: app windows turned off, Shizuku gone, or the
+            // computer no longer the phone's own: they are given back.
+            watchWindows()
             // M7: the sound alone ended by itself (the capture or the
             // link failed): nothing is left to do (M7 review: it stayed up
             // silent until Stop).
@@ -428,7 +517,7 @@ class CastService : Service() {
                     // Hands-free: the computer left a screen it was showing:
                     // keep the owner's consent for a while instead of ending.
                     if (CastPauseRule.pauses(
-                            screen = !camera && !soundAlone,
+                            screen = !camera && !soundAlone && !windowsOnly,
                             shown = showing,
                             appsOn = Prefs.appsFromComputer(this),
                             optIn = Prefs.autoAcceptScreen(this),
@@ -450,7 +539,19 @@ class CastService : Service() {
                         reached = true
                         HostStore.markUsed(this, address)
                     }
-                    if (!showing && soundAlone) {
+                    // App windows may ride any cast of the phone's screen or be
+                    // the whole session (Phone apps tier 2).
+                    if (!soundAlone && !camera && !windowsLive) {
+                        windowsLive = true
+                        drainPendingWindows()
+                    }
+                    if (!showing && windowsOnly) {
+                        showing = true
+                        resuming = false
+                        update(getString(R.string.cast_showing_windows, shown))
+                        // The computer's touch and typing in the windows.
+                        control = dev.pocketdesk.android.control.ControlRunner(this, windowsOnly = true) { }.also { it.start() }
+                    } else if (!showing && soundAlone) {
                         showing = true
                         // M7: its sound only: no picture, no control.
                         startSound(castState)
@@ -485,6 +586,101 @@ class CastService : Service() {
             }
             Thread.sleep(POLL_MS)
         }
+    }
+
+    /**
+     * Phone apps tier 2: an ask to open an app in a window. A fresh service
+     * becomes a session of app windows alone; a running screen cast to the
+     * same computer carries the window too; anything else is refused.
+     */
+    private fun onOpenWindow(intent: Intent) {
+        val to = intent.getStringExtra(EXTRA_ADDRESS).orEmpty()
+        val port = intent.getIntExtra(EXTRA_PORT, 0)
+        val controlPort = intent.getIntExtra(EXTRA_CONTROL_PORT, 0)
+        val pkg = intent.getStringExtra(EXTRA_APP).orEmpty()
+        val ask = WindowRule.Ask(
+            intent.getIntExtra(EXTRA_WINDOW, 0),
+            intent.getIntExtra(EXTRA_WINDOW_WIDTH, 0),
+            intent.getIntExtra(EXTRA_WINDOW_HEIGHT, 0),
+            intent.getIntExtra(EXTRA_WINDOW_DPI, 0),
+        )
+        val fresh = !started && !finished
+        // A service started as a foreground one must say so at once, whatever follows.
+        createChannel()
+        val notification = notification(getString(R.string.cast_connecting, HostStore.shownName(this, to)))
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        }.onFailure { Log.w(TAG, "the window service could not go foreground", it) }
+        val usable = to.isNotEmpty() && pkg.isNotEmpty() && ask.sound && !finished && !paused && !camera &&
+            !soundAlone && (fresh || address == to)
+        if (!usable) {
+            Log.i(TAG, "an app window was not made: no usable session")
+            Thread { dev.pocketdesk.android.control.PhoneActions.report(to, controlPort, "open", pkg, dev.pocketdesk.android.control.AppOpenRule.WINDOWS_UNAVAILABLE, window = ask.id) }.start()
+            if (fresh) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+            return
+        }
+        pendingWindows.add(PendingWindow(ask, pkg, controlPort))
+        if (fresh) {
+            address = to
+            windowsOnly = true
+            started = true
+            castingTo = to
+            Thread({ run(port) }, "cast-session").start()
+        } else if (windowsLive) {
+            drainPendingWindows()
+        }
+    }
+
+    /** The app windows asked for before the cast was admitted are made now. */
+    private fun drainPendingWindows() {
+        if (finished) return
+        val asked = pendingWindows.toList()
+        pendingWindows.clear()
+        if (asked.isEmpty()) return
+        val cast = windowCast ?: WindowCast(this) { onWindowsEmpty() }.also { windowCast = it }
+        for (one in asked) {
+            val to = address
+            cast.open(one.ask, one.pkg) { word ->
+                Log.i(TAG, "an app window: $word")
+                dev.pocketdesk.android.control.PhoneActions.report(to, one.controlPort, "open", one.pkg, word, window = one.ask.id)
+            }
+        }
+    }
+
+    /** The last app window closed: a session of windows alone ends after a moment. */
+    private fun onWindowsEmpty() {
+        if (!windowsOnly) return
+        main.postDelayed({
+            if (windowsOnly && !finished && pendingWindows.isEmpty() && windowCast?.isEmpty != false) finish()
+        }, EMPTY_GRACE_MS)
+    }
+
+    /**
+     * Every half second while the cast runs: app windows are given back at
+     * once when the switch is turned off, Shizuku is gone, "Let the computer
+     * open my apps" is off, or the computer is no longer the phone's own.
+     */
+    private fun watchWindows() {
+        val cast = windowCast ?: return
+        val mode = WindowRule.mode(
+            Build.VERSION.SDK_INT,
+            ShizukuBridge.running(),
+            ShizukuBridge.permitted(),
+            Prefs.separateWindows(this),
+        )
+        val own = dev.pocketdesk.android.notify.PhoneLink.target(this)?.address == address
+        if (mode == WindowRule.Mode.ON && Prefs.appsFromComputer(this) && own) return
+        Log.i(TAG, "App windows are no longer allowed: they are given back")
+        windowCast = null
+        cast.closeAll()
+        if (windowsOnly) finish()
     }
 
     /** Why it could not start, as a sentence naming the computer. */
@@ -721,6 +917,10 @@ class CastService : Service() {
     private fun finish() {
         if (finished) return
         finished = true
+        // Phone apps tier 2: every app window is given back with the cast.
+        windowCast?.closeAll()
+        windowCast = null
+        pendingWindows.clear()
         castingTo = null
         screenTo = null
         pausedFor = null

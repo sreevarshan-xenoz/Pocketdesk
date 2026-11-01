@@ -13,6 +13,8 @@ import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.control.ControlRunner
 import dev.pocketdesk.android.notify.PhoneNotificationPrefs
+import dev.pocketdesk.android.windows.ShizukuBridge
+import dev.pocketdesk.android.windows.WindowRule
 
 /**
  * Which of the switches that need "Pocketdesk control" shows the row that
@@ -301,6 +303,54 @@ fun AutoAcceptSetting() {
     if (on && appsOn && !serviceOn) {
         SettingLink(stringResource(R.string.settings_control_open_accessibility), null) { openAccessibility() }
     }
+}
+
+/**
+ * Phone apps tier 2: the computer may open an app in a window of its own,
+ * several at once, while this phone's screen stays as it is. Optional and
+ * off by default; the row is shown only while Shizuku is installed and
+ * running (or while it is on, so it can be turned off), and nobody is told
+ * to install or start Shizuku or to turn on wireless debugging. Turning it
+ * on asks Shizuku's own dialog once, which is the owner's grant.
+ */
+@Composable
+fun WindowsSetting() {
+    val context = LocalContext.current
+    val resumes = rememberResumes()
+    var on by remember { mutableStateOf(Prefs.separateWindows(context)) }
+    val running = remember(resumes, on) { ShizukuBridge.running() }
+    val permitted = remember(resumes, on) { ShizukuBridge.permitted() }
+    val appsOn = remember(resumes, on) { Prefs.appsFromComputer(context) }
+    if (!WindowRule.rowShown(android.os.Build.VERSION.SDK_INT, running, on)) return
+    val mode = WindowRule.mode(android.os.Build.VERSION.SDK_INT, running, permitted, on)
+    SettingSwitch(
+        title = stringResource(R.string.settings_windows),
+        summary = stringResource(
+            when {
+                !on -> R.string.settings_windows_summary_off
+                mode == WindowRule.Mode.NO_SHIZUKU -> R.string.settings_windows_summary_needs_shizuku
+                mode == WindowRule.Mode.NEEDS_PERMISSION -> R.string.settings_windows_summary_needs_permission
+                !appsOn -> R.string.settings_windows_summary_needs_apps
+                else -> R.string.settings_windows_summary_on
+            },
+        ),
+        checked = on,
+        warning = on && (mode != WindowRule.Mode.ON || !appsOn),
+        onChange = { want ->
+            if (!want) {
+                on = false
+                Prefs.setSeparateWindows(context, false)
+            } else {
+                // Shizuku's own question is the grant: asked now, and only now.
+                ShizukuBridge.request { granted ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        Prefs.setSeparateWindows(context, granted)
+                        on = granted
+                    }
+                }
+            }
+        },
+    )
 }
 
 /**

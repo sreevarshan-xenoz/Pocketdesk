@@ -60,10 +60,11 @@ object AppsList {
     }
 
     /** The list packet's body: `{apps: [{id, name, v}]}`. */
-    fun listBody(apps: List<App>): JSONObject {
+    fun listBody(apps: List<App>, windows: JSONObject? = null): JSONObject {
         val list = JSONArray()
         apps.forEach { list.put(JSONObject().put("id", it.pkg).put("name", it.label).put("v", it.version)) }
-        return JSONObject().put("apps", list)
+        // Phone apps tier 2: whether apps open in windows of their own (to the phone's own computer).
+        return JSONObject().put("apps", list).apply { if (windows != null) put("windows", windows) }
     }
 
     /** An icons packet's body: `{icons: [{id, v, png}]}`. */

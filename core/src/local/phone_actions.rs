@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::approval::is_valid_id;
 use super::paths::PHONE_ACTIONS_DIR;
-use crate::protocol::phone_action::PhoneAction;
+use crate::protocol::phone_action::{PhoneAction, WindowAsk};
 
 /// How long an ask waits for its phone: a minute, as a call does.
 pub const ACTION_TTL_SECS: u64 = 60;
@@ -34,7 +34,20 @@ pub struct PhoneActionRequest {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<u64>,
+    /// An `open` that wants the app in a window of its own (Phone apps
+    /// tier 2), with that window's id and size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<WindowAsk>,
     pub created_unix: u64,
+}
+
+/// What an ask carries beside its action.
+#[derive(Default)]
+struct Extras<'a> {
+    app: Option<&'a str>,
+    screen: bool,
+    share: Option<(&'a str, u64)>,
+    window: Option<WindowAsk>,
 }
 
 impl PhoneActionRequest {
@@ -51,7 +64,7 @@ pub fn request(
     action: PhoneAction,
     now_unix: u64,
 ) -> io::Result<PhoneActionRequest> {
-    write_request(state_dir, device_id, action, None, false, None, now_unix)
+    write_request(state_dir, device_id, action, Extras::default(), now_unix)
 }
 
 /// Apps part 2: ask the server to have `device_id` share the file it is
@@ -73,9 +86,10 @@ pub fn request_share(
         state_dir,
         device_id,
         PhoneAction::Share,
-        None,
-        false,
-        Some((name, size)),
+        Extras {
+            share: Some((name, size)),
+            ..Extras::default()
+        },
         now_unix,
     )
 }
@@ -106,9 +120,43 @@ pub fn request_open_with_screen(
         state_dir,
         device_id,
         PhoneAction::Open,
-        Some(app),
-        screen,
-        None,
+        Extras {
+            app: Some(app),
+            screen,
+            ..Extras::default()
+        },
+        now_unix,
+    )
+}
+
+/// Phone apps tier 2: ask the server to have `device_id` open `app` in a
+/// window of its own, `window` its id and size. The phone's screen is not
+/// asked for.
+pub fn request_open_window(
+    state_dir: &Path,
+    device_id: &str,
+    app: &str,
+    window: WindowAsk,
+    now_unix: u64,
+) -> io::Result<PhoneActionRequest> {
+    if !crate::protocol::phone_action::valid_app_id(app) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "not an app"));
+    }
+    if !window.is_sound() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "not an app window",
+        ));
+    }
+    write_request(
+        state_dir,
+        device_id,
+        PhoneAction::Open,
+        Extras {
+            app: Some(app),
+            window: Some(window),
+            ..Extras::default()
+        },
         now_unix,
     )
 }
@@ -117,11 +165,15 @@ fn write_request(
     state_dir: &Path,
     device_id: &str,
     action: PhoneAction,
-    app: Option<&str>,
-    screen: bool,
-    share: Option<(&str, u64)>,
+    extras: Extras<'_>,
     now_unix: u64,
 ) -> io::Result<PhoneActionRequest> {
+    let Extras {
+        app,
+        screen,
+        share,
+        window,
+    } = extras;
     if device_id.is_empty() {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "no phone"));
     }
@@ -133,6 +185,7 @@ fn write_request(
         screen: screen && action == PhoneAction::Open,
         name: share.map(|(name, _)| name.to_string()),
         size: share.map(|(_, size)| size),
+        window: window.filter(|_| action == PhoneAction::Open),
         created_unix: now_unix,
     };
     let file = path(state_dir, &request.id)?;
@@ -181,7 +234,11 @@ pub fn take_all(state_dir: &Path, now_unix: u64) -> Vec<PhoneActionRequest> {
             Some(_) => request.app.is_none(),
             None => false,
         };
-        if fresh && request.id == stem && is_valid_id(&request.id) && app_right {
+        // A window is an open's, and a sound one (Phone apps tier 2).
+        let window_right = request
+            .window
+            .is_none_or(|window| request.action() == Some(PhoneAction::Open) && window.is_sound());
+        if fresh && request.id == stem && is_valid_id(&request.id) && app_right && window_right {
             taken.push(request);
         }
     }
@@ -278,6 +335,52 @@ mod tests {
         )
         .unwrap();
         assert!(take_all(&dir, 1_000).is_empty(), "an open without its app");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phone apps tier 2: an open for a window carries its id and size, only an open
+    /// does, and a window that is not a sound one is refused or dropped.
+    #[test]
+    fn an_open_may_ask_for_a_window_of_its_own() {
+        let dir = dir("window");
+        let ask = WindowAsk::standard(2);
+        let open = request_open_window(&dir, "phone-a", "org.example.app", ask, 1_000).unwrap();
+        assert_eq!(open.window, Some(ask));
+        assert!(!open.screen, "a window leaves the phone's screen alone");
+        assert_eq!(take_all(&dir, 1_000), vec![open]);
+        for bad in [
+            WindowAsk { id: 0, ..ask },
+            WindowAsk { id: 5, ..ask },
+            WindowAsk { width: 10, ..ask },
+            WindowAsk {
+                height: 9_000,
+                ..ask
+            },
+            WindowAsk { dpi: 0, ..ask },
+        ] {
+            assert!(
+                request_open_window(&dir, "phone-a", "org.example.app", bad, 1_000).is_err(),
+                "{bad:?}"
+            );
+        }
+        assert!(request_open_window(&dir, "phone-a", "bad id", ask, 1_000).is_err());
+        // A file written by hand: a window on a lock, or an unsound one, is dropped.
+        let mut odd = request(&dir, "phone-a", PhoneAction::Lock, 1_000).unwrap();
+        odd.window = Some(ask);
+        std::fs::write(
+            path(&dir, &odd.id).unwrap(),
+            serde_json::to_string(&odd).unwrap(),
+        )
+        .unwrap();
+        assert!(take_all(&dir, 1_000).is_empty(), "a window on a lock");
+        let mut odd = request_open(&dir, "phone-a", "org.example.app", 1_000).unwrap();
+        odd.window = Some(WindowAsk { id: 9, ..ask });
+        std::fs::write(
+            path(&dir, &odd.id).unwrap(),
+            serde_json::to_string(&odd).unwrap(),
+        )
+        .unwrap();
+        assert!(take_all(&dir, 1_000).is_empty(), "an unsound window");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -62,6 +62,8 @@ android {
 
     buildFeatures {
         compose = true
+        // Phone apps tier 2: the interface of the helper process Shizuku starts.
+        aidl = true
     }
 }
 
@@ -99,6 +101,11 @@ dependencies {
     // its constraints (an unmetered network, charging). No permission of its
     // own, and no Google services (Apache-2.0).
     implementation("androidx.work:work-runtime:2.10.0")
+    // Phone apps tier 2 (separate windows): the optional road to a helper process
+    // with shell identity, only for owners who already run Shizuku and turn the
+    // row on (Apache-2.0, RikkaApps/Shizuku-API). Nothing here runs otherwise.
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
     // On-device check that the scanner reads the desktop app's code.
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

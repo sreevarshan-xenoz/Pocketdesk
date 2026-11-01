@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1216 open items.
+1230 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 67 |
-| Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 188 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 74 |
+| Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 189 |
 | A phone with a SIM | 40 |
 | A second phone | 20 |
-| Away from home: another network, or through a router | 42 |
-| A second computer | 159 |
+| Away from home: another network, or through a router | 43 |
+| A second computer | 160 |
 | A Linux desktop (the Azure VM serves for some) | 214 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 75 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 393 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 76 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 395 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -182,6 +182,16 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Removing: Remove on the desktop's Settings, Wake: the helper phone's switch goes off at its next link with the computer (within a minute) and a wake through it fails. It does not come back by itself: after 20 minutes it is still off. Turning the switch on again on the phone makes it the helper again. (where: OPPO)
 - Unpairing the helper phone from the computer: it is no longer the computer's helper at the next check (the desktop's row says none) and its duty is gone. (where: OPPO)
 
+**263. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
+
+- Shizuku not running: the phone's Settings has no "Separate windows" row at all, and the computer's Phone apps page says apps open on the phone's screen; the Phone apps page opens an app as before. (where: OPPO)
+- Shizuku running, switch off: the row is shown and off; the page still opens apps on the phone's screen. Turn it on: Shizuku's own permission dialog appears once and nothing else; after Allow the row says on; after Deny the switch stays off and nothing is asked again at once. (where: OPPO)
+- Open a second, third and fourth app: four windows at once, each its own app and stream; a fifth says the phone already shows four and opens nowhere; closing one lets it open. The page says "N of 4 open". (where: OPPO)
+- Close a window on the computer: the app's display goes (the phone's `dumpsys display` no longer lists it) and the encoder stops within a second or two; the last window closing ends the phone's notification after a moment. Quit the desktop app with windows open: the phone closes them about 30 seconds later. (where: OPPO)
+- Turn the switch off with windows open, then separately stop Shizuku, then turn off "Let the computer open my apps", then unpair: each gives every window back within a second and the computer's windows close. (where: OPPO)
+- A foreground service start from the background: with Pocketdesk not in front and the screen off or on another app, a window ask starts the cast service; if Android refuses, the page falls back to opening the app on the phone's screen (`windows_unavailable`) and the log says why. The notification says "Showing app windows on <computer>". (where: OPPO)
+- The deny-list: Settings, the package installer, the permission screens, Play Store, the Shizuku manager and Pocketdesk, asked for in a window from the Phone apps page, are not opened in a window (the page opens them on the phone's screen under the usual rules, or says so); in a session of windows alone a screen-control batch from the computer does nothing to the phone's screen. (where: OPPO)
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -234,6 +244,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **262. A spare phone at home as the wake helper (Settings, Wake helper for this home)**
 
 - Survives: reboot the helper with the switch on and on the charger: the service starts after boot (Android may refuse a start from the background: it starts the next time the app is opened, and the notification says why it waits); on ColorOS 14 the helper keeps answering with the screen off for an hour on the charger. (where: OPPO)
+
+**263. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
+
+- Lock rules: with a PIN lock on, an open for a window is refused like any open (the page says locked and to unlock or use Extend Unlock) and no display is made; after unlocking and opening a window, lock the phone: the window goes on. (where: OPPO)
 
 ## Needs the owner's OK on this box: input reaching Windows, or its display settings
 
@@ -647,6 +661,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A hotspot still named `pocketdesk-…` (left by a killed server whose record was lost): "Make a direct link" says to give it a name of your own and starts nothing. (where: owner)
 - The Pair page's card follows the server's plan, not the desktop's own look: with the internet unplugged the card says Mobile Hotspot needs a connection within about 30 s, and after plugging it in the button comes back within about 30 s; the desktop app itself never calls WinRT. (where: owner)
 
+**263. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
+
+- Touch, scroll, Back and typing in a window (a notes app, a browser with a made-up page): each reaches only that window's app, even with two windows open; Home and Recents are not offered; a letter outside the keyboard's map is skipped, not typed wrong. Watch only (the window's bar) stops input. (where: OPPO)
+
 ## A phone with a SIM
 
 **11. WAN over iroh (R1)**
@@ -947,6 +965,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Another network: take the helper to a different Wi-Fi network (the computer elsewhere) and ask for a wake: the answer is that the helper could not send it, and the packet capture there shows nothing. A helper on a VPN-only network is told its duty is withdrawn: an owner phone revoked meanwhile can no longer ask once the helper hears it (within a minute). (where: away)
 - A helper whose relay changed (move the helper to another Wi-Fi network, with the computer awake): it offers again and the owner phone's next connection gets the new relay; an owner phone that has not connected since asks the old one and is told it could not be reached. (where: away)
 
+**263. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
+
+- The display flags: the display is neither public nor a presentation, so check on each Android at hand that `am start --display <id>` from the helper still launches another app on it (Android 14 first; on 10 to 12, where it may refuse a private display, the page then opens the app on the phone's screen and the log says the launch failed), and that the helper's touch, scroll, Back, Enter and Delete reach that app and no key outside those three is ever pressed. (where: OPPO)
+
 ## A second computer
 
 **29. Computers on this network**
@@ -1238,6 +1260,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **261. Phone apps on the computer's Start menu, from notifications, and dropped files shared into the app in front**
 
 - The guards: "Let the computer open my apps" off, then the control service off, then a secure lock, then the screen shown to another computer only: each drop leaves the file in Downloads and the line names the reason; the foreground package is read once per drop (the phone's log names no package of any other window), and Pocketdesk's own screen in front is refused. Whether a share started from the service with another app in front appears on ColorOS 14 and Android 15 or 16, and whether Android's chooser fallback shows when the direct share is refused. (where: OPPO)
+
+**263. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
+
+- A screen cast running at the same time (the phone's screen shown to the same computer): a window opens beside it and each has its own window here; stopping the screen cast keeps no window open unless the session is still up. With the screen shown to another computer, a window ask is answered `windows_unavailable`. (where: OPPO)
 
 **264. Wear OS tile, complication and list (Settings, Watch controls; `android/wear`)**
 
@@ -2012,6 +2038,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **262. A spare phone at home as the wake helper (Settings, Wake helper for this home)**
 
 - A stranger: a phone paired with nothing, or another owner's phone, dialing the helper by its key is closed (the helper's counts show a dropped request, no packet sent). A request line with a MAC in it sends nothing (the packet capture shows none). (where: other hardware)
+
+**263. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
+
+- An older computer (a throwaway built before this change) answers no such ask; a computer without the setting (`phone_app_windows` off in the desktop's Settings) opens apps on the phone's screen as before. (where: other hardware)
 
 **264. Wear OS tile, complication and list (Settings, Watch controls; `android/wear`)**
 
@@ -2901,6 +2931,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Charger and Wi-Fi gate: unplug the helper: within a few seconds the notification says it is waiting and the log says "not listening" (the endpoint is closed: a wake asked now says the helper could not be reached); plug it in: it listens again. Turn Wi-Fi off with the charger on: same. On the battery for 30 minutes with the switch on, the app uses no measurable battery (no timer, no wake lock). (where: OPPO)
 - A refused helper stops listening at once: remove it on the desktop while it is serving: within a minute the notification goes and the endpoint is closed (the log says "not listening"), and it sends no offer again. (where: OPPO)
 - The words in Spanish and Tamil (Settings, the Wake settings dialog, the notification), and the desktop's Settings, Wake row, light and dark, in a narrow window, by hand on Windows and on Linux. (where: by hand)
+
+**263. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
+
+- Switch on, "Let the computer open my apps" on, phone unlocked: click an app on the Phone apps page: a window with the app's name opens on the computer, the app's picture in it, and the phone's own screen stays as it was (try with it off, and with another app in front); the log (`WindowCast`, `WindowHost`) names the display. Try Android 14 first, then a phone on 10 to 13 if one is at hand. (where: OPPO)
+- The Phone apps page's line about how apps open, and Settings, "Open phone apps in windows of their own", by hand on Windows and on Linux, light and dark, and in a narrow window; the window's title, its Back-only bar and its control hint; the viewer windows in a Wayland session. (where: by hand)
 
 **264. Wear OS tile, complication and list (Settings, Watch controls; `android/wear`)**
 

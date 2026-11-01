@@ -10,7 +10,11 @@
 //! - `2` scroll: `x u16 LE + y u16 LE + dx i8 + dy i8` (notches);
 //! - `3` global action: `u8` ([`Global`]);
 //! - `4` text: `len u16 LE + UTF-8`;
-//! - `5` backspace; `6` enter.
+//! - `5` backspace; `6` enter;
+//! - `7` window: `window u8` (Phone apps tier 2): the events after it, up to
+//!   the next window event, are for that app window, not the phone's screen;
+//! - `8` close: the app window named before it is closed and its display
+//!   given back (a batch of a window event and this, nothing else).
 //!
 //! Points are fractions of the picture, 0 to 65535 on each axis, so the
 //! phone maps them to its own screen whatever size it encodes at.
@@ -72,12 +76,25 @@ impl Global {
 /// One thing to do on the phone.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ControlEvent {
-    Touch { action: TouchAction, x: u16, y: u16 },
-    Scroll { x: u16, y: u16, dx: i8, dy: i8 },
+    Touch {
+        action: TouchAction,
+        x: u16,
+        y: u16,
+    },
+    Scroll {
+        x: u16,
+        y: u16,
+        dx: i8,
+        dy: i8,
+    },
     Global(Global),
     Text(String),
     Backspace,
     Enter,
+    /// The events after this one are for app window `n` (tier 2).
+    Window(u8),
+    /// Close the app window named before it (tier 2).
+    Close,
 }
 
 /// A batch of events, and when its sender sent it.
@@ -130,6 +147,11 @@ impl ControlBatch {
                 }
                 ControlEvent::Backspace => out.push(5),
                 ControlEvent::Enter => out.push(6),
+                ControlEvent::Window(window) => {
+                    out.push(7);
+                    out.push(*window);
+                }
+                ControlEvent::Close => out.push(8),
             }
         }
         Some(out)
@@ -176,11 +198,63 @@ impl ControlBatch {
                 }
                 5 => ControlEvent::Backspace,
                 6 => ControlEvent::Enter,
+                7 => {
+                    let window = r.u8()?;
+                    if !super::cast::valid_window(window) {
+                        return None;
+                    }
+                    ControlEvent::Window(window)
+                }
+                8 => ControlEvent::Close,
                 _ => return None,
             };
             events.push(event);
         }
         r.0.is_empty().then_some(ControlBatch { sent_ms, events })
+    }
+
+    /// The app window the batch's first event names, if it is for one.
+    pub fn window(&self) -> Option<u8> {
+        match self.events.first() {
+            Some(ControlEvent::Window(window)) => Some(*window),
+            _ => None,
+        }
+    }
+
+    /// Whether this batch only closes the app window it names.
+    pub fn is_close(&self) -> bool {
+        matches!(
+            self.events.as_slice(),
+            [ControlEvent::Window(_), ControlEvent::Close]
+        )
+    }
+
+    /// The batch that closes app window `window`; `None` for one that is not.
+    pub fn close_window(sent_ms: u64, window: u8) -> Option<ControlBatch> {
+        super::cast::valid_window(window).then_some(ControlBatch {
+            sent_ms,
+            events: vec![ControlEvent::Window(window), ControlEvent::Close],
+        })
+    }
+
+    /// This batch made for app window `window`: any window events it had
+    /// are dropped and one naming `window` leads it, so a viewer of one
+    /// window cannot touch another. `None` when `window` is not one or the
+    /// batch would then be too large.
+    pub fn for_window(self, window: u8) -> Option<ControlBatch> {
+        if !super::cast::valid_window(window) {
+            return None;
+        }
+        let mut events = vec![ControlEvent::Window(window)];
+        events.extend(
+            self.events
+                .into_iter()
+                .filter(|e| !matches!(e, ControlEvent::Window(_))),
+        );
+        (events.len() <= MAX_EVENTS).then_some(ControlBatch {
+            sent_ms: self.sent_ms,
+            events,
+        })
     }
 
     /// The batch as JSON for the phone's app: `{"sent": ms, "events": [...]}`,
@@ -209,9 +283,30 @@ impl ControlBatch {
                 ControlEvent::Text(text) => serde_json::json!({"type": "text", "text": text}),
                 ControlEvent::Backspace => serde_json::json!({"type": "backspace"}),
                 ControlEvent::Enter => serde_json::json!({"type": "enter"}),
+                ControlEvent::Window(window) => {
+                    serde_json::json!({"type": "window", "window": window})
+                }
+                ControlEvent::Close => serde_json::json!({"type": "close"}),
             })
             .collect();
         serde_json::json!({"sent": self.sent_ms, "events": events})
+    }
+}
+
+/// Whether the computer's cast session may pass a control batch (as the
+/// bytes on the wire) to the phone: the phone said it takes control of its
+/// screen (`screen_control`), or the batch is for an app window whose
+/// `window_input` bit (bit `n - 1` for window `n`) the phone set, or it only
+/// closes an app window (the owner closing a window never waits on its input
+/// switch). A batch for a window is never passed on the screen's say-so
+/// alone, nor the other way round.
+pub fn passes(batch: &[u8], screen_control: bool, window_input: u8) -> bool {
+    let Some(batch) = ControlBatch::decode(batch) else {
+        return false;
+    };
+    match batch.window() {
+        None => screen_control,
+        Some(window) => batch.is_close() || window_input & (1 << (window - 1)) != 0,
     }
 }
 
@@ -315,6 +410,94 @@ mod tests {
             events: vec![],
         };
         assert_eq!(none.encode(), None);
+    }
+
+    #[test]
+    fn a_window_event_names_the_window_the_events_after_it_are_for() {
+        let batch = ControlBatch {
+            sent_ms: 5,
+            events: vec![
+                ControlEvent::Window(3),
+                ControlEvent::Touch {
+                    action: TouchAction::Down,
+                    x: 1,
+                    y: 2,
+                },
+            ],
+        };
+        let bytes = batch.encode().unwrap();
+        let back = ControlBatch::decode(&bytes).unwrap();
+        assert_eq!(back, batch);
+        assert_eq!(back.window(), Some(3));
+        assert_eq!(back.to_json()["events"][0]["window"], 3);
+        assert_eq!(every_kind().window(), None);
+        // A window that is not one is refused when read.
+        let mut bad = 7u64.to_le_bytes().to_vec();
+        bad.extend_from_slice(&[1, 7, 0]);
+        assert_eq!(ControlBatch::decode(&bad), None, "window 0");
+        let mut past = 7u64.to_le_bytes().to_vec();
+        past.extend_from_slice(&[1, 7, super::super::cast::MAX_WINDOWS + 1]);
+        assert_eq!(ControlBatch::decode(&past), None, "past the cap");
+    }
+
+    #[test]
+    fn a_window_viewer_s_batch_is_made_for_its_window_only() {
+        let mut batch = every_kind();
+        batch.events.insert(2, ControlEvent::Window(4));
+        let made = batch.clone().for_window(2).unwrap();
+        assert_eq!(made.window(), Some(2));
+        assert_eq!(
+            made.events
+                .iter()
+                .filter(|e| matches!(e, ControlEvent::Window(_)))
+                .count(),
+            1,
+            "any window the viewer named is dropped"
+        );
+        assert_eq!(made.events.len(), every_kind().events.len() + 1);
+        assert_eq!(batch.clone().for_window(0), None);
+        assert_eq!(batch.for_window(super::super::cast::MAX_WINDOWS + 1), None);
+        let full = ControlBatch {
+            sent_ms: 0,
+            events: vec![ControlEvent::Enter; MAX_EVENTS],
+        };
+        assert_eq!(full.for_window(1), None, "no room for the window event");
+    }
+
+    #[test]
+    fn the_session_passes_a_batch_by_what_the_phone_said() {
+        let screen = every_kind().encode().unwrap();
+        let w2 = every_kind().for_window(2).unwrap().encode().unwrap();
+        assert!(passes(&screen, true, 0));
+        assert!(
+            !passes(&screen, false, 0b1111),
+            "windows' input is not the screen's"
+        );
+        assert!(passes(&w2, false, 0b10));
+        assert!(
+            !passes(&w2, true, 0b01),
+            "the screen's control is not a window's"
+        );
+        assert!(!passes(&w2, true, 0b1101), "window 2's bit is off");
+        assert!(!passes(&[1, 2, 3], true, 0b1111), "not a batch");
+        // Closing a window needs no input switch, and closes only the window named.
+        let close = ControlBatch::close_window(1, 3).unwrap();
+        assert!(close.is_close());
+        let close = close.encode().unwrap();
+        assert!(passes(&close, false, 0), "a close passes with input off");
+        assert_eq!(ControlBatch::close_window(1, 0), None);
+        // A batch of a window event and more is not a close.
+        assert!(
+            !ControlBatch {
+                sent_ms: 1,
+                events: vec![
+                    ControlEvent::Window(1),
+                    ControlEvent::Close,
+                    ControlEvent::Enter
+                ],
+            }
+            .is_close()
+        );
     }
 
     #[test]
