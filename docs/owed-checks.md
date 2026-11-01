@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1200 open items.
+1202 open items.
 
 | Where | Items |
 |---|---|
@@ -11,11 +11,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 188 |
 | A phone with a SIM | 40 |
 | A second phone | 20 |
-| Away from home: another network, or through a router | 41 |
+| Away from home: another network, or through a router | 42 |
 | A second computer | 155 |
 | A Linux desktop (the Azure VM serves for some) | 214 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 66 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 391 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 392 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -826,7 +826,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Introduction: with the helper phone paired with the throwaway computer's own code and connected once while the computer is awake, the desktop's Settings, Wake shows "<phone> is this computer's wake helper" and the computer showed one notification "<phone> is now this computer's wake helper". A phone paired as a guest (a time-limited grant, or another owner's code) that sends the offer is not listed (the server's log says an offer from a phone that is not an owner phone was dropped). (where: second phone)
 - Owner phones learn of it: another owner phone, connected once while the computer is awake, shows "Wake through my helper" in the computer's Wake settings with the helper's name (off by default); a guest phone shows "No wake helper yet". (where: second phone)
 - The limit: two Wakes in a row work; a third within 30 seconds says "the helper was asked a moment ago: try again in half a minute", and one half a minute later works. (where: second phone)
-- Revoking: remove an owner phone from the computer's Devices page: within about 15 seconds the helper's list drops it and that phone's Wake now fails ("the helper could not send it" or "could not be reached"); the packet capture shows nothing for it. (where: second phone)
+- Revoking: remove an owner phone from the computer's Devices page: within a minute the helper's list drops it and that phone's Wake now fails ("the helper could not send it" or "could not be reached"); the packet capture shows nothing for it. (where: second phone)
 
 ## Away from home: another network, or through a router
 
@@ -944,6 +944,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **262. A spare phone at home as the wake helper (Settings, Wake helper for this home)**
 
 - The wake: the computer asleep (suspend it by hand on the throwaway machine), the owner phone on mobile data with "Wake through my helper" on: Wake sends the request, the computer wakes, and the helper's capture shows the magic packet matched the computer's own MAC (matched or not only). With the same phone at home on the same Wi-Fi, Wake sends the packet from the phone itself, as before. (where: away)
+- Another network: take the helper to a different Wi-Fi network (the computer elsewhere) and ask for a wake: the answer is that the helper could not send it, and the packet capture there shows nothing. A helper on a VPN-only network is told its duty is withdrawn: an owner phone revoked meanwhile can no longer ask once the helper hears it (within a minute). (where: away)
 - A helper whose relay changed (move the helper to another Wi-Fi network, with the computer awake): it offers again and the owner phone's next connection gets the new relay; an owner phone that has not connected since asks the old one and is told it could not be reached. (where: away)
 
 ## A second computer
@@ -2879,4 +2880,5 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The switch: with "Wake helper for this home" off (the default) nothing listens (`adb shell dumpsys activity services dev.pocketdesk.android` lists no `WakeHelperService`, and the phone's iroh endpoint is not bound). Turn it on: a quiet notification "Waiting for a charger and Wi-Fi", or "Waking your computers for your other phones" when plugged in on Wi-Fi. (where: OPPO)
 - Charger and Wi-Fi gate: unplug the helper: within a few seconds the notification says it is waiting and the log says "not listening" (the endpoint is closed: a wake asked now says the helper could not be reached); plug it in: it listens again. Turn Wi-Fi off with the charger on: same. On the battery for 30 minutes with the switch on, the app uses no measurable battery (no timer, no wake lock). (where: OPPO)
+- A refused helper stops listening at once: remove it on the desktop while it is serving: within a minute the notification goes and the endpoint is closed (the log says "not listening"), and it sends no offer again. (where: OPPO)
 - The words in Spanish and Tamil (Settings, the Wake settings dialog, the notification), and the desktop's Settings, Wake row, light and dark, in a narrow window, by hand on Windows and on Linux. (where: by hand)
