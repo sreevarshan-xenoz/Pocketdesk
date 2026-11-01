@@ -397,7 +397,7 @@ async fn start(fixes: Arc<Fixes>) -> std::result::Result<Serving, String> {
         listeners,
         fixes,
         Arc::new(chosen_precision),
-        Arc::new(crate::nmea::from_this_computer),
+        Arc::new(crate::nmea::from_geoclue),
         crate::nmea::SEND_EVERY,
     ));
     Ok(Serving {

@@ -141,6 +141,72 @@ pub fn from_this_computer(peer: IpAddr) -> bool {
     is_own_address(peer, &own_addresses())
 }
 
+/// The system users GeoClue runs as: `geoclue` on most distributions,
+/// `srvGeoClue` on openSUSE.
+const GEOCLUE_USERS: [&str; 2] = ["geoclue", "srvGeoClue"];
+
+/// The uids of GeoClue's users in `passwd` (the text of `/etc/passwd`).
+pub fn geoclue_uids(passwd: &str) -> Vec<u32> {
+    passwd
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split(':');
+            let name = fields.next()?;
+            let uid = fields.nth(1)?.parse().ok()?;
+            GEOCLUE_USERS.contains(&name).then_some(uid)
+        })
+        .collect()
+}
+
+/// An address as `/proc/net/tcp{,6}` prints it: each 32-bit word of the
+/// address in host order (little-endian here), then the port, in hex.
+fn proc_address(addr: SocketAddr) -> String {
+    let words: Vec<String> = match addr.ip() {
+        IpAddr::V4(v4) => vec![format!("{:08X}", u32::from_le_bytes(v4.octets()))],
+        IpAddr::V6(v6) => v6
+            .octets()
+            .chunks(4)
+            .map(|w| format!("{:08X}", u32::from_le_bytes([w[0], w[1], w[2], w[3]])))
+            .collect(),
+    };
+    format!("{}:{:04X}", words.concat(), addr.port())
+}
+
+/// The uid owning the socket at `local` connected to `remote`, from the
+/// text of `/proc/net/tcp` or `/proc/net/tcp6`.
+pub fn socket_uid(table: &str, local: SocketAddr, remote: SocketAddr) -> Option<u32> {
+    let (local, remote) = (proc_address(local), proc_address(remote));
+    table.lines().skip(1).find_map(|line| {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        let matches = fields.get(1)?.eq_ignore_ascii_case(&local)
+            && fields.get(2)?.eq_ignore_ascii_case(&remote);
+        matches.then(|| fields.get(7)?.parse().ok()).flatten()
+    })
+}
+
+/// Whether the client at `peer`, connected to this end `here`, is GeoClue
+/// itself: from this computer, and its socket owned by GeoClue's user. Any
+/// other program, of any user, is turned away, so GeoClue's own per-app
+/// permission is the one that decides (#612 review). With no GeoClue user
+/// on this computer no one is let in.
+pub fn from_geoclue(peer: SocketAddr, here: SocketAddr) -> bool {
+    if !from_this_computer(peer.ip()) {
+        return false;
+    }
+    let uids = std::fs::read_to_string("/etc/passwd")
+        .map(|passwd| geoclue_uids(&passwd))
+        .unwrap_or_default();
+    if uids.is_empty() {
+        tracing::warn!("No GeoClue user on this computer: location clients are refused");
+        return false;
+    }
+    let table = if peer.is_ipv4() { "/proc/net/tcp" } else { "/proc/net/tcp6" };
+    std::fs::read_to_string(table)
+        .ok()
+        .and_then(|text| socket_uid(&text, peer, here))
+        .is_some_and(|uid| uids.contains(&uid))
+}
+
 /// Listen on this computer's loopback only, IPv4 on a free port and IPv6 on
 /// the same one where it can: nothing on the network can connect at all, and
 /// [`serve`] still turns away what is not from this computer.
@@ -155,14 +221,15 @@ pub async fn bind() -> std::io::Result<Vec<TcpListener>> {
 }
 
 /// Serve `source` to whoever connects to `listeners` until the task is
-/// dropped: a client `admit` lets in (from this computer: [`from_this_computer`])
+/// dropped: a client `admit` lets in (by its address and this end's: GeoClue's
+/// own user on this computer, [`from_geoclue`])
 /// is sent GGA and RMC for the fix at `precision()` at once and every `every`
 /// while it stays; any other is closed unread.
 pub async fn serve(
     listeners: Vec<TcpListener>,
     source: Arc<dyn FixSource>,
     precision: Arc<dyn Fn() -> Precision + Send + Sync>,
-    admit: Arc<dyn Fn(IpAddr) -> bool + Send + Sync>,
+    admit: Arc<dyn Fn(SocketAddr, SocketAddr) -> bool + Send + Sync>,
     every: Duration,
 ) {
     let clients = Arc::new(tokio::sync::Semaphore::new(MOST_CLIENTS));
@@ -184,8 +251,9 @@ pub async fn serve(
                             tokio::time::sleep(Duration::from_millis(200)).await;
                             continue;
                         };
-                        if !admit(peer.ip()) {
-                            tracing::info!("A location client from outside this computer was refused");
+                        let here = stream.local_addr().unwrap_or(peer);
+                        if !admit(peer, here) {
+                            tracing::info!("A location client that is not GeoClue was refused");
                             continue;
                         }
                         let Ok(permit) = clients.clone().try_acquire_owned() else {
@@ -353,6 +421,41 @@ mod tests {
         assert!(!is_own_address("192.0.2.11".parse().unwrap(), &[]));
     }
 
+    #[test]
+    fn geoclues_users_are_found_by_name() {
+        let passwd = "root:x:0:0::/root:/bin/bash
+geoclue:x:964:964::/var/lib/geoclue:/usr/bin/nologin
+srvGeoClue:x:470:470::/:/sbin/nologin
+alice:x:1000:1000::/home/alice:/bin/sh
+broken
+";
+        assert_eq!(geoclue_uids(passwd), vec![964, 470]);
+        assert!(geoclue_uids("alice:x:1000:1000::/:/bin/sh
+").is_empty());
+    }
+
+    #[test]
+    fn a_sockets_owner_is_read_from_the_kernels_table() {
+        // Two ends of one loopback connection, as /proc/net/tcp shows them:
+        // the client's socket (owned by 964) and the server's (by 1000).
+        let table = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 0100007F:D431 0100007F:A2B4 01 00000000:00000000 00:00000000 00000000   964        0 1 1 0000000000000000 20 4 30 10 -1
+   1: 0100007F:A2B4 0100007F:D431 01 00000000:00000000 00:00000000 00000000  1000        0 2 1 0000000000000000 20 4 30 10 -1
+";
+        let client: SocketAddr = "127.0.0.1:54321".parse().unwrap();
+        let server: SocketAddr = "127.0.0.1:41652".parse().unwrap();
+        assert_eq!(socket_uid(table, client, server), Some(964));
+        assert_eq!(socket_uid(table, server, client), Some(1000));
+        let other: SocketAddr = "127.0.0.1:1".parse().unwrap();
+        assert_eq!(socket_uid(table, other, server), None);
+    }
+
+    #[test]
+    fn an_ipv6_address_is_written_word_by_word() {
+        let loopback: SocketAddr = "[::1]:80".parse().unwrap();
+        assert_eq!(proc_address(loopback), "00000000000000000000000001000000:0050");
+    }
+
     struct Fixed(Option<Fix>);
 
     #[async_trait::async_trait]
@@ -386,7 +489,7 @@ mod tests {
             listeners,
             Arc::new(Fixed(source)),
             Arc::new(|| Precision::Exact),
-            Arc::new(move |_| admit),
+            Arc::new(move |_, _| admit),
             Duration::from_millis(50),
         ))
     }

@@ -60,7 +60,7 @@ async fn geoclue_reads_the_fake_fix_through_avahi() {
         listeners,
         fixes,
         Arc::new(|| Precision::Exact),
-        Arc::new(nmea::from_this_computer),
+        Arc::new(nmea::from_geoclue),
         Duration::from_secs(2),
     ));
 
@@ -87,6 +87,21 @@ async fn geoclue_reads_the_fake_fix_through_avahi() {
     }
     println!("non-loopback addresses tried: {tried}, refused: {refused}");
     assert_eq!(refused, tried, "no network address may reach the source");
+
+    // Nor any program on this computer but GeoClue: this test, on the
+    // loopback, is closed with nothing read (#612 review).
+    let mut direct = tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port))
+        .await
+        .expect("the loopback port to answer");
+    let mut sink = [0u8; 16];
+    let read = tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio::io::AsyncReadExt::read(&mut direct, &mut sink),
+    )
+    .await
+    .expect("closed in time");
+    assert!(matches!(read, Ok(0) | Err(_)), "a program that is not GeoClue reads nothing");
+    println!("a direct loopback client that is not GeoClue: refused");
 
     let demo = std::env::var("POCKETDESK_WHERE_AM_I")
         .unwrap_or_else(|_| "/usr/lib/geoclue-2.0/demos/where-am-i".to_string());
