@@ -35,6 +35,7 @@ pub mod identity;
 pub mod kdeconnect;
 pub mod kdeconnect_devices;
 pub mod kept_folders;
+pub mod keymap;
 pub mod link_rules;
 pub mod links;
 pub mod listening;
