@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1095 open items.
+1096 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
 | A second computer | 149 |
-| A Linux desktop (the Azure VM serves for some) | 191 |
+| A Linux desktop (the Azure VM serves for some) | 192 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
 
@@ -1618,6 +1618,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **250. The phone's camera as this computer's webcam (Linux)**
 
+- "Offer phones as a camera" turned off and "Stop camera" on the Overview each end a running camera, and the "in use" notification shows plainly (default importance, silent) on the phone. (where: linux)
 - A real video call on the owner's desk: Firefox (and Zoom or Meet in the browser) picks "Pocketdesk camera (<phone>)" in its camera list, the other side sees the phone's picture, and it stops when the phone's notification's Stop is pressed. (where: linux)
 - OBS 30+ and GNOME Snapshot list and show the camera; `pw-v4l2` lets a V4L2-only app (e.g. `pw-v4l2 ffplay /dev/video0` or Cheese) open it. (where: linux)
 - Front camera and 1080p at 24 fps from Settings: the phone's notification says so and the app's picture is 1920x1080. (where: linux)
