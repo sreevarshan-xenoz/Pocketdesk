@@ -575,6 +575,8 @@ pub const EXTRA_COMPUTERS: &str = "Your other computers";
 pub const EXTRA_KDE: &str = "KDE Connect devices";
 /// The phone apps muted here, beside Notifications' rows (K2b).
 pub const EXTRA_MUTED: &str = "Muted apps";
+/// The phone this computer holds as its wake helper, beside Wake's rows.
+pub const EXTRA_WAKE_HELPER: &str = "Wake helper phone";
 
 /// What a section draws beside its rows, by name.
 fn extras(section: Section) -> &'static [&'static str] {
@@ -583,6 +585,7 @@ fn extras(section: Section) -> &'static [&'static str] {
         Section::Computers => &[EXTRA_COMPUTERS],
         Section::KdeConnect => &[EXTRA_KDE],
         Section::Notifications => &[EXTRA_MUTED],
+        Section::Wake => &[EXTRA_WAKE_HELPER],
         _ => &[],
     }
 }
@@ -3276,6 +3279,9 @@ mod tests {
         // An extra counts for its section.
         assert!(section_shown("browser", Section::Phones));
         assert!(section_shown("kde", Section::KdeConnect));
+        // The wake helper phone sits with the wake rows.
+        assert!(section_shown("wake helper", Section::Wake));
+        assert!(!section_shown("wake helper", Section::Phones));
         for section in Section::ALL {
             assert!(!section_shown("zzzz nothing", section), "{section:?}");
         }
