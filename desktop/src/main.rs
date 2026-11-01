@@ -30,6 +30,7 @@ mod notice;
 mod nv12;
 mod pair_view;
 mod phone_files_view;
+mod phone_hotspot;
 mod phone_open;
 mod phone_windows;
 mod photos_view;

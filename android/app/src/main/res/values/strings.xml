@@ -1242,6 +1242,15 @@
     <string name="settings_windows_summary_needs_permission">Allow Pocketdesk in Shizuku to use this</string>
     <string name="settings_windows_summary_needs_shizuku">Shizuku is not running: start it, or turn this off</string>
     <string name="settings_windows_summary_needs_apps">Almost: turn on \"Let the computer open my apps\" too, since a window opens with an app</string>
+    <string name="settings_hotspot">Let my computers turn on my hotspot</string>
+    <string name="settings_hotspot_summary_off">Off. Lets your own computer turn on this phone\'s Wi-Fi hotspot, as you already have it set in Android, to get internet through it. The computer sends no name or password. It uses Shizuku, which you already run</string>
+    <string name="settings_hotspot_summary_on">On. Your computer can turn this phone\'s hotspot on and off, even while the phone is locked. Android shows its usual hotspot indicator. Turn this off to turn a hotspot it started off at once</string>
+    <string name="settings_hotspot_summary_needs_permission">Allow Pocketdesk in Shizuku to use this</string>
+    <string name="settings_hotspot_summary_needs_shizuku">Shizuku is not running: start it, or turn this off</string>
+    <string name="settings_hotspot_summary_needs_access">Almost: turn on Pocketdesk\'s notification access, which is how the computer\'s ask reaches this phone</string>
+    <string name="settings_hotspot_off_title">Turn the hotspot off by itself</string>
+    <string name="settings_hotspot_off_after">After %1$d minutes with no new ask from the computer. Tap to change</string>
+    <string name="settings_hotspot_off_never">Never: only the computer or you turn it off. Tap to change</string>
     <string name="cast_showing_windows">Showing app windows on %1$s</string>
     <string name="settings_phone_actions">Let the computer take screenshots and lock this phone</string>
     <string name="settings_phone_actions_summary_off">The computer\'s Screenshot of the phone and Lock the phone do them here: a screenshot comes to the computer as \"Send new screenshots\" sends it (turn that on too), never of the lock screen. Uses the \"Pocketdesk control\" Accessibility service</string>

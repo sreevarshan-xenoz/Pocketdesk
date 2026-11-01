@@ -301,6 +301,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Phones,
     ),
     (
+        "phone_hotspot_network",
+        "Join my phone's hotspot network",
+        Section::Phones,
+    ),
+    (
         "gamepad_controller",
         "The phone's gamepad as a game controller",
         Section::Phones,
@@ -673,6 +678,8 @@ pub(crate) fn drawn_here(key: &str) -> bool {
         | "phone_approves_local_only"
         | "phone_approves_timeout_secs"
         | "phone_approves_phones" => cfg!(target_os = "linux"),
+        // Joining a phone's hotspot network by itself: NetworkManager's, so Linux.
+        "phone_hotspot_network" => cfg!(target_os = "linux"),
         // The phone's location for GeoClue: Linux's.
         "phone_location" | "phone_location_precision" | "phone_location_phone" => {
             cfg!(target_os = "linux")
@@ -825,6 +832,8 @@ pub fn applies_live(key: &str) -> bool {
             | "phone_drop_share"
             | "phone_app_windows"
             | "phone_app_keymaps"
+            // Read by the window at each "Use my phone's hotspot".
+            | "phone_hotspot_network"
             | "gamepad_controller"
             | "downloads_folder"
             // Read by the server at each kept file and each run's end.
@@ -2059,6 +2068,22 @@ impl SettingsForm {
                         "Off by default. Each app window then has \u{201c}Keys to taps\u{201d} on its bar: draw where keys tap, a stick and a swipe on the picture, and lock the pointer to aim with the mouse (Ctrl+Alt+Shift+M). It sends several fingers at once and needs the window setting above, so Shizuku on the phone: the phone's own screen window and a phone without Shizuku have no keymaps. Some online games flag injected input as cheating: use it where that is fine. The keymaps are kept on this computer only, one per app.",
                     );
                 });
+                // Use my phone's hotspot: joining by itself is NetworkManager's, so Linux only.
+                if drawn_here("phone_hotspot_network") {
+                    row(ui, "phone_hotspot_network", |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut e.phone_hotspot_network)
+                                .char_limit(
+                                    pocketdesk_core::local::phone_hotspot::MAX_NETWORK_BYTES,
+                                )
+                                .hint_text("a saved Wi-Fi network, e.g. My phone"),
+                        );
+                        note(
+                            ui,
+                            "After \u{201c}Use my phone's hotspot\u{201d} (Overview, for a phone that offers it: its \u{201c}Let my computers turn on my hotspot\u{201d} is on, which needs Shizuku), join this Wi-Fi network by itself with NetworkManager, but only if it is already saved on this computer. Empty (the default): you are only told to connect. The phone's password is never asked for, kept or sent; the phone is asked for nothing but \u{201c}on\u{201d} or \u{201c}off\u{201d}.",
+                        );
+                    });
+                }
                 // F6 part 2: a PipeWire camera, so Linux only.
                 if cfg!(target_os = "linux") {
                     row(ui, "phone_camera", |ui| {

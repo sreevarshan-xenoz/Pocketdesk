@@ -1163,6 +1163,15 @@
     <string name="settings_windows_summary_needs_permission">இதைப் பயன்படுத்த Shizuku-வில் Pocketdesk-ஐ அனுமதிக்கவும்</string>
     <string name="settings_windows_summary_needs_shizuku">Shizuku இயங்கவில்லை: அதைத் தொடங்கவும், அல்லது இதை அணைக்கவும்</string>
     <string name="settings_windows_summary_needs_apps">கிட்டத்தட்ட: «என் செயலிகளைக் கணினி திறக்கட்டும்» என்பதையும் இயக்கவும், ஏனெனில் சாளரம் ஒரு செயலியுடன் திறக்கும்</string>
+    <string name="settings_hotspot">என் கணினிகள் என் ஹாட்ஸ்பாட்டை இயக்க அனுமதி</string>
+    <string name="settings_hotspot_summary_off">அணைந்துள்ளது. Android-இல் நீங்கள் ஏற்கெனவே அமைத்துள்ளபடியே, இந்தத் தொலைபேசியின் வைஃபை ஹாட்ஸ்பாட்டை உங்கள் சொந்தக் கணினி இயக்க அனுமதிக்கிறது; அதன் வழியாக இணையம் பெறலாம். கணினி எந்தப் பெயரையும் கடவுச்சொல்லையும் அனுப்பாது. நீங்கள் ஏற்கெனவே இயக்கும் Shizuku-வைப் பயன்படுத்துகிறது</string>
+    <string name="settings_hotspot_summary_on">இயக்கத்தில் உள்ளது. தொலைபேசி பூட்டியிருந்தாலும் உங்கள் கணினி இந்தத் தொலைபேசியின் ஹாட்ஸ்பாட்டை இயக்கவும் அணைக்கவும் முடியும். Android தனது வழக்கமான ஹாட்ஸ்பாட் குறியீட்டைக் காட்டும். இதை அணைத்தால், கணினி தொடங்கிய ஹாட்ஸ்பாட் உடனே அணையும்</string>
+    <string name="settings_hotspot_summary_needs_permission">இதைப் பயன்படுத்த Shizuku-வில் Pocketdesk-ஐ அனுமதிக்கவும்</string>
+    <string name="settings_hotspot_summary_needs_shizuku">Shizuku இயங்கவில்லை: அதைத் தொடங்கவும், அல்லது இதை அணைக்கவும்</string>
+    <string name="settings_hotspot_summary_needs_access">கிட்டத்தட்ட: Pocketdesk-இன் அறிவிப்பு அணுகலை இயக்கவும்; கணினியின் கோரிக்கை இந்தத் தொலைபேசியை அடைவது அதன் வழியாகவே</string>
+    <string name="settings_hotspot_off_title">ஹாட்ஸ்பாட்டைத் தானாக அணை</string>
+    <string name="settings_hotspot_off_after">கணினியிடமிருந்து புதிய கோரிக்கை இல்லாமல் %1$d நிமிடங்களுக்குப் பிறகு. மாற்ற தட்டவும்</string>
+    <string name="settings_hotspot_off_never">ஒருபோதும் இல்லை: கணினி அல்லது நீங்கள் மட்டுமே அணைக்கலாம். மாற்ற தட்டவும்</string>
     <string name="cast_showing_windows">%1$s இல் செயலி சாளரங்கள் காட்டப்படுகின்றன</string>
     <string name="settings_phone_actions">கணினி திரைப்பிடிப்பு எடுக்கவும் இந்தத் தொலைபேசியைப் பூட்டவும் அனுமதி</string>
     <string name="settings_phone_actions_summary_off">கணினியின் தொலைபேசியின் திரைப்பிடிப்பு, தொலைபேசியைப் பூட்டு இங்கே செய்கின்றன: திரைப்பிடிப்பு \"புதிய திரைப்பிடிப்புகளை அனுப்பு\" அனுப்புவது போலக் கணினிக்கு வரும் (அதையும் இயக்கவும்), பூட்டுத் திரையை ஒருபோதும் இல்லை. \"Pocketdesk கட்டுப்பாடு\" அணுகல்தன்மைச் சேவையைப் பயன்படுத்தும்</string>

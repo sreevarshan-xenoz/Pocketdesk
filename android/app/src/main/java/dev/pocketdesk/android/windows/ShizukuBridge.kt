@@ -117,7 +117,8 @@ object ShizukuBridge {
         val userService = Shizuku.UserServiceArgs(ComponentName(context.packageName, WindowHostService::class.java.name))
             .processNameSuffix("windows")
             .daemon(false)
-            .version(2)
+            // 3: the helper gained the hotspot calls (transactions 9 and 10).
+            .version(3)
         synchronized(this) {
             args = userService
             connection = service
@@ -128,9 +129,64 @@ object ShizukuBridge {
         }
     }
 
+    /** Hotspot jobs under way: [release] leaves the helper alone while one is, and the job lets it go after. */
+    private val hotspotJobs = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /**
+     * Let my computers turn on my hotspot: have the helper process turn the hotspot on or off
+     * ([on]), starting it if need be, off the caller's thread; [done] gets whether it went
+     * through. [windowsOpen] says whether app windows still use the helper, which is let go
+     * after the job only when none does.
+     */
+    fun hotspot(context: Context, on: Boolean, windowsOpen: () -> Boolean, done: (Int) -> Unit) {
+        hotspotJobs.incrementAndGet()
+        val finished = java.util.concurrent.atomic.AtomicBoolean(false)
+        // Once, whichever comes first: the helper's answer or the limit on waiting for it.
+        fun finish(result: Int) {
+            if (!finished.compareAndSet(false, true)) return
+            if (hotspotJobs.decrementAndGet() == 0 && !windowsOpen()) release()
+            done(result)
+        }
+        val onReady: (IWindowHost?) -> Unit = { helper ->
+            Thread {
+                val result = runCatching {
+                    when {
+                        helper == null -> HotspotRule.RESULT_FAILED
+                        on -> helper.startHotspot()
+                        else -> if (helper.stopHotspot()) HotspotRule.RESULT_DONE else HotspotRule.RESULT_FAILED
+                    }
+                }.onFailure { Log.w(TAG, "the hotspot call failed", it) }.getOrDefault(HotspotRule.RESULT_FAILED)
+                finish(result)
+            }.start()
+        }
+        // A helper that never answers its bind must not hold this job (and its callers' flags) for ever.
+        Thread {
+            if (!finished.get()) {
+                Thread.sleep(BIND_LIMIT_MS)
+                if (!finished.get()) {
+                    Log.w(TAG, "the helper did not answer in time for a hotspot ask")
+                    abandon(onReady)
+                    finish(HotspotRule.RESULT_FAILED)
+                }
+            }
+        }.apply { isDaemon = true }.start()
+        host(context, onReady)
+    }
+
+    /** How long a hotspot ask waits for the helper, bind and call together. */
+    private const val BIND_LIMIT_MS = 45_000L
+
+    /** Stop waiting for [onReady]; a bind nobody waits for any more can be started again. */
+    private fun abandon(onReady: (IWindowHost?) -> Unit) = synchronized(this) {
+        waiting.remove(onReady)
+        if (waiting.isEmpty()) binding = false
+    }
+
     /** Let the helper process go: no window is open. */
     @Synchronized
     fun release() {
+        // A hotspot job still using it lets it go itself when it is done.
+        if (hotspotJobs.get() > 0) return
         val made = host
         host = null
         runCatching { made?.destroy() }

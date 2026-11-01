@@ -131,6 +131,8 @@ object HostStore {
         prefs.edit {
             for (prefix in PER_ADDRESS) remove("$prefix$address")
         }
+        // A hotspot this computer turned on goes off with it (and is tried again until it does).
+        if (Prefs.hotspotRun(ctx)?.asker == address) dev.pocketdesk.android.windows.PhoneHotspot.stopIfOurs(ctx)
     }
 
     /** Each card's Wake settings that [change] gives new ones for, written. */

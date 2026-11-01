@@ -13,6 +13,7 @@ import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.control.ControlRunner
 import dev.pocketdesk.android.notify.PhoneNotificationPrefs
+import dev.pocketdesk.android.windows.HotspotRule
 import dev.pocketdesk.android.windows.ShizukuBridge
 import dev.pocketdesk.android.windows.WindowRule
 
@@ -351,6 +352,72 @@ fun WindowsSetting() {
             }
         },
     )
+}
+
+/**
+ * Let my computers turn on my hotspot: the phone's own computer may turn this
+ * phone's Wi-Fi hotspot on and off, with the settings already saved in Android,
+ * so it can get internet through the phone. Optional and off by default, shown
+ * only while Shizuku is installed and running (or while it is on, so it can be
+ * turned off), with no new Android permission. Turning it on asks Shizuku's own
+ * dialog once; turning it off turns off a hotspot it started.
+ */
+@Composable
+fun HotspotSetting() {
+    val context = LocalContext.current
+    val resumes = rememberResumes()
+    var on by remember { mutableStateOf(Prefs.hotspotFromComputer(context)) }
+    var minutes by remember { mutableStateOf(Prefs.hotspotOffMinutes(context)) }
+    val running = remember(resumes, on) { ShizukuBridge.running() }
+    val permitted = remember(resumes, on) { ShizukuBridge.permitted() }
+    val listening = remember(resumes, on) { PhoneNotificationPrefs.accessGranted(context) }
+    val sdk = android.os.Build.VERSION.SDK_INT
+    if (!HotspotRule.rowShown(sdk, running, on)) return
+    val mode = HotspotRule.mode(sdk, running, permitted, on)
+    SettingSwitch(
+        title = stringResource(R.string.settings_hotspot),
+        summary = stringResource(
+            when {
+                !on -> R.string.settings_hotspot_summary_off
+                mode == HotspotRule.Mode.NO_SHIZUKU -> R.string.settings_hotspot_summary_needs_shizuku
+                mode == HotspotRule.Mode.NEEDS_PERMISSION -> R.string.settings_hotspot_summary_needs_permission
+                !listening -> R.string.settings_hotspot_summary_needs_access
+                else -> R.string.settings_hotspot_summary_on
+            },
+        ),
+        checked = on,
+        warning = on && (mode != HotspotRule.Mode.ON || !listening),
+        onChange = { want ->
+            if (!want) {
+                // A hotspot this switch let the computer start goes off with it.
+                dev.pocketdesk.android.windows.PhoneHotspot.stopIfOurs(context)
+                on = false
+                Prefs.setHotspotFromComputer(context, false)
+            } else {
+                // Shizuku's own question is the grant: asked now, and only now.
+                ShizukuBridge.request { granted ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        Prefs.setHotspotFromComputer(context, granted)
+                        on = granted
+                    }
+                }
+            }
+        },
+    )
+    if (on) {
+        SettingLink(
+            title = stringResource(R.string.settings_hotspot_off_title),
+            summary = if (minutes > 0) {
+                stringResource(R.string.settings_hotspot_off_after, minutes)
+            } else {
+                stringResource(R.string.settings_hotspot_off_never)
+            },
+            onClick = {
+                minutes = HotspotRule.nextChoice(minutes)
+                Prefs.setHotspotOffMinutes(context, minutes)
+            },
+        )
+    }
 }
 
 /**

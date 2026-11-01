@@ -51,6 +51,7 @@ pub const FEATURES: &[&str] = &[
     "phone_actions",
     "apps",
     "peek",
+    "hotspot",
 ];
 
 /// One feature as the phone says it stands.
@@ -141,7 +142,7 @@ pub fn capability(feature: &str) -> Option<Capability> {
         "dial" => Capability::Dial,
         "commands" => Capability::Command,
         "tasks" => Capability::Tasks,
-        "phone_actions" | "apps" => Capability::PhoneActions,
+        "phone_actions" | "apps" | "hotspot" => Capability::PhoneActions,
         "peek" => Capability::Peek,
         _ => return None,
     })

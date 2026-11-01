@@ -665,6 +665,62 @@ object Prefs {
     }
 
     /**
+     * Let my computers turn on my hotspot: the phone's own computer may ask it to turn its
+     * Wi-Fi hotspot on and off, through Shizuku (off by default, shown only while Shizuku
+     * runs). The computer sends no name or password; the hotspot starts as Android has it set.
+     */
+    fun hotspotFromComputer(ctx: Context): Boolean =
+        prefs(ctx).getBoolean("hotspot_from_computer", false)
+
+    fun setHotspotFromComputer(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean("hotspot_from_computer", enabled) }
+        bump()
+    }
+
+    /** Minutes after the last ask to turn on that the hotspot is turned off by itself (0 = never). */
+    fun hotspotOffMinutes(ctx: Context): Int =
+        prefs(ctx).getInt("hotspot_off_minutes", dev.pocketdesk.android.windows.HotspotRule.DEFAULT_OFF_MINUTES)
+
+    fun setHotspotOffMinutes(ctx: Context, minutes: Int) {
+        prefs(ctx).edit { putInt("hotspot_off_minutes", minutes) }
+    }
+
+    /**
+     * The hotspot Pocketdesk turned on and has not yet seen go off, or null when none is ours: when its
+     * run began, when it was last asked for (wall clock, ms), and the address of the computer that asked.
+     * Kept until a stop has gone through, so a hotspot that could not be turned off is never forgotten.
+     */
+    fun hotspotRun(ctx: Context): dev.pocketdesk.android.windows.HotspotRule.Run? {
+        val p = prefs(ctx)
+        val first = p.getLong("hotspot_first_on_at", 0L)
+        val asker = p.getString("hotspot_asker", null)
+        if (first <= 0L || asker == null) return null
+        return dev.pocketdesk.android.windows.HotspotRule.Run(first, p.getLong("hotspot_on_at", first), asker)
+    }
+
+    fun setHotspotRun(ctx: Context, run: dev.pocketdesk.android.windows.HotspotRule.Run?) {
+        prefs(ctx).edit {
+            if (run == null) {
+                remove("hotspot_first_on_at")
+                remove("hotspot_on_at")
+                remove("hotspot_asker")
+                remove("hotspot_stop_pending")
+            } else {
+                putLong("hotspot_first_on_at", run.firstOnAtMs)
+                putLong("hotspot_on_at", run.lastOnAtMs)
+                putString("hotspot_asker", run.asker)
+            }
+        }
+    }
+
+    /** Whether a stop is owed (a reason came up) and has not gone through yet; it is tried again until it does. */
+    fun hotspotStopPending(ctx: Context): Boolean = prefs(ctx).getBoolean("hotspot_stop_pending", false)
+
+    fun setHotspotStopPending(ctx: Context, pending: Boolean) {
+        prefs(ctx).edit { putBoolean("hotspot_stop_pending", pending) }
+    }
+
+    /**
      * Hands-free: Pocketdesk accepts Android's own screen-sharing question for
      * the phone's own computer, when that computer asked to open an app (off by
      * default). It needs "Let the computer open my apps" and Pocketdesk control.

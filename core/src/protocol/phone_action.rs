@@ -500,16 +500,24 @@ pub enum PhoneAction {
     /// Share the file being sent into the app in front on the phone (Apps
     /// part 2), the file's name and size beside the action.
     Share,
+    /// Turn the phone's own Wi-Fi hotspot on, with the hotspot settings the
+    /// phone already has (the computer sends none), so this computer can get
+    /// internet through it. Nothing but the action travels.
+    HotspotOn,
+    /// Turn that hotspot off again.
+    HotspotOff,
 }
 
 impl PhoneAction {
-    pub const ALL: [PhoneAction; 6] = [
+    pub const ALL: [PhoneAction; 8] = [
         PhoneAction::Screenshot,
         PhoneAction::Lock,
         PhoneAction::Apps,
         PhoneAction::Open,
         PhoneAction::Contacts,
         PhoneAction::Share,
+        PhoneAction::HotspotOn,
+        PhoneAction::HotspotOff,
     ];
 
     /// The word the packet and the request files carry.
@@ -521,6 +529,8 @@ impl PhoneAction {
             PhoneAction::Open => "open",
             PhoneAction::Contacts => "contacts",
             PhoneAction::Share => "share",
+            PhoneAction::HotspotOn => "hotspot_on",
+            PhoneAction::HotspotOff => "hotspot_off",
         }
     }
 
@@ -574,6 +584,17 @@ mod tests {
         );
         assert_eq!(PhoneAction::parse("Lock"), None);
         assert_eq!(PhoneAction::parse("unlock"), None);
+    }
+
+    /// The hotspot asks carry nothing but their word: no name, password or band.
+    #[test]
+    fn a_hotspot_ask_carries_only_its_word() {
+        for action in [PhoneAction::HotspotOn, PhoneAction::HotspotOff] {
+            assert_eq!(body(action, None).as_object().unwrap().len(), 1);
+        }
+        assert_eq!(PhoneAction::HotspotOn.as_str(), "hotspot_on");
+        assert_eq!(PhoneAction::HotspotOff.as_str(), "hotspot_off");
+        assert_eq!(PhoneAction::parse("hotspot"), None);
     }
 
     /// Apps part 2: a share names its file, and a report of one says so.
