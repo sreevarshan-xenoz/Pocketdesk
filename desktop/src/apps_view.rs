@@ -552,17 +552,20 @@ impl AppsPage {
             // The phone could not make a window (its switch went off, Shizuku
             // stopped, Android refused a display): the app opens the ordinary
             // way, and the phone's word is not asked about again.
-            AppResult::WindowsUnavailable | AppResult::WindowLimit if open.window.is_some() => {
-                self.released_window = open.window;
-                if outcome.report.result == AppResult::WindowsUnavailable {
-                    self.windows_mode = WindowsMode::default();
-                    let route = self.route();
-                    if let Some(app) = self.apps.iter().find(|a| a.id == open.app).cloned() {
-                        self.open_by(state_dir, phone, &app, now, &route);
-                    }
+            AppResult::WindowsUnavailable if open.window.is_some() => {
+                self.windows_mode = WindowsMode::default();
+                let route = self.route();
+                if let Some(app) = self.apps.iter().find(|a| a.id == open.app).cloned() {
+                    self.open_by(state_dir, phone, &app, now, &route);
                 }
             }
             _ => {}
+        }
+        // A window asked for that did not open is free again.
+        if outcome.report.result != AppResult::Opened
+            && let Some(id) = open.window
+        {
+            self.released_window = Some(id);
         }
     }
 
