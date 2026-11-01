@@ -97,6 +97,11 @@ pub const SHARED_INPUT_DIR: &str = "shared_input_out";
 pub const DIRECT_LINK_DIR: &str = "direct_link_out";
 /// The server's word on the direct link (owner-only: it holds the passphrase).
 pub const DIRECT_LINK_FILE: &str = "direct_link.json";
+/// What the server found a direct link could do on this computer (the plan
+/// the desktop shows before it asks), refreshed while no link is on. The
+/// desktop never asks the system itself: on Windows that is WinRT, which
+/// belongs in the server's one process for it.
+pub const DIRECT_LINK_PLAN_FILE: &str = "direct_link_plan.json";
 /// What this state folder's server made for the direct link (its
 /// connection's id, the interface it added, the connection it took the card
 /// from), so a restart removes and restores exactly that and no other

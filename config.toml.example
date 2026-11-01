@@ -47,7 +47,8 @@ video_quality = "balanced"
 # computer's own Wi-Fi for one phone, for a train, a cafe with client
 # isolation or a guest network where phones cannot reach this computer. You
 # start each one, it turns itself off, and the phone joins it for Pocketdesk
-# only. Linux, through NetworkManager. Off, the button is not shown.
+# only. Linux through NetworkManager, Windows through the Mobile Hotspot.
+# Off, the button is not shown.
 # direct_link = true
 # The band: "auto" (2.4 GHz, which every phone can join), "2.4" or "5".
 # direct_link_band = "auto"

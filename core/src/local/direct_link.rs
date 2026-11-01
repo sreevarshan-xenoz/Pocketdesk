@@ -18,17 +18,23 @@
 //!   passphrase while the link is on);
 //! * the **idle timer** that turns the link off when no phone is using it.
 //!
-//! The server makes and removes the access point (`server/src/direct_link.rs`,
-//! NetworkManager over D-Bus). The name and passphrase are never logged.
+//! The server makes and removes the access point (`server/src/direct_link.rs`):
+//! NetworkManager over D-Bus on Linux, and on Windows the Mobile Hotspot
+//! (`direct_link_windows`), whose settings are the whole system's, so
+//! what was set there is recorded first and put back after
+//! ([`HotspotRestore`]). The name and passphrase are never logged.
 
 use std::io;
+use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 use super::approval::is_valid_id;
-use super::paths::{DIRECT_LINK_DIR, DIRECT_LINK_FILE, DIRECT_LINK_OWNED_FILE};
+use super::paths::{
+    DIRECT_LINK_DIR, DIRECT_LINK_FILE, DIRECT_LINK_OWNED_FILE, DIRECT_LINK_PLAN_FILE,
+};
 
 /// Every network name this makes starts so: a phone's list shows what made
 /// it.
@@ -161,7 +167,102 @@ impl Band {
             Self::Ghz5 => Some("a"),
         }
     }
+
+    /// The Mobile Hotspot's name for the band
+    /// (`TetheringWiFiBand`: 0 auto, 1 2.4 GHz, 2 5 GHz), the number the
+    /// owner's own setting is also kept as.
+    pub fn tethering_code(self) -> i32 {
+        match self {
+            Self::Auto => TETHERING_AUTO,
+            Self::Ghz24 => TETHERING_24,
+            Self::Ghz5 => TETHERING_5,
+        }
+    }
 }
+
+/// `TetheringWiFiBand` as the Mobile Hotspot numbers it.
+pub const TETHERING_AUTO: i32 = 0;
+pub const TETHERING_24: i32 = 1;
+pub const TETHERING_5: i32 = 2;
+
+/// The Mobile Hotspot band to ask for, given the owner's choice and which
+/// bands this computer's card can host on (`supported(code)`). Automatic
+/// means 2.4 GHz where the card has it, as on Linux (every phone joins it);
+/// a band the card cannot host is left to the card (auto) rather than
+/// failing the link.
+pub fn pick_tethering_band(want: Band, supported: impl Fn(i32) -> bool) -> i32 {
+    let code = match want {
+        Band::Auto | Band::Ghz24 => TETHERING_24,
+        Band::Ghz5 => TETHERING_5,
+    };
+    if supported(code) {
+        code
+    } else {
+        TETHERING_AUTO
+    }
+}
+
+/// Why the Mobile Hotspot cannot be used, from `TetheringCapability`'s
+/// number (0 enabled, 1 group policy, 2 hardware, 3 operator, 4 edition,
+/// 5 a required app, 6 unknown, 7 system capability); none when it can.
+pub fn unavailable_for_tethering_capability(code: i32) -> Option<Unavailable> {
+    match code {
+        0 => None,
+        2 | 7 => Some(Unavailable::NoAccessPoint),
+        _ => Some(Unavailable::Blocked),
+    }
+}
+
+/// What a Mobile Hotspot that would not start says, from
+/// `TetheringOperationStatus`'s number. A few words with nothing from the
+/// operator in them.
+pub fn tethering_failure_words(code: i32) -> &'static str {
+    match code {
+        2 | 4 | 5 => {
+            "Windows' Mobile Hotspot could not start its check with the connection's provider."
+        }
+        3 => "Wi-Fi is switched off on this computer. Turn it on, then try again.",
+        6 => "Windows is still changing the hotspot. Try again in a moment.",
+        7 => "Bluetooth is switched off on this computer.",
+        8 => {
+            "This computer's internet connection has limited connectivity, which Mobile Hotspot will not share."
+        }
+        10 => "A radio restriction (airplane mode, for one) stops the hotspot.",
+        11 => {
+            "The hotspot could not use the band chosen without interfering with this computer's own Wi-Fi. Try Automatic."
+        }
+        _ => "Windows' Mobile Hotspot did not start.",
+    }
+}
+
+/// This computer's address on the network a Mobile Hotspot just made: an
+/// address that was not there before the start, in Windows' hotspot range
+/// (192.168.137.0/24) first, else any private one; failing that the range's
+/// own gateway address, if it is there now. `before` and `after` are this
+/// computer's IPv4 addresses.
+pub fn pick_link_address(before: &[Ipv4Addr], after: &[Ipv4Addr]) -> Option<Ipv4Addr> {
+    let in_range = |a: &Ipv4Addr| a.octets()[..3] == [192, 168, 137];
+    let mut fresh: Vec<Ipv4Addr> = after
+        .iter()
+        .filter(|a| !before.contains(a) && a.is_private())
+        .copied()
+        .collect();
+    fresh.sort();
+    fresh
+        .iter()
+        .find(|a| in_range(a))
+        .or_else(|| fresh.first())
+        .copied()
+        .or_else(|| {
+            after
+                .iter()
+                .find(|a| **a == WINDOWS_HOTSPOT_GATEWAY)
+                .copied()
+        })
+}
+
+/// The address Windows gives itself on a hotspot's network.
+pub const WINDOWS_HOTSPOT_GATEWAY: Ipv4Addr = Ipv4Addr::new(192, 168, 137, 1);
 
 /// The band a Wi-Fi channel number is in, for a card that must keep one
 /// channel (2.4 GHz channels are 1 to 14, 5 GHz from 32).
@@ -187,7 +288,8 @@ pub enum Mode {
 }
 
 /// Why no link can be made here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Unavailable {
     /// Not a platform this makes links on yet.
     Unsupported,
@@ -197,6 +299,15 @@ pub enum Unavailable {
     NoAccessPoint,
     /// NetworkManager is not running: it makes the hotspot.
     NoNetworkManager,
+    /// Windows: no internet connection for the Mobile Hotspot to share, and
+    /// it will not start without one.
+    NoConnectionProfile,
+    /// Windows: Mobile Hotspot is turned off here by policy, the hardware,
+    /// the operator or the system.
+    Blocked,
+    /// Windows: the owner's own Mobile Hotspot is on, and a link would
+    /// change it under the devices using it.
+    HotspotInUse,
 }
 
 impl Unavailable {
@@ -209,12 +320,21 @@ impl Unavailable {
             Self::NoNetworkManager => {
                 "A direct link needs NetworkManager, which is not running here."
             }
+            Self::NoConnectionProfile => {
+                "Windows' Mobile Hotspot shares an internet connection, and this computer has none right now. Connect it to a network (Ethernet or Wi-Fi), then try again."
+            }
+            Self::Blocked => {
+                "Mobile Hotspot is turned off on this computer (by policy, by its hardware or by Windows), so it cannot make a direct link."
+            }
+            Self::HotspotInUse => {
+                "Windows' Mobile Hotspot is on already. Turn it off in Settings, Network & internet, Mobile hotspot, so a direct link does not change a hotspot you are using."
+            }
         }
     }
 }
 
 /// What starting a link would do on this computer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Plan {
     /// The card's interface (`wlan0`): the hotspot goes on it, or beside it.
     pub device: String,
@@ -480,7 +600,8 @@ pub fn plan_from(
 }
 
 /// [`plan_from`] for this computer: runs `iw` and reads this process's
-/// capabilities. Linux only; read-only (it changes nothing).
+/// capabilities (Linux), or asks the Mobile Hotspot (Windows). Read-only (it
+/// changes nothing).
 pub fn probe() -> Result<Plan, Unavailable> {
     #[cfg(target_os = "linux")]
     {
@@ -498,7 +619,11 @@ pub fn probe() -> Result<Plan, Unavailable> {
         let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
         plan_from(&list, &dev, can_add_interface_from_status(&status))
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(windows)]
+    {
+        super::direct_link_windows::probe()
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
     {
         Err(Unavailable::Unsupported)
     }
@@ -679,6 +804,40 @@ pub fn clear_status(state_dir: &Path) {
     let _ = std::fs::remove_file(state_dir.join(DIRECT_LINK_FILE));
 }
 
+/// How long a plan on file is believed: the server refreshes it every half
+/// minute while no link is on.
+pub const PLAN_FRESH_SECS: u64 = 90;
+
+/// The server's word on what a link could do here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanReport {
+    pub updated_unix: u64,
+    pub plan: Result<Plan, Unavailable>,
+}
+
+/// Leave the plan for the desktop to read. Nothing secret in it.
+pub fn write_plan(state_dir: &Path, report: &PlanReport) -> io::Result<()> {
+    std::fs::create_dir_all(state_dir)?;
+    let json = serde_json::to_string(report).map_err(io::Error::other)?;
+    let file = state_dir.join(DIRECT_LINK_PLAN_FILE);
+    let tmp = file.with_extension("json.tmp");
+    std::fs::write(&tmp, json)?;
+    crate::atomic_file::replace(&tmp, &file)
+}
+
+/// The plan on file, if there is one and it is recent: a plan a stopped
+/// server left says nothing about now.
+pub fn read_plan(state_dir: &Path, now_unix: u64) -> Option<Result<Plan, Unavailable>> {
+    let raw = std::fs::read_to_string(state_dir.join(DIRECT_LINK_PLAN_FILE)).ok()?;
+    let report: PlanReport = serde_json::from_str(&raw).ok()?;
+    (now_unix.saturating_sub(report.updated_unix) <= PLAN_FRESH_SECS).then_some(report.plan)
+}
+
+/// The plan is taken off file as the server starts and stops.
+pub fn clear_plan(state_dir: &Path) {
+    let _ = std::fs::remove_file(state_dir.join(DIRECT_LINK_PLAN_FILE));
+}
+
 // ---- Idle ----
 
 /// Turns the link off after `limit` with no phone using it. Counted in
@@ -747,6 +906,101 @@ pub struct Owned {
     pub interface: Option<String>,
     /// The connection to bring back after a takeover.
     pub restore: Option<Restore>,
+    /// Windows: the owner's own Mobile Hotspot settings, to put back. The
+    /// one place a passphrase other than the link's is kept: the owner's
+    /// hotspot passphrase, in this owner-only file, until the link ends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hotspot: Option<HotspotRestore>,
+}
+
+/// The Mobile Hotspot settings on Windows (`ssid`, `passphrase`, and the
+/// band as `TetheringWiFiBand`'s number, none where this Windows has no
+/// band setting).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HotspotSettings {
+    pub ssid: String,
+    pub passphrase: String,
+    pub band: Option<i32>,
+}
+
+impl std::fmt::Debug for HotspotSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HotspotSettings(..)")
+    }
+}
+
+/// What the Mobile Hotspot was before a link: Windows keeps one setting
+/// for the whole system, so a link changes the owner's, and ends by putting
+/// it back (and leaving the hotspot off if it was off).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HotspotRestore {
+    /// It was on, so it goes back on.
+    pub was_on: bool,
+    pub settings: HotspotSettings,
+}
+
+impl std::fmt::Debug for HotspotRestore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "HotspotRestore(was_on: {})", self.was_on)
+    }
+}
+
+/// Whether the Mobile Hotspot as it is now can be made into a link, and
+/// recorded as the owner's to put back: why not, in words, or none. It must
+/// be off (a link would change it under whatever uses it), have a name and
+/// a passphrase that were really read (an empty one could never be put back
+/// and the owner's would be lost), and not be named like a link (that is a
+/// left-over link's, never the owner's, and recording it would lose the
+/// owner's settings for good).
+pub fn hotspot_start_refusal(before: &HotspotRestore) -> Option<&'static str> {
+    if before.was_on {
+        return Some(Unavailable::HotspotInUse.words());
+    }
+    let settings = &before.settings;
+    if settings.ssid.is_empty() || settings.passphrase.is_empty() {
+        return Some(
+            "Windows' Mobile Hotspot has no name or passphrase Pocketdesk could read, so it could not be put back afterwards. Set the hotspot up in Windows' Settings first.",
+        );
+    }
+    if settings.ssid.starts_with(SSID_PREFIX) {
+        return Some(
+            "Windows' Mobile Hotspot is still named like a direct link's (an earlier link did not end cleanly). Give it a name of your own in Windows' Settings, then try again.",
+        );
+    }
+    None
+}
+
+/// One step of putting the Mobile Hotspot back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HotspotStep {
+    Stop,
+    Configure,
+    Start,
+}
+
+/// What to do to put the Mobile Hotspot back, given what it is now
+/// (`current_ssid`, and whether it is `on`). Only a hotspot still set to a
+/// name this made (`pocketdesk-...`) is touched: one the owner set up
+/// since, after a crash, is theirs. Stop first, so no phone is left on the
+/// link's network while its settings change; the owner's own hotspot goes
+/// back on only if it was on.
+pub fn hotspot_restore_steps(
+    restore: &HotspotRestore,
+    current_ssid: &str,
+    on: bool,
+) -> Vec<HotspotStep> {
+    if !current_ssid.starts_with(SSID_PREFIX) {
+        return Vec::new();
+    }
+    let mut steps = Vec::new();
+    if on {
+        steps.push(HotspotStep::Stop);
+    }
+    steps.push(HotspotStep::Configure);
+    if restore.was_on {
+        steps.push(HotspotStep::Start);
+    }
+    steps
 }
 
 /// What to bring back once a link ends: only a takeover took something,
@@ -1081,6 +1335,7 @@ mod tests {
                 device: "wlan0".into(),
                 connection: "/x/1".into(),
             }),
+            hotspot: None,
         };
         write_owned(&dir, &owned).unwrap();
         assert_eq!(read_owned(&dir), Some(owned));
@@ -1090,6 +1345,222 @@ mod tests {
         assert!(read_owned(&dir).is_none());
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(state_dir("owned-other"));
+    }
+
+    fn hotspot(was_on: bool) -> HotspotRestore {
+        HotspotRestore {
+            was_on,
+            settings: HotspotSettings {
+                ssid: "home-hotspot".into(),
+                passphrase: "k".repeat(16),
+                band: Some(TETHERING_5),
+            },
+        }
+    }
+
+    #[test]
+    fn the_owners_hotspot_settings_are_kept_with_what_the_server_made() {
+        let dir = state_dir("owned-hotspot");
+        let owned = Owned {
+            uuid: "00000000-0000-4000-8000-000000000000".into(),
+            interface: None,
+            restore: None,
+            hotspot: Some(hotspot(true)),
+        };
+        write_owned(&dir, &owned).unwrap();
+        assert_eq!(read_owned(&dir), Some(owned));
+        // A record an older server wrote has no hotspot and still reads.
+        std::fs::write(
+            dir.join(DIRECT_LINK_OWNED_FILE),
+            r#"{"uuid":"u","interface":null,"restore":null}"#,
+        )
+        .unwrap();
+        assert_eq!(read_owned(&dir).unwrap().hotspot, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn debug_output_never_shows_the_owners_hotspot() {
+        let text = format!("{:?} {:?}", hotspot(true), hotspot(false).settings);
+        assert!(!text.contains("home-hotspot"), "{text}");
+        assert!(!text.contains("kkkk"), "{text}");
+    }
+
+    #[test]
+    fn a_hotspot_that_was_off_is_stopped_and_left_off() {
+        let ours = "pocketdesk-ab12";
+        assert_eq!(
+            hotspot_restore_steps(&hotspot(false), ours, true),
+            vec![HotspotStep::Stop, HotspotStep::Configure]
+        );
+        // Already stopped: only its settings go back.
+        assert_eq!(
+            hotspot_restore_steps(&hotspot(false), ours, false),
+            vec![HotspotStep::Configure]
+        );
+    }
+
+    #[test]
+    fn a_hotspot_that_was_on_goes_back_on_with_its_settings() {
+        assert_eq!(
+            hotspot_restore_steps(&hotspot(true), "pocketdesk-ab12", true),
+            vec![
+                HotspotStep::Stop,
+                HotspotStep::Configure,
+                HotspotStep::Start
+            ]
+        );
+    }
+
+    #[test]
+    fn a_hotspot_the_owner_has_set_up_since_is_left_alone() {
+        assert!(hotspot_restore_steps(&hotspot(true), "home-hotspot", true).is_empty());
+        assert!(hotspot_restore_steps(&hotspot(false), "", false).is_empty());
+    }
+
+    #[test]
+    fn the_band_asked_of_the_mobile_hotspot_follows_what_the_card_can_host() {
+        let all = |_: i32| true;
+        let only_24 = |c: i32| c == TETHERING_24;
+        let none = |_: i32| false;
+        // Automatic is 2.4 GHz where there is one.
+        assert_eq!(pick_tethering_band(Band::Auto, all), TETHERING_24);
+        assert_eq!(pick_tethering_band(Band::Ghz24, all), TETHERING_24);
+        assert_eq!(pick_tethering_band(Band::Ghz5, all), TETHERING_5);
+        // A band the card cannot host is the card's to choose.
+        assert_eq!(pick_tethering_band(Band::Ghz5, only_24), TETHERING_AUTO);
+        assert_eq!(pick_tethering_band(Band::Auto, none), TETHERING_AUTO);
+        assert_eq!(Band::Ghz24.tethering_code(), 1);
+        assert_eq!(Band::Ghz5.tethering_code(), 2);
+        assert_eq!(Band::Auto.tethering_code(), 0);
+    }
+
+    #[test]
+    fn a_hotspot_windows_will_not_allow_says_why() {
+        assert_eq!(unavailable_for_tethering_capability(0), None);
+        assert_eq!(
+            unavailable_for_tethering_capability(2),
+            Some(Unavailable::NoAccessPoint)
+        );
+        assert_eq!(
+            unavailable_for_tethering_capability(7),
+            Some(Unavailable::NoAccessPoint)
+        );
+        for blocked in [1, 3, 4, 5, 6, 99] {
+            assert_eq!(
+                unavailable_for_tethering_capability(blocked),
+                Some(Unavailable::Blocked),
+                "{blocked}"
+            );
+        }
+        // Every reason has words, and none says what Linux needs.
+        for why in [
+            Unavailable::NoConnectionProfile,
+            Unavailable::Blocked,
+            Unavailable::HotspotInUse,
+        ] {
+            assert!(!why.words().contains("NetworkManager"), "{why:?}");
+        }
+        assert!(
+            Unavailable::NoConnectionProfile
+                .words()
+                .contains("internet connection")
+        );
+        for code in 1..=12 {
+            assert!(!tethering_failure_words(code).is_empty());
+        }
+        assert!(tethering_failure_words(3).contains("Wi-Fi"));
+        assert!(tethering_failure_words(8).contains("limited"));
+    }
+
+    #[test]
+    fn the_computers_address_on_the_hotspot_is_the_one_that_appeared() {
+        let a = |d: u8| Ipv4Addr::new(192, 0, 2, d);
+        let lan = Ipv4Addr::new(192, 168, 1, 20);
+        let gw = WINDOWS_HOTSPOT_GATEWAY;
+        // The hotspot's range first, even beside another new private one.
+        assert_eq!(
+            pick_link_address(&[lan], &[lan, Ipv4Addr::new(10, 0, 0, 5), gw]),
+            Some(gw)
+        );
+        // Else any new private address.
+        assert_eq!(
+            pick_link_address(&[lan], &[lan, Ipv4Addr::new(10, 0, 0, 5)]),
+            Some(Ipv4Addr::new(10, 0, 0, 5))
+        );
+        // A public one (not an address a phone's network has) is never it.
+        assert_eq!(pick_link_address(&[], &[a(1)]), None);
+        // Nothing new: only the gateway, if it is there now.
+        assert_eq!(pick_link_address(&[lan, gw], &[lan, gw]), Some(gw));
+        assert_eq!(pick_link_address(&[lan], &[lan]), None);
+        assert_eq!(pick_link_address(&[], &[]), None);
+    }
+
+    #[test]
+    fn a_hotspot_that_cannot_be_put_back_is_never_recorded_as_the_owners() {
+        let ok = hotspot(false);
+        assert_eq!(hotspot_start_refusal(&ok), None);
+        // On: a link would change it under what uses it.
+        assert_eq!(
+            hotspot_start_refusal(&hotspot(true)),
+            Some(Unavailable::HotspotInUse.words())
+        );
+        // A failed read is empty, and an empty passphrase cannot be put back.
+        let mut empty = hotspot(false);
+        empty.settings.passphrase = String::new();
+        assert!(
+            hotspot_start_refusal(&empty)
+                .unwrap()
+                .contains("could not be put back")
+        );
+        let mut nameless = hotspot(false);
+        nameless.settings.ssid = String::new();
+        assert!(hotspot_start_refusal(&nameless).is_some());
+        // A left-over link's name is not the owner's.
+        let mut left = hotspot(false);
+        left.settings.ssid = format!("{SSID_PREFIX}ab12");
+        assert!(hotspot_start_refusal(&left).unwrap().contains("named like"));
+    }
+
+    #[test]
+    fn the_plan_on_file_is_read_while_recent_and_not_after() {
+        let dir = state_dir("plan");
+        assert!(read_plan(&dir, 1_000).is_none());
+        for plan in [
+            Ok(Plan {
+                device: "wlan0".into(),
+                mode: Mode::TakesOverCard,
+                channel: None,
+                disconnects: true,
+            }),
+            Err(Unavailable::NoConnectionProfile),
+        ] {
+            let report = PlanReport {
+                updated_unix: 1_000,
+                plan,
+            };
+            write_plan(&dir, &report).unwrap();
+            assert_eq!(read_plan(&dir, 1_000 + PLAN_FRESH_SECS), Some(report.plan));
+            assert!(read_plan(&dir, 1_000 + PLAN_FRESH_SECS + 1).is_none());
+        }
+        std::fs::write(dir.join(DIRECT_LINK_PLAN_FILE), "junk").unwrap();
+        assert!(read_plan(&dir, 1_000).is_none());
+        clear_plan(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn no_windows_log_line_names_the_link_or_the_owners_hotspot() {
+        // The Windows backend's source is read on every system: no logging
+        // line in it carries a name, a passphrase or the settings.
+        for line in include_str!("direct_link_windows.rs").lines() {
+            let line = line.trim();
+            if line.starts_with("tracing::") {
+                for word in ["passphrase", "ssid", "join", "settings", "restore"] {
+                    assert!(!line.contains(word), "{line}");
+                }
+            }
+        }
     }
 
     #[test]

@@ -3,7 +3,9 @@
 //! (`pocketdesk_core::local::direct_link` is the part both programs share).
 //!
 //! The desktop app leaves a request in `<state>/direct_link_out/`; this
-//! makes the access point through NetworkManager over D-Bus, writes the
+//! makes the access point (through NetworkManager over D-Bus on Linux, and
+//! on Windows through the Mobile Hotspot, whose one system-wide setting is
+//! recorded first and put back), writes the
 //! status the app draws its QR from (`<state>/direct_link.json`, owner-only),
 //! and removes the access point when
 //!
@@ -40,6 +42,14 @@ pub const CONNECTION_ID: &str = "Pocketdesk direct link";
 pub const SECOND_INTERFACE: &str = "pdlink0";
 /// How often an access point that is on is looked at.
 const TICK: Duration = Duration::from_secs(5);
+/// How often what a link could do here is looked at again, while none is on
+/// (the desktop reads it from `direct_link_plan.json`).
+const PLAN_EVERY: Duration = Duration::from_secs(30);
+/// How often a restore that did not complete (the owner's Windows hotspot
+/// settings) is tried again while no link is on.
+const RETRY_EVERY: Duration = Duration::from_secs(60);
+/// Set when a link ends, so the plan is looked at again at once.
+static PLAN_STALE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 /// What is on now, and what to take down.
 struct Active {
@@ -66,6 +76,9 @@ pub async fn run() {
     // connection comes back). Only what `direct_link_owned.json` names.
     backend::sweep(&dir).await;
     dl::clear_status(&dir);
+    dl::clear_plan(&dir);
+    let mut planned: Option<std::time::Instant> = None;
+    let mut retried = std::time::Instant::now();
     loop {
         crate::inbox::wait_at_most(DIRECT_LINK_DIR, TICK, Duration::from_secs(2)).await;
         let now = pocketdesk_core::local::pin::now_unix();
@@ -78,20 +91,59 @@ pub async fn run() {
             }
         }
         tick(&dir).await;
+        if ACTIVE.lock().await.is_none() {
+            // A restore that did not complete is not left until the next
+            // link: its record is kept, and tried again here.
+            if retried.elapsed() >= RETRY_EVERY {
+                retried = std::time::Instant::now();
+                backend::sweep(&dir).await;
+            }
+            let stale = PLAN_STALE.swap(false, std::sync::atomic::Ordering::Relaxed);
+            if stale || planned.is_none_or(|t| t.elapsed() >= PLAN_EVERY) {
+                planned = Some(std::time::Instant::now());
+                publish_plan(&dir).await;
+            }
+        }
+    }
+}
+
+/// Leave what a link could do here for the desktop to show. Read in this
+/// process, on its blocking pool, so the desktop never asks the system
+/// itself (on Windows that is WinRT). Not while direct links are off.
+async fn publish_plan(dir: &std::path::Path) {
+    if !crate::events::current_config().direct_link {
+        dl::clear_plan(dir);
+        return;
+    }
+    let plan = match tokio::task::spawn_blocking(dl::probe).await {
+        Ok(plan) => plan,
+        Err(_) => Err(dl::Unavailable::Unsupported),
+    };
+    let report = dl::PlanReport {
+        updated_unix: pocketdesk_core::local::pin::now_unix(),
+        plan,
+    };
+    if let Err(e) = dl::write_plan(dir, &report) {
+        tracing::warn!("Direct link: could not write its plan: {e}");
     }
 }
 
 /// Take the access point down as the server goes. Bounded: a stuck
-/// NetworkManager does not hold the exit.
+/// NetworkManager does not hold the exit. Windows has longer: putting the
+/// owner's hotspot back is a stop, a configure and a start (20 + 15 + 30
+/// seconds at worst), and what does not finish stays in the record for the
+/// next start.
 pub async fn stop_at_exit() {
     let Ok(dir) = crate::state::state_dir() else {
         return;
     };
+    let within = if cfg!(windows) { 70 } else { 10 };
     let _ = tokio::time::timeout(
-        Duration::from_secs(10),
+        Duration::from_secs(within),
         stop(&dir, "the server is stopping"),
     )
     .await;
+    dl::clear_plan(&dir);
 }
 
 async fn start(dir: &std::path::Path, request: &Request) {
@@ -174,12 +226,16 @@ async fn stop(dir: &std::path::Path, why: &str) -> bool {
     let taken = ACTIVE.lock().await.take();
     let was = taken.is_some();
     if let Some(active) = taken {
-        backend::stop(active.handle).await;
-        dl::clear_owned(dir);
+        // A record that says something was not put back is kept (Windows:
+        // the owner's own hotspot settings), for the next start to retry.
+        if backend::stop(active.handle).await {
+            dl::clear_owned(dir);
+        }
         tracing::info!("Direct link: off ({why})");
     }
     // A failed status goes with a stop too: the owner dismissed it.
     dl::clear_status(dir);
+    PLAN_STALE.store(true, std::sync::atomic::Ordering::Relaxed);
     was
 }
 
@@ -239,8 +295,7 @@ fn in_use(dir: &std::path::Path, address: &str) -> bool {
     };
     let config = crate::events::current_config();
     let port = pocketdesk_core::local::listening::control_port(dir, config.control_port);
-    let tcp = std::fs::read_to_string("/proc/net/tcp").unwrap_or_default();
-    if parse_established_to(&tcp, port)
+    if established_peers(port)
         .into_iter()
         .any(|peer| same_network(ours, peer))
     {
@@ -260,13 +315,33 @@ fn in_use(dir: &std::path::Path, address: &str) -> bool {
         })
 }
 
-/// The access point's network is a /24 (NetworkManager's shared mode).
+/// The peers of the established TCP connections to local `port`.
+fn established_peers(port: u16) -> Vec<Ipv4Addr> {
+    #[cfg(target_os = "linux")]
+    {
+        let tcp = std::fs::read_to_string("/proc/net/tcp").unwrap_or_default();
+        parse_established_to(&tcp, port)
+    }
+    #[cfg(windows)]
+    {
+        pocketdesk_core::local::direct_link_windows::established_peers(port)
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        let _ = port;
+        Vec::new()
+    }
+}
+
+/// The access point's network is a /24 (NetworkManager's shared mode, and
+/// Windows' hotspot range).
 fn same_network(ours: Ipv4Addr, other: Ipv4Addr) -> bool {
     ours.octets()[..3] == other.octets()[..3]
 }
 
 /// The peers of the established TCP connections to local `port`, from a
 /// `/proc/net/tcp`. Addresses there are the host's byte order in hex.
+#[cfg(any(target_os = "linux", test))]
 fn parse_established_to(text: &str, port: u16) -> Vec<Ipv4Addr> {
     let mut peers = Vec::new();
     for line in text.lines().skip(1) {
@@ -433,6 +508,7 @@ mod backend {
             uuid: uuid.clone(),
             interface: made.clone(),
             restore: restore.clone(),
+            hotspot: None,
         };
         dl::write_owned(dir, &owned)
             .map_err(|_| "The state folder is not writable.".to_string())?;
@@ -623,7 +699,7 @@ mod backend {
         }
     }
 
-    pub async fn stop(handle: Handle) {
+    pub async fn stop(handle: Handle) -> bool {
         if let Ok(conn) = Connection::system().await
             && let Ok(nm) = Proxy::new(&conn, NM, NM_PATH, NM).await
         {
@@ -638,6 +714,7 @@ mod backend {
         } else if let Some(name) = &handle.interface {
             remove_interface(name).await;
         }
+        true
     }
 
     /// Take down what an earlier run of this state folder's server made (the
@@ -729,9 +806,113 @@ mod backend {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
 mod backend {
-    //! Not on this system yet (Windows is its own change).
+    //! The Mobile Hotspot (`pocketdesk_core::local::direct_link_windows`),
+    //! on worker threads: its calls block.
+    //!
+    //! Windows keeps one hotspot setting for the whole system, so what the
+    //! owner had set (name, passphrase, band, and whether it was on) is
+    //! written to the owned record before anything changes, and put back
+    //! when the link ends, and by the next start if this server was killed.
+
+    use super::*;
+    use pocketdesk_core::local::direct_link::{HotspotRestore, Owned};
+    use pocketdesk_core::local::direct_link_windows as win;
+    use std::path::{Path, PathBuf};
+
+    /// What to put back.
+    pub struct Handle {
+        restore: HotspotRestore,
+    }
+
+    fn record(dir: &Path, restore: &HotspotRestore) -> std::io::Result<()> {
+        dl::write_owned(
+            dir,
+            &Owned {
+                uuid: uuid::Uuid::new_v4().to_string(),
+                interface: None,
+                restore: None,
+                hotspot: Some(restore.clone()),
+            },
+        )
+    }
+
+    pub async fn start(
+        dir: &Path,
+        _plan: &Plan,
+        join: &WifiJoin,
+        band: Band,
+    ) -> Result<(Handle, String), String> {
+        // The owner's settings from an earlier link, not yet put back, are
+        // retried first: a new record over them would lose them.
+        if dl::read_owned(dir).is_some_and(|o| o.hotspot.is_some()) {
+            sweep(dir).await;
+            if dl::read_owned(dir).is_some_and(|o| o.hotspot.is_some()) {
+                return Err(
+                    "Your Mobile Hotspot's settings from an earlier link could not be put back yet; try again in a moment."
+                        .to_string(),
+                );
+            }
+        }
+        let (record_dir, join): (PathBuf, WifiJoin) = (dir.to_path_buf(), join.clone());
+        let made = tokio::task::spawn_blocking(move || {
+            win::start(&join, band, |restore| {
+                // Written before the hotspot is touched, so a crash leaves
+                // what a next start puts back.
+                record(&record_dir, restore)
+                    .map_err(|_| "The state folder is not writable.".to_string())
+            })
+        })
+        .await
+        .map_err(|_| "The Mobile Hotspot could not be reached.".to_string())?;
+        match made {
+            Ok((restore, address)) => Ok((Handle { restore }, address)),
+            Err(reason) => {
+                // `win::start` put the hotspot back; this confirms it, and
+                // keeps the record if it could not (the next start retries).
+                sweep(dir).await;
+                Err(reason)
+            }
+        }
+    }
+
+    /// Whether everything was put back (a record that says otherwise stays).
+    pub async fn stop(handle: Handle) -> bool {
+        let put_back = tokio::task::spawn_blocking(move || win::restore(&handle.restore))
+            .await
+            .is_ok_and(|result| result.is_ok());
+        if !put_back {
+            tracing::warn!("Direct link: the Mobile Hotspot was not fully put back");
+        }
+        put_back
+    }
+
+    /// Put back what an earlier run of this state folder's server changed:
+    /// only what `direct_link_owned.json` records.
+    pub async fn sweep(dir: &Path) {
+        let Some(owned) = dl::read_owned(dir) else {
+            return;
+        };
+        if let Some(restore) = owned.hotspot {
+            let put_back = tokio::task::spawn_blocking(move || win::restore(&restore))
+                .await
+                .is_ok_and(|result| result.is_ok());
+            if !put_back {
+                // Kept, so the owner's settings are not lost: the next
+                // start tries again.
+                tracing::warn!("Direct link: the Mobile Hotspot was not fully put back");
+                return;
+            }
+            tracing::info!("Direct link: swept one an earlier run left");
+        }
+        dl::clear_owned(dir);
+    }
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
+mod backend {
+    //! Not on this system yet.
 
     use super::*;
     use std::path::Path;
@@ -747,7 +928,9 @@ mod backend {
         Err(dl::Unavailable::Unsupported.words().to_string())
     }
 
-    pub async fn stop(_handle: Handle) {}
+    pub async fn stop(_handle: Handle) -> bool {
+        true
+    }
 
     pub async fn sweep(_dir: &Path) {}
 }
