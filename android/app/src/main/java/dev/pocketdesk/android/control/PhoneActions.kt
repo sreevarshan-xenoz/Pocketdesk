@@ -137,12 +137,12 @@ object PhoneActions {
     }
 
     /** Tell the computer at [address]:[controlPort] how an ask went, over the link already up to it. */
-    private fun report(address: String, controlPort: Int, about: String, app: String?, result: String) {
+    internal fun report(address: String, controlPort: Int, about: String, app: String?, result: String, name: String? = null) {
         val sent = RustCore.sendPhonePacketOnLink(
             address,
             controlPort,
             PHONE_APP_OPENED,
-            AppOpenRule.report(about, app, result).toString(),
+            AppOpenRule.report(about, app, result, name).toString(),
         ).isSuccess
         Log.i(TAG, if (sent) "told the computer: $about $result" else "could not tell the computer: $about $result")
     }
@@ -180,6 +180,8 @@ object PhoneActions {
         !Prefs.appsFromComputer(context) -> AppOpenRule.OFF
         KeyguardDismiss.kind(context) == LockRule.Kind.SECURE -> AppOpenRule.LOCKED_SECURE
         context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked ?: true -> AppOpenRule.LOCKED
+        // The screen off at the moment of the open or the share (a file may take minutes).
+        context.getSystemService(PowerManager::class.java)?.isInteractive == false -> AppOpenRule.ASLEEP
         dev.pocketdesk.android.notify.PhoneLink.target(context)?.address != address -> AppOpenRule.OFF
         else -> null
     }
@@ -404,11 +406,16 @@ object PhoneActions {
                 // open was refused, so it can say so; any other is told nothing.
                 val word = AppOpenRule.tell(decision, ownComputer)
                 if (own != null && word != null &&
-                    (action == PhoneActionRule.Action.APPS || action == PhoneActionRule.Action.OPEN)
+                    (action == PhoneActionRule.Action.APPS || action == PhoneActionRule.Action.OPEN || action == PhoneActionRule.Action.SHARE)
                 ) {
-                    val about = if (action == PhoneActionRule.Action.OPEN) "open" else "apps"
+                    val about = when (action) {
+                        PhoneActionRule.Action.OPEN -> "open"
+                        PhoneActionRule.Action.SHARE -> "share"
+                        else -> "apps"
+                    }
                     val named = if (action == PhoneActionRule.Action.OPEN) ask.app else null
-                    Thread { report(own.address, own.controlPort, about, named, word) }.start()
+                    val file = if (action == PhoneActionRule.Action.SHARE) ask.name else null
+                    Thread { report(own.address, own.controlPort, about, named, word, file) }.start()
                 }
                 continue
             }
@@ -458,6 +465,11 @@ object PhoneActions {
             }
             if (action == PhoneActionRule.Action.OPEN) {
                 openAsked(context, ask, own, service != null)
+                continue
+            }
+            // Apps part 2: a file dropped on the screen window, shared into the app in front.
+            if (action == PhoneActionRule.Action.SHARE) {
+                if (own != null) ShareDrops.ask(context, own, ask.name, ask.size)
                 continue
             }
             if (service == null) continue

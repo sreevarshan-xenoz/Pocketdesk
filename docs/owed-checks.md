@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1176 open items.
+1183 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 60 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 63 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 17 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 188 |
 | A phone with a SIM | 40 |
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 155 |
+| A second computer | 156 |
 | A Linux desktop (the Azure VM serves for some) | 212 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 65 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 384 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 387 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -163,6 +163,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - An emptied file: empty one file on the phone (keep its name) and run: the computer's copy is emptied (size 0), not left with its old content, and a file that is empty on the phone from the start is made empty there. (where: OPPO)
 - The size cap: set "Size cap for kept folders" to 1 GB and keep more than that: the run stops with the notice on the phone ("the computer's kept folders are full"), the Files page row shows the problem, and one desktop notification came, not one per file. Raising the cap and running again finishes it. (where: OPPO)
 - A phone that is not one of this computer's owner phones (a guest's pairing) is refused ("Kept folders take only the owner's own phones") and nothing is made on the computer. With "Phones may keep folders here" off, every run is refused with its reason on the phone. (where: OPPO)
+
+**261. Phone apps on the computer's Start menu, from notifications, and dropped files shared into the app in front**
+
+- The pin with the phone away or the phone's switch off: the shortcut says why on the main window's notice line, never opening anything; with the apps list never fetched it says to open the Phone apps page once. After the phone app is restarted (its list is forgotten), the pinned shortcut still opens the app: the list is asked for again and the open follows once. (where: OPPO)
+- A notification with a reply or button (a chat) on the Notifications page: "Open app on the phone" opens that chat app and brings up the screen window; with the phone off or unlinked the button is grey and says why; a notification of an app the phone does not list has no such button. (where: OPPO)
+- Drop a PNG on the phone's screen window with a notes or messaging app in front: the file arrives, Android's share screen for that app opens (never sent by itself), and the window's line says "Shared ... into <App>". With an app in front that takes no images (a calculator): nothing opens, the file is in Downloads/Pocketdesk, and the line says so. With the launcher in front: "could not tell" and Downloads. Two files dropped at once: both go to Downloads, none is shared. (where: OPPO)
 - Names: a file named with a colon, a Windows device name (`NUL.txt`), a hidden file and a trailing-dot name on the phone are left out (the phone's log counts them) and the run goes on. A folder renamed on the phone keeps its place on the computer. (where: OPPO)
 - Remove a folder in Settings: its row goes, the computer's copy stays, and Android no longer lists the folder in its granted folders for the app (`adb shell dumpsys package` shows no persisted grant for it) unless Folders the computer may open still shares it. (where: OPPO)
 
@@ -1206,6 +1212,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - "Let the computer open my apps" off on the phone: the page says the phone keeps its apps to itself and names the setting; turned on, "Ask again" lists them. A computer that is not the phone's own gets no word from it at all. (where: OPPO) Partly checked 2026-11-01 (the OPPO): with the switch off an ask for the list and an open were each answered `off`; turned on, the next ask for the list gave the 77 apps again. "A computer that is not the phone's own gets no word" needs a second computer and was not tried; the page's words are desktop UI.
 
+**261. Phone apps on the computer's Start menu, from notifications, and dropped files shared into the app in front**
+
+- The guards: "Let the computer open my apps" off, then the control service off, then a secure lock, then the screen shown to another computer only: each drop leaves the file in Downloads and the line names the reason; the foreground package is read once per drop (the phone's log names no package of any other window), and Pocketdesk's own screen in front is refused. Whether a share started from the service with another app in front appears on ColorOS 14 and Android 15 or 16, and whether Android's chooser fallback shows when the direct share is refused. (where: OPPO)
+
 ## A Linux desktop (the Azure VM serves for some)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1960,7 +1970,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Whether a background start by the control service itself works on the OPPO (ColorOS 14) and, if it can, on a phone with Android 15 or 16: the app starts from the service's own context with the phone's screen on another app. If it only appears behind, the fallback (N3's opt-in) is the next thing to try. (where: other hardware) Partly checked 2026-11-01 on the OPPO (ColorOS 14, Android 14): yes — with Calculator in front and the cast shown, an open of Settings from the control service's own context brought Settings to the front (`opened`). Android 15 or 16 hardware was not available.
 
-**260. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
+**261. Phone apps on the computer's Start menu, from notifications, and dropped files shared into the app in front**
 
 - A computer that is too old (a throwaway built from before this change): the phone says the computer cannot keep folders yet and sends nothing; no copies appear in that computer's Downloads. (where: other hardware)
 
@@ -2826,6 +2836,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Pause and resume: show an app's screen, close the window on the computer, and the phone's notification says "Paused" with Stop and minutes left; the status bar still shows Android's own sharing indicator. Click an app again within ten minutes: the window comes back and the app opens with no question and no tap, and the encoder started again (the picture is live). A different computer's open (or a second pairing) gets a new question, and the old pause is gone. Stop ends it; after ten minutes it ends by itself; locking the phone ends it (Android stops the projection), and the next open then asks as before. (where: OPPO)
 - The desktop pages by hand: "Tap needed on the phone" appears in the accent colour with the message, and "locked_secure" shows the Extend Unlock sentence, on Windows and on Linux. (where: by hand)
 
-**260. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
+**261. Phone apps on the computer's Start menu, from notifications, and dropped files shared into the app in front**
 
+- Windows: right-click an app, Pin to Start: "<App> (phone)" is in Start's All apps with the app's own icon (not Pocketdesk's), and its right-click offers Pin to taskbar. Click it with Pocketdesk running: the app opens on the phone and the phone's screen window comes up, and the Pocketdesk main window does not move; click it with Pocketdesk closed: Pocketdesk starts, then the same. Unpin on the page removes the shortcut and the icon file. A second pin of an app with the same name keeps the first. (where: by hand)
+- Linux (KDE, GNOME, Hyprland with a launcher): Pin to the applications menu: the entry "<App> (phone)" shows in the launcher (after a moment on some desktops) with the icon; running it opens the app and the screen window. An app whose name has quotes, `$`, `%`, a backslash or a path separator pins and runs with the name as given and nothing else started (check the `.desktop` file by eye). Unpin removes `pocketdesk-phone-*.desktop` and the icon. (where: by hand)
+- Settings on both: "Offer to pin phone apps to Start or the applications menu" off removes the right-click menu and keeps made shortcuts working; "Share a dropped file into the phone's app in front" off sends dropped files as before. (where: by hand)
 - The Files page's Kept folders section and the three Settings rows on the desktop (the folder box with Choose folder, the cap, the deletion switch) by hand on Windows and on Linux, light and dark, and in a narrow window; the Show in folder button opens the folder. (where: by hand)

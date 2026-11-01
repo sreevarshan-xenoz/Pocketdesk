@@ -704,6 +704,8 @@ class TransferService : Service() {
             offline.reset()
             // Ecosystem 1f: its type and size, never its name.
             val mime = uri?.let { runCatching { contentResolver.getType(it) }.getOrNull() } ?: "application/octet-stream"
+            // Apps part 2: a file dropped on the screen window, shared into the app in front when one was asked for.
+            dev.pocketdesk.android.control.ShareDrops.arrived(this, job.address, job.name, job.size, uri, mime)
             PhoneEventBroadcast.send(
                 this,
                 PhoneEvents.Kind.FILE_RECEIVED,

@@ -281,6 +281,16 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Phones,
     ),
     (
+        "phone_apps_pin",
+        "Offer to pin phone apps to Start or the applications menu",
+        Section::Phones,
+    ),
+    (
+        "phone_drop_share",
+        "Share a dropped file into the phone's app in front",
+        Section::Phones,
+    ),
+    (
         "gamepad_controller",
         "The phone's gamepad as a game controller",
         Section::Phones,
@@ -798,6 +808,8 @@ pub fn applies_live(key: &str) -> bool {
             | "notification_pictures"
             | "cast_control"
             | "phone_apps_page"
+            | "phone_apps_pin"
+            | "phone_drop_share"
             | "gamepad_controller"
             | "downloads_folder"
             // Read by the server at each kept file and each run's end.
@@ -1990,6 +2002,26 @@ impl SettingsForm {
                     note(
                         ui,
                         "The page shows a linked phone's apps and opens one there, with its screen in a window here. On the phone it needs \"Let the computer open my apps\" on (off by default) and Pocketdesk's control service.",
+                    );
+                });
+                row(ui, "phone_apps_pin", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_apps_pin,
+                        "right-click a phone app to pin it to Start (Windows) or the applications menu (Linux)",
+                    );
+                    note(
+                        ui,
+                        "The pin is a shortcut named \"<app> (phone)\" that opens the app on the phone from this computer. On Windows, right-click it in Start to put it on the taskbar too. Shortcuts already pinned keep working with this off.",
+                    );
+                });
+                row(ui, "phone_drop_share", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_drop_share,
+                        "a file dropped on a phone's screen window is also shared into the app in front there, when it takes that file",
+                    );
+                    note(
+                        ui,
+                        "One file at a time; if the app takes no such file it stays in Downloads and the window says so. On the phone it needs \"Let the computer open my apps\" on (off by default) and Pocketdesk's control service, with the screen shown to this computer. Pocketdesk reads only which app is in front, once, when the file is dropped.",
                     );
                 });
                 // F6 part 2: a PipeWire camera, so Linux only.

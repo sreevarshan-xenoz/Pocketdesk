@@ -29,6 +29,11 @@ pub struct PhoneActionRequest {
     /// An `open` that wants the phone's screen shown here too (Apps part 1).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub screen: bool,
+    /// The file a `share` is for (Apps part 2): its name and size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
     pub created_unix: u64,
 }
 
@@ -46,7 +51,33 @@ pub fn request(
     action: PhoneAction,
     now_unix: u64,
 ) -> io::Result<PhoneActionRequest> {
-    write_request(state_dir, device_id, action, None, false, now_unix)
+    write_request(state_dir, device_id, action, None, false, None, now_unix)
+}
+
+/// Apps part 2: ask the server to have `device_id` share the file it is
+/// being sent, `name` of `size` bytes, into the app in front there.
+pub fn request_share(
+    state_dir: &Path,
+    device_id: &str,
+    name: &str,
+    size: u64,
+    now_unix: u64,
+) -> io::Result<PhoneActionRequest> {
+    if !crate::protocol::phone_action::valid_share_name(name) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "not a file name",
+        ));
+    }
+    write_request(
+        state_dir,
+        device_id,
+        PhoneAction::Share,
+        None,
+        false,
+        Some((name, size)),
+        now_unix,
+    )
 }
 
 /// P2: ask the server to have `device_id` open the app `app`.
@@ -77,6 +108,7 @@ pub fn request_open_with_screen(
         PhoneAction::Open,
         Some(app),
         screen,
+        None,
         now_unix,
     )
 }
@@ -87,6 +119,7 @@ fn write_request(
     action: PhoneAction,
     app: Option<&str>,
     screen: bool,
+    share: Option<(&str, u64)>,
     now_unix: u64,
 ) -> io::Result<PhoneActionRequest> {
     if device_id.is_empty() {
@@ -98,6 +131,8 @@ fn write_request(
         action: action.as_str().to_string(),
         app: app.map(str::to_string),
         screen: screen && action == PhoneAction::Open,
+        name: share.map(|(name, _)| name.to_string()),
+        size: share.map(|(_, size)| size),
         created_unix: now_unix,
     };
     let file = path(state_dir, &request.id)?;
@@ -174,6 +209,25 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// Apps part 2: a share names its file; one that names a path is not made.
+    #[test]
+    fn a_share_carries_its_file_and_refuses_a_path() {
+        let dir = dir("share");
+        let ask = request_share(&dir, "phone-a", "photo.png", 1234, 1_000).unwrap();
+        assert_eq!(ask.action(), Some(PhoneAction::Share));
+        assert_eq!(ask.name.as_deref(), Some("photo.png"));
+        assert_eq!(ask.size, Some(1234));
+        assert_eq!(take_all(&dir, 1_001), vec![ask]);
+        for bad in ["", "a/b.png", "..\\x", "a\nb"] {
+            assert!(
+                request_share(&dir, "phone-a", bad, 1, 1_000).is_err(),
+                "{bad:?}"
+            );
+        }
+        assert!(request_share(&dir, "", "photo.png", 1, 1_000).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// O2: an ask is taken once within its minute, and a stale or unknown one dropped.
