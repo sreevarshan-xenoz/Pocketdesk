@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1165 open items.
+1166 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 50 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 51 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 17 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 188 |
 | A phone with a SIM | 39 |
@@ -150,10 +150,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **259. Hands-free apps: a paused share, the screen-sharing question accepted, a lock swiped away**
 
+- The window-state event of the question names the activity Pocketdesk's intent names (`ConsentPress` presses nothing before it): the log shows "pressed" only after it; a second system dialog raised by another app at the same time is not pressed; a button whose words are not a known confirm word (set the phone to a language not in the list) is not pressed and the page says a tap is needed. (where: OPPO)
 - The question was raised for the entire screen on Android 14 and later, with no one-app choice (the question has no chooser); and if the OEM's question has a chooser, entire screen was picked before Start, and a chooser reading as one app was never confirmed. (where: OPPO)
 - Nothing else is ever pressed: with the opt-in on, open a second system dialog (a permission question) during the five seconds, and with no open asked at all, raise Android's screen-sharing question from another app; neither is touched, and with the opt-in off nothing is pressed even for an open. (where: OPPO)
-- The pause is kept only with the apps switch on and for the phone's own computer: turn the switch off while paused and the next ask is refused and does not resume. (where: OPPO)
-- A swipe-only lock (set the lock to "Swipe" in Android's settings), screen off: an open from the Phone apps page wakes the screen, swipes the lock away and opens the app; the log (`KeyguardDismiss`) says "the lock screen was dismissed". With the lock set to a PIN: the page says the phone has a lock Pocketdesk never bypasses and names Extend Unlock / Smart Lock / Trusted devices, the phone stays locked, and the screen is not woken by the ask. (where: OPPO)
+- The pause is kept only with the apps switch and the opt-in on and for the phone's own computer: turn either off while paused and the notification goes and the projection is given back within about two seconds (the status bar's sharing indicator goes); unpairing the computer does the same. Whether the OPPO also ends a paused projection when the phone locks (the guide and SECURITY do not rely on it). (where: OPPO)
+- A swipe-only lock (set the lock to "Swipe" in Android's settings), screen off: an open from the Phone apps page wakes the screen, swipes the lock away and opens the app; the log (`KeyguardDismiss`) says "the lock screen was dismissed". With the lock set to a PIN: the page says the phone has a lock Pocketdesk never bypasses and names Extend Unlock / Smart Lock / Trusted devices, the phone stays locked, and the screen is not woken by the ask; a lock set to a PIN a moment after an open is asked is given up on within about 2.5 seconds. (where: OPPO)
 - Extend Unlock: with a trusted device or place keeping the phone unlocked behind a lock screen that still shows, an open swipes it away and opens the app; with the trust gone (PIN needed), it is refused as above. (where: OPPO)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
