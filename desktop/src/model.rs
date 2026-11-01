@@ -760,6 +760,28 @@ pub fn phone_action_reach(linked: bool, allowed: bool) -> Result<(), &'static st
     }
 }
 
+/// Whether this computer can ask the phone to be its camera (F6 part 2),
+/// or why not: Linux only, the owner's setting, the phone's permission and
+/// its link.
+pub fn webcam_reach(
+    linux: bool,
+    offered: bool,
+    allowed: bool,
+    linked: bool,
+) -> Result<(), &'static str> {
+    if !linux {
+        Err("A phone can be this computer's camera on Linux only (PipeWire).")
+    } else if !offered {
+        Err("Turn on \u{201c}Offer phones as a camera\u{201d} in Settings (Phones).")
+    } else if !allowed {
+        Err("This phone's \u{201c}Use its camera as a webcam\u{201d} is off in Devices.")
+    } else if !linked {
+        Err("The phone is not linked now: a session, or one of its background features, links it.")
+    } else {
+        Ok(())
+    }
+}
+
 /// One feature as both sides stand (L7): this computer's permission (and
 /// its Settings, L7 review), the phone's switch and Android's grant as the
 /// phone said them (`None`: not said, or Android needs nothing), and what
@@ -1595,6 +1617,20 @@ mod tests {
                 .unwrap_err()
                 .contains("not linked")
         );
+    }
+
+    /// F6 part 2: the camera is asked for on Linux, offered, allowed and
+    /// linked; each missing one says what to change.
+    #[test]
+    fn a_phone_is_asked_for_its_camera_only_where_it_can_be_one() {
+        assert_eq!(super::webcam_reach(true, true, true, true), Ok(()));
+        let why = |linux, offered, allowed, linked| {
+            super::webcam_reach(linux, offered, allowed, linked).unwrap_err()
+        };
+        assert!(why(false, true, true, true).contains("Linux only"));
+        assert!(why(true, false, true, true).contains("Settings"));
+        assert!(why(true, true, false, true).contains("Devices"));
+        assert!(why(true, true, true, false).contains("not linked"));
     }
 
     /// Q2: the phone's own switch against Screenshot and Lock, said.
