@@ -42,6 +42,17 @@ object WindowInput {
         return fraction.coerceIn(0, FRACTION_MAX).toFloat() / FRACTION_MAX * (size - 1)
     }
 
+    /**
+     * Whether [event] is one the rate limit never drops: a finger going down or up (dropping
+     * one leaves a finger down or stuck up) and a close. Moves, wheel, keys and text are limited.
+     */
+    fun isEdge(event: Event): Boolean = when (event) {
+        is Event.Touch -> event.action != ACTION_MOVE
+        is Event.Pointer -> event.action != ACTION_MOVE
+        Event.Close -> true
+        else -> false
+    }
+
     /** The motion action a touch event's word means, or null for one that is not. */
     fun motionAction(word: String): Int? = when (word) {
         "down" -> ACTION_DOWN

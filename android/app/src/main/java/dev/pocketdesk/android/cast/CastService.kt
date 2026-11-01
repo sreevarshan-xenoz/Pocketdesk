@@ -156,8 +156,7 @@ class CastService : Service() {
             val now = SystemClock.uptimeMillis()
             for (one in events) {
                 // A press or release always goes (dropping one leaves a finger down); the rest is limited.
-                val edge = (one.event as? WindowInput.Event.Touch)?.let { it.action != WindowInput.ACTION_MOVE } == true ||
-                    one.event is WindowInput.Event.Close
+                val edge = WindowInput.isEdge(one.event)
                 if (!edge && !service.windowRate.take(now)) continue
                 cast.input(one.window, one.event)
             }

@@ -122,6 +122,20 @@ class PointerTrackerTest {
     }
 
     @Test
+    fun aFingerGoingDownOrUpIsNeverRateLimited() {
+        val edge = { e: WindowInput.Event -> WindowInput.isEdge(e) }
+        assertTrue(edge(WindowInput.Event.Pointer(2, ACTION_DOWN, 1, 1)))
+        assertTrue(edge(WindowInput.Event.Pointer(2, ACTION_UP, 1, 1)))
+        assertFalse(edge(WindowInput.Event.Pointer(2, ACTION_MOVE, 1, 1)))
+        assertTrue(edge(WindowInput.Event.Touch(ACTION_UP, 1, 1)))
+        assertFalse(edge(WindowInput.Event.Touch(ACTION_MOVE, 1, 1)))
+        assertTrue(edge(WindowInput.Event.Close))
+        assertFalse(edge(WindowInput.Event.Scroll(1, 1, 3)))
+        assertFalse(edge(WindowInput.Event.Key(WindowInput.KEYCODE_ENTER)))
+        assertFalse(edge(WindowInput.Event.Text("a")))
+    }
+
+    @Test
     fun theHelperTakesOnlySoundFingerSets() {
         val d = ACTION_DOWN
         val ids1 = intArrayOf(1)
