@@ -6,6 +6,7 @@
 
 mod activity_view;
 mod app;
+mod approve_view;
 mod apps_view;
 mod arrange_view;
 mod cast_view;

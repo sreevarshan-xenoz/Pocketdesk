@@ -2,13 +2,13 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1096 open items.
+1102 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 39 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 168 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 174 |
 | A phone with a SIM | 39 |
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
@@ -132,7 +132,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The OPPO on this build with a throwaway server on this build: after a connection, the computer's card on Home says "runs <this release>" in the muted colour, and the server's `pocketdesk devices --json` lists the phone's `version` as the app's. Then the phone on 0.8.2 from F-Droid or a release APK: the card says nothing (the server on 0.8.2 sends no release), and a 0.8.2 phone against this build's server leaves the phone's `version` null. (where: here) Half checked 2026-10-31: A's card says "runs 0.8.2" in the muted colour and A's `devices --json` lists the phone's `version` 0.8.2. Not run: a 0.8.2 phone from F-Droid or a release APK (a differently signed APK needs an uninstall, which wipes the phone's pairings).
 - A throwaway server whose `pocketdeskVersion` differs from the phone's (a build from a commit with the workspace version raised, say 0.9.0): the card says "runs 0.9.0, newer than this app: update this app" in the tertiary colour; with Settings → Pairing's switch off it says "runs 0.9.0" only. Its Devices page lists the phone with "older than this one: update it" in the warning colour, and plainly with Settings → Phones' switch off. (where: here) Phone half checked 2026-10-31 against B built at 0.9.0: "runs 0.9.0, newer than this app: update this app" in the tertiary colour, "runs 0.9.0" alone with Settings → Pairing's switch off. B's `devices --json` lists the phone at 0.8.2; its desktop Devices page was not opened.
 
-**250. The phone's camera as this computer's webcam (Linux)**
+**252. The phone's camera as this computer's webcam (Linux)**
 
 - Stop on the phone's "Your camera is in use" notification ends the cast and the node goes. (where: here)
 
@@ -560,6 +560,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **240. Keys by position in a computer's screen window**
 
 - An input method here (Windows' Japanese IME, or Linux fcitx): note that it does not compose in the window in either mode (the picture asks for no input method), and that with Keys by position on, its keys go by place with nothing typed twice. (where: owner)
+
+**250. Approve with my phone: sudo, polkit and the lock screen**
+
+- A real fingerprint on the owner's phone approves `sudo true` on the owner's desk, and the phone shows sudo's command; No, no answer and a phone out of reach each give the password prompt (at once with no phone linked, after the wait otherwise). (where: owner)
+- polkit on the owner's desk: a `pkexec true` (or a GUI admin prompt) with the line in `/etc/pam.d/polkit-1` is approved on the phone. (where: owner)
+- The lock screen on the owner's desk (hyprlock): with "The lock screen too" on and the line in `/etc/pam.d/hyprlock`, the phone unlocks it; with the switch off, only the password does. (where: owner)
+- Pinning on a real phone with Key Attestation: `sudo pocketdesk-pam-ask --pin <user>` asks the phone, the fingerprint makes an attested key, the phone says it replaces the current key and shows a code, root asks for that code and pins only when it is typed right, reports the key attested (TEE or StrongBox), and the old key keeps approving until a request names the new one. (where: owner)
+- "Fingerprint only, not the PIN" on the phone: the prompt offers no PIN, and a fingerprint enrolled afterwards makes the phone say its key no longer works until it is made and pinned again. (where: owner)
+- `sudo` over ssh to the owner's desk with "Only from this desk" on asks for the password at once, and the phone is not asked. (where: owner)
 
 ## A phone with a SIM
 
@@ -1616,7 +1625,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - uinput on a Linux computer where `/dev/uinput` is writable: `libinput debug-events` shows `v120` values below 120 for a slow scroll, and a mouse wheel's notch from an older phone app still scrolls one notch. (where: linux)
 - The phone's trackpad: a slow two-finger scroll moves the page smoothly; with Settings' Smooth scrolling off it moves a notch at a time as before. (where: linux)
 
-**250. The phone's camera as this computer's webcam (Linux)**
+**252. The phone's camera as this computer's webcam (Linux)**
 
 - "Offer phones as a camera" turned off and "Stop camera" on the Overview each end a running camera, and the "in use" notification shows plainly (default importance, silent) on the phone. (where: linux)
 - A real video call on the owner's desk: Firefox (and Zoom or Meet in the browser) picks "Pocketdesk camera (<phone>)" in its camera list, the other side sees the phone's picture, and it stops when the phone's notification's Stop is pressed. (where: linux)

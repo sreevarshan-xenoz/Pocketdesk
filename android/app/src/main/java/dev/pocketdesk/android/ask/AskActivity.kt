@@ -17,11 +17,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -30,8 +33,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.pocketdesk.android.HostStore
+import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.ui.plainErrorText
@@ -48,10 +53,18 @@ import kotlinx.coroutines.withContext
  * A question the computer put to this phone (BF3), with Yes and No. No is
  * sent at a tap; Yes first takes the phone's fingerprint or screen lock
  * (a phone with none cannot say Yes, and is told so).
+ *
+ * An approval request (approve with my phone: sudo, polkit, the lock
+ * screen) shows what it is for, and its Yes is a signature over the request
+ * by this phone's Keystore key, which the fingerprint (or the screen lock,
+ * unless "Fingerprint only" is on) unlocks for that one signature.
  */
 class AskActivity : ComponentActivity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var said by mutableStateOf<String?>(null)
+    // A pin's code, shown once the new key's answer went (review I5).
+    private var pinCode by mutableStateOf<String?>(null)
+    @Volatile private var pendingCode: String? = null
     // Asking for the lock or sending: the buttons wait (BF3 review: a
     // double tap on Yes opened two prompts).
     private var sending by mutableStateOf(false)
@@ -62,6 +75,7 @@ class AskActivity : ComponentActivity() {
     private lateinit var id: String
     private lateinit var question: String
     private var expiresUnix = 0L
+    private var approval: ApproveRule.Approval? = null
 
     /** The screen lock's own screen, below Android 11. */
     private val confirm = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -80,22 +94,68 @@ class AskActivity : ComponentActivity() {
         id = intent.getStringExtra(Asks.EXTRA_ID) ?: return finish()
         question = intent.getStringExtra(Asks.EXTRA_QUESTION) ?: return finish()
         expiresUnix = intent.getLongExtra(Asks.EXTRA_EXPIRES, 0L)
+        approval = ApproveRule.parse(intent.getStringExtra(Asks.EXTRA_APPROVE))
+        if (intent.hasExtra(Asks.EXTRA_APPROVE) && approval == null) return finish()
+        val asked = approval
         val computer = HostStore.shownName(this, host)
         val until = DateFormat.getTimeFormat(this).format(Date(expiresUnix * 1000))
         setContent {
             PocketdeskTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     Column(
-                        modifier = Modifier.padding(24.dp),
+                        // Scrolls: a long command is shown whole.
+                        modifier = Modifier.verticalScroll(rememberScrollState()).padding(24.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
                         Text(stringResource(R.string.ask_from_computer, computer), style = MaterialTheme.typography.titleMedium)
-                        Text(question, style = MaterialTheme.typography.headlineSmall)
+                        if (asked == null) {
+                            Text(question, style = MaterialTheme.typography.headlineSmall)
+                        } else {
+                            // What the signature covers, as the computer
+                            // sent it: never the free words of the question.
+                            Text(
+                                when {
+                                    asked.pin -> stringResource(R.string.approve_pin, computer, asked.user)
+                                    asked.unlock -> stringResource(R.string.approve_unlock, asked.user)
+                                    else -> stringResource(R.string.approve_admin, asked.service, asked.user)
+                                },
+                                style = MaterialTheme.typography.headlineSmall,
+                            )
+                            // Every field is shown whole, in the computer's
+                            // printable form (hidden characters as ⟨U+XXXX⟩).
+                            @Composable
+                            fun line(label: Int, value: String) {
+                                if (value.isEmpty()) return
+                                Text(stringResource(label), style = MaterialTheme.typography.labelMedium)
+                                Text(value, fontFamily = FontFamily.Monospace)
+                            }
+                            line(R.string.approve_command, asked.command)
+                            if (asked.requester.isNotEmpty() && asked.requester != asked.user) {
+                                line(R.string.approve_requester, asked.requester)
+                            }
+                            line(R.string.approve_action, asked.action)
+                            line(R.string.approve_tty, asked.tty)
+                            line(R.string.approve_origin, asked.origin)
+                            Text(
+                                if (asked.pin) {
+                                    stringResource(R.string.approve_pin_replaces, computer) + " " + stringResource(R.string.approve_pin_signs)
+                                } else {
+                                    stringResource(R.string.approve_signs)
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         Text(
                             stringResource(R.string.ask_waits_until, until),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        pinCode?.let {
+                            Text(stringResource(R.string.approve_pin_code_title), style = MaterialTheme.typography.titleMedium)
+                            Text(it, style = MaterialTheme.typography.displaySmall, fontFamily = FontFamily.Monospace)
+                            Text(stringResource(R.string.approve_pin_code_help), style = MaterialTheme.typography.bodySmall)
+                        }
                         said?.let {
                             Text(
                                 it,
@@ -103,7 +163,9 @@ class AskActivity : ComponentActivity() {
                                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                             )
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (pinCode != null) {
+                            Button(onClick = { finish() }) { Text(stringResource(R.string.approve_pin_done)) }
+                        } else Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             OutlinedButton(onClick = { answer(yes = false) }, enabled = !sending) {
                                 Text(stringResource(R.string.ask_no))
                             }
@@ -132,6 +194,7 @@ class AskActivity : ComponentActivity() {
             return
         }
         if (!yes) return send(yes = false)
+        approval?.let { return approve(it) }
         val keyguard = getSystemService(KeyguardManager::class.java)
         if (!AskRule.mayAnswerYes(keyguard.isDeviceSecure)) {
             said = getString(R.string.ask_needs_lock)
@@ -175,8 +238,137 @@ class AskActivity : ComponentActivity() {
         }
     }
 
+    /** Yes to an approval: the fingerprint (or lock) unlocks one signature over it. */
+    private fun approve(asked: ApproveRule.Approval) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            said = getString(R.string.approve_needs_android_11)
+            return
+        }
+        if (asked.pin) return pinKey(asked)
+        // The key the computer pinned: a new one waiting for its pin takes
+        // over once a request names it (review N13).
+        val alias = ApproveKey.pick(this, ApproveRule.pinnedKeys(asked)) ?: run {
+            said = getString(R.string.approve_not_pinned)
+            Log.i(TAG, "an approval was not signed: this phone's key is not the pinned one")
+            return
+        }
+        val signature = ApproveKey.signature(alias).getOrElse {
+            val problem = (it as? ApproveKey.ProblemException)?.problem
+            said = getString(
+                if (problem == ApproveKey.Problem.Invalidated) R.string.approve_invalidated else R.string.approve_no_key,
+            )
+            Log.i(TAG, "an approval was not signed: ${problem ?: it.javaClass.simpleName}")
+            return
+        }
+        val biometricOnly = Prefs.approveBiometricOnly(this)
+        sending = true
+        val signal = CancellationSignal().also { prompt = it }
+        val builder = BiometricPrompt.Builder(this)
+            .setTitle(getString(R.string.ask_confirm_title))
+            .setDescription(asked.command.ifEmpty { question })
+        if (biometricOnly) {
+            builder.setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+                .setNegativeButton(getString(R.string.ask_no), mainExecutor) { _, _ ->
+                    sending = false
+                    said = getString(R.string.ask_not_confirmed)
+                }
+        } else {
+            builder.setAllowedAuthenticators(
+                BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL,
+            )
+        }
+        builder.build().authenticate(
+            BiometricPrompt.CryptoObject(signature),
+            signal,
+            mainExecutor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    val signed = runCatching {
+                        val s = result.cryptoObject?.signature ?: error("no signature")
+                        s.update(ApproveRule.message(asked))
+                        s.sign()
+                    }.getOrElse {
+                        sending = false
+                        said = getString(R.string.approve_no_key)
+                        Log.i(TAG, "an approval was not signed: ${it.javaClass.simpleName}")
+                        return
+                    }
+                    sendBody(ApproveRule.signedAnswer(asked.id, signed) ?: return finish(), yes = true)
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    sending = false
+                    said = getString(R.string.ask_not_confirmed)
+                }
+            },
+        )
+    }
+
+    /**
+     * Root pins this phone: after the fingerprint (or lock), make the key
+     * with the pin's challenge and answer with its attestation chain, which
+     * root checks up to Google's roots.
+     */
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
+    private fun pinKey(asked: ApproveRule.Approval) {
+        val biometricOnly = Prefs.approveBiometricOnly(this)
+        sending = true
+        val signal = CancellationSignal().also { prompt = it }
+        val builder = BiometricPrompt.Builder(this)
+            .setTitle(getString(R.string.ask_confirm_title))
+            .setDescription(getString(R.string.approve_pin, HostStore.shownName(this, host), asked.user))
+        if (biometricOnly) {
+            builder.setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+                .setNegativeButton(getString(R.string.ask_no), mainExecutor) { _, _ ->
+                    sending = false
+                    said = getString(R.string.ask_not_confirmed)
+                }
+        } else {
+            builder.setAllowedAuthenticators(
+                BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL,
+            )
+        }
+        builder.build().authenticate(
+            signal,
+            mainExecutor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    scope.launch {
+                        val body = withContext(Dispatchers.Default) {
+                            runCatching {
+                                // Beside the current key, which stays until a request
+                                // names this one as pinned (review N13).
+                                val spare = ApproveKey.spare(this@AskActivity)
+                                val key = ApproveKey.create(spare, biometricOnly, ApproveRule.pinChallenge(asked))
+                                pendingCode = ApproveRule.code(key)
+                                // Settings lists the new key too.
+                                RustCore.sendPhonePacket(host, port, ApproveRule.KEY_PACKET, ApproveRule.keyBody(key, biometricOnly))
+                                ApproveRule.pinAnswer(asked.id, ApproveKey.chain(spare))
+                            }.getOrNull()
+                        }
+                        if (body == null) {
+                            sending = false
+                            said = getString(R.string.settings_approve_no_key_made)
+                            return@launch
+                        }
+                        sendBody(body, yes = true, stay = true)
+                    }
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    sending = false
+                    said = getString(R.string.ask_not_confirmed)
+                }
+            },
+        )
+    }
+
     private fun send(yes: Boolean) {
         val body = AskRule.body(id, yes) ?: return finish()
+        sendBody(body, yes)
+    }
+
+    private fun sendBody(body: String, yes: Boolean, stay: Boolean = false) {
         // A prompt can outlive the question (BF3 review).
         if (expired()) {
             sending = false
@@ -192,7 +384,7 @@ class AskActivity : ComponentActivity() {
                 // For the device checks; never the question.
                 Log.i(TAG, "answered ${if (yes) "yes" else "no"}")
                 Toast.makeText(this@AskActivity, getString(R.string.ask_sent), Toast.LENGTH_SHORT).show()
-                finish()
+                if (stay) pinCode = pendingCode else finish()
             }.onFailure {
                 said = getString(R.string.ask_not_sent, plainErrorText(it.message))
             }

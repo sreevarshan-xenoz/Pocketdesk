@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use pocketdesk_core::error::Result;
 use pocketdesk_core::local::asks::{self, AskRequest};
+use pocketdesk_core::protocol::approve::{APPROVE_KEY, attestation_of, signature_of};
 use pocketdesk_core::protocol::ask::{ASK, ASK_ANSWER, Answer, answer_of, ask_body};
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin, TrustStore};
 use pocketdesk_core::protocol::permissions::Capability;
@@ -227,7 +228,7 @@ impl Plugin for AskPlugin {
     }
 
     fn incoming_capabilities(&self) -> &'static [&'static str] {
-        &[ASK_ANSWER]
+        &[ASK_ANSWER, APPROVE_KEY]
     }
 
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
@@ -235,15 +236,40 @@ impl Plugin for AskPlugin {
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
+        let Ok(dir) = crate::state::state_dir() else {
+            return Ok(());
+        };
+        // Approve with my phone: a phone's key, given or taken back.
+        if packet.packet_type == APPROVE_KEY {
+            crate::phone_approves::key_heard(&dir, sender.device_id(), &packet.body, now_unix());
+            return Ok(());
+        }
         if packet.packet_type != ASK_ANSWER {
             return Ok(());
         }
         let Some((id, answer)) = answer_of(&packet.body) else {
             return Ok(());
         };
-        let Ok(dir) = crate::state::state_dir() else {
+        // An answer to an approval request goes to the PAM helper, with its
+        // signature, which the helper checks.
+        if crate::phone_approves::is_pending(&id) {
+            let signature = signature_of(&packet.body);
+            let attestation = attestation_of(&packet.body);
+            if crate::phone_approves::heard(
+                &dir,
+                sender.device_id(),
+                &id,
+                answer,
+                signature,
+                attestation,
+                now_unix(),
+            ) {
+                tracing::info!("A phone answered an approval request: {}", answer.word());
+            } else {
+                tracing::info!("An approval answer was dropped: not put to that phone, or late");
+            }
             return Ok(());
-        };
+        }
         if heard(&dir, sender.device_id(), &id, answer, now_unix()) {
             tracing::info!("A phone answered a question: {}", answer.word());
         } else {

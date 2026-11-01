@@ -72,6 +72,7 @@ The desktop end runs on Linux and Windows; the phone end is the Android app. It 
 | Another computer's screen in a window | yes, either way round | yes, either way round |
 | KDE Connect devices (pairing, ping, clipboard, battery, Ring, notifications, files both ways) | yes, but not beside `kdeconnectd` or GSConnect: started after one of them, Pocketdesk's server listens on the next free port (1717 to 1725) and leaves KDE Connect devices to that program | yes, with KDE Connect 1.36 on the A71 |
 | Events, hooks, named tasks, Home Assistant | yes | yes |
+| Approve sudo, polkit and the lock screen on the phone | PAM, through a line you add (off by default) | no |
 | Desktop app tray | yes, where the desktop shows StatusNotifierItems (closing quits where it does not) | yes |
 | Device-checked | Hyprland on a laptop (2026-09: pairing, video with VAAPI, input, Tailscale, start at login); a headless Sway VM across the internet (2026-10-14: pairing, LAN and WAN sessions, clipboard; 2026-10-15: links both ways, the phone's battery, now-playing and Pause through `playerctl`; 2026-10-16: typing any character, input without uinput, the phone as a remote; 2026-10-22: the desktop app's window, its typing and phone-screen windows, the tray program under waybar with the phone's music in MPRIS, the laser dot); on the laptop, the shared keyboard and mouse's receiving end from a script into a headless Sway (2026-10-28: keys in order and none left down, a killed sender's key let go, a lock screen typed into); KDE Plasma 6.8 headless in a container on the laptop, the portal capture driven by a script rather than a phone (2026-10-31: the screen at about 58 fps, both kinds of grant restored with no dialog, allowed ahead with no dialog at all, input through the portal, the wheel a mouse notch at a time since the same day's fix); Linux driving through Hyprland's input-capture portal, the laptop's own touchpad into a stand-in computer (2026-10-29); the laptop showing Windows' screen in a window, view-only, by both roads (2026-10-31); a phone-shaped second screen on Hyprland added, captured and removed by a test (2026-10-31); software encoding through OpenH264 on Fedora 44's `ffmpeg-free` in a container, by a test and the real streaming server on a test pattern, with no phone (2026-10-31). Not yet: files, notifications and texts, sound on the phone, the phone's sound and pen, GNOME, KDE at a real desk with a phone, the shared keyboard and mouse driven from a real Windows computer at the desk, and Linux driving on GNOME or KDE | most rows, with a Galaxy A71 (2026-10), and the newer features with an OPPO phone on ColorOS 14 (2026-10-20 on); the phone as another screen driven from a script (2026-10-29); another computer's screen in a window between two servers on one computer (2026-10-29), and Windows' screen shown on the Linux laptop, view-only (2026-10-31). Not yet: start at login, the tray menu by hand, single-window streaming, the phone's sound and its music in the media controls, the pen and gamepad from the phone into an app, the phone's window by hand (drops, paste, screenshots, recordings), and the shared keyboard and mouse at the desk (driving Linux, the phone with the real mouse, files dragged across, the sound following, another real computer's screen in a window) |
 
@@ -629,6 +630,46 @@ What the DHT sees, in every mode but `"off"`:
 - **The phone's IP, and which id it looks for,** on each connection from away (and each WAN dial at home), since the lookup runs next to the cached address.
 
 The id is in the pairing QR code, on each paired phone and on every relay the desktop uses.
+
+### Approve With My Phone: sudo, polkit and the Lock Screen
+
+On Linux, sudo, and with their own switches administrator prompts (polkit) and the lock screen, can be approved on your phone with its fingerprint or screen lock. It is off on both sides until you turn it on, and the password always keeps working: the phone is tried first, and when it does not approve (no phone linked, No, no answer within the wait, anything unexpected) the password prompt comes as before. With no phone linked it comes at once.
+
+1. **On this computer:** Settings → Phones → "Approve with my phone". Turn on "Answer my questions" for your phone on the Devices page.
+2. **On the phone:** Settings → "Approve my computer's requests" (Android 11 or later, with a screen lock), and "Fingerprint only, not the PIN" if others know your PIN.
+3. **Pin the phone's key as root:** `sudo /usr/lib/pocketdesk/pocketdesk-pam-ask --pin $USER`. The phone asks "Allow this phone to approve sudo on this computer?", says it replaces its current approval key, and takes your fingerprint; it then makes the new key in its secure hardware with the pin's challenge (the old key keeps working until the pin is done), and shows a code. Root checks the key's Android attestation up to Google's roots (in the TEE or StrongBox, made there, signs only after your fingerprint or lock for each use, the Pocketdesk app signed with its release key), then asks you to type the code your phone shows; only if it matches is the key pinned to `/etc/pocketdesk/pam/$USER.json`, which only root can change. The code is what proves the key is your phone's: attestation proves only that it is some phone's hardware key. Type it only from your own phone, after running the command yourself; if the command asks for a code your phone does not show, press Ctrl+C. Pin again whenever the phone makes a new key (a new fingerprint enrolled, or "Fingerprint only" switched). A debug build of the app needs `--pin $USER --debug-app`; a phone without Key Attestation can be pinned with `--pin-without-attestation`, which warns that nothing then proves where the key lives (SECURITY.md limit 73).
+4. **Test:** the Test button in Settings asks the phone a dry request as you, with no PAM involved.
+5. **Add the line to PAM yourself.** Pocketdesk never edits `/etc/pam.d`. As root, add this line to each service you want, after `pam_faillock.so preauth` where your distribution uses faillock and before `pam_unix`:
+
+   ```
+   auth    sufficient    pam_exec.so quiet stdout /usr/lib/pocketdesk/pocketdesk-pam-ask
+   ```
+
+   - **Arch and Fedora:** `/etc/pam.d/sudo` has `auth include system-auth`, which holds the faillock and `pam_unix` lines. Put `auth required pam_faillock.so preauth` and then the line above that include, so a locked account stays locked.
+   - **Debian and Ubuntu:** `/etc/pam.d/sudo` has `@include common-auth`. Put the line above it (and `auth required pam_faillock.so preauth` before it if you enabled faillock).
+   - **Lock screens,** with "The lock screen too" on: `hyprlock`, `swaylock`, `kde` (Plasma) or `gtklock`, the same way. GNOME's `gdm-password` is not offered: the login screen uses it too.
+   - **polkit,** with "polkit too" on: `/etc/pam.d/polkit-1`.
+
+   Use `sufficient`, never `required` or `requisite`. `pocketdesk-pam-ask --lines` prints the lines. Under PAM the helper only ever fails unless the phone approved: a mistyped line (an extra argument, say) cannot let anyone in.
+
+Settings also has: the wait (20 s, 5 to 60), "Only from this desk, not ssh", "The lock screen too" (off), "polkit too" (off) and which pinned phones may approve. At most three requests a minute go to the phone per service, user and asking user (three in five minutes at the lock screen), counting only requests that passed the checks; past that, the password prompt comes at once. The packages install the helper to `/usr/lib/pocketdesk/`; from source, `sudo install -Dm755 target/release/pocketdesk-pam-ask /usr/lib/pocketdesk/pocketdesk-pam-ask` (it must be root's, outside any folder you can write to). How the request is signed and checked: SECURITY.md limit 73.
+
+What the phone shows, all of it signed: the service and user, the command (the program's real executable and every argument, never cut, any hidden or non-ASCII character written as `⟨U+XXXX⟩`, a run of three or more spaces as `⟨SPx3000⟩`), the terminal, and the programs that asked (`sudo(812) < bash(700) < kitty(650)`), so a request that is not yours stands out. Answer No to any request you did not make.
+
+Know before you rely on it:
+- **"Only from this desk" is a best-effort guard, not a boundary.** It refuses sudo typed in an ssh session, but sudo run over ssh inside a tmux or screen session started at the desk, or through `systemd-run` or a timer, is not seen as remote; such a request still needs your phone.
+- **polkit:** PAM is not told polkit's action, so the phone cannot show what is asked; a polkit request from another user is refused; and the newer socket-started polkit helper has no parent processes, so "Only from this desk" cannot judge it. That is why polkit has its own switch, off.
+- **sudo's timestamp:** after a Yes, sudo does not ask again on that terminal for its timeout (5 to 15 minutes), for any command. To keep the phone's view of each command, set `Defaults timestamp_timeout=0` with `visudo`.
+- **Over the internet road** the phone drops approval requests (it checks the computer by the certificate it pinned for its address), so the password is asked.
+- **A Yes does not unlock your keyring** (GNOME Keyring, KWallet), which the password would have.
+
+**Do not lock yourself out.** Keep a root shell open (`sudo -i` in another terminal) while you edit a PAM file, and try `sudo -k; sudo true` from a new terminal before you close it. A `sufficient` line cannot stop the password from working, but a typo in a PAM file can break the whole service.
+
+**The way back**, if sudo or the lock screen stops working:
+- From the root shell you kept open, or a text console (Ctrl+Alt+F3) logged in as root, remove the `pocketdesk-pam-ask` line from the file you edited.
+- With no root password: boot with `systemd.unit=rescue.target` (or `init=/bin/bash`) added to the kernel line, remount `/` read-write (`mount -o remount,rw /`), and remove the line.
+- `pkexec` uses polkit-1, so a broken `/etc/pam.d/polkit-1` does not stop `sudo` from fixing it, and the other way round.
+- To stop the phone approving without touching PAM: turn off "Approve with my phone" in Settings, or `sudo /usr/lib/pocketdesk/pocketdesk-pam-ask --unpin $USER`; the line then fails at once and the password prompt comes as before.
 
 ### CLI Commands
 

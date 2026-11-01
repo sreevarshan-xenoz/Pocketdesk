@@ -1177,7 +1177,15 @@ object RustCore {
         }.getOrDefault(emptyList())
 
     /** A question the computer at [host]:[port] put to this phone (BF3). */
-    data class AskQuestion(val host: String, val port: Int, val id: String, val question: String, val expiresUnix: Long)
+    data class AskQuestion(
+        val host: String,
+        val port: Int,
+        val id: String,
+        val question: String,
+        val expiresUnix: Long,
+        /** An approval request's fields as JSON (approve with my phone), or null for a plain question. */
+        val approve: String? = null,
+    )
 
     /** The questions waiting (BF3), taken. */
     fun takeAsks(): List<AskQuestion> =
@@ -1185,7 +1193,14 @@ object RustCore {
             val array = org.json.JSONArray(envelope(nativeTakeAsks()).getOrDefault("[]"))
             (0 until array.length()).map { i ->
                 val a = array.getJSONObject(i)
-                AskQuestion(a.getString("host"), a.getInt("port"), a.getString("id"), a.getString("question"), a.getLong("expires_unix"))
+                AskQuestion(
+                    a.getString("host"),
+                    a.getInt("port"),
+                    a.getString("id"),
+                    a.getString("question"),
+                    a.getLong("expires_unix"),
+                    a.optJSONObject("approve")?.toString(),
+                )
             }
         }.getOrDefault(emptyList())
 

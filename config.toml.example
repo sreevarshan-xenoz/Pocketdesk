@@ -137,6 +137,26 @@ video_quality = "balanced"
 # less, not charging).
 # phone_battery_alerts = true
 
+# Approve with my phone (Linux): sudo and administrator prompts approved on a
+# linked phone with its fingerprint or screen lock, through
+# /usr/lib/pocketdesk/pocketdesk-pam-ask, which you add to /etc/pam.d
+# yourself as "auth sufficient" (Pocketdesk never edits PAM; the password
+# always still works) after pinning the phone's key as root. Off by default.
+# See docs/guide.md, "Approve With My Phone".
+# phone_approves = false
+# How long a request waits for the phone, 5 to 60 seconds.
+# phone_approves_timeout_secs = 20
+# The lock screen too (hyprlock, swaylock, KDE, gtklock), with its own PAM line.
+# phone_approves_lock_screen = false
+# polkit too, with its own PAM line: off, as PAM is not told polkit's action
+# and the socket-started agent has no ancestry to judge ssh by.
+# phone_approves_polkit = false
+# Only from this desk: a request from an ssh session asks for the password (a
+# best-effort guard: tmux, systemd-run or a timer over ssh get past it).
+# phone_approves_local_only = true
+# Which phones may approve (device ids); empty is every phone pinned.
+# phone_approves_phones = []
+
 # Waking this computer from the phone. Paired phones are told this
 # computer's network adapter (MAC and broadcast address) so they can send
 # the magic packet themselves. To wake it from outside, forward a UDP port
