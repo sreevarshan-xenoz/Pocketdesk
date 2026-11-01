@@ -2585,6 +2585,12 @@ forged log line"
             "kdeconnect.pocketdesk.introduce",
             "kdeconnect.pocketdesk.introduce_phone",
             "kdeconnect.pocketdesk.introduce_phone_answer",
+            // The phone's location (GeoClue): an answer, taken only from the
+            // paired phone this computer asked, once, with the setting on;
+            // anything else is dropped unread. The setting, the phone chosen
+            // and the phone's own switch gate it, as the ask is the
+            // computer's own.
+            "kdeconnect.pocketdesk.phone_location",
         ];
         for packet_type in ALWAYS_ALLOWED {
             assert!(
