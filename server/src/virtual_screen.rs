@@ -977,6 +977,9 @@ fn answer_with(
                     if let Some(index) = host.capture_index(&name, output.rect.x) {
                         return json!({ "name": name, "index": index, "width": output.rect.width, "height": output.rect.height });
                     }
+                    // Still there but not streamable: taken away, or nothing
+                    // would remove it once forgotten below (review).
+                    host.remove(&name);
                 }
                 // Gone from the compositor meanwhile: forget it and make another.
                 made().phones.remove(phone);
