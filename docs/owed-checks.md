@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1105 open items.
+1112 open items.
 
 | Where | Items |
 |---|---|
@@ -12,8 +12,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 151 |
-| A Linux desktop (the Azure VM serves for some) | 193 |
+| A second computer | 152 |
+| A Linux desktop (the Azure VM serves for some) | 199 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
 
@@ -1129,6 +1129,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Windows driving the Linux laptop for real with this build (its hook loop has the same changes and builds on CI only): a 1 kHz mouse keeps up and feels smooth, clicks and drags land where the pointer is, keys typed during a fast move arrive in order, and the gaming lock still takes the hooks out within about half a second of a game coming to the front. (where: second computer)
 - The Linux portal driver for real (the owner's Hyprland driving another computer): the same feel check, and the edge still crosses after a screen is plugged in or rescaled. (where: second computer)
 
+**254. Unattended on GNOME (mutter's own D-Bus, no dialog)**
+
+- The "Allow Remote Interaction" off case through the portal on a real GNOME: the server logs "Portal input not taken" once, and another computer's window onto this one (Settings → Other computers → Show its screen) goes view-only without a reconnect; the phone is no longer offered the pen. (where: second computer)
+
 ## A Linux desktop (the Azure VM serves for some)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1641,6 +1645,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - OBS 30+ and GNOME Snapshot list and show the camera; `pw-v4l2` lets a V4L2-only app (e.g. `pw-v4l2 ffplay /dev/video0` or Cheese) open it. (where: linux)
 - Front camera and 1080p at 24 fps from Settings: the phone's notification says so and the app's picture is 1920x1080. (where: linux)
 - The ask refused: Webcam off in Devices (the button is greyed and says why), the phone's switch off (no notification), and the setting off (a camera cast from an older ask is closed with "does not offer phones as a camera"). (where: linux)
+
+**254. Unattended on GNOME (mutter's own D-Bus, no dialog)**
+
+- The first-input race on a real session: a pointer move sent before an app has bound the seat's pointer is lost to that app until the next time the pointer enters it (seen with `wev` started before the session); check a click right after a session starts lands in a window the pointer was already over. (where: linux)
+- A real GNOME desk (Ubuntu 24.04 or newer, Fedora 41 or newer) with the switch on and no one at the desk: a paired phone starts a session with no dialog, the picture and a tap and a typed word arrive, the screen-sharing indicator shows while it runs and goes when the phone leaves, and nothing is left in `~/.local/state/pocketdesk` for it (no restore token). (where: linux)
+- The same with two monitors: `monitor_index` 1 records the second one (the logical monitor at its corner), and an absolute click lands on it. (where: linux)
+- With the switch off, or on KDE or Sway with it on, the capture goes through the portal as before (no mutter call in `busctl --user monitor org.gnome.Mutter.ScreenCast`). (where: linux)
+- An older GNOME whose mutter has the ScreenCast API but no `org.gnome.Mutter.RemoteDesktop` (or refuses it): the same single log line and the portal's dialog. (where: linux)
+- The desktop app's Settings → Connection shows "Unattended on GNOME" on Linux only, off by default, and a session started after turning it on takes the new path with no server restart. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

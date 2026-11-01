@@ -3420,6 +3420,21 @@ Built 2026-11-01. "Use as a camera" on the Overview asks a phone with Webcam on;
 - [ ] Front camera and 1080p at 24 fps from Settings: the phone's notification says so and the app's picture is 1920x1080. (where: linux)
 - [ ] The ask refused: Webcam off in Devices (the button is greyed and says why), the phone's switch off (no notification), and the setting off (a camera cast from an older ask is closed with "does not offer phones as a camera"). (where: linux)
 
+## 254. Unattended on GNOME (mutter's own D-Bus, no dialog)
+
+Built 2026-11-01, off by default (`gnome_unattended`; Settings → Connection). On a GNOME session with it on, the capture makes the screen (and, where input is wanted, the keyboard and mouse) through `org.gnome.Mutter.ScreenCast` and `org.gnome.Mutter.RemoteDesktop`, as gnome-remote-desktop's headless mode does; if mutter's D-Bus is missing or refuses, the portal is used and the log says so once.
+- [x] A throwaway Arch container on the Linux laptop running `gnome-shell --headless --wayland --virtual-monitor 1280x720` (gnome-shell and mutter 51, PipeWire, `wev`, GTK's fishbowl as the animated window), the `portal_live` probe with `PD_PORTAL_PROBE_MUTTER` set: the capture started with no dialog (0.0 s), BGRx 1280x720, 118 frames in 3 s of the fishbowl for the screen alone and 103 with input; GNOME's own screen-sharing indicator showed in the top bar of a snapshot of the stream; the cursor was not in the picture. (where: linux)
+- [x] The same session's input into `wev`: a click at the asked spot (surface x, y 319.5, 439.2 of a window at 320, 136 for 0.5, 0.8 of the screen), left button down and up, `a` by evdev code and `a`, `b` by keysym; a wheel of three notches was three `axis_value120` of 120 (axis 10.0), one up -120, two sideways 120 each, and four fine turns of 30 one notch; `é` by keysym sent nothing (the layout was US). (where: linux)
+      (2026-11-01, counts and coordinates only.)
+- [ ] The first-input race on a real session: a pointer move sent before an app has bound the seat's pointer is lost to that app until the next time the pointer enters it (seen with `wev` started before the session); check a click right after a session starts lands in a window the pointer was already over. (where: linux)
+- [ ] A real GNOME desk (Ubuntu 24.04 or newer, Fedora 41 or newer) with the switch on and no one at the desk: a paired phone starts a session with no dialog, the picture and a tap and a typed word arrive, the screen-sharing indicator shows while it runs and goes when the phone leaves, and nothing is left in `~/.local/state/pocketdesk` for it (no restore token). (where: linux)
+- [ ] The same with two monitors: `monitor_index` 1 records the second one (the logical monitor at its corner), and an absolute click lands on it. (where: linux)
+- [ ] With the switch off, or on KDE or Sway with it on, the capture goes through the portal as before (no mutter call in `busctl --user monitor org.gnome.Mutter.ScreenCast`). (where: linux)
+- [x] With `gnome-shell` stopped in the container (mutter's names gone) and the switch on: the log said once "Unattended GNOME capture through mutter did not start (… ServiceUnknown …): using the screen-sharing portal", and the portal path ran after it. (where: linux)
+- [ ] An older GNOME whose mutter has the ScreenCast API but no `org.gnome.Mutter.RemoteDesktop` (or refuses it): the same single log line and the portal's dialog. (where: linux)
+- [ ] The "Allow Remote Interaction" off case through the portal on a real GNOME: the server logs "Portal input not taken" once, and another computer's window onto this one (Settings → Other computers → Show its screen) goes view-only without a reconnect; the phone is no longer offered the pen. (where: second computer)
+- [ ] The desktop app's Settings → Connection shows "Unattended on GNOME" on Linux only, off by default, and a session started after turning it on takes the new path with no server restart. (where: linux)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
