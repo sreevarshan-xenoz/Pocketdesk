@@ -15,27 +15,47 @@ object FolderWalk {
     const val MAX_DEPTH = 32
     const val MAX_BYTES = 32L * 1024 * 1024 * 1024
 
-    /** One child of a folder, as the documents provider lists it. */
-    data class Entry(val id: String, val name: String, val isDir: Boolean, val size: Long)
+    /** One child of a folder, as the documents provider lists it; [modified] in ms, 0 when it does not say. */
+    data class Entry(val id: String, val name: String, val isDir: Boolean, val size: Long, val modified: Long = 0)
 
     /** One file to send. */
-    data class File(val id: String, val path: List<String>, val size: Long)
+    data class File(val id: String, val path: List<String>, val size: Long, val modified: Long = 0)
 
-    data class Plan(val files: List<File>, val skipped: Int, val truncated: Boolean) {
+    /**
+     * What a walk is cut at. A folder kept on the computer (its own walk, on
+     * a schedule) is cut far later than a folder send a person waits for.
+     */
+    data class Limits(val maxFiles: Int = MAX_FILES, val maxDepth: Int = MAX_DEPTH, val maxBytes: Long = MAX_BYTES)
+
+    /**
+     * What a walk found. [listFailed] counts folders the provider could not
+     * list: the plan is then not the folder's whole, which only a caller that
+     * deletes by it needs to know (a kept folder never infers a deletion from
+     * a part).
+     */
+    data class Plan(val files: List<File>, val skipped: Int, val truncated: Boolean, val listFailed: Int = 0) {
         val totalBytes: Long get() = files.sumOf { it.size }
+
+        /** Whether every folder was listed and nothing was cut short. */
+        val whole: Boolean get() = listFailed == 0 && !truncated
     }
 
     /** Walk the folder [root], listing each folder with [children] (null: it could not be listed). */
-    fun plan(root: String, children: (String) -> List<Entry>?): Plan {
+    fun plan(root: String, children: (String) -> List<Entry>?): Plan = plan(root, Limits(), children)
+
+    /** [plan] cut at [limits]. */
+    fun plan(root: String, limits: Limits, children: (String) -> List<Entry>?): Plan {
         val files = mutableListOf<File>()
         var skipped = 0
         var truncated = false
+        var listFailed = 0
         var bytes = 0L
 
         fun walk(id: String, under: List<String>) {
             val listed = children(id)?.sortedWith(compareBy({ !it.isDir }, { it.name.lowercase() }))
             if (listed == null) {
                 skipped++
+                listFailed++
                 return
             }
             for (entry in listed) {
@@ -47,23 +67,23 @@ object FolderWalk {
                 }
                 val path = under + entry.name
                 if (entry.isDir) {
-                    if (path.size >= MAX_DEPTH) {
+                    if (path.size >= limits.maxDepth) {
                         truncated = true
                         return
                     }
                     walk(entry.id, path)
                 } else {
-                    if (files.size >= MAX_FILES || bytes + entry.size > MAX_BYTES) {
+                    if (files.size >= limits.maxFiles || bytes + entry.size > limits.maxBytes) {
                         truncated = true
                         return
                     }
-                    files += File(entry.id, path, entry.size)
+                    files += File(entry.id, path, entry.size, entry.modified)
                     bytes += entry.size
                 }
             }
         }
         walk(root, emptyList())
-        return Plan(files, skipped, truncated)
+        return Plan(files, skipped, truncated, listFailed)
     }
 
     /**

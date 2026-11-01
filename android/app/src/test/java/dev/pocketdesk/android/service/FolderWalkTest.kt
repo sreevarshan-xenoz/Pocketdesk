@@ -84,6 +84,44 @@ class FolderWalkTest {
     }
 
     @Test
+    fun aFilesModifiedTimeTravelsWithItAndAWalkSaysWhetherItWasWhole() {
+        val dated = mapOf(
+            "root" to listOf(
+                FolderWalk.Entry("f1", "a.txt", isDir = false, size = 5, modified = 1_780_000_000_000),
+                dir("d1", "sub"),
+            ),
+            "d1" to listOf(file("f2", "b.txt")),
+        )
+        val whole = FolderWalk.plan("root") { dated[it].orEmpty() }
+        assertEquals(listOf(0L, 1_780_000_000_000), whole.files.map { it.modified }.sorted())
+        assertTrue(whole.whole)
+        // A folder the provider could not list: a part, never the whole.
+        val part = FolderWalk.plan("root") { if (it == "d1") null else dated[it].orEmpty() }
+        assertEquals(1, part.listFailed)
+        assertFalse(part.whole)
+        // Cut short: not whole either.
+        val cut = FolderWalk.plan("root", FolderWalk.Limits(maxFiles = 1)) { dated[it].orEmpty() }
+        assertTrue(cut.truncated)
+        assertFalse(cut.whole)
+        // A name the computer would refuse is skipped, not a listing failure.
+        val refused = FolderWalk.plan("root") { mapOf("root" to listOf(file("x", "a:b"))).getValue(it) }
+        assertEquals(1, refused.skipped)
+        assertTrue(refused.whole)
+    }
+
+    @Test
+    fun aKeptFoldersWalkIsCutFarLaterThanAFolderSend() {
+        val many = (1..FolderWalk.MAX_FILES + 5).map { file("f$it", "n$it") }
+        val sent = FolderWalk.plan("root") { many.takeIf { _ -> it == "root" }.orEmpty() }
+        assertTrue(sent.truncated)
+        val kept = FolderWalk.plan("root", FolderWalk.Limits(maxFiles = 200_000, maxBytes = Long.MAX_VALUE)) {
+            many.takeIf { _ -> it == "root" }.orEmpty()
+        }
+        assertFalse(kept.truncated)
+        assertEquals(many.size, kept.files.size)
+    }
+
+    @Test
     fun namesTheComputerRefusesAreSkipped() {
         for (bad in listOf(
             "NUL", "com1.txt", "COM0", "lpt0.log", "a?b", "name.", "name ", "x\u0000y",
