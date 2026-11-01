@@ -2,19 +2,19 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1245 open items.
+1259 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 76 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 86 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 197 |
 | A phone with a SIM | 40 |
 | A second phone | 20 |
 | Away from home: another network, or through a router | 43 |
-| A second computer | 160 |
-| A Linux desktop (the Azure VM serves for some) | 214 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 78 |
+| A second computer | 161 |
+| A Linux desktop (the Azure VM serves for some) | 215 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 80 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 398 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
@@ -196,6 +196,19 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A stick: the Stick tool, WASD: W puts a finger down in the stick's middle and moves it up by its reach, W with D moves it on a diagonal of the same reach, letting go lifts it from where it was; opposite keys together leave the finger in the middle; the reach slider changes how far it goes. The stick is round on a tall phone window. (where: OPPO)
 - Without Shizuku nothing changes: with the phone's "Separate windows" off or Shizuku stopped, apps open on the phone's screen, its window shows no keys, and the bar says keys to taps works in an app window only; stopping Shizuku with keys held gives the windows back within a second and nothing stays down. (where: OPPO)
+
+**266. The computer turns on the phone's hotspot (Settings, Let my computers turn on my hotspot; Overview, Use my phone's hotspot)**
+
+- Off by default and quiet: with the switch off (or on a phone without Shizuku running) the phone's Settings shows no hotspot row (or the row off), the Overview shows no hotspot buttons for it, and an `hotspot_on` ask written by hand into `phone_actions_out/` is logged by the phone as "not done: OFF" and starts nothing. A phone on Android 10 or older shows no row. (where: here)
+- Turning the switch on asks Shizuku's own dialog once; with Shizuku running and Pocketdesk allowed, notification access on, the row says "On" and, within a minute, the Overview shows both buttons for the phone (the phone's switches report says `hotspot` on with android true). Stopping Shizuku greys the buttons with the reason in a minute. (where: here)
+- The computer connects: another device or this computer joins the phone's network with its own saved password and has internet through the phone's mobile data (open a page, or `ping` an address by number). (where: here)
+- Turning it off: "Turn its hotspot off" stops it within about 10 seconds and the indicator goes; the same with the switch off (an `off` ask is taken with the switch off); stopping the tethering manager's call by making it fail (the fallback) runs `/system/bin/cmd wifi stop-softap` only (see the helper's log), and nothing else. (where: here)
+- The phone's own switch turned off while the computer's hotspot is on turns that hotspot off at once; a hotspot the owner turned on themselves is not turned off by the timer or by the switch. (where: here)
+- The auto-off: with 15 minutes chosen (tap the row to change it; the values go round 15, 30, 60, 120, never), a hotspot the computer turned on is turned off by the phone about 15 minutes after the last ask to turn it on, a second ask meanwhile renews the time, and "never" leaves it on until asked or turned off. The phone's process killed in between (swipe the app away) still turns it off at the next tick after it restarts. (where: here)
+- A locked phone with a PIN or fingerprint lock still turns the hotspot on and off when asked, with the screen off; nothing appears on the phone's screen but Android's own indicator. (where: here)
+- The rate limit: nine asks (on and off together) in ten minutes: the first eight go, the ninth is logged "TOO_MANY" and does nothing; ten minutes later it goes again. (where: here)
+- No other command: while turning it on and off, `ps` and logcat on the phone show no `cmd wifi start-softap`, no shell and no hotspot name or password anywhere in the helper's command lines; the computer's Activity and the phone's log never show the hotspot's name or password. (where: here)
+- The Settings rows by hand: the phone's switch, summary and auto-off row (light, dark, narrow, Spanish and Tamil), and the desktop's Phones row on Linux (the field limits at 32 characters; the row is not drawn on Windows). (where: here)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -1288,6 +1301,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A question: with a `pocketdesk ask` waiting, the tile shows "No: ..." and the list shows its words; No on the watch answers No on the computer and takes the phone's notification away; with the watch's lock set it works unlocked and says "Unlock the watch first" when locked; with no watch lock it says "Set a watch lock to use this". (where: second computer)
 - Deck: with Deck switched on the list shows the computer's buttons (at most eight) and a press runs it (a button the computer's own rules refuse says so); with it off the list shows none. Two presses within 1.5 s: the second says "Too soon". (where: second computer)
 
+**266. The computer turns on the phone's hotspot (Settings, Let my computers turn on my hotspot; Overview, Use my phone's hotspot)**
+
+- Only its own computer: another paired computer's `hotspot_on` (sent by hand) is logged "NOT_OWN" and does nothing, and a paired computer with "Screenshot, lock and open its apps" turned off in Devices on the computer cannot ask at all. (where: second computer)
+
 ## A Linux desktop (the Azure VM serves for some)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1831,6 +1848,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The longest life: with a phone connected (so never idle), the link goes off at eight hours (a test build with the constant cut to a minute is enough). (where: linux)
 - The OPPO opening a direct link from another app (an `adb shell am start -d "pocketdesk://pair?..."` link, not scanned): Pair first, then a second screen naming the Wi-Fi network and asking again; "Join the network and pair" is the only way on, and Cancel and back both leave with nothing joined. After `adb shell am kill` or a rotation mid-pairing, the restored link has no Wi-Fi keys. (where: linux)
 
+**266. The computer turns on the phone's hotspot (Settings, Let my computers turn on my hotspot; Overview, Use my phone's hotspot)**
+
+- Joining on Linux with NetworkManager: with "Join my phone's hotspot network" set to the phone's saved Wi-Fi name, "Use my phone's hotspot" says "Joining ..." and the computer joins it once it appears (the notice says "Joined"); with a name that is not saved here it says so and joins nothing and asks for no password; with the setting empty it only tells you to connect. No password prompt appears and none is stored by Pocketdesk. (where: linux)
+
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
 **13. PiP + multitask (Tier-3 #14, DeX)**
@@ -2075,6 +2096,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Aiming: with an Aim area, "Aim with the mouse" (and Ctrl+Alt+Shift+M) hides and locks the pointer to the window; moving the mouse drags one finger around the area (a camera in a 3D game or a map pans); still for a moment lifts it, moving again puts it down in the middle; running to the area's edge lifts and puts it down in the middle again; a mouse button mapped as a key taps; Ctrl+Alt+Shift+M again or Ctrl+Alt+Shift alone frees the pointer. Try a 1000 Hz mouse and a 144 Hz screen: no lag builds up and the phone logs no flood. (where: other hardware)
 - An older phone (a build before this change) with a keymap played: it ignores the finger batches and still takes touch and typing; the desktop does not break. (where: other hardware)
+
+**266. The computer turns on the phone's hotspot (Settings, Let my computers turn on my hotspot; Overview, Use my phone's hotspot)**
+
+- The first check, per Android: "Use my phone's hotspot" starts the phone's Wi-Fi hotspot within about 15 seconds with no tap and no screen on the phone, under its own saved name and password (the computer sent neither), Android shows its usual hotspot indicator, and the helper's log line says it started. Record the Android version and maker for each phone tried; if the helper logs "no tethering manager" or "did not start", record the exact line (the call may need another route on that Android). Android 11, 12, 13, 14 and 15 are each owed. (where: other hardware)
+- An older phone (a build before this) or an older computer: the computer shows no buttons for a phone that never reported `hotspot`; an older phone drops an `hotspot_on` ask it does not know and nothing breaks. (where: other hardware)
 
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 
