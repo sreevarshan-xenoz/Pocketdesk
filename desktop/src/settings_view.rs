@@ -604,9 +604,10 @@ pub fn computer_quality_label(name: &str) -> &'static str {
 pub(crate) fn drawn_here(key: &str) -> bool {
     match key {
         "remember_screen_grant" | "gnome_unattended" => cfg!(target_os = "linux"),
-        // The direct link is made on Linux (Windows is its own change).
+        // The direct link is made on Linux (NetworkManager) and on Windows
+        // (the Mobile Hotspot).
         "direct_link" | "direct_link_band" | "direct_link_idle_minutes" => {
-            cfg!(target_os = "linux")
+            cfg!(any(target_os = "linux", windows))
         }
         // P3: Windows says when it is presenting; Linux does not.
         // Q4: GNOME's and KDE's Do Not Disturb on Linux.
@@ -1290,7 +1291,7 @@ impl SettingsForm {
                         );
                     });
                 }
-                // Linux: this computer's own Wi-Fi for one phone.
+                // Linux and Windows: this computer's own Wi-Fi for one phone.
                 if drawn_here("direct_link") {
                     row(ui, "direct_link", |ui| {
                         ui.checkbox(
@@ -1299,7 +1300,11 @@ impl SettingsForm {
                         );
                         note(
                             ui,
-                            "For a train, a café with client isolation or a guest Wi-Fi, where a phone cannot reach this computer. You start each link, the phone joins this computer's own Wi-Fi for Pocketdesk only, and it turns itself off. If this computer's Wi-Fi card cannot host its own network beside its connection, this computer's Wi-Fi disconnects while the link is on, and the Pair page says so first. Needs NetworkManager (and dnsmasq for sharing).",
+                            if cfg!(windows) {
+                                "For a train, a café with client isolation or a guest Wi-Fi, where a phone cannot reach this computer. You start each link, the phone joins this computer's own Wi-Fi for Pocketdesk only, and it turns itself off. It uses Windows' Mobile Hotspot, which shares this computer's internet connection (so it needs one), and while a link is on it changes the hotspot's name and passphrase and puts them back when it ends. If your own hotspot is on, no link is made."
+                            } else {
+                                "For a train, a café with client isolation or a guest Wi-Fi, where a phone cannot reach this computer. You start each link, the phone joins this computer's own Wi-Fi for Pocketdesk only, and it turns itself off. If this computer's Wi-Fi card cannot host its own network beside its connection, this computer's Wi-Fi disconnects while the link is on, and the Pair page says so first. Needs NetworkManager (and dnsmasq for sharing)."
+                            },
                         );
                     });
                     row(ui, "direct_link_band", |ui| {

@@ -158,7 +158,9 @@ impl DirectLinkCard {
     ) {
         let default = Config::default();
         let config = config.unwrap_or(&default);
-        let supported = cfg!(target_os = "linux");
+        // Linux makes it through NetworkManager, Windows through the Mobile
+        // Hotspot.
+        let supported = cfg!(any(target_os = "linux", windows));
         if !config.direct_link || !supported {
             // Off in Settings while one is on: the server turns it off.
             self.leave(state_dir);
