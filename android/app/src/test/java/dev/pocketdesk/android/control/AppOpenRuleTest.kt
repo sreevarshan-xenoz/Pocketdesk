@@ -16,6 +16,7 @@ class AppOpenRuleTest {
         appsOn: Boolean = true,
         listed: Boolean = true,
         service: Boolean = true,
+        secureLock: Boolean = true,
     ) = PhoneActionRule.decide(
         action = action,
         on = true,
@@ -28,6 +29,7 @@ class AppOpenRuleTest {
         withinBudget = true,
         appsOn = appsOn,
         listed = listed,
+        secureLock = secureLock,
     )
 
     @Test
@@ -57,9 +59,15 @@ class AppOpenRuleTest {
 
     @Test
     fun `a locked phone says locked, and a sleeping one asleep, for an open`() {
-        assertEquals(AppOpenRule.LOCKED, AppOpenRule.refusal(decide(locked = true)))
-        assertEquals(AppOpenRule.ASLEEP, AppOpenRule.refusal(decide(awake = false)))
+        // Hands-free: an open behind a secure lock says so, and that is its own word.
+        assertEquals(AppOpenRule.LOCKED_SECURE, AppOpenRule.refusal(decide(locked = true)))
+        assertEquals(AppOpenRule.LOCKED, AppOpenRule.refusal(decide(locked = true, service = false, secureLock = false)))
+        assertEquals(AppOpenRule.ASLEEP, AppOpenRule.refusal(decide(awake = false, service = false)))
+        // The list needs an unlocked phone, as before.
         assertEquals(AppOpenRule.LOCKED, AppOpenRule.refusal(decide(action = Action.APPS, locked = true)))
+        // Said to the phone's own computer only.
+        assertEquals(AppOpenRule.LOCKED_SECURE, AppOpenRule.tell(Decision.LOCKED_SECURE, own = true))
+        assertNull(AppOpenRule.tell(Decision.LOCKED_SECURE, own = false))
     }
 
     @Test
@@ -121,11 +129,11 @@ class AppOpenRuleTest {
         // core::protocol::phone_action::AppResult::as_str.
         val words = listOf(
             AppOpenRule.OPENED, AppOpenRule.NEEDS_SCREEN, AppOpenRule.CONTROL_OFF, AppOpenRule.LOCKED,
-            AppOpenRule.ASLEEP, AppOpenRule.OFF, AppOpenRule.NOT_LISTED, AppOpenRule.NOT_FOUND,
+            AppOpenRule.LOCKED_SECURE, AppOpenRule.NEEDS_TAP, AppOpenRule.ASLEEP, AppOpenRule.OFF, AppOpenRule.NOT_LISTED, AppOpenRule.NOT_FOUND,
             AppOpenRule.TOO_MANY, AppOpenRule.FAILED,
         )
         assertEquals(
-            listOf("opened", "needs_screen", "control_off", "locked", "asleep", "off", "not_listed", "not_found", "too_many", "failed"),
+            listOf("opened", "needs_screen", "control_off", "locked", "locked_secure", "needs_tap", "asleep", "off", "not_listed", "not_found", "too_many", "failed"),
             words,
         )
     }

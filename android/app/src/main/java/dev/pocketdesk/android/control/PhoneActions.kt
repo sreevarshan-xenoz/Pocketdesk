@@ -178,6 +178,7 @@ object PhoneActions {
      */
     internal fun stillRefused(context: Context, address: String): String? = when {
         !Prefs.appsFromComputer(context) -> AppOpenRule.OFF
+        KeyguardDismiss.kind(context) == LockRule.Kind.SECURE -> AppOpenRule.LOCKED_SECURE
         context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked ?: true -> AppOpenRule.LOCKED
         dev.pocketdesk.android.notify.PhoneLink.target(context)?.address != address -> AppOpenRule.OFF
         else -> null
@@ -249,6 +250,28 @@ object PhoneActions {
      */
     private fun openAsked(context: Context, ask: RustCore.PhoneActionAsk, own: HostStore.Host?, service: Boolean) {
         if (own == null) return
+        // Hands-free: a lock that guards nothing is swiped away, and a screen
+        // that is off woken, first (off this tick: it waits for Android). A
+        // secure lock never got here; the window looks again before it acts.
+        val awake = context.getSystemService(PowerManager::class.java)?.isInteractive ?: false
+        if (service && LockRule.needsDismiss(KeyguardDismiss.kind(context), awake)) {
+            val app = context.applicationContext
+            Thread {
+                if (KeyguardDismiss.dismiss(app)) {
+                    openUnlocked(app, ask, own, true)
+                } else {
+                    val why = if (KeyguardDismiss.kind(app) == LockRule.Kind.SECURE) AppOpenRule.LOCKED_SECURE else AppOpenRule.LOCKED
+                    Log.i(TAG, "the lock screen was not dismissed for an open: $why")
+                    report(own.address, own.controlPort, "open", ask.app, why)
+                }
+            }.start()
+            return
+        }
+        openUnlocked(context, ask, own, service)
+    }
+
+    /** The open itself, once the phone is awake and unlocked. */
+    private fun openUnlocked(context: Context, ask: RustCore.PhoneActionAsk, own: HostStore.Host, service: Boolean) {
         val casting = dev.pocketdesk.android.cast.CastService.screenTo == own.address
         val paused = dev.pocketdesk.android.cast.CastService.pausedFor == own.address
         val result = when (AppOpenRule.plan(ask.screen, service, casting, paused)) {
@@ -306,6 +329,7 @@ object PhoneActions {
                 service = service != null,
                 sdk = Build.VERSION.SDK_INT,
                 locked = context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked ?: true,
+                secureLock = KeyguardDismiss.kind(context) == LockRule.Kind.SECURE,
                 awake = context.getSystemService(PowerManager::class.java)?.isInteractive ?: false,
                 // T10h carries it, to the clipboard or Downloads (O2 review: with
                 // both off, it would be taken and go nowhere).
