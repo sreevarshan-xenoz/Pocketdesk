@@ -854,6 +854,7 @@ pub async fn run(config: Config) -> Result<()> {
                                 streaming_server.set_laser(laser);
                                 streaming_server.set_capture_backend(capture_backend);
                                 streaming_server.set_screen_grant(state::screen_grant());
+                                state::apply_gnome_unattended();
                                 // The gate judges the deviceId the client announces in-band
                                 // against the key its TLS certificate proved (device keys). It
                                 // runs with pairing off too, so a paired device's own

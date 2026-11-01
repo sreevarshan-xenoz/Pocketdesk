@@ -20,6 +20,7 @@ mod gpu_frame;
 pub mod h264_sps;
 #[cfg(all(windows, feature = "capture", feature = "inproc-windows"))]
 pub use gpu_frame::GpuFrame;
+pub mod gnome_unattended;
 pub mod in_flight;
 pub mod input_packet;
 #[cfg(feature = "wan")]
@@ -51,6 +52,8 @@ mod capture_d3d;
 pub mod capture_dxgi;
 #[cfg(all(feature = "capture", target_os = "linux"))]
 pub mod capture_linux;
+#[cfg(all(feature = "capture", target_os = "linux"))]
+pub mod capture_mutter;
 #[cfg(all(feature = "capture", target_os = "linux"))]
 pub mod capture_screencopy;
 #[cfg(all(feature = "capture", windows))]

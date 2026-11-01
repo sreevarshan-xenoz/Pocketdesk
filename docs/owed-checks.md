@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1117 open items.
+1123 open items.
 
 | Where | Items |
 |---|---|
@@ -12,8 +12,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 153 |
-| A Linux desktop (the Azure VM serves for some) | 194 |
+| A second computer | 154 |
+| A Linux desktop (the Azure VM serves for some) | 199 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
 
@@ -136,7 +136,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Stop on the phone's "Your camera is in use" notification ends the cast and the node goes. (where: here)
 
-**254. The phone's location for this computer's apps (GeoClue, Linux)**
+**255. The phone's location for this computer's apps (GeoClue, Linux)**
 
 - The OPPO for real: Settings "Give my computer my location" asks for location and turns on; with a throwaway server and `where-am-i -a 4` (city) the computer logs "fix sent, accuracy 1000 m" or more and `where-am-i` reports a place within about 1 km of the phone's true one (compare by distance only, never print either place); Activity shows "city location, accurate to N m". (where: here)
 - The same with the computer on Exact and the phone's "Exact location" on (accuracy of tens of metres, GPS), and with only one of the two on (the phone still gives the city). (where: here)
@@ -584,7 +584,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A host with "Phones may add a screen" off, or with Input off for the asking computer, says why on the window and shows the screen asked for. (where: owner)
 - A program started on the fitted screen by its own keys (the window drives the empty desktop: a workspace of it, a launcher) works as on any screen. (where: owner)
 
-**254. The phone's location for this computer's apps (GeoClue, Linux)**
+**255. The phone's location for this computer's apps (GeoClue, Linux)**
 
 - A real session on the owner's desk (GNOME or KDE): night light or the time zone panel takes the phone's city; the server's log and `events.jsonl` hold no coordinates (search them for the first digits of the phone's true latitude: none). (where: owner)
 
@@ -1151,7 +1151,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A Windows computer as the other end: the window's switch is greyed with the reason once it says it runs Windows, and the switch turned on before that (Settings) is answered "only Sway and Hyprland" and shows the screen asked for. (where: second computer)
 
-**254. The phone's location for this computer's apps (GeoClue, Linux)**
+**254. Unattended on GNOME (mutter's own D-Bus, no dialog)**
+
+- The "Allow Remote Interaction" off case through the portal on a real GNOME: the server logs "Portal input not taken" once, and another computer's window onto this one (Settings → Other computers → Show its screen) goes view-only without a reconnect; the phone is no longer offered the pen. (where: second computer)
+
+**255. The phone's location for this computer's apps (GeoClue, Linux)**
 
 - Two computers of the owner's, both with the setting on: each asks only its own phone, and a computer the phone is not paired to gets no answer. (where: second computer)
 
@@ -1412,11 +1416,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **100. GNOME and KDE hosts that work unattended (N8)**
 
-- "Remember the screen-sharing grant" on: a session from the phone asks once at the desk; a second session and a reconnect start with no dialog. (KDE headless above; a phone session and GNOME owed.)
-- Without uinput access: the phone's taps, typing (accents, emoji), keys and the wheel (its direction, one click a notch) reach GNOME through the RemoteDesktop portal; a remote without the screen is told it gets no input there.
+- "Remember the screen-sharing grant" on: a session from the phone asks once at the desk; a second session and a reconnect start with no dialog. (KDE and GNOME headless above, by the probe; a phone session at a real desk owed.)
+- Without uinput access: the phone's taps, typing (accents, emoji), keys and the wheel (its direction, one click a notch) reach GNOME through the RemoteDesktop portal; a remote without the screen is told it gets no input there. (Headless 2026-11-01: taps, keys, ASCII typing and the wheel arrived, accents not on a US layout, and a grant with "Allow Remote Interaction" off gave no input and no word to the phone; owed: a phone, a layout with accents, emoji.)
 - Revoking in GNOME's settings brings the dialog back; Forget the grant and turning the setting off make the next session ask.
 - No RemoteDesktop portal (or refused): the screen alone.
-- The server started as a systemd user service: does the portal keep its restore data with no desktop app id? (Unnamed, KDE kept and restored both tokens under the empty id; the server now names itself `dev.pocketdesk.Pocketdesk` where the package's desktop file is installed. The unit itself is still owed.)
+- The server started as a systemd user service: does the portal keep its restore data with no desktop app id? (Unnamed, KDE kept and restored both tokens under the empty id; the server now names itself `dev.pocketdesk.Pocketdesk` where the package's desktop file is installed. The unit itself is still owed on a live desk. Answered 2026-11-01 from the unit and systemd's rules: a user unit gets only the user manager's environment, never the session's, and Plasma's `startplasma-wayland` sets `XDG_CURRENT_DESKTOP`, `KDE_FULL_SESSION` and `KDE_SESSION_VERSION` itself and carries KDE's `KUpdateLaunchEnvironmentJob`, the job that pushes them to the user manager and D-Bus activation (read from the 6.8.2 binary's strings, not run), while `plasma-workspace.target` is `Before=graphical-session.target`, which the unit starts after; the same rig showed the converse on GNOME, where the manager had no `XDG_CURRENT_DESKTOP` until the session set it, and the portal then offered no ScreenCast. Still to see on a real Plasma desk: `systemctl --user show-environment | grep -E 'XDG_CURRENT_DESKTOP|KDE_FULL_SESSION'`.)
 
 **101. KDE Connect, next steps (N9)**
 
@@ -1652,7 +1656,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Firefox and a GTK app under Sway or Hyprland without uinput: a slow two-finger scroll moves the page about as far as the same scroll on a laptop's own touchpad, with no jump at notch boundaries. (where: linux)
 - X11 (an Xorg session without uinput, through XTEST): the wheel scrolls up and down the right way, a click a notch. (where: linux)
 - KDE Plasma through the portal: a slow touchpad scroll from the window or the phone moves a few pixels at a time (`NotifyPointerAxis` pixels, 3.75 a quarter notch), the right way. (where: linux)
-- GNOME through the portal: a slow touchpad scroll still scrolls, a notch once the turns make one. (where: linux)
 - uinput on a Linux computer where `/dev/uinput` is writable: `libinput debug-events` shows `v120` values below 120 for a slow scroll, and a mouse wheel's notch from an older phone app still scrolls one notch. (where: linux)
 - The phone's trackpad: a slow two-finger scroll moves the page smoothly; with Settings' Smooth scrolling off it moves a notch at a time as before. (where: linux)
 
@@ -1668,7 +1671,16 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Front camera and 1080p at 24 fps from Settings: the phone's notification says so and the app's picture is 1920x1080. (where: linux)
 - The ask refused: Webcam off in Devices (the button is greyed and says why), the phone's switch off (no notification), and the setting off (a camera cast from an older ask is closed with "does not offer phones as a camera"). (where: linux)
 
-**254. The phone's location for this computer's apps (GeoClue, Linux)**
+**254. Unattended on GNOME (mutter's own D-Bus, no dialog)**
+
+- The first-input race on a real session: a pointer move sent before an app has bound the seat's pointer is lost to that app until the next time the pointer enters it (seen with `wev` started before the session); check a click right after a session starts lands in a window the pointer was already over. (where: linux)
+- A real GNOME desk (Ubuntu 24.04 or newer, Fedora 41 or newer) with the switch on and no one at the desk: a paired phone starts a session with no dialog, the picture and a tap and a typed word arrive, the screen-sharing indicator shows while it runs and goes when the phone leaves, and nothing is left in `~/.local/state/pocketdesk` for it (no restore token). (where: linux)
+- The same with two monitors: `monitor_index` 1 records the second one (the logical monitor at its corner), and an absolute click lands on it. (where: linux)
+- With the switch off, or on KDE or Sway with it on, the capture goes through the portal as before (no mutter call in `busctl --user monitor org.gnome.Mutter.ScreenCast`). (where: linux)
+- An older GNOME whose mutter has the ScreenCast API but no `org.gnome.Mutter.RemoteDesktop` (or refuses it): the same single log line and the portal's dialog. (where: linux)
+- The desktop app's Settings → Connection shows "Unattended on GNOME" on Linux only, off by default, and a session started after turning it on takes the new path with no server restart. (where: linux)
+
+**255. The phone's location for this computer's apps (GeoClue, Linux)**
 
 - The computer's setting turned off while `where-am-i` runs: the source goes within about 5 s, Avahi no longer lists `_nmea-0183._tcp`, and turning it on again announces again; restarting avahi-daemon while on re-announces within about 5 s. (where: linux)
 

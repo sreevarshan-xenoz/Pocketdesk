@@ -181,6 +181,14 @@ pub fn fine_wheel_call(
     }
 }
 
+/// Whether the text of a failed input call says the session may not take
+/// input at all: GNOME's "Allow Remote Interaction" left off in its dialog
+/// ("Session is not allowed to call NotifyPointer methods"). Any other
+/// failure is a call that went wrong, not a session that is closed to input.
+pub fn input_refused_text(message: &str) -> bool {
+    message.to_ascii_lowercase().contains("not allowed")
+}
+
 /// Where a normalized position falls on a stream of `size`, in its pixels.
 pub fn absolute_position(x_norm: u16, y_norm: u16, size: (u32, u32)) -> (f64, f64) {
     let scale = |n: u16, len: u32| f64::from(n) / 65535.0 * f64::from(len.saturating_sub(1));
@@ -279,6 +287,18 @@ mod tests {
         assert_eq!(keysym_for('\u{7}'), None, "a bell types nothing");
         assert_eq!(text_events("a\u{7}").len(), 2, "skipped");
         assert_eq!(text_events("a\r\nb").len(), 6, "a CRLF is one Return");
+    }
+
+    #[test]
+    fn a_session_closed_to_input_is_told_from_a_call_that_failed() {
+        assert!(input_refused_text(
+            "Session is not allowed to call NotifyPointer methods"
+        ));
+        assert!(input_refused_text(
+            "org.freedesktop.portal.Error.NotAllowed: Method not allowed"
+        ));
+        assert!(!input_refused_text("org.freedesktop.DBus.Error.NoReply"));
+        assert!(!input_refused_text("timed out"));
     }
 
     #[test]

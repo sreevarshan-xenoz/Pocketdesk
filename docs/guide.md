@@ -43,7 +43,7 @@ The desktop end runs on Linux and Windows; the phone end is the Android app. It 
 |---|---|---|
 | Screen capture | wlroots screencopy (Hyprland, Sway), the portal (GNOME, KDE; it asks at each session, or with Settings "Remember the screen-sharing grant" on, off by default, once until you revoke it, so sessions start with no one at the desk; on KDE Plasma 6 it can be [allowed ahead](#kde-plasma-no-dialog-at-all), so it never asks), X11 | Windows.Graphics.Capture, DXGI duplication |
 | Hardware encoding | VAAPI (in process), NVENC (through `ffmpeg`); software is libx264, or on Fedora's `ffmpeg-free` Cisco's OpenH264 (after 0.8.3) | NVENC, AMF, Quick Sync, Media Foundation (every encoder, software too, through `ffmpeg.exe` on `PATH`) |
-| Remote input | uinput (Wayland), else the compositor's virtual pointer and keyboard on wlroots (Sway, Hyprland) when uinput is root-only, or GNOME's and KDE's RemoteDesktop portal through the session's screen sharing (one grant for both; a remote without the screen gets no input there), XTEST (X11); text typed from the phone goes through the compositor's virtual keyboard on wlroots (Sway, Hyprland), so any character arrives on any layout, else as US-layout keys with Shift | `SendInput`: elevated windows need `install --elevated`; the UAC prompt and the lock screen are never reachable |
+| Remote input | uinput (Wayland), else the compositor's virtual pointer and keyboard on wlroots (Sway, Hyprland) when uinput is root-only, or GNOME's and KDE's RemoteDesktop portal through the session's screen sharing (one grant for both; a remote without the screen gets no input there; GNOME also has the off-by-default "Unattended on GNOME", mutter's own D-Bus with no dialog), XTEST (X11); text typed from the phone goes through the compositor's virtual keyboard on wlroots (Sway, Hyprland), so any character arrives on any layout, else as US-layout keys with Shift | `SendInput`: elevated windows need `install --elevated`; the UAC prompt and the lock screen are never reachable |
 | Clipboard: text and images, anywhere | `wl-clipboard` on Wayland, `xclip` on X11 | Win32 clipboard |
 | Files both ways, remote browsing (anywhere) | yes | yes |
 | Desktop sound on the phone | PipeWire | WASAPI loopback |
@@ -75,7 +75,7 @@ The desktop end runs on Linux and Windows; the phone end is the Android app. It 
 | Events, hooks, named tasks, Home Assistant | yes | yes |
 | Approve sudo, polkit and the lock screen on the phone | PAM, through a line you add (off by default) | no |
 | Desktop app tray | yes, where the desktop shows StatusNotifierItems (closing quits where it does not) | yes |
-| Device-checked | Hyprland on a laptop (2026-09: pairing, video with VAAPI, input, Tailscale, start at login); a headless Sway VM across the internet (2026-10-14: pairing, LAN and WAN sessions, clipboard; 2026-10-15: links both ways, the phone's battery, now-playing and Pause through `playerctl`; 2026-10-16: typing any character, input without uinput, the phone as a remote; 2026-10-22: the desktop app's window, its typing and phone-screen windows, the tray program under waybar with the phone's music in MPRIS, the laser dot); on the laptop, the shared keyboard and mouse's receiving end from a script into a headless Sway (2026-10-28: keys in order and none left down, a killed sender's key let go, a lock screen typed into); KDE Plasma 6.8 headless in a container on the laptop, the portal capture driven by a script rather than a phone (2026-10-31: the screen at about 58 fps, both kinds of grant restored with no dialog, allowed ahead with no dialog at all, input through the portal, the wheel a mouse notch at a time since the same day's fix); Linux driving through Hyprland's input-capture portal, the laptop's own touchpad into a stand-in computer (2026-10-29); the laptop showing Windows' screen in a window, view-only, by both roads (2026-10-31); a phone-shaped second screen on Hyprland added, captured and removed by a test (2026-10-31); software encoding through OpenH264 on Fedora 44's `ffmpeg-free` in a container, by a test and the real streaming server on a test pattern, with no phone (2026-10-31). Not yet: files, notifications and texts, sound on the phone, the phone's sound and pen, GNOME, KDE at a real desk with a phone, the shared keyboard and mouse driven from a real Windows computer at the desk, and Linux driving on GNOME or KDE | most rows, with a Galaxy A71 (2026-10), and the newer features with an OPPO phone on ColorOS 14 (2026-10-20 on); the phone as another screen driven from a script (2026-10-29); another computer's screen in a window between two servers on one computer (2026-10-29), and Windows' screen shown on the Linux laptop, view-only (2026-10-31). Not yet: start at login, the tray menu by hand, single-window streaming, the phone's sound and its music in the media controls, the pen and gamepad from the phone into an app, the phone's window by hand (drops, paste, screenshots, recordings), and the shared keyboard and mouse at the desk (driving Linux, the phone with the real mouse, files dragged across, the sound following, another real computer's screen in a window) |
+| Device-checked | Hyprland on a laptop (2026-09: pairing, video with VAAPI, input, Tailscale, start at login); a headless Sway VM across the internet (2026-10-14: pairing, LAN and WAN sessions, clipboard; 2026-10-15: links both ways, the phone's battery, now-playing and Pause through `playerctl`; 2026-10-16: typing any character, input without uinput, the phone as a remote; 2026-10-22: the desktop app's window, its typing and phone-screen windows, the tray program under waybar with the phone's music in MPRIS, the laser dot); on the laptop, the shared keyboard and mouse's receiving end from a script into a headless Sway (2026-10-28: keys in order and none left down, a killed sender's key let go, a lock screen typed into); KDE Plasma 6.8 headless in a container on the laptop, the portal capture driven by a script rather than a phone (2026-10-31: the screen at about 58 fps, both kinds of grant restored with no dialog, allowed ahead with no dialog at all, input through the portal, the wheel a mouse notch at a time since the same day's fix); GNOME 51.1 headless the same way (2026-11-01: the screen as BGRx at 1280x720, over 100 frames in 3 s of an animated window, the grant restored with no dialog, input and the wheel through the portal, accents not on a US layout); Linux driving through Hyprland's input-capture portal, the laptop's own touchpad into a stand-in computer (2026-10-29); the laptop showing Windows' screen in a window, view-only, by both roads (2026-10-31); a phone-shaped second screen on Hyprland added, captured and removed by a test (2026-10-31); software encoding through OpenH264 on Fedora 44's `ffmpeg-free` in a container, by a test and the real streaming server on a test pattern, with no phone (2026-10-31). Not yet: files, notifications and texts, sound on the phone, the phone's sound and pen, GNOME or KDE at a real desk with a phone, the shared keyboard and mouse driven from a real Windows computer at the desk, and Linux driving on GNOME or KDE | most rows, with a Galaxy A71 (2026-10), and the newer features with an OPPO phone on ColorOS 14 (2026-10-20 on); the phone as another screen driven from a script (2026-10-29); another computer's screen in a window between two servers on one computer (2026-10-29), and Windows' screen shown on the Linux laptop, view-only (2026-10-31). Not yet: start at login, the tray menu by hand, single-window streaming, the phone's sound and its music in the media controls, the pen and gamepad from the phone into an app, the phone's window by hand (drops, paste, screenshots, recordings), and the shared keyboard and mouse at the desk (driving Linux, the phone with the real mouse, files dragged across, the sound following, another real computer's screen in a window) |
 
 The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 (Android 16) and an OPPO Reno8 (ColorOS 14).
 
@@ -550,6 +550,13 @@ The unit is `WantedBy=graphical-session.target`, so it starts at login and
 stops with the session. To run it without a login session (headless), enable
 lingering first: `sudo loginctl enable-linger $USER`.
 
+A user unit sees only the user manager's environment, not your session's. GNOME
+and KDE Plasma put `XDG_CURRENT_DESKTOP` and `WAYLAND_DISPLAY` there at login;
+on Sway or Hyprland, add `dbus-update-activation-environment --systemd
+WAYLAND_DISPLAY XDG_CURRENT_DESKTOP` to the compositor's start-up. Without
+`XDG_CURRENT_DESKTOP` the desktop portal offers no screen sharing, and the
+server cannot tell KDE's wheel from GNOME's.
+
 ### KDE Plasma: No Dialog at All
 
 The server names itself to the desktop portal as `dev.pocketdesk.Pocketdesk`,
@@ -590,6 +597,48 @@ waits a minute at each session, or two where input goes through the portal
 (its dialog, then the screen's), and ends it ("No one answered the
 screen-sharing dialog"), and a dialog answered late leaves "The kept
 screen-sharing grant was not taken" in the server's log.
+
+### GNOME: One Dialog, With a Switch
+
+GNOME asks once, in one dialog: "Remote Desktop" when the server wants
+input too, "Share Screen" for the screen alone. "Remember This Selection"
+is ticked already, and with "Remember the screen-sharing grant" on the
+next session starts with no dialog. **"Allow Remote Interaction" starts
+off.** Leave it off and the screen is shared but the keyboard and mouse
+are refused (the server's log says "Portal input not taken"); turn it on
+before Share. Typed accents (`é`) reach GNOME through the portal only if
+the active layout has them. GNOME's dialog calls the server "an app"
+either way.
+
+### GNOME: Unattended, With No Dialog
+
+GNOME's screen-sharing dialog needs someone at the computer the first time.
+For a computer with no one at it, Settings → Connection has **Unattended on
+GNOME** (`gnome_unattended = true` in `config.toml`; off by default, GNOME
+only, read as each session starts). With it on, the server starts the screen,
+and the keyboard and mouse where uinput is not open to it, through GNOME's
+own screen-casting and remote-desktop service (`org.gnome.Mutter.ScreenCast`
+and `org.gnome.Mutter.RemoteDesktop`, the calls gnome-remote-desktop's
+headless mode makes), so no dialog shows and nothing is asked.
+
+**Before you do:** any program running as you can make the same calls, so
+this adds no power an attacker running as you lacked, but it removes the one
+place a person at the computer could say no (SECURITY.md, limit 75). A paired
+phone still needs your approval and its Control permission for input. While a
+phone is connected GNOME shows its screen-sharing indicator in the top bar,
+and the pointer is not drawn into the picture.
+
+If GNOME's service is missing or refuses, the server uses the screen-sharing
+portal instead, as with the switch off, and says so once in its log
+("Unattended GNOME capture through mutter did not start"). "Remember the
+screen-sharing grant" is not involved: nothing is stored. Typed accents reach
+GNOME only if the active layout has them, as through the portal. If a dialog
+you answered left "Allow Remote Interaction" off, the screen is shared and the
+keyboard and mouse are refused; the server logs "Portal input not taken" and
+says so on the session's ready stream (the status a session already carries
+for what the computer takes): another computer's window shows it view-only,
+and a phone is no longer offered the pen. The phone app has no banner for it
+yet.
 
 ### Away From Home: Your Own Relay
 
@@ -679,7 +728,7 @@ Mozilla's location service shut down in 2024, so on Linux GeoClue (what night li
 1. **On this computer:** Settings → Phones → "Location from my phone". Pick City (the default: the place rounded to about 1 km) or Exact, and which phone (any of yours that is linked, or one by name). You need `geoclue` and `avahi-daemon` running; GeoClue's network-NMEA source is on by default (`[network-nmea]` in `/etc/geoclue/geoclue.conf`), and on a desktop without a GeoClue agent (GNOME and KDE have one) the demo agent must run for apps to be allowed.
 2. **On the phone:** Settings → "Give my computer my location" (allow location when asked). "Exact location" under it is off; the computer gets the city unless you turn it on and the computer asks for exact. Android shows no location to an app that is not on screen, so for asks while the phone is in your pocket choose "Allow all the time" for Pocketdesk in the app's location settings (the row under the switch opens them); without it the phone answers while Pocketdesk is open.
 
-How it works: this computer serves one location source to itself only (its own loopback; nothing on the network can connect) and tells GeoClue about it over Avahi on the loopback. When an app asks GeoClue for a place, GeoClue connects, and the computer asks the phone for one fix, at most every ten minutes, and passes it on. Each fix shows in Activity by its accuracy. Nothing is stored and nothing is logged but "fix sent, accuracy N m". Linux only: Windows would need a sensor driver. `docs/privacy.md` and limit 75 in `SECURITY.md` say what it exposes; the packets are in `docs/protocol.md`.
+How it works: this computer serves one location source to itself only (its own loopback; nothing on the network can connect) and tells GeoClue about it over Avahi on the loopback. When an app asks GeoClue for a place, GeoClue connects, and the computer asks the phone for one fix, at most every ten minutes, and passes it on. Each fix shows in Activity by its accuracy. Nothing is stored and nothing is logged but "fix sent, accuracy N m". Linux only: Windows would need a sensor driver. `docs/privacy.md` and limit 76 in `SECURITY.md` say what it exposes; the packets are in `docs/protocol.md`.
 
 ### CLI Commands
 
