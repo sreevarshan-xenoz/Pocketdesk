@@ -102,6 +102,11 @@ video_quality = "balanced"
 # Off: the window only shows.
 # cast_control = true
 
+# The desktop app lists a Phone apps page: a linked phone's apps, to open one
+# there with its screen in a window here. The phone decides whether it may be
+# asked ("Let the computer open my apps", off by default). Off: not listed.
+# phone_apps_page = true
+
 # Linux: offer phones as this computer's camera. A phone with "Use its camera
 # as a webcam" on in the desktop app (Devices) and "Let the computer use
 # my camera" on in its Settings, asked from the Overview, is published as a

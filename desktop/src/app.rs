@@ -423,6 +423,7 @@ pub enum Tab {
     Messages,
     Notifications,
     Phone,
+    Apps,
     Clipboard,
     Settings,
     Diagnostics,
@@ -506,8 +507,8 @@ pub struct PocketdeskApp {
     overview_link: Option<(String, String)>,
     /// The link box was just opened: its field takes the cursor once.
     overview_link_focus: bool,
-    /// The Overview's "Open an app on the phone…" box (P2).
-    apps_box: Option<crate::apps_view::AppsBox>,
+    /// The Phone apps page (Apps part 1, over P2's box).
+    apps_page: crate::apps_view::AppsPage,
     /// A "Choose file…" dialog that is open.
     picking: Option<std::thread::JoinHandle<Option<PathBuf>>>,
     /// The Diagnostics tab (F10).
@@ -609,7 +610,7 @@ impl PocketdeskApp {
             recent_sessions_stamp: None,
             overview_link: None,
             overview_link_focus: false,
-            apps_box: None,
+            apps_page: Default::default(),
             picking: None,
             diagnostics: Default::default(),
             messages: Default::default(),
@@ -1549,6 +1550,22 @@ impl PocketdeskApp {
                     self.photos.show(ui, &self.state_dir, &phone, now_unix());
                 }
             }
+            Tab::Apps => {
+                let ctx = ui.ctx().clone();
+                let action =
+                    self.apps_page
+                        .show(ui, &self.state_dir, &self.snapshot.devices, now_unix());
+                match action {
+                    Some(crate::apps_view::Action::Go(tab)) => self.switch_to(tab),
+                    // An app opened: the phone's screen window, brought up.
+                    Some(crate::apps_view::Action::Raise(_phone)) => {
+                        if let Some(cast) = &self.cast {
+                            cast.raise(&ctx);
+                        }
+                    }
+                    None => {}
+                }
+            }
             Tab::Clipboard => {
                 let history = self.config.as_ref().map_or(0, |c| c.clipboard_history);
                 match self.clipboard.show(
@@ -2110,24 +2127,6 @@ impl PocketdeskApp {
         );
     }
 
-    /// P2: ask the phone `id` to open the app `app`, and say how that went.
-    fn open_phone_app(&mut self, id: &str, app: &str, name: &str) {
-        let who = self.label(id);
-        self.notice = crate::notice::Notice::outcome(
-            match pocketdesk_core::local::phone_actions::request_open(
-                &self.state_dir,
-                id,
-                app,
-                now_unix(),
-            ) {
-                Ok(_) => Ok(format!(
-                    "Asked {who} to open {name}. With the phone unlocked it opens at once while Pocketdesk control is on, else the phone offers \"Tap to open\"."
-                )),
-                Err(e) => Err(format!("Could not ask {who}: {e}")),
-            },
-        );
-    }
-
     /// The Overview's phones (N6): where each is, its battery and last
     /// session, and Ring, Send file… and Send link… for it.
     fn phones_panel(&mut self, ui: &mut egui::Ui) {
@@ -2149,8 +2148,6 @@ impl PocketdeskApp {
         let cameras = model::cameras(&self.snapshot.sessions);
         let mut phone_action = None;
         let mut open_apps = None;
-        // P2: the phones listed, for the apps box drawn after them.
-        let listed: Vec<String> = rows.iter().map(|r| r.device.id.clone()).collect();
         let mut type_to = None;
         let mut media_press = None;
         let control_on = self.config.as_ref().is_none_or(|c| c.cast_control);
@@ -2413,10 +2410,10 @@ impl PocketdeskApp {
                     }
                     // P2: one of the phone's apps opened from here.
                     let apps_why = action_reach.err().unwrap_or(
-                        "Lists the phone's apps, to open one there. On the phone it needs \"Let the computer open my apps\" on, and the Pocketdesk control service to open one.",
+                        "The Phone apps page: the phone's apps as icons, to open one there with its screen in a window here. On the phone it needs \"Let the computer open my apps\" on, and the Pocketdesk control service.",
                     );
                     if ui
-                        .add_enabled(action_reach.is_ok(), egui::Button::new("Open an app on the phone…"))
+                        .add_enabled(action_reach.is_ok(), egui::Button::new("Phone apps…"))
                         .on_hover_text(apps_why)
                         .on_disabled_hover_text(apps_why)
                         .clicked()
@@ -2520,39 +2517,10 @@ impl PocketdeskApp {
             self.phone_action(&id, action);
         }
         if let Some(id) = open_apps {
-            self.phone_action(
-                &id,
-                pocketdesk_core::protocol::phone_action::PhoneAction::Apps,
-            );
-            self.apps_box = Some(crate::apps_view::AppsBox::new(id, now));
-        }
-        // The box for the phone it was opened for, while that phone is listed.
-        let box_for = self.apps_box.as_ref().map(|b| b.device_id.clone());
-        if let Some(id) = box_for {
-            if listed.contains(&id) {
-                let who = self.label(&id);
-                let state_dir = self.state_dir.clone();
-                let action = self
-                    .apps_box
-                    .as_mut()
-                    .and_then(|b| b.ui(ui, &state_dir, &who));
-                match action {
-                    Some(crate::apps_view::Action::Open(app, name)) => {
-                        self.open_phone_app(&id, &app, &name)
-                    }
-                    Some(crate::apps_view::Action::Close) => self.apps_box = None,
-                    Some(crate::apps_view::Action::AskAgain) => {
-                        self.phone_action(
-                            &id,
-                            pocketdesk_core::protocol::phone_action::PhoneAction::Apps,
-                        );
-                        self.apps_box = Some(crate::apps_view::AppsBox::new(id.clone(), now));
-                    }
-                    None => {}
-                }
-            } else {
-                self.apps_box = None;
-            }
+            // P2's box is the Phone apps page now.
+            self.apps_page.choose(&id);
+            self.switch_to(Tab::Apps);
+            self.chosen = Tab::Apps;
         }
         if let Some((id, name)) = type_to {
             self.type_view.open(&self.state_dir, &id, &name);
@@ -4723,6 +4691,12 @@ impl eframe::App for PocketdeskApp {
                                 );
                             }
                             for tab in group.pages {
+                                // The Phone apps page, unless Settings unlists it.
+                                if *tab == Tab::Apps
+                                    && self.config.as_ref().is_some_and(|c| !c.phone_apps_page)
+                                {
+                                    continue;
+                                }
                                 // What waits there, after its name (I3).
                                 let label = match crate::nav::badge(*tab, waiting) {
                                     Some(badge) => {
@@ -4839,6 +4813,7 @@ impl eframe::App for PocketdeskApp {
             self.arrange.take_notice(),
             self.messages.take_notice(),
             self.logs.take_notice(),
+            self.apps_page.take_notice(),
         ];
         if let Some(notice) = said.into_iter().flatten().last() {
             self.notice = Some(notice);

@@ -78,6 +78,16 @@ class CastService : Service() {
         var castingTo: String? = null
             private set
 
+        /**
+         * The computer the phone's screen (not its camera, not its sound
+         * alone) is shown on now, null when none: what an open that wants
+         * the screen reuses instead of asking for Android's consent again
+         * (Apps part 1).
+         */
+        @Volatile
+        var screenTo: String? = null
+            private set
+
         /** Whether the camera is the computer's camera now (F6 part 2). */
         @Volatile
         var webcamRunning: Boolean = false
@@ -259,6 +269,7 @@ class CastService : Service() {
             main,
         )
         castingTo = address
+        screenTo = address.takeUnless { soundAlone }
         Thread({ run(port) }, "cast-session").start()
         return START_NOT_STICKY
     }
@@ -504,6 +515,7 @@ class CastService : Service() {
         if (finished) return
         finished = true
         castingTo = null
+        screenTo = null
         webcamRunning = false
         if (reached) HostStore.markUsed(this, address)
         // Its sound first, off the main thread (its stop waits for its

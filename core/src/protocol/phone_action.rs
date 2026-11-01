@@ -12,8 +12,21 @@ pub const PHONE_ACTION: &str = "kdeconnect.pocketdesk.phone_action";
 /// open, answering `apps`. Under the Phone actions permission.
 pub const PHONE_APPS: &str = "kdeconnect.pocketdesk.phone_apps";
 
+/// Phone → computer (Apps part 1): `{icons: [{id, v, png}]}`, the icons of
+/// apps the computer did not have at that version, `png` base64, sent in
+/// batches after the list. Under the Phone actions permission.
+pub const PHONE_APP_ICONS: &str = "kdeconnect.pocketdesk.phone_app_icons";
+
+/// Phone → computer (Apps part 1): `{about, app?, result}`, how an `apps`
+/// or `open` ask went, given only to the phone's own computer. Under the
+/// Phone actions permission.
+pub const PHONE_APP_OPENED: &str = "kdeconnect.pocketdesk.phone_app_opened";
+
 /// The most apps a list holds.
 pub const MAX_APPS: usize = 500;
+
+/// The most icons one [`PHONE_APP_ICONS`] packet holds.
+pub const MAX_ICONS_PER_PACKET: usize = 40;
 
 /// Phone → computer (P10): `{contacts: [{name, numbers}]}`, the phone's
 /// contacts, names and numbers only, answering `contacts`. Under the Texts
@@ -88,11 +101,15 @@ pub fn parse_contacts(body: &serde_json::Value) -> Vec<PhoneContact> {
 /// The longest app id (an Android package name) taken.
 pub const MAX_APP_ID: usize = 255;
 
-/// One of the phone's apps (P2): its package name and its label.
+/// One of the phone's apps (P2): its package name and its label, and (Apps
+/// part 1) its version code, which names the icon the computer keeps for
+/// it (0 from a phone that does not say).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PhoneApp {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub version: u64,
 }
 
 /// Whether `id` is an Android package name: dotted words of letters,
@@ -136,12 +153,150 @@ pub fn parse_apps(body: &serde_json::Value) -> Vec<PhoneApp> {
             } else {
                 name
             },
+            version: app.get("v").and_then(|v| v.as_u64()).unwrap_or(0),
         });
         if apps.len() == MAX_APPS {
             break;
         }
     }
     apps
+}
+
+/// The icons the computer already has, from an `apps` ask's `have`
+/// (`{id: version}`): only valid ids, at most [`MAX_APPS`].
+pub fn parse_have(body: &serde_json::Value) -> std::collections::BTreeMap<String, u64> {
+    body.get("have")
+        .and_then(|h| h.as_object())
+        .map(|have| {
+            have.iter()
+                .filter(|(id, _)| valid_app_id(id))
+                .filter_map(|(id, v)| Some((id.clone(), v.as_u64()?)))
+                .take(MAX_APPS)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The packet's body for an `apps` ask: the icons already kept (an app's
+/// id and the version of its icon), so the phone sends only the rest.
+pub fn apps_body(have: &std::collections::BTreeMap<String, u64>) -> serde_json::Value {
+    if have.is_empty() {
+        return json!({ "action": PhoneAction::Apps.as_str() });
+    }
+    json!({ "action": PhoneAction::Apps.as_str(), "have": have })
+}
+
+/// The packet's body for an `open` ask; `screen` asks that the phone's
+/// screen be shown here too (one consent for the connection, not one per
+/// app), and is left out when not.
+pub fn open_body(app: &str, screen: bool) -> serde_json::Value {
+    let mut open = body(PhoneAction::Open, Some(app));
+    if screen {
+        open["screen"] = json!(true);
+    }
+    open
+}
+
+/// What came of an ask the phone answers with [`PHONE_APP_OPENED`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AppResult {
+    /// The app was started.
+    Opened,
+    /// The phone's screen is not shown here yet: its owner is asked once,
+    /// and the app opens after.
+    NeedsScreen,
+    /// Pocketdesk's control service on the phone is off.
+    ControlOff,
+    /// The phone is locked.
+    Locked,
+    /// The phone's screen is off.
+    Asleep,
+    /// "Let the computer open my apps" is off.
+    Off,
+    /// An app the phone did not list for the computer.
+    NotListed,
+    /// The app is gone or has nothing to open.
+    NotFound,
+    /// More asks than the phone does a minute.
+    TooMany,
+    /// Android refused it.
+    Failed,
+}
+
+impl AppResult {
+    /// Every result.
+    pub const ALL: [AppResult; 10] = [
+        AppResult::Opened,
+        AppResult::NeedsScreen,
+        AppResult::ControlOff,
+        AppResult::Locked,
+        AppResult::Asleep,
+        AppResult::Off,
+        AppResult::NotListed,
+        AppResult::NotFound,
+        AppResult::TooMany,
+        AppResult::Failed,
+    ];
+
+    /// The word the packet carries.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AppResult::Opened => "opened",
+            AppResult::NeedsScreen => "needs_screen",
+            AppResult::ControlOff => "control_off",
+            AppResult::Locked => "locked",
+            AppResult::Asleep => "asleep",
+            AppResult::Off => "off",
+            AppResult::NotListed => "not_listed",
+            AppResult::NotFound => "not_found",
+            AppResult::TooMany => "too_many",
+            AppResult::Failed => "failed",
+        }
+    }
+
+    /// The result `word` names, or `None`.
+    pub fn parse(word: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|r| r.as_str() == word)
+    }
+}
+
+/// How an ask went, as a phone says it ([`PHONE_APP_OPENED`]): which ask
+/// (`apps` or `open`), the app an open named, and the result.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AppReport {
+    pub about: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    pub result: AppResult,
+}
+
+impl AppReport {
+    /// The report in `body`: an `apps` or `open` ask with a result this
+    /// computer knows, and for an open a valid app id.
+    pub fn from_body(body: &serde_json::Value) -> Option<AppReport> {
+        let about = body.get("about")?.as_str()?;
+        let result = AppResult::parse(body.get("result")?.as_str()?)?;
+        let app = body
+            .get("app")
+            .and_then(|a| a.as_str())
+            .filter(|a| valid_app_id(a))
+            .map(str::to_string);
+        match (about, &app) {
+            ("open", Some(_)) | ("apps", None) => {}
+            _ => return None,
+        }
+        Some(AppReport {
+            about: about.to_string(),
+            app,
+            result,
+        })
+    }
+
+    /// The packet's body.
+    pub fn to_body(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or_else(|_| json!({}))
+    }
 }
 
 /// What the phone is asked to do.
@@ -223,7 +378,7 @@ mod tests {
         assert!(!valid_app_id("org.app;rm"));
         assert!(!valid_app_id(&format!("a.{}", "b".repeat(MAX_APP_ID))));
         let apps = parse_apps(&json!({"apps": [
-            {"id": "org.example.app", "name": "Example\nApp"},
+            {"id": "org.example.app", "name": "Example\nApp", "v": 12},
             {"id": "org.example.app", "name": "Again"},
             {"id": "bad id", "name": "Bad"},
             {"id": "org.example.blank", "name": "  "},
@@ -233,11 +388,13 @@ mod tests {
             vec![
                 PhoneApp {
                     id: "org.example.app".into(),
-                    name: "Example App".into()
+                    name: "Example App".into(),
+                    version: 12
                 },
                 PhoneApp {
                     id: "org.example.blank".into(),
-                    name: "org.example.blank".into()
+                    name: "org.example.blank".into(),
+                    version: 0
                 },
             ]
         );
@@ -246,6 +403,50 @@ mod tests {
             .collect();
         assert_eq!(parse_apps(&json!({ "apps": many })).len(), MAX_APPS);
         assert!(parse_apps(&json!({})).is_empty());
+    }
+
+    /// Apps part 1: an ask says which icons the computer has, and an open
+    /// may want the screen too.
+    #[test]
+    fn an_apps_ask_says_what_the_computer_has() {
+        let none = std::collections::BTreeMap::new();
+        assert_eq!(apps_body(&none), json!({"action": "apps"}));
+        let have = std::collections::BTreeMap::from([("org.example.app".to_string(), 7u64)]);
+        assert_eq!(parse_have(&apps_body(&have)), have);
+        let odd = json!({"have": {"bad id": 1, "org.example.b": "x", "org.example.c": 3}});
+        assert_eq!(
+            parse_have(&odd),
+            std::collections::BTreeMap::from([("org.example.c".to_string(), 3u64)])
+        );
+        assert!(parse_have(&json!({"have": [1]})).is_empty());
+        assert!(open_body("org.example.app", false).get("screen").is_none());
+        assert_eq!(open_body("org.example.app", true)["screen"], true);
+        assert_eq!(open_body("org.example.app", true)["action"], "open");
+    }
+
+    /// Apps part 1: a report of an ask is read with care.
+    #[test]
+    fn a_report_of_an_ask_is_read_with_care() {
+        for result in AppResult::ALL {
+            assert_eq!(AppResult::parse(result.as_str()), Some(result));
+            let report = AppReport {
+                about: "open".into(),
+                app: Some("org.example.app".into()),
+                result,
+            };
+            assert_eq!(AppReport::from_body(&report.to_body()), Some(report));
+        }
+        let list = json!({"about": "apps", "result": "off"});
+        assert_eq!(AppReport::from_body(&list).unwrap().app, None);
+        // An open names its app, a list names none, and a result is a known word.
+        assert!(AppReport::from_body(&json!({"about": "open", "result": "off"})).is_none());
+        let named = json!({"about": "apps", "app": "org.example.app", "result": "off"});
+        assert!(AppReport::from_body(&named).is_none());
+        let bad = json!({"about": "open", "app": "no", "result": "off"});
+        assert!(AppReport::from_body(&bad).is_none());
+        let word = json!({"about": "open", "app": "org.example.app", "result": "yes"});
+        assert!(AppReport::from_body(&word).is_none());
+        assert!(AppReport::from_body(&json!({"about": "lock", "result": "off"})).is_none());
     }
 
     /// P10: contacts with a name and a callable number, each number once.

@@ -1221,7 +1221,16 @@ object RustCore {
         }.getOrDefault(emptyList())
 
     /** A screenshot or a lock the computer at [host]:[port] asked for (O2). */
-    data class PhoneActionAsk(val host: String, val port: Int, val action: String, val app: String = "")
+    data class PhoneActionAsk(
+        val host: String,
+        val port: Int,
+        val action: String,
+        val app: String = "",
+        /** Apps part 1: for a list, the icons the computer keeps (package to version). */
+        val have: Map<String, Long> = emptyMap(),
+        /** Apps part 1: for an open, the phone's screen is wanted shown there too. */
+        val screen: Boolean = false,
+    )
 
     /** The screenshots and locks waiting (O2), taken. */
     fun takePhoneActions(): List<PhoneActionAsk> =
@@ -1229,7 +1238,17 @@ object RustCore {
             val array = org.json.JSONArray(envelope(nativeTakePhoneActions()).getOrDefault("[]"))
             (0 until array.length()).map { i ->
                 val a = array.getJSONObject(i)
-                PhoneActionAsk(a.getString("host"), a.getInt("port"), a.getString("action"), a.optString("app"))
+                val have = a.optJSONObject("have")?.let { h ->
+                    h.keys().asSequence().associateWith { h.optLong(it, -1L) }.filterValues { it >= 0 }
+                } ?: emptyMap()
+                PhoneActionAsk(
+                    a.getString("host"),
+                    a.getInt("port"),
+                    a.getString("action"),
+                    a.optString("app"),
+                    have,
+                    a.optBoolean("screen", false),
+                )
             }
         }.getOrDefault(emptyList())
 

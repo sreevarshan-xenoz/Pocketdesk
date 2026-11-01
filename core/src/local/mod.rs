@@ -51,6 +51,7 @@ pub mod paths;
 pub mod pause;
 pub mod permission_profiles;
 pub mod phone_actions;
+pub mod phone_app_icons;
 pub mod phone_apps;
 pub mod phone_contacts;
 pub mod phone_files;

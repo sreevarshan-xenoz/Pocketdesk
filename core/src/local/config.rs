@@ -171,6 +171,11 @@ pub struct Config {
     /// phone allows it (C8); off, the window only shows.
     #[serde(default = "default_true")]
     pub cast_control: bool,
+    /// The Phone apps page in the desktop app's list (Apps part 1): a
+    /// phone's apps, to open one there. Off, the page is not listed; the
+    /// phone's own switch still decides whether it may be asked.
+    #[serde(default = "default_true")]
+    pub phone_apps_page: bool,
     /// Offer phones as this computer's camera (F6 part 2, Linux): a phone
     /// with the Webcam permission, asked from here, is published as a
     /// PipeWire camera apps can open. Off by default: a camera from afar.
@@ -776,6 +781,7 @@ impl Default for Config {
             kept_folders_cap_gb: default_kept_folders_cap_gb(),
             kept_folders_allow_delete: false,
             cast_control: true,
+            phone_apps_page: true,
             phone_camera: false,
             phone_camera_lens: default_phone_camera_lens(),
             phone_camera_height: default_phone_camera_height(),
@@ -1067,6 +1073,7 @@ impl Config {
         "kept_folders_cap_gb",
         "kept_folders_allow_delete",
         "cast_control",
+        "phone_apps_page",
         "phone_camera",
         "phone_camera_lens",
         "phone_camera_height",

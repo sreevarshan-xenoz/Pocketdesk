@@ -655,6 +655,8 @@
     <string name="open_tap_title">Tap to open: %1$s</string>
     <string name="open_tap_text">Asked from %1$s</string>
     <string name="channel_opens">Opened from the computer</string>
+    <string name="open_screen_title">Tap to show your screen and open %1$s</string>
+    <string name="open_screen_text">Asked from %1$s. Android asks you once to share the screen there.</string>
     <string name="phone_notifications_answer">Let the computer answer notifications</string>
     <string name="phone_notifications_answer_summary">The computer can press a notification\'s buttons and reply to chats, as you: from its Notifications page, or from the notification it shows. Only notifications sent in full, and only from your own computer</string>
     <string name="phone_notifications_alarms">Alarms on the computer</string>
@@ -1189,8 +1191,8 @@
     <string name="typing_stop">Stop</string>
     <string name="typing_stopped">No typing from the computer for 10 minutes</string>
     <string name="settings_phone_apps">Let the computer open my apps</string>
-    <string name="settings_phone_apps_summary_off">The computer can list this phone\'s apps (their names only) and open one you pick there, while the phone is unlocked and awake</string>
-    <string name="settings_phone_apps_summary_on">On: the computer can list this phone\'s apps (their names only) and open one while the phone is unlocked and awake: at once with \"Pocketdesk control\" on, else as \"Tap to open\"</string>
+    <string name="settings_phone_apps_summary_off">The computer can list this phone\'s apps (their names and icons only) and open one you pick there, while the phone is unlocked and awake</string>
+    <string name="settings_phone_apps_summary_on">On: the computer can list this phone\'s apps (their names and icons only) and open one while the phone is unlocked and awake: at once with \"Pocketdesk control\" on, else as \"Tap to open\"</string>
     <string name="settings_phone_actions">Let the computer take screenshots and lock this phone</string>
     <string name="settings_phone_actions_summary_off">The computer\'s Screenshot of the phone and Lock the phone do them here: a screenshot comes to the computer as \"Send new screenshots\" sends it (turn that on too), never of the lock screen. Uses the \"Pocketdesk control\" Accessibility service</string>
     <string name="settings_phone_actions_summary_needs_access">Almost: Pocketdesk needs notification access to wait for what the computer asks</string>
