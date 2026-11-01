@@ -470,6 +470,14 @@ pub struct Config {
     /// chosen, there or in Settings.
     #[serde(default)]
     pub computer_view_lock_on_close: bool,
+    /// A computer's screen window starts with "Fit the screen to this
+    /// window": a Linux computer on Hyprland or Sway makes a headless
+    /// screen of the window's size, shows that, and resizes it as the
+    /// window does (item 8 of the plan after 0.8.3). Read as a window
+    /// starts showing a computer; an open window keeps its own switch. Off
+    /// until chosen, there or in Settings.
+    #[serde(default)]
+    pub computer_view_fit: bool,
     /// A computer's screen window starts with "Keys by position" (scancode
     /// mode): every key goes to that computer as the key at its place on
     /// the keyboard, for games, instead of typing text. Each computer's own
@@ -769,6 +777,7 @@ impl Default for Config {
             computer_view_hw_decode: true,
             computer_view_hevc: true,
             computer_view_lock_on_close: false,
+            computer_view_fit: false,
             computer_view_scancodes: false,
             smooth_scrolling: true,
             computer_view_mic_device: None,
@@ -1048,6 +1057,7 @@ impl Config {
         "computer_view_hw_decode",
         "computer_view_hevc",
         "computer_view_lock_on_close",
+        "computer_view_fit",
         "computer_view_scancodes",
         "smooth_scrolling",
         "computer_view_mic_device",
@@ -1668,6 +1678,26 @@ phone_battery = \"x\"
         assert_eq!(
             Config::default().changed_keys(&chosen),
             ["computer_view_lock_on_close"]
+        );
+    }
+
+    /// Item 8: a computer's screen window fits the other screen to itself
+    /// only once chosen, and the choice saves and reads back.
+    #[test]
+    fn a_computers_window_fits_the_screen_only_once_chosen() {
+        let path = temp("computer-view-fit");
+        std::fs::write(&path, "").unwrap();
+        assert!(!Config::load_from(&path).unwrap().computer_view_fit);
+        assert!(!Config::default().computer_view_fit);
+        let chosen = Config {
+            computer_view_fit: true,
+            ..Config::default()
+        };
+        chosen.save_keys_to(&path, &["computer_view_fit"]).unwrap();
+        assert!(Config::load_from(&path).unwrap().computer_view_fit);
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["computer_view_fit"]
         );
     }
 
