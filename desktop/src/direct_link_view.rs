@@ -60,6 +60,18 @@ pub enum Stage {
     Failed(String),
 }
 
+/// What this computer's network could do, asked of the system. The app's
+/// own tests draw this page on whatever machine runs them and must not
+/// depend on that machine's network stack (on Windows, WinRT), so they get
+/// "not here" instead.
+fn probe() -> Result<Plan, Unavailable> {
+    if cfg!(test) {
+        Err(Unavailable::Unsupported)
+    } else {
+        dl::probe()
+    }
+}
+
 /// The stage from what is known now. Pure, so a test reads it.
 pub fn stage(
     offered: bool,
@@ -172,7 +184,7 @@ impl DirectLinkCard {
             let (tx, rx) = mpsc::channel();
             let ctx = ui.ctx().clone();
             std::thread::spawn(move || {
-                let _ = tx.send(dl::probe());
+                let _ = tx.send(probe());
                 ctx.request_repaint();
             });
             self.probing = Some(rx);
