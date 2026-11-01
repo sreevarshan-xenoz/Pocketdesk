@@ -52,8 +52,23 @@ object LockRule {
      */
     fun needsDismiss(kind: Kind, awake: Boolean): Boolean = kind != Kind.UNLOCKED || !awake
 
-    /** How long a dismissal waits for Android's answer. */
-    const val DISMISS_WAIT_MS = 8_000L
+    /**
+     * Whether the phone is really open to an app now: no lock screen up and
+     * the screen on, read again after a wake or a dismissal ([kind] and
+     * [awake] read just now), never taken from what the window was told.
+     */
+    fun openNow(kind: Kind, awake: Boolean): Boolean = kind == Kind.UNLOCKED && awake
+
+    /**
+     * How long the dismissing window waits for Android's answer. A swipe is
+     * answered in a fraction of a second; a longer wait means Android is
+     * asking for a secret (the lock turned secure since it was looked at),
+     * which is not given here, so the wait is short.
+     */
+    const val BOUNCER_WAIT_MS = 2_500L
+
+    /** How long the waiting side allows for the window and its answer. */
+    const val DISMISS_WAIT_MS = 4_000L
 
     /** How long a dismissal ask stays valid for the transparent window to act on. */
     const val ASK_VALID_MS = 5_000L

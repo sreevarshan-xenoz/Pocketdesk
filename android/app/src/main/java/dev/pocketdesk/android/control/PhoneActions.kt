@@ -272,6 +272,16 @@ object PhoneActions {
 
     /** The open itself, once the phone is awake and unlocked. */
     private fun openUnlocked(context: Context, ask: RustCore.PhoneActionAsk, own: HostStore.Host, service: Boolean) {
+        // Right before anything starts, the lock is read once more: an app is never opened
+        // (nor a screen share asked for) over a lock screen, whatever was true when the ask came.
+        val awake = context.getSystemService(PowerManager::class.java)?.isInteractive ?: false
+        val lock = KeyguardDismiss.kind(context)
+        if (service && !LockRule.openNow(lock, awake)) {
+            val why = if (lock == LockRule.Kind.SECURE) AppOpenRule.LOCKED_SECURE else AppOpenRule.LOCKED
+            Log.i(TAG, "the phone is not open at the moment of the open: $why")
+            Thread { report(own.address, own.controlPort, "open", ask.app, why) }.start()
+            return
+        }
         val casting = dev.pocketdesk.android.cast.CastService.screenTo == own.address
         val paused = dev.pocketdesk.android.cast.CastService.pausedFor == own.address
         val result = when (AppOpenRule.plan(ask.screen, service, casting, paused)) {

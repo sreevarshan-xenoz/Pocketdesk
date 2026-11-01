@@ -124,21 +124,34 @@ class DismissKeyguardActivity : Activity() {
         val keyguard = getSystemService(KeyguardManager::class.java)
         if (kind == LockRule.Kind.UNLOCKED || keyguard == null) {
             // Only asleep: the screen is turned on by this window; give it a moment.
-            main.postDelayed({ end(getSystemService(PowerManager::class.java)?.isInteractive == true) }, WAKE_MS)
+            // Read again after the wake: the lock must still be none, never assumed.
+            main.postDelayed({ end(settled()) }, WAKE_MS)
             return
         }
         keyguard.requestDismissKeyguard(
             this,
             object : KeyguardManager.KeyguardDismissCallback() {
-                override fun onDismissSucceeded() = end(true)
+                // Android's word is read again, not taken: the phone must now be
+                // awake with no lock screen over it (a bouncer asking for a secret is not).
+                override fun onDismissSucceeded() {
+                    main.postDelayed({ end(settled()) }, SETTLE_MS)
+                }
 
                 override fun onDismissCancelled() = end(false)
 
                 override fun onDismissError() = end(false)
             },
         )
-        main.postDelayed({ end(false) }, LockRule.DISMISS_WAIT_MS)
+        // A swipe is answered at once; waiting longer means Android wants a secret: not given here.
+        main.postDelayed({ end(false) }, LockRule.BOUNCER_WAIT_MS)
     }
+
+    /** Whether the phone is open now, from Android's own answers read just now. */
+    private fun settled(): Boolean =
+        LockRule.openNow(
+            KeyguardDismiss.kind(this),
+            getSystemService(PowerManager::class.java)?.isInteractive == true,
+        )
 
     private fun end(success: Boolean) {
         if (done) return
@@ -161,5 +174,6 @@ class DismissKeyguardActivity : Activity() {
     private companion object {
         const val TAG = "KeyguardDismiss"
         const val WAKE_MS = 700L
+        const val SETTLE_MS = 400L
     }
 }

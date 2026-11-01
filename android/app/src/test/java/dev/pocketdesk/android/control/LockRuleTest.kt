@@ -44,6 +44,26 @@ class LockRuleTest {
     }
 
     @Test
+    fun `after a wake or a dismissal the phone is open only if it is awake with no lock screen, read again`() {
+        assertTrue(LockRule.openNow(Kind.UNLOCKED, awake = true))
+        // Woken but a lock screen is still up (swipe, trusted or secure): not open.
+        for (kind in listOf(Kind.SWIPE, Kind.TRUSTED, Kind.SECURE)) {
+            assertFalse(kind.name, LockRule.openNow(kind, awake = true))
+        }
+        // No lock but still asleep: not open.
+        assertFalse(LockRule.openNow(Kind.UNLOCKED, awake = false))
+        // The lock turned secure between the look and the wake: refused, not opened.
+        assertFalse(LockRule.mayDismiss(LockRule.kind(keyguardLocked = true, keyguardSecure = true, deviceLocked = true)))
+        assertFalse(LockRule.openNow(LockRule.kind(true, true, true), awake = true))
+    }
+
+    @Test
+    fun `a bouncer asking for a secret is given up on quickly`() {
+        assertTrue(LockRule.BOUNCER_WAIT_MS <= 3_000L)
+        assertTrue(LockRule.BOUNCER_WAIT_MS < LockRule.DISMISS_WAIT_MS)
+    }
+
+    @Test
     fun `an ask is acted on only while it is fresh`() {
         assertTrue(LockRule.askValid(askedAt = 1_000, startedAt = 1_000))
         assertTrue(LockRule.askValid(askedAt = 1_000, startedAt = 1_000 + LockRule.ASK_VALID_MS))
