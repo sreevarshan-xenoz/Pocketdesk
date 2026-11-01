@@ -26,6 +26,9 @@ pub struct PhoneActionRequest {
     /// The app an `open` opens (P2).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app: Option<String>,
+    /// An `open` that wants the phone's screen shown here too (Apps part 1).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub screen: bool,
     pub created_unix: u64,
 }
 
@@ -43,7 +46,7 @@ pub fn request(
     action: PhoneAction,
     now_unix: u64,
 ) -> io::Result<PhoneActionRequest> {
-    write_request(state_dir, device_id, action, None, now_unix)
+    write_request(state_dir, device_id, action, None, false, now_unix)
 }
 
 /// P2: ask the server to have `device_id` open the app `app`.
@@ -53,10 +56,29 @@ pub fn request_open(
     app: &str,
     now_unix: u64,
 ) -> io::Result<PhoneActionRequest> {
+    request_open_with_screen(state_dir, device_id, app, false, now_unix)
+}
+
+/// Apps part 1: [`request_open`], and with `screen` the phone's screen
+/// shown here as well (shared with any cast already running).
+pub fn request_open_with_screen(
+    state_dir: &Path,
+    device_id: &str,
+    app: &str,
+    screen: bool,
+    now_unix: u64,
+) -> io::Result<PhoneActionRequest> {
     if !crate::protocol::phone_action::valid_app_id(app) {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "not an app"));
     }
-    write_request(state_dir, device_id, PhoneAction::Open, Some(app), now_unix)
+    write_request(
+        state_dir,
+        device_id,
+        PhoneAction::Open,
+        Some(app),
+        screen,
+        now_unix,
+    )
 }
 
 fn write_request(
@@ -64,6 +86,7 @@ fn write_request(
     device_id: &str,
     action: PhoneAction,
     app: Option<&str>,
+    screen: bool,
     now_unix: u64,
 ) -> io::Result<PhoneActionRequest> {
     if device_id.is_empty() {
@@ -74,6 +97,7 @@ fn write_request(
         device_id: device_id.to_string(),
         action: action.as_str().to_string(),
         app: app.map(str::to_string),
+        screen: screen && action == PhoneAction::Open,
         created_unix: now_unix,
     };
     let file = path(state_dir, &request.id)?;
@@ -179,6 +203,14 @@ mod tests {
         let open = request_open(&dir, "phone-a", "org.example.app", 1_000).unwrap();
         assert_eq!(take_all(&dir, 1_000), vec![open]);
         assert!(request_open(&dir, "phone-a", "bad id", 1_000).is_err());
+        // Apps part 1: an open may want the screen, an ask for the list never does.
+        let plain = request_open(&dir, "phone-a", "org.example.app", 1_000).unwrap();
+        assert!(!plain.screen);
+        let shown = request_open_with_screen(&dir, "phone-a", "org.example.app", true, 1_001).unwrap();
+        assert!(shown.screen);
+        assert_eq!(take_all(&dir, 1_001), vec![plain, shown]);
+        assert!(!request(&dir, "phone-a", PhoneAction::Apps, 1_000).unwrap().screen);
+        let _ = take_all(&dir, 1_000);
         let mut odd = request(&dir, "phone-a", PhoneAction::Open, 1_000).unwrap();
         odd.app = None;
         std::fs::write(
