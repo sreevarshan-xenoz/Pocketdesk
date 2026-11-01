@@ -33,7 +33,7 @@ use super::pace::MovePacer;
 use super::phone::{self, PhoneChannel};
 use super::portal_glue::{Backend, Portal, PortalGlue, Standing};
 use super::quick::Nudge;
-use super::refresh::Refresher;
+use super::refresh::{Freshness, Refresher, STALE_AFTER};
 use super::screens;
 use super::sound;
 use super::status;
@@ -51,6 +51,12 @@ const TICK: Duration = Duration::from_millis(50);
 const AWAY_TICK: Duration = Duration::from_millis(100);
 /// How often at home: its next deadline is the activity note.
 const HOME_TICK: Duration = ACTIVE_EVERY;
+/// How early a timer may count as due on a tick: a pass on its tick finds
+/// a 200 ms timer a hair short of due, and without this slack it went on
+/// the pass after (activity notes every 400 ms at home, review N1).
+const TICK_SLACK: Duration = Duration::from_millis(10);
+/// The longest the reader waits on the desktop for its screens.
+const SCREENS_WAIT: Duration = Duration::from_secs(1);
 /// The most events taken in one turn before the rest is looked at.
 const BATCH_MOST: usize = 256;
 /// How often what the owner does is told to every computer with a channel.
@@ -517,22 +523,43 @@ pub(super) fn drive<B: Backend>(
     let mut settings = config.clone();
     let mut desktop_screens = glue.own.clone();
     let zones_known = Arc::new(AtomicBool::new(false));
-    let reads = Refresher::start("pd-shared-read", LAYOUT_EVERY, {
+    // Started again should it die (its reads stale meanwhile, below).
+    let start_reads = {
         let (state_dir, runtime) = (state_dir.clone(), runtime.clone());
         let zones_known = Arc::clone(&zones_known);
         move || {
-            let config = crate::events::current_config();
-            let files = LayoutFiles::read(state_dir.as_deref(), &mut saved);
-            let fractional = fractional_now(&runtime);
-            // Asked of the desktop only until the portal said its zones.
-            let screens =
-                (!zones_known.load(Ordering::SeqCst)).then(|| runtime.block_on(screens::current()));
-            (config, files, fractional, screens)
+            let (state_dir, runtime) = (state_dir.clone(), runtime.clone());
+            let zones_known = Arc::clone(&zones_known);
+            let mut saved = SavedLayout::default();
+            Refresher::start("pd-shared-read", LAYOUT_EVERY, move || {
+                let config = crate::events::current_config();
+                let files = LayoutFiles::read(state_dir.as_deref(), &mut saved);
+                let fractional = fractional_now(&runtime);
+                // Asked of the desktop only until the portal said its
+                // zones, and never waited on past a second (an untimed
+                // Hyprland socket would hold the reader for good).
+                let screens = if zones_known.load(Ordering::SeqCst) {
+                    None
+                } else {
+                    runtime
+                        .block_on(tokio::time::timeout(SCREENS_WAIT, screens::current()))
+                        .ok()
+                };
+                (config, files, fractional, screens)
+            })
         }
-    });
+    };
+    drop(saved);
+    let mut reads = start_reads();
+    let mut reads_started = Instant::now();
+    // What only the driver checks (a phone's permission, the clipboard
+    // following the mouse) is refused while the reads are stale.
+    let mut freshness = Freshness::default();
     // Looked at only at home: away, the desktop gives every key and click
-    // to Pocketdesk, so nothing here comes to the front.
+    // to Pocketdesk, so nothing here comes to the front; a look that
+    // started before the last arrival home is older news.
     let at_home = Arc::new(AtomicBool::new(true));
+    let mut home_since = Instant::now();
     let fronts = Refresher::start("pd-shared-front", GAME_EVERY, {
         let (runtime, at_home) = (runtime.clone(), Arc::clone(&at_home));
         move || {
@@ -650,7 +677,8 @@ pub(super) fn drive<B: Backend>(
                 driver.answered(id, now);
             }
         }
-        let actions = driver.tick(now);
+        // Pings fall due on the tick they are due by, not the one after.
+        let actions = driver.tick(now + TICK_SLACK);
         glue.apply(&mut driver, actions);
         // Let go after ten seconds without input here (BK10 review M3).
         let quick = quick_on && last_input.elapsed() < super::receive::QUICK_FOR;
@@ -659,10 +687,15 @@ pub(super) fn drive<B: Backend>(
         // Looked at only at home: away, the desktop gives every key and
         // click to Pocketdesk, so nothing here comes to the front, and the
         // loop is not held up while it carries input.
-        at_home.store(driver.away_on().is_none(), Ordering::SeqCst);
+        let home = driver.away_on().is_none();
+        if home && !at_home.swap(true, Ordering::SeqCst) {
+            home_since = Instant::now();
+        }
+        at_home.store(home, Ordering::SeqCst);
         zones_known.store(glue.input.zones().is_some(), Ordering::SeqCst);
-        if let Some((Some(front), _)) = fronts.as_ref().and_then(Refresher::take)
-            && driver.away_on().is_none()
+        if let Some((Some(front), started)) = fronts.as_ref().and_then(Refresher::take)
+            && home
+            && started >= home_since
         {
             let actions = driver.on(front);
             glue.apply(&mut driver, actions);
@@ -670,7 +703,7 @@ pub(super) fn drive<B: Backend>(
         }
         // Who is at this computer, as libei last said (only while away is
         // anything said), to every computer with a channel.
-        if active_at.elapsed() >= ACTIVE_EVERY {
+        if active_at.elapsed() + TICK_SLACK >= ACTIVE_EVERY {
             active_at = Instant::now();
             let idle = u32::try_from(last_input.elapsed().as_millis()).unwrap_or(u32::MAX);
             let to: Vec<String> = glue.channels.keys().cloned().collect();
@@ -705,25 +738,35 @@ pub(super) fn drive<B: Backend>(
             }
             glue.take_refusals(&mut driver, Some(&to));
         }
+        // A read that came back is taken on this turn, never left for the
+        // layout pass, and laid out at once: a setting lands within the
+        // read's two seconds and a tick.
+        // No read back for a while (one hangs, or the reader died): what
+        // only the driver checks is refused until one comes, said once.
+        let (read, changed) = freshness.turn(reads.as_ref());
+        if let Some((config, read, fractional, screens)) = read {
+            settings = config;
+            files = read;
+            fractional_screen = fractional;
+            if let Some(screens) = screens {
+                desktop_screens = screens;
+            }
+        }
+        if changed {
+            layout_at = None;
+        }
+        let stale = freshness.stale();
+        if reads.as_ref().is_none_or(Refresher::died) && reads_started.elapsed() >= STALE_AFTER {
+            reads_started = Instant::now();
+            reads = start_reads();
+        }
         if layout_at.is_none_or(|at| at.elapsed() >= LAYOUT_EVERY) {
             layout_at = Some(Instant::now());
-            // What the read off this thread saw last, never waited for: a
-            // read that hangs leaves the last one in use.
-            if let Some(((config, read, fractional, screens), _)) =
-                reads.as_ref().and_then(Refresher::take)
-            {
-                settings = config;
-                files = read;
-                fractional_screen = fractional;
-                if let Some(screens) = screens {
-                    desktop_screens = screens;
-                }
-            }
             let config = &settings;
             game_lock_on = config.shared_input_game_lock;
             quick_on = config.shared_input_low_latency;
             glue.pacer.set(quick_on);
-            driver.set_clipboard(config.shared_input_clipboard);
+            driver.set_clipboard(config.shared_input_clipboard && !stale);
             glue.sound_on = config.shared_input_sound;
             let actions =
                 driver.set_game_lock(game_lock_on, config.shared_input_lock_programs.clone());
@@ -784,7 +827,11 @@ pub(super) fn drive<B: Backend>(
                 })
                 .collect();
             let mut reachable = reachable(&open, &link::screens_heard());
-            reachable.extend(files.phones_ready.iter().cloned());
+            // A phone's permission is this driver's to check: none while
+            // the reads are stale.
+            if !stale {
+                reachable.extend(files.phones_ready.iter().cloned());
+            }
             for id in &reachable {
                 glue.refusals.clear(id);
             }

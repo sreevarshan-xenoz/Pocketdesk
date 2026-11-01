@@ -84,7 +84,7 @@ use super::link::{self, Channel};
 use super::pace::MovePacer;
 use super::phone::{self, PhoneChannel};
 use super::quick::{KeepQuick, Nudge};
-use super::refresh::Refresher;
+use super::refresh::{Freshness, Refresher, STALE_AFTER};
 use super::screens::{Desktop, Motion};
 use super::sound;
 use super::status;
@@ -1016,6 +1016,10 @@ const TICK: Duration = Duration::from_millis(50);
 const AWAY_TICK: Duration = Duration::from_millis(100);
 /// How often at home: its next deadline is the activity note.
 const HOME_TICK: Duration = ACTIVE_EVERY;
+/// How early a timer may count as due on a tick: a pass on its tick finds
+/// a 200 ms timer a hair short of due, and without this slack it went on
+/// the pass after (activity notes every 400 ms at home, review N1).
+const TICK_SLACK: Duration = Duration::from_millis(10);
 /// The most events taken in one turn before the rest is looked at.
 const BATCH_MOST: usize = 256;
 /// How often what the owner does is told to every computer with a channel.
@@ -1799,22 +1803,33 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
     driver.set_clipboard(config.shared_input_clipboard);
     // When what is in front was last looked at on this thread: a read off
     // it that started before is older news.
-    let mut probed_at = Some(Instant::now());
+    let mut probed_at = Instant::now();
     let actions = driver.on(foreground_now(game_lock_on, &lock_programs, &glue.desktop));
     glue.apply(&mut driver, actions);
     // The files, the settings and the monitors every two seconds, and what
     // is in front every half second, read on threads of their own: on this
     // one a slow disk stalled the moves.
     let (mut settings, mut read_desktop) = (config.clone(), glue.desktop.clone());
-    let reads = Refresher::start("pd-shared-read", LAYOUT_EVERY, {
+    // Started again should it die (its reads stale meanwhile, below).
+    let start_reads = {
         let state_dir = state_dir.clone();
         move || {
-            let config = crate::events::current_config();
-            let desktop = Desktop::arrange(&crate::windows_desktop::monitors_scaled());
-            let files = LayoutFiles::read(state_dir.as_deref(), &mut saved);
-            (config, desktop, files)
+            let state_dir = state_dir.clone();
+            let mut saved = SavedLayout::default();
+            Refresher::start("pd-shared-read", LAYOUT_EVERY, move || {
+                let config = crate::events::current_config();
+                let desktop = Desktop::arrange(&crate::windows_desktop::monitors_scaled());
+                let files = LayoutFiles::read(state_dir.as_deref(), &mut saved);
+                (config, desktop, files)
+            })
         }
-    });
+    };
+    drop(saved);
+    let mut reads = start_reads();
+    let mut reads_started = Instant::now();
+    // What only the driver checks (a phone's permission, the clipboard
+    // following the mouse) is refused while the reads are stale.
+    let mut freshness = Freshness::default();
     let fronts = Refresher::start("pd-shared-front", GAME_EVERY, || {
         let config = crate::events::current_config();
         foreground_physical(
@@ -1883,7 +1898,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
                         Captured::ForegroundChanged => {
                             let actions = driver.on(Captured::ForegroundChanged);
                             glue.apply(&mut driver, actions);
-                            probed_at = Some(Instant::now());
+                            probed_at = Instant::now();
                             let now = foreground_now(game_lock_on, &lock_programs, &glue.desktop);
                             let actions = driver.on(now);
                             glue.apply(&mut driver, actions);
@@ -1958,7 +1973,8 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
                 driver.answered(id, now);
             }
         }
-        let actions = driver.tick(now);
+        // Pings fall due on the tick they are due by, not the one after.
+        let actions = driver.tick(now + TICK_SLACK);
         glue.apply(&mut driver, actions);
         // The quick link while away and someone types or moves here, let
         // go after ten seconds without (BK10 review M3).
@@ -1977,20 +1993,20 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         if settle_until.is_some_and(|until| Instant::now() < until) {
             if game_at.elapsed() >= GAME_SETTLE_EVERY {
                 game_at = Instant::now();
-                probed_at = Some(game_at);
+                probed_at = game_at;
                 let now = foreground_now(game_lock_on, &lock_programs, &glue.desktop);
                 let actions = driver.on(now);
                 glue.apply(&mut driver, actions);
             }
         } else if let Some((front, started)) = fronts.as_ref().and_then(Refresher::take)
-            && probed_at.is_none_or(|at| started > at)
+            && started > probed_at
         {
             let actions = driver.on(logical_foreground(front, &glue.desktop));
             glue.apply(&mut driver, actions);
         }
         // Who is at this computer, to every computer with a channel: the
         // driven one lets go after a second without a word.
-        if active_at.elapsed() >= ACTIVE_EVERY {
+        if active_at.elapsed() + TICK_SLACK >= ACTIVE_EVERY {
             active_at = Instant::now();
             let idle =
                 idle_ms().min(u32::try_from(last_input.elapsed().as_millis()).unwrap_or(u32::MAX));
@@ -2034,20 +2050,29 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             // It refused while driven: home within a quarter of a second.
             glue.take_refusals(&mut driver, Some(&to));
         }
-        if layout_at.elapsed() >= LAYOUT_EVERY {
+        // A read that came back is taken on this turn, never left for the
+        // layout pass, and laid out at once: a setting lands within the
+        // read's two seconds and a tick.
+        // No read back for a while (one hangs, or the reader died): what
+        // only the driver checks is refused until one comes, said once.
+        let (read, layout_now) = freshness.turn(reads.as_ref());
+        if let Some((config, desktop, read)) = read {
+            settings = config;
+            read_desktop = desktop;
+            files = read;
+        }
+        let stale = freshness.stale();
+        if reads.as_ref().is_none_or(Refresher::died) && reads_started.elapsed() >= STALE_AFTER {
+            reads_started = Instant::now();
+            reads = start_reads();
+        }
+        if layout_now || layout_at.elapsed() >= LAYOUT_EVERY {
             layout_at = Instant::now();
-            // What the read off this thread saw last, never waited for: a
-            // read that hangs leaves the last one in use.
-            if let Some(((config, desktop, read), _)) = reads.as_ref().and_then(Refresher::take) {
-                settings = config;
-                read_desktop = desktop;
-                files = read;
-            }
             let config = &settings;
             // The gaming lock's settings, taken without a restart.
             game_lock_on = config.shared_input_game_lock;
             lock_programs = config.shared_input_lock_programs.clone();
-            driver.set_clipboard(config.shared_input_clipboard);
+            driver.set_clipboard(config.shared_input_clipboard && !stale);
             glue.sound_on = config.shared_input_sound;
             glue.quick_on = config.shared_input_low_latency;
             glue.pacer.set(glue.quick_on);
@@ -2117,7 +2142,11 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             let mut reachable = reachable(&open, &link::screens_heard());
             // A phone may be crossed onto while it is linked and both it
             // and this computer allow it (BK5).
-            reachable.extend(files.phones_ready.iter().cloned());
+            // A phone's permission is this driver's to check: none while
+            // the reads are stale.
+            if !stale {
+                reachable.extend(files.phones_ready.iter().cloned());
+            }
             // One that answers takes input: its next refusal starts the
             // wait over.
             for id in &reachable {
