@@ -83,15 +83,11 @@ pub fn ask_open(
     use pocketdesk_core::local::phone_actions as ask;
     let failed = |e: std::io::Error| format!("Could not ask the phone: {e}");
     match route.pick() {
-        OpenMode::Window(id) => ask::request_open_window(
-            state_dir,
-            phone,
-            app,
-            WindowAsk::standard(id),
-            now,
-        )
-        .map(|_| Asked::Window(id))
-        .map_err(failed),
+        OpenMode::Window(id) => {
+            ask::request_open_window(state_dir, phone, app, WindowAsk::standard(id), now)
+                .map(|_| Asked::Window(id))
+                .map_err(failed)
+        }
         OpenMode::Screen => ask::request_open_with_screen(state_dir, phone, app, true, now)
             .map(|_| Asked::Screen)
             .map_err(failed),
@@ -170,8 +166,7 @@ impl Windows {
             if there {
                 self.reserved[slot] = None;
                 if self.views[slot].is_none() {
-                    self.views[slot] =
-                        Some(CastView::for_window(ctx, state_dir.to_path_buf(), id));
+                    self.views[slot] = Some(CastView::for_window(ctx, state_dir.to_path_buf(), id));
                 }
             }
         }
@@ -257,21 +252,39 @@ mod tests {
     fn asking_for_a_window_writes_the_ask_with_its_size() {
         let dir = std::env::temp_dir().join(format!("pd-phone-windows-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let asked = ask_open(&dir, "phone-a", "org.example.app", &route(phone(true), true, &[1]), 1_000)
-            .unwrap();
+        let asked = ask_open(
+            &dir,
+            "phone-a",
+            "org.example.app",
+            &route(phone(true), true, &[1]),
+            1_000,
+        )
+        .unwrap();
         assert_eq!(asked, Asked::Window(2));
         let taken = pocketdesk_core::local::phone_actions::take_all(&dir, 1_000);
         assert_eq!(taken.len(), 1);
         assert_eq!(taken[0].window, Some(WindowAsk::standard(2)));
         assert!(!taken[0].screen);
         // The ordinary open shows the screen, with no window.
-        let asked = ask_open(&dir, "phone-a", "org.example.app", &route(phone(false), true, &[]), 1_000)
-            .unwrap();
+        let asked = ask_open(
+            &dir,
+            "phone-a",
+            "org.example.app",
+            &route(phone(false), true, &[]),
+            1_000,
+        )
+        .unwrap();
         assert_eq!(asked, Asked::Screen);
         let taken = pocketdesk_core::local::phone_actions::take_all(&dir, 1_000);
         assert!(taken[0].window.is_none() && taken[0].screen);
         // At the limit nothing is asked.
-        let none = ask_open(&dir, "phone-a", "org.example.app", &route(phone(true), true, &[1, 2, 3, 4]), 1_000);
+        let none = ask_open(
+            &dir,
+            "phone-a",
+            "org.example.app",
+            &route(phone(true), true, &[1, 2, 3, 4]),
+            1_000,
+        );
         assert!(none.is_err());
         assert!(pocketdesk_core::local::phone_actions::take_all(&dir, 1_000).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
