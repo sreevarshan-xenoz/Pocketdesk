@@ -22,7 +22,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
+import dev.pocketdesk.android.pair.DirectLinkDecision
+import dev.pocketdesk.android.pair.DirectLinkNetwork
+import dev.pocketdesk.android.pair.JoinOutcome
 import dev.pocketdesk.android.pair.PairLink
 import dev.pocketdesk.android.pair.PairOutcome
 import dev.pocketdesk.android.pair.RustPairOps
@@ -40,6 +44,11 @@ import kotlinx.coroutines.withContext
  * and sanitized), warns when the code was not scanned here, and waits for
  * "Pair". Every address is then pinned to the code's certificate fingerprint
  * before it is contacted.
+ *
+ * A direct link (a computer's own Wi-Fi, made for this phone) joins that
+ * network first, for Pocketdesk only, once "Pair" is tapped: the system asks
+ * as well. The network stays joined through the session that follows and is
+ * released by the caller when the session ends or the pairing is left.
  */
 @Composable
 fun PairLinkScreen(
@@ -54,15 +63,35 @@ fun PairLinkScreen(
     var confirmed by remember(uri) { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
     val link = parsed.getOrNull()
+    val decision = DirectLinkDecision.decide(
+        link?.wifi,
+        remember { Prefs.directLinks(context) },
+        android.os.Build.VERSION.SDK_INT,
+    )
+    // Waiting for the system's prompt and the join of a direct link.
+    var joining by remember(uri) { mutableStateOf(false) }
+    var joinFailed by remember(uri) { mutableStateOf(false) }
+    val blocked = decision == DirectLinkDecision.Disabled || decision == DirectLinkDecision.TooOld
     // Back cancels as Cancel does (U2: it left the app), and only when
     // Cancel shows: a pairing under way runs to its end, or the computer
-    // could keep this phone paired while the phone saved nothing.
+    // could keep this phone paired while the phone saved nothing. Joining a
+    // direct link is not yet a pairing: back leaves it, and the join with it.
     androidx.activity.compose.BackHandler {
-        if (link == null || outcome != null || !confirmed) onBack()
+        if (link == null || outcome != null || !confirmed || joining || joinFailed || blocked) onBack()
     }
 
     LaunchedEffect(uri, confirmed) {
-        if (link == null || !confirmed) return@LaunchedEffect
+        if (link == null || !confirmed || blocked) return@LaunchedEffect
+        val wifi = link.wifi
+        if (decision == DirectLinkDecision.Join && wifi != null) {
+            joining = true
+            val joined = DirectLinkNetwork.join(context, wifi)
+            joining = false
+            if (joined is JoinOutcome.Unavailable) {
+                joinFailed = true
+                return@LaunchedEffect
+            }
+        }
         val result = withContext(Dispatchers.IO) { runPairing(link, RustPairOps(context)) }
         if (result is PairOutcome.Paired) {
             onPaired(link, result.address, result.serverId)
@@ -81,6 +110,32 @@ fun PairLinkScreen(
                 stringResource(R.string.pair_link_invalid),
                 textAlign = TextAlign.Center,
             )
+            decision == DirectLinkDecision.Disabled -> Text(
+                stringResource(R.string.pair_link_direct_disabled),
+                textAlign = TextAlign.Center,
+            )
+            decision == DirectLinkDecision.TooOld -> Text(
+                stringResource(R.string.pair_link_direct_too_old),
+                textAlign = TextAlign.Center,
+            )
+            joinFailed -> Text(
+                stringResource(R.string.pair_link_join_failed),
+                textAlign = TextAlign.Center,
+            )
+            joining -> {
+                CircularProgressIndicator()
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    stringResource(R.string.pair_link_joining),
+                    style = MaterialTheme.typography.titleMedium,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    stringResource(R.string.pair_link_joining_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                )
+            }
             !confirmed -> {
                 Text(
                     stringResource(R.string.pair_link_confirm_title, link.addresses.joinToString(", ")),
@@ -98,6 +153,10 @@ fun PairLinkScreen(
                         color = MaterialTheme.colorScheme.error,
                         textAlign = TextAlign.Center,
                     )
+                }
+                if (decision == DirectLinkDecision.Join) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(stringResource(R.string.pair_link_direct_note), textAlign = TextAlign.Center)
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(stringResource(R.string.pair_link_confirm_body), textAlign = TextAlign.Center)
@@ -133,7 +192,7 @@ fun PairLinkScreen(
                 textAlign = TextAlign.Center,
             )
         }
-        if (link == null || outcome != null || !confirmed) {
+        if (link == null || outcome != null || !confirmed || joining || joinFailed || blocked) {
             Spacer(Modifier.height(16.dp))
             TextButton(onClick = onBack) { Text(stringResource(R.string.cancel)) }
         }

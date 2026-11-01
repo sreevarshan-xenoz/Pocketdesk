@@ -11,6 +11,10 @@ import java.util.Base64
  * `pocketdesk://pair?v=1&name&id&a=ip,ip&cp&sp&pin&fp&ep` — addresses best
  * first, `fp` the hex SHA-256 of the desktop's TLS certificate, `ep` its iroh
  * endpoint JSON in base64url. Values are percent-encoded.
+ *
+ * A direct link (no shared network, `ws` and `wp` on the end) also names the
+ * Wi-Fi network the computer made for it and its passphrase: the phone joins
+ * it, for Pocketdesk only, before it pairs.
  */
 data class PairLink(
     val name: String,
@@ -21,6 +25,7 @@ data class PairLink(
     val pin: String,
     val fingerprint: String?,
     val endpoint: String?,
+    val wifi: WifiJoin? = null,
 ) {
     companion object {
         private const val PREFIX = "pocketdesk://pair?"
@@ -53,6 +58,15 @@ data class PairLink(
         fun clean(text: String): String =
             text.trim { it.isWhitespace() || it.code == 0xFEFF || it.code in 0x200B..0x200D || it.code == 0x2060 }
 
+        /** Both Wi-Fi keys or neither, and ones an access point can use. */
+        private fun parseWifi(ssid: String?, passphrase: String?): WifiJoin? {
+            if (ssid == null && passphrase == null) return null
+            require(ssid != null && passphrase != null) { "the link names a Wi-Fi network without its key" }
+            val join = WifiJoin(ssid, passphrase)
+            require(join.isValid()) { "bad Wi-Fi details" }
+            return join
+        }
+
         fun parse(uri: String): Result<PairLink> = runCatching {
             val cleaned = clean(uri)
             val query = cleaned.removePrefix(PREFIX)
@@ -84,6 +98,7 @@ data class PairLink(
                 endpoint = fields["ep"]?.let { encoded ->
                     String(Base64.getUrlDecoder().decode(encoded), StandardCharsets.UTF_8)
                 },
+                wifi = parseWifi(fields["ws"], fields["wp"]),
             )
         }
 
@@ -115,3 +130,28 @@ data class PairLink(
 /** The first Pocketdesk pairing code among the codes a camera frame holds. */
 fun firstPairingCode(values: List<String?>): String? =
     values.firstOrNull { it?.startsWith("pocketdesk://pair?") == true }
+
+/**
+ * The Wi-Fi network a direct link names, and its passphrase. Never printed:
+ * a log line or a crash report of a link must not carry the key.
+ */
+class WifiJoin(val ssid: String, val passphrase: String) {
+    /**
+     * Whether an access point can use them, as core's `WifiJoin::is_valid`: a
+     * name of 1 to 32 bytes with no control characters, and a passphrase of 8
+     * to 63 printable ASCII characters.
+     */
+    fun isValid(): Boolean =
+        ssid.isNotEmpty() &&
+            ssid.toByteArray(StandardCharsets.UTF_8).size <= 32 &&
+            ssid.none { Character.isISOControl(it) } &&
+            passphrase.length in 8..63 &&
+            passphrase.all { it.code in 0x20..0x7e }
+
+    override fun equals(other: Any?): Boolean =
+        other is WifiJoin && other.ssid == ssid && other.passphrase == passphrase
+
+    override fun hashCode(): Int = 31 * ssid.hashCode() + passphrase.hashCode()
+
+    override fun toString(): String = "WifiJoin(..)"
+}

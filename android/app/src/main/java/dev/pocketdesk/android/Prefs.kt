@@ -29,6 +29,7 @@ object Prefs {
     private const val KEY_CONTROL_FROM_COMPUTER = "control_from_computer"
     private const val KEY_PHONE_ACTIONS_FROM_COMPUTER = "phone_actions_from_computer"
     private const val KEY_INTERNET_FILES = "internet_files"
+    private const val KEY_DIRECT_LINKS = "direct_links"
     private const val KEY_OTHERS_CHOOSE_COMPUTER = "others_choose_computer"
     private const val KEY_TELL_OTHER_APPS = "tell_other_apps"
     private const val KEY_OTHERS_RUN_TASKS = "others_run_tasks"
@@ -714,6 +715,19 @@ object Prefs {
 
     fun setInternetFiles(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_INTERNET_FILES, enabled) }
+        bump()
+    }
+
+    /**
+     * Whether a scanned direct link (a computer's own Wi-Fi, made for this
+     * phone) is joined for Pocketdesk only. On by default; the system asks
+     * the owner each time as well.
+     */
+    fun directLinks(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_DIRECT_LINKS, true)
+
+    fun setDirectLinks(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_DIRECT_LINKS, enabled) }
         bump()
     }
 

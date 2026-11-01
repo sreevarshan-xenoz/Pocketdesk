@@ -1,6 +1,7 @@
 package dev.pocketdesk.android.pair
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -24,6 +25,46 @@ class PairLinkTest {
         assertEquals("012345", link.pin)
         assertEquals("ab".repeat(32), link.fingerprint)
         assertEquals("""{"endpointId":"x","relayUrls":[],"directAddrs":[]}""", link.endpoint)
+    }
+
+    /** The exact URI core's `WIFI_FIXTURE` encodes (a direct link); both tests pin it. */
+    private val wifiFixture =
+        "pocketdesk://pair?v=1&name=Desk%20%26%20Co&id=d-1&a=192.0.2.1&cp=1716&sp=4716&pin=012345" +
+            "&fp=abababababababababababababababababababababababababababababababab" +
+            "&ws=pocketdesk-ab12&wp=Abc%3Bdef%3A12,34%22x"
+
+    @Test
+    fun aDirectLinkNamesItsWifi() {
+        val link = PairLink.parse(wifiFixture).getOrThrow()
+        assertEquals(listOf("192.0.2.1"), link.addresses)
+        assertEquals(WifiJoin("pocketdesk-ab12", "Abc;def:12,34\"x"), link.wifi)
+        assertNull("an ordinary link names none", PairLink.parse(fixture).getOrThrow().wifi)
+    }
+
+    @Test
+    fun theWifiKeyIsNeverPrinted() {
+        val link = PairLink.parse(wifiFixture).getOrThrow()
+        val shown = link.wifi.toString() + link.wifi?.let { "$it" }
+        assertFalse(shown, shown.contains("ab12") || shown.contains("Abc;def"))
+    }
+
+    @Test
+    fun halfAWifiOrUnusableWifiIsRejected() {
+        val base = "pocketdesk://pair?v=1&a=192.0.2.1&pin=123456"
+        for (tail in listOf(
+            "&ws=pocketdesk-ab12",
+            "&wp=Abcdef123456",
+            "&ws=&wp=Abcdef123456",
+            "&ws=pocketdesk-ab12&wp=short",
+            "&ws=pocketdesk-ab12&wp=Abcdef%0A123456",
+            "&ws=x%0Ay&wp=Abcdef123456",
+            "&ws=" + "n".repeat(33) + "&wp=Abcdef123456",
+            "&ws=n&wp=" + "k".repeat(64),
+            "&ws=n&wp=p%C3%A4ssword1",
+        )) {
+            assertTrue(tail, PairLink.parse(base + tail).isFailure)
+        }
+        assertTrue(PairLink.parse("$base&ws=n&wp=Abcdef123456").isSuccess)
     }
 
     /** The owner's first live test: a pasted link that began with a byte-order mark. */
