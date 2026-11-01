@@ -143,6 +143,20 @@ pub struct Config {
     /// The camera's frames a second: 15, 24 or 30.
     #[serde(default = "default_phone_camera_fps")]
     pub phone_camera_fps: u32,
+    /// Give this computer's apps the location of a phone, through GeoClue
+    /// (Linux): an NMEA source on this computer's own addresses, announced
+    /// as `_nmea-0183._tcp` for GeoClue to find. The phone is asked for one
+    /// fix when an app wants a place, at most every ten minutes, and only
+    /// with its own "Give my computer my location" on. Off by default.
+    #[serde(default)]
+    pub phone_location: bool,
+    /// How close the place is given: `city` (about a kilometre; the
+    /// default) or `exact`, which the phone must also allow.
+    #[serde(default = "default_phone_location_precision")]
+    pub phone_location_precision: String,
+    /// The phone asked, by device id; empty is any linked phone of the owner's.
+    #[serde(default)]
+    pub phone_location_phone: String,
     /// On Linux, the phone's gamepad is a game controller (T7) where uinput
     /// may be used; off, or where it may not, it types keys and moves the
     /// mouse as before.
@@ -516,6 +530,10 @@ pub struct Config {
     pub version_hints: bool,
 }
 
+fn default_phone_location_precision() -> String {
+    "city".to_string()
+}
+
 fn default_phone_camera_lens() -> String {
     "back".to_string()
 }
@@ -699,6 +717,9 @@ impl Default for Config {
             phone_camera_lens: default_phone_camera_lens(),
             phone_camera_height: default_phone_camera_height(),
             phone_camera_fps: default_phone_camera_fps(),
+            phone_location: false,
+            phone_location_precision: default_phone_location_precision(),
+            phone_location_phone: String::new(),
             gamepad_controller: true,
             notifications_per_minute: default_notifications_per_minute(),
             sms_notify: true,
@@ -979,6 +1000,9 @@ impl Config {
         "phone_camera_lens",
         "phone_camera_height",
         "phone_camera_fps",
+        "phone_location",
+        "phone_location_precision",
+        "phone_location_phone",
         "gamepad_controller",
         "notifications_per_minute",
         "sms_notify",
