@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tile_wake">Despertar</string>
+    <string name="tile_ring">Sonar teléfono</string>
+    <string name="tile_play">Reproducir / pausar</string>
+    <string name="tile_next">Siguiente</string>
+    <string name="tile_deck">Panel</string>
+    <string name="tile_deny">No: %1$s</string>
+    <string name="tile_nothing_on">Nada está activado en los Controles del reloj del teléfono</string>
+
+    <string name="said_sent">Enviado</string>
+    <string name="said_off">Ese botón está desactivado en el teléfono</string>
+    <string name="said_busy">Demasiado pronto, espera un momento</string>
+    <string name="said_unreachable">No se alcanza el teléfono</string>
+    <string name="said_not_paired">Empareja primero con el teléfono</string>
+    <string name="said_set_lock">Configura un bloqueo del reloj para usar esto</string>
+    <string name="said_locked">Desbloquea primero el reloj</string>
+    <string name="said_failed">No funcionó</string>
+    <string name="said_no_bluetooth">Permite primero los dispositivos cercanos</string>
+    <string name="said_answered">Dijiste No</string>
+
+    <string name="main_title">Pocketdesk</string>
+    <string name="main_need_permission">Permite los dispositivos cercanos para que este reloj alcance tu teléfono</string>
+    <string name="main_allow">Permitir</string>
+    <string name="main_pair_title">Emparejar con tu teléfono</string>
+    <string name="main_pair_steps">En el teléfono: Ajustes, Controles del reloj, Emparejar un reloj. Luego elige aquí el teléfono.</string>
+    <string name="main_no_phone">Ningún teléfono está emparejado con este reloj. Empárejalo antes en la app de Wear OS.</string>
+    <string name="main_code">Escribe %1$s en el teléfono</string>
+    <string name="main_waiting">Esperando al teléfono…</string>
+    <string name="main_pair_failed">No emparejado: %1$s</string>
+    <string name="main_refresh">Actualizar</string>
+    <string name="main_forget">Olvidar el teléfono</string>
+    <string name="main_wake">Despertar mi equipo</string>
+    <string name="main_ring">Hacer sonar mi teléfono</string>
+    <string name="main_play">Reproducir / pausar</string>
+    <string name="main_next">Siguiente</string>
+    <string name="main_previous">Anterior</string>
+    <string name="main_deck_title">Panel</string>
+    <string name="main_asks_title">Preguntas</string>
+    <string name="main_ask_no">No</string>
+    <string name="main_ask_on_phone">El Sí pide la huella de tu teléfono: respóndelo en el teléfono.</string>
+    <string name="main_loading">Preguntando al teléfono…</string>
+</resources>

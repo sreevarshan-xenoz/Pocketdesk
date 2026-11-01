@@ -22,6 +22,7 @@ object Waker {
             HostStore.wakeInfo(ctx, address),
             wanAddrs(HostStore.wanIdentity(ctx, address)),
             atHome(ctx, address),
+            helperKnown = WakeHelperRule.helperKnown(HostStore.wakeHelperInfo(ctx, address)),
         )
 
     /**
@@ -29,7 +30,8 @@ object Waker {
      * too, so pressing it says why nothing can be sent from here.
      */
     fun canWake(plan: WakePlan.Plan): Boolean =
-        plan is WakePlan.Plan.Direct || plan is WakePlan.Plan.Relay || plan is WakePlan.Plan.Away
+        plan is WakePlan.Plan.Direct || plan is WakePlan.Plan.Relay || plan is WakePlan.Plan.Away ||
+            plan is WakePlan.Plan.Helper
 
     /**
      * Send the wake for the computer at [address]. Returns how many
@@ -44,6 +46,14 @@ object Waker {
                     Result.failure(IllegalStateException("the computer that sends it is no longer saved"))
                 } else {
                     RustCore.wakeViaRelay(relay.address, relay.controlPort, plan.mac, plan.broadcast).map { 1 }
+                }
+            }
+            WakePlan.Plan.Helper -> {
+                val info = HostStore.wakeHelperInfo(ctx, address)
+                if (info == null) {
+                    Result.failure(IllegalStateException("no wake helper is known for this computer"))
+                } else {
+                    RustCore.wakeViaHelper(info).fold({ WakeHelperRule.outcome(it) }, { Result.failure(it) })
                 }
             }
             WakePlan.Plan.Off -> Result.failure(IllegalStateException("wake is off for this computer"))

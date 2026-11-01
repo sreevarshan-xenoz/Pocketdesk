@@ -291,6 +291,12 @@ jobs:
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon
 
+      # The JVM tests of every module: the app's, the watch link's and the
+      # watch app's (the debug assemble above already built the watch app).
+      - name: Kotlin unit tests
+        working-directory: android
+        run: ./gradlew testDebugUnitTest --no-daemon
+
       # The instrumented tests need a device, so CI only compiles them.
       - name: Compile instrumented tests
         working-directory: android

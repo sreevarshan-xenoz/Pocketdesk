@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What the tile carousel shows before the tile is added: four buttons. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="180dp"
+    android:height="180dp"
+    android:viewportWidth="180"
+    android:viewportHeight="180">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M0,0h180v180h-180z" />
+    <path
+        android:fillColor="#FF2C2C2E"
+        android:pathData="M24,50h60a10,10 0 0 1 10,10v14a10,10 0 0 1 -10,10h-60a10,10 0 0 1 -10,-10v-14a10,10 0 0 1 10,-10z" />
+    <path
+        android:fillColor="#FF2C2C2E"
+        android:pathData="M96,50h60a10,10 0 0 1 10,10v14a10,10 0 0 1 -10,10h-60a10,10 0 0 1 -10,-10v-14a10,10 0 0 1 10,-10z" />
+    <path
+        android:fillColor="#FF2C2C2E"
+        android:pathData="M24,100h60a10,10 0 0 1 10,10v14a10,10 0 0 1 -10,10h-60a10,10 0 0 1 -10,-10v-14a10,10 0 0 1 10,-10z" />
+    <path
+        android:fillColor="#FF2C2C2E"
+        android:pathData="M96,100h60a10,10 0 0 1 10,10v14a10,10 0 0 1 -10,10h-60a10,10 0 0 1 -10,-10v-14a10,10 0 0 1 10,-10z" />
+</vector>

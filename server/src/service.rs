@@ -173,6 +173,7 @@ pub async fn run(config: Config) -> Result<()> {
     tokio::spawn(crate::plugins::links::run_watcher());
     // N1: rings the desktop app or `pocketdesk ring` queues for a phone.
     tokio::spawn(crate::ring_phone::run_watcher());
+    tokio::spawn(crate::wake_helper::run_watcher());
     // The Pair page's direct link: this computer's own Wi-Fi for a phone.
     tokio::spawn(crate::direct_link::run());
     // D2: mutes for phones, and what the phones said before this run.

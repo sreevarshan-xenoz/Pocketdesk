@@ -31,6 +31,8 @@ pub mod session;
 pub mod session_telemetry;
 pub mod sessions;
 pub mod transport;
+#[cfg(feature = "wan")]
+pub mod wake_helper_net;
 pub mod wheel;
 
 // Server-only modules. Feature gates say *what* is built; the
