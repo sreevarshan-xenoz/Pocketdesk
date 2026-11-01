@@ -2220,8 +2220,15 @@ pub async fn run_with(
                 // The same window's next view of the same computer, fitted
                 // again (a resize), keeps the screen it made there: the new
                 // session asks for it at the new size, and the old view's
-                // end does not take it away first (item 8).
+                // end does not take it away first (item 8). Only when the
+                // new view will start: with the computer gone from the list,
+                // the old end must still take its screen away (#609 review).
+                let computer = computers::read(&state_dir)
+                    .computers
+                    .into_iter()
+                    .find(|c| c.device_id == device_id);
                 if fit.is_some()
+                    && computer.is_some()
                     && let Some(old) = views[slot].as_mut().filter(|v| v.device_id == device_id)
                 {
                     old.fit_held = None;
@@ -2229,10 +2236,6 @@ pub async fn run_with(
                 end(&mut views[slot], &mut viewers[slot], &state_dir, None);
                 next_id += 1;
                 let session_id = next_id;
-                let computer = computers::read(&state_dir)
-                    .computers
-                    .into_iter()
-                    .find(|c| c.device_id == device_id);
                 let mut token = [0u8; TOKEN_LEN];
                 rand::rngs::OsRng.fill_bytes(&mut token);
                 let name = computer.as_ref().map_or_else(|| "That computer".to_string(), |c| c.name.clone());
