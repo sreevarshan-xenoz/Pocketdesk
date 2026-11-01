@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1259 open items.
+1265 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 86 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 90 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 197 |
 | A phone with a SIM | 40 |
 | A second phone | 20 |
 | Away from home: another network, or through a router | 43 |
-| A second computer | 161 |
-| A Linux desktop (the Azure VM serves for some) | 215 |
+| A second computer | 162 |
+| A Linux desktop (the Azure VM serves for some) | 216 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 80 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 398 |
 
@@ -204,10 +204,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The computer connects: another device or this computer joins the phone's network with its own saved password and has internet through the phone's mobile data (open a page, or `ping` an address by number). (where: here)
 - Turning it off: "Turn its hotspot off" stops it within about 10 seconds and the indicator goes; the same with the switch off (an `off` ask is taken with the switch off); stopping the tethering manager's call by making it fail (the fallback) runs `/system/bin/cmd wifi stop-softap` only (see the helper's log), and nothing else. (where: here)
 - The phone's own switch turned off while the computer's hotspot is on turns that hotspot off at once; a hotspot the owner turned on themselves is not turned off by the timer or by the switch. (where: here)
-- The auto-off: with 15 minutes chosen (tap the row to change it; the values go round 15, 30, 60, 120, never), a hotspot the computer turned on is turned off by the phone about 15 minutes after the last ask to turn it on, a second ask meanwhile renews the time, and "never" leaves it on until asked or turned off. The phone's process killed in between (swipe the app away) still turns it off at the next tick after it restarts. (where: here)
+- The auto-off: with 15 minutes chosen (tap the row to change it; the values go round 15, 30, 60, 120, never), a hotspot the computer turned on is turned off by the phone about 15 minutes after the last ask to turn it on, a second ask meanwhile renews the time, and "never" leaves it on until asked, turned off, or the 4-hour cap. The phone's process killed in between (swipe the app away) still turns it off at the next tick after it restarts. (where: here)
 - A locked phone with a PIN or fingerprint lock still turns the hotspot on and off when asked, with the screen off; nothing appears on the phone's screen but Android's own indicator. (where: here)
 - The rate limit: nine asks (on and off together) in ten minutes: the first eight go, the ninth is logged "TOO_MANY" and does nothing; ten minutes later it goes again. (where: here)
 - No other command: while turning it on and off, `ps` and logcat on the phone show no `cmd wifi start-softap`, no shell and no hotspot name or password anywhere in the helper's command lines; the computer's Activity and the phone's log never show the hotspot's name or password. (where: here)
+- A stop that fails is never forgotten: with the computer's hotspot on, stop Shizuku and press "Turn its hotspot off" (or turn the phone's switch off): the hotspot stays on, nothing is cleared, the log says the stop did not go through and tries again about every 15 seconds; start Shizuku again and allow Pocketdesk: it goes off within about 15 seconds. (where: here)
+- The hard cap: with "never" chosen for the auto-off, a hotspot the computer turned on goes off 4 hours after the first ask of that run, and asking again at 3 hours does not move it. (where: here)
+- The owner's own hotspot: turn the hotspot on yourself in Android, then press "Use my phone's hotspot": nothing is started, and neither the timer, the cap nor the switch ever turns it off; only "Turn its hotspot off" from the computer ends it. A USB tether you started does not stop the hotspot from being started. (where: here)
+- A helper that hangs: with Shizuku stopped half way (or its service unresponsive) an ask ends within about 45 seconds and the next ask works (nothing stays "busy"). (where: here)
 - The Settings rows by hand: the phone's switch, summary and auto-off row (light, dark, narrow, Spanish and Tamil), and the desktop's Phones row on Linux (the field limits at 32 characters; the row is not drawn on Windows). (where: here)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
@@ -1304,6 +1308,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **266. The computer turns on the phone's hotspot (Settings, Let my computers turn on my hotspot; Overview, Use my phone's hotspot)**
 
 - Only its own computer: another paired computer's `hotspot_on` (sent by hand) is logged "NOT_OWN" and does nothing, and a paired computer with "Screenshot, lock and open its apps" turned off in Devices on the computer cannot ask at all. (where: second computer)
+- The asking computer gone: with the hotspot on, turn off the computer's Wi-Fi or stop its server for over 2 minutes: the phone turns the hotspot off (and not before 2 minutes); unpair the phone on the computer, or remove the computer on the phone: it goes off at once. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
@@ -1851,6 +1856,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **266. The computer turns on the phone's hotspot (Settings, Let my computers turn on my hotspot; Overview, Use my phone's hotspot)**
 
 - Joining on Linux with NetworkManager: with "Join my phone's hotspot network" set to the phone's saved Wi-Fi name, "Use my phone's hotspot" says "Joining ..." and the computer joins it once it appears (the notice says "Joined"); with a name that is not saved here it says so and joins nothing and asks for no password; with the setting empty it only tells you to connect. No password prompt appears and none is stored by Pocketdesk. (where: linux)
+- Two saved networks of one name on Linux: with the phone's name saved twice in NetworkManager, nothing is joined and the notice says so; with one, it is joined by UUID (`ps` while it joins shows `nmcli ... connection up uuid ...`, no name or password). (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
