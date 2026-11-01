@@ -186,13 +186,21 @@ class PhoneLocation(private val ctx: Context) {
             return
         }
         val cancel = CancellationSignal()
-        Handler(Looper.getMainLooper()).postDelayed({ cancel.cancel() }, FIX_WITHIN_MS)
+        // Answered once: a cancelled ask never calls its consumer, so the time
+        // running out answers "none" itself, or the ask stays in flight and
+        // every later one goes unanswered (device batch 2026-11-01).
+        val answered = AtomicBoolean(false)
+        val once = { location: Location? -> if (answered.compareAndSet(false, true)) done(location) }
+        Handler(Looper.getMainLooper()).postDelayed({
+            cancel.cancel()
+            worker.execute { once(null) }
+        }, FIX_WITHIN_MS)
         runCatching {
             @Suppress("MissingPermission")
-            LocationManagerCompat.getCurrentLocation(manager, provider, cancel, worker) { done(it) }
+            LocationManagerCompat.getCurrentLocation(manager, provider, cancel, worker) { once(it) }
         }.onFailure {
             Log.w(TAG, "the system would not give a location", it)
-            worker.execute { done(null) }
+            worker.execute { once(null) }
         }
     }
 
