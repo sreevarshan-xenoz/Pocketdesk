@@ -39,8 +39,9 @@ interface IWindowHost {
 
     // Let my computers turn on my hotspot: start the phone's own Wi-Fi hotspot
     // with the settings Android already holds for it. No argument: no name,
-    // password or band is ever passed in. True when it started.
-    boolean startHotspot() = 9;
+    // password or band is ever passed in. 1 when it started, 2 when a Wi-Fi
+    // hotspot was already running (nothing was started), 0 when it did not.
+    int startHotspot() = 9;
 
     // Turn the hotspot off again. True when it was asked to stop.
     boolean stopHotspot() = 10;

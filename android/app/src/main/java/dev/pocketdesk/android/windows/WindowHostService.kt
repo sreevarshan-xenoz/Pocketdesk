@@ -200,9 +200,9 @@ class WindowHostService() : IWindowHost.Stub() {
      * settings Android already holds. Takes nothing from the caller, after the same
      * caller-uid check as every call here.
      */
-    override fun startHotspot(): Boolean {
+    override fun startHotspot(): Int {
         guard()
-        val context = shellContext ?: return false
+        val context = shellContext ?: return HotspotRule.RESULT_FAILED
         return HotspotShell.start(context)
     }
 

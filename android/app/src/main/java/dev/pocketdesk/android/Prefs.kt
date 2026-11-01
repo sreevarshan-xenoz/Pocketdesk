@@ -685,11 +685,39 @@ object Prefs {
         prefs(ctx).edit { putInt("hotspot_off_minutes", minutes) }
     }
 
-    /** When (wall clock, ms) the last ask to turn the hotspot on went through, or 0 when none is on from here. */
-    fun hotspotOnAt(ctx: Context): Long = prefs(ctx).getLong("hotspot_on_at", 0L)
+    /**
+     * The hotspot Pocketdesk turned on and has not yet seen go off, or null when none is ours: when its
+     * run began, when it was last asked for (wall clock, ms), and the address of the computer that asked.
+     * Kept until a stop has gone through, so a hotspot that could not be turned off is never forgotten.
+     */
+    fun hotspotRun(ctx: Context): dev.pocketdesk.android.windows.HotspotRule.Run? {
+        val p = prefs(ctx)
+        val first = p.getLong("hotspot_first_on_at", 0L)
+        val asker = p.getString("hotspot_asker", null)
+        if (first <= 0L || asker == null) return null
+        return dev.pocketdesk.android.windows.HotspotRule.Run(first, p.getLong("hotspot_on_at", first), asker)
+    }
 
-    fun setHotspotOnAt(ctx: Context, atMs: Long) {
-        prefs(ctx).edit { putLong("hotspot_on_at", atMs) }
+    fun setHotspotRun(ctx: Context, run: dev.pocketdesk.android.windows.HotspotRule.Run?) {
+        prefs(ctx).edit {
+            if (run == null) {
+                remove("hotspot_first_on_at")
+                remove("hotspot_on_at")
+                remove("hotspot_asker")
+                remove("hotspot_stop_pending")
+            } else {
+                putLong("hotspot_first_on_at", run.firstOnAtMs)
+                putLong("hotspot_on_at", run.lastOnAtMs)
+                putString("hotspot_asker", run.asker)
+            }
+        }
+    }
+
+    /** Whether a stop is owed (a reason came up) and has not gone through yet; it is tried again until it does. */
+    fun hotspotStopPending(ctx: Context): Boolean = prefs(ctx).getBoolean("hotspot_stop_pending", false)
+
+    fun setHotspotStopPending(ctx: Context, pending: Boolean) {
+        prefs(ctx).edit { putBoolean("hotspot_stop_pending", pending) }
     }
 
     /**

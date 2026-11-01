@@ -107,6 +107,85 @@ object HotspotRule {
         return OFF_CHOICES[(at + 1) % OFF_CHOICES.size]
     }
 
+    private val WIFI_AP_INTERFACE = Regex("^(wlan|ap|swlan|softap)[0-9]+$")
+
+    /**
+     * Whether any of the interfaces being tethered is a Wi-Fi access point's (Android's own names for
+     * them), so a USB or Bluetooth tether the owner started does not count as a hotspot already on.
+     */
+    fun wifiApAmong(tethered: List<String>): Boolean = tethered.any { WIFI_AP_INTERFACE.matches(it) }
+
+    /** What the helper says of a start or a stop. */
+    const val RESULT_FAILED = 0
+    const val RESULT_DONE = 1
+
+    /** A start that found a Wi-Fi hotspot already running (the owner's own): nothing was started. */
+    const val RESULT_ALREADY_ON = 2
+
+    /** The longest a hotspot Pocketdesk turned on stays on, from the first ask of that run, whatever the setting (including never). */
+    const val MAX_LIFETIME_MS = 4 * 60 * 60_000L
+
+    /** How long the asking computer's link may be gone before the hotspot goes off. */
+    const val LINK_GRACE_MS = 2 * 60_000L
+
+    /** The least time between two tries to turn it off while one has not gone through. */
+    const val RETRY_MS = 15_000L
+
+    /**
+     * A hotspot Pocketdesk turned on and has not yet seen go off: when the run began ([firstOnAtMs], which a
+     * later ask never moves), when it was last asked for ([lastOnAtMs], which the auto-off counts from), and
+     * which computer asked ([asker], its address on this phone).
+     */
+    data class Run(val firstOnAtMs: Long, val lastOnAtMs: Long, val asker: String)
+
+    /** Why a hotspot is to be turned off now. */
+    enum class StopWhy { CAP, ASKER_GONE, TIMER, LINK_LOST }
+
+    /**
+     * The run after an ask to turn it on whose start said [start], [prev] being the run before. A start that
+     * failed changes nothing; one that started a hotspot begins a run, or renews the one going (its first time
+     * is kept, so asking again never moves the cap); one that found a hotspot already running renews a run of
+     * ours, and otherwise starts none: a hotspot the owner turned on themselves is never ours to turn off.
+     */
+    fun afterOn(prev: Run?, start: Int, asker: String, nowMs: Long): Run? = when (start) {
+        RESULT_DONE -> Run(prev?.firstOnAtMs ?: nowMs, nowMs, asker)
+        RESULT_ALREADY_ON -> prev?.copy(lastOnAtMs = nowMs, asker = asker)
+        else -> prev
+    }
+
+    /**
+     * Whether, and why, [run] is to be turned off now. In this order: the [MAX_LIFETIME_MS] cap (always,
+     * whatever [minutes] says), the asking computer no longer paired ([askerPaired] false), the owner's
+     * [minutes] since the last ask (0 = never), and its link gone for [linkLostForMs] or more.
+     */
+    fun stopDue(run: Run?, nowMs: Long, minutes: Int, askerPaired: Boolean, linkLostForMs: Long): StopWhy? = when {
+        run == null -> null
+        nowMs - run.firstOnAtMs >= MAX_LIFETIME_MS -> StopWhy.CAP
+        !askerPaired -> StopWhy.ASKER_GONE
+        offDue(run.lastOnAtMs, nowMs, minutes) -> StopWhy.TIMER
+        linkLostForMs >= LINK_GRACE_MS -> StopWhy.LINK_LOST
+        else -> null
+    }
+
+    /** Whether a try to turn it off may be made now, the last one having been at [lastTryMs]. */
+    fun retryDue(lastTryMs: Long, nowMs: Long): Boolean = nowMs < lastTryMs || nowMs - lastTryMs >= RETRY_MS
+
+    /** Counts how long a link has been gone, from what is seen at each tick. */
+    class LinkWatch {
+        private var lostAtMs = 0L
+
+        /** 0 while [linked]; else how long, in ms, since it was first seen gone. */
+        @Synchronized
+        fun lostFor(linked: Boolean, nowMs: Long): Long {
+            if (linked) {
+                lostAtMs = 0L
+                return 0L
+            }
+            if (lostAtMs == 0L) lostAtMs = nowMs
+            return (nowMs - lostAtMs).coerceAtLeast(0L)
+        }
+    }
+
     /** A sliding window of recent asks, for the limit. Not thread-safe by itself: [take] is synchronized. */
     class Limiter(private val max: Int = LIMIT_ASKS, private val windowMs: Long = LIMIT_WINDOW_MS) {
         private val times = ArrayDeque<Long>()

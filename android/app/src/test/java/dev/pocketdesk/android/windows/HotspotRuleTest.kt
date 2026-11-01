@@ -124,4 +124,116 @@ class HotspotRuleTest {
         // A value that is not a choice (an old setting) lands on the first.
         assertEquals(HotspotRule.OFF_CHOICES.first(), HotspotRule.nextChoice(-5))
     }
+
+    private val minute = 60_000L
+    private val run = HotspotRule.Run(firstOnAtMs = 1_000L, lastOnAtMs = 1_000L, asker = "192.0.2.7")
+
+    @Test
+    fun aStartThatStartedOneBeginsARunAndALaterAskNeverMovesItsFirstTime() {
+        val first = HotspotRule.afterOn(null, HotspotRule.RESULT_DONE, "192.0.2.7", 1_000L)
+        assertEquals(HotspotRule.Run(1_000L, 1_000L, "192.0.2.7"), first)
+        // Asked again an hour later: renewed for the minutes, but the cap still counts from the first.
+        val again = HotspotRule.afterOn(first, HotspotRule.RESULT_DONE, "192.0.2.7", 1_000L + 60 * minute)
+        assertEquals(1_000L, again!!.firstOnAtMs)
+        assertEquals(1_000L + 60 * minute, again.lastOnAtMs)
+    }
+
+    @Test
+    fun aHotspotTheOwnerTurnedOnThemselvesIsNeverRecordedSoNeverTurnedOffFromHere() {
+        // A start that found one running starts no run...
+        assertEquals(null, HotspotRule.afterOn(null, HotspotRule.RESULT_ALREADY_ON, "192.0.2.7", 5_000L))
+        // ...but one of ours that is still running is renewed, keeping its first time.
+        val renewed = HotspotRule.afterOn(run, HotspotRule.RESULT_ALREADY_ON, "192.0.2.7", 9_000L)
+        assertEquals(HotspotRule.Run(1_000L, 9_000L, "192.0.2.7"), renewed)
+        // A failed start changes nothing, with or without a run.
+        assertEquals(null, HotspotRule.afterOn(null, HotspotRule.RESULT_FAILED, "192.0.2.7", 5_000L))
+        assertEquals(run, HotspotRule.afterOn(run, HotspotRule.RESULT_FAILED, "192.0.2.7", 5_000L))
+    }
+
+    @Test
+    fun onlyWifiAccessPointsCountAsAHotspotRunning() {
+        assertTrue(HotspotRule.wifiApAmong(listOf("ap0")))
+        assertTrue(HotspotRule.wifiApAmong(listOf("rndis0", "swlan0")))
+        assertTrue(HotspotRule.wifiApAmong(listOf("wlan1")))
+        assertTrue(HotspotRule.wifiApAmong(listOf("softap0")))
+        assertFalse("a USB tether is not a hotspot", HotspotRule.wifiApAmong(listOf("rndis0", "usb0")))
+        assertFalse("a Bluetooth tether is not one", HotspotRule.wifiApAmong(listOf("bt-pan")))
+        assertFalse(HotspotRule.wifiApAmong(emptyList()))
+        assertFalse(HotspotRule.wifiApAmong(listOf("wlan", "xap0", "ap0x")))
+    }
+
+    @Test
+    fun theCapTurnsItOffWhateverTheSettingIncludingNever() {
+        val capped = 1_000L + HotspotRule.MAX_LIFETIME_MS
+        for (minutes in HotspotRule.OFF_CHOICES) {
+            assertEquals(
+                "minutes $minutes",
+                HotspotRule.StopWhy.CAP,
+                HotspotRule.stopDue(run, capped, minutes, askerPaired = true, linkLostForMs = 0),
+            )
+            assertEquals(
+                null,
+                HotspotRule.stopDue(run.copy(lastOnAtMs = capped - 1), capped - 1, 0, askerPaired = true, linkLostForMs = 0),
+            )
+        }
+        assertEquals(4 * 60 * minute, HotspotRule.MAX_LIFETIME_MS)
+    }
+
+    @Test
+    fun aLaterAskDoesNotExtendPastTheCap() {
+        // First on at 1_000, asked again just before the cap: renewed, yet the cap is from the first.
+        val late = 1_000L + HotspotRule.MAX_LIFETIME_MS - minute
+        val renewed = HotspotRule.afterOn(run, HotspotRule.RESULT_DONE, "192.0.2.7", late)
+        assertEquals(null, HotspotRule.stopDue(renewed, late, 0, true, 0))
+        assertEquals(
+            HotspotRule.StopWhy.CAP,
+            HotspotRule.stopDue(renewed, late + minute, 0, true, 0),
+        )
+    }
+
+    @Test
+    fun theAskingComputerGoingAwayTurnsItOff() {
+        // Unpaired or revoked: at once, whatever else is true.
+        assertEquals(HotspotRule.StopWhy.ASKER_GONE, HotspotRule.stopDue(run, 2_000L, 0, askerPaired = false, linkLostForMs = 0))
+        // Its link gone: only after the grace.
+        assertEquals(null, HotspotRule.stopDue(run, 2_000L, 0, true, HotspotRule.LINK_GRACE_MS - 1))
+        assertEquals(HotspotRule.StopWhy.LINK_LOST, HotspotRule.stopDue(run, 2_000L, 0, true, HotspotRule.LINK_GRACE_MS))
+        assertEquals(2 * minute, HotspotRule.LINK_GRACE_MS)
+    }
+
+    @Test
+    fun theOwnersMinutesStillTurnItOffAndNeverMeansNoTimer() {
+        assertEquals(HotspotRule.StopWhy.TIMER, HotspotRule.stopDue(run, 1_000L + 30 * minute, 30, true, 0))
+        assertEquals(null, HotspotRule.stopDue(run, 1_000L + 29 * minute, 30, true, 0))
+        assertEquals(null, HotspotRule.stopDue(run, 1_000L + 3 * 60 * minute, 0, true, 0))
+        assertEquals(null, HotspotRule.stopDue(null, 1_000L + 99 * 60 * minute, 30, false, 99 * minute))
+    }
+
+    @Test
+    fun aStopThatFailedIsTriedAgainOnlyAfterTheRetryTime() {
+        assertTrue("never tried (a real clock is far past the first time)", HotspotRule.retryDue(0L, 100_000L))
+        assertFalse(HotspotRule.retryDue(10_000L, 10_000L + HotspotRule.RETRY_MS - 1))
+        assertTrue(HotspotRule.retryDue(10_000L, 10_000L + HotspotRule.RETRY_MS))
+        assertTrue("a clock set back does not stop the tries", HotspotRule.retryDue(10_000L, 5_000L))
+    }
+
+    @Test
+    fun theLinkWatchCountsFromTheFirstTimeItSawTheLinkGoneAndResetsWhenItIsBack() {
+        val watch = HotspotRule.LinkWatch()
+        assertEquals(0L, watch.lostFor(linked = true, nowMs = 1_000L))
+        assertEquals(0L, watch.lostFor(linked = false, nowMs = 2_000L))
+        assertEquals(30_000L, watch.lostFor(linked = false, nowMs = 32_000L))
+        assertEquals(0L, watch.lostFor(linked = true, nowMs = 40_000L))
+        assertEquals(0L, watch.lostFor(linked = false, nowMs = 50_000L))
+        assertEquals(HotspotRule.LINK_GRACE_MS, watch.lostFor(linked = false, nowMs = 50_000L + HotspotRule.LINK_GRACE_MS))
+    }
+
+    @Test
+    fun aStopHeldThroughFailuresIsNeverForgottenByTheRule() {
+        // The run is only ever replaced by afterOn (an ask), never cleared by a reason: a reason leaves
+        // it for the caller, which clears it only when the helper says the stop went through.
+        val after = HotspotRule.afterOn(run, HotspotRule.RESULT_FAILED, "192.0.2.7", 10 * minute)
+        assertEquals(run, after)
+        assertEquals(HotspotRule.StopWhy.CAP, HotspotRule.stopDue(after, 1_000L + HotspotRule.MAX_LIFETIME_MS + 7 * minute, 30, true, 0))
+    }
 }

@@ -432,7 +432,7 @@ object PhoneActions {
                 val hotspot = if (action == PhoneActionRule.Action.HOTSPOT_ON) HotspotRule.Ask.ON else HotspotRule.Ask.OFF
                 val decided = PhoneHotspot.decide(context, hotspot, ownComputer, SystemClock.elapsedRealtime())
                 if (decided == HotspotRule.Decision.DO) {
-                    PhoneHotspot.run(context, hotspot)
+                    PhoneHotspot.run(context, hotspot, own?.address.orEmpty())
                 } else {
                     Log.i(TAG, "an ask from the computer (${action.word}) was not done: $decided")
                 }

@@ -32,6 +32,7 @@ internal object HotspotShell {
     /** `TetheringManager.TETHERING_WIFI`. */
     private const val TETHERING_WIFI = 0
     private const val START_WAIT_S = 15L
+    private const val ASK_WAIT_S = 3L
     private const val STOP_WAIT_S = 10L
 
     /** The tethering manager, made for the shell's own package so the system's checks name uid 2000. */
@@ -49,9 +50,42 @@ internal object HotspotShell {
         }
     }.onFailure { Log.w(TAG, "no tethering manager", it) }.getOrNull()
 
-    /** Start Wi-Fi tethering, waiting for the system's answer. True when it started. */
-    fun start(context: Context): Boolean = runCatching {
-        val manager = manager(context) ?: return false
+    /**
+     * Whether a Wi-Fi access point is being tethered now: the tethering manager tells a new listener the
+     * current interfaces at once. Null when that could not be asked. USB and Bluetooth tethers do not count.
+     */
+    private fun wifiHotspotRunning(manager: Any): Boolean? = runCatching {
+        val clazz = Class.forName("android.net.TetheringManager")
+        val callbackClass = Class.forName("android.net.TetheringManager\$TetheringEventCallback")
+        val heard = CountDownLatch(1)
+        var tethered: List<*>? = null
+        val callback = Proxy.newProxyInstance(callbackClass.classLoader, arrayOf(callbackClass)) { proxy, method, args ->
+            when (method.name) {
+                "onTetheredInterfacesChanged" -> {
+                    tethered = args?.firstOrNull() as? List<*>
+                    heard.countDown()
+                }
+                "hashCode" -> System.identityHashCode(proxy)
+                "equals" -> proxy === args?.firstOrNull()
+                "toString" -> "TetheringEventCallback"
+                else -> null
+            }
+        }
+        clazz.getMethod("registerTetheringEventCallback", Executor::class.java, callbackClass)
+            .invoke(manager, Executor { it.run() }, callback)
+        val answered = heard.await(ASK_WAIT_S, TimeUnit.SECONDS)
+        runCatching { clazz.getMethod("unregisterTetheringEventCallback", callbackClass).invoke(manager, callback) }
+        if (answered) HotspotRule.wifiApAmong(tethered.orEmpty().map { it.toString() }) else null
+    }.onFailure { Log.w(TAG, "could not ask whether a hotspot is running", it) }.getOrNull()
+
+    /**
+     * Start Wi-Fi tethering, waiting for the system's answer: [HotspotRule.RESULT_DONE] when it started,
+     * [HotspotRule.RESULT_ALREADY_ON] when one was running already (nothing is started), else
+     * [HotspotRule.RESULT_FAILED]. When whether one runs cannot be asked, it is started as before.
+     */
+    fun start(context: Context): Int = runCatching {
+        val manager = manager(context) ?: return HotspotRule.RESULT_FAILED
+        if (wifiHotspotRunning(manager) == true) return HotspotRule.RESULT_ALREADY_ON
         val clazz = Class.forName("android.net.TetheringManager")
         val requestClass = Class.forName("android.net.TetheringManager\$TetheringRequest")
         val builderClass = Class.forName("android.net.TetheringManager\$TetheringRequest\$Builder")
@@ -82,8 +116,8 @@ internal object HotspotShell {
         }
         clazz.getMethod("startTethering", requestClass, Executor::class.java, callbackClass)
             .invoke(manager, request, Executor { it.run() }, callback)
-        done.await(START_WAIT_S, TimeUnit.SECONDS) && started
-    }.onFailure { Log.w(TAG, "the hotspot did not start", it) }.getOrDefault(false)
+        if (done.await(START_WAIT_S, TimeUnit.SECONDS) && started) HotspotRule.RESULT_DONE else HotspotRule.RESULT_FAILED
+    }.onFailure { Log.w(TAG, "the hotspot did not start", it) }.getOrDefault(HotspotRule.RESULT_FAILED)
 
     /** Stop Wi-Fi tethering: the manager first, then the fixed command. True when one of them went through. */
     fun stop(context: Context): Boolean {
