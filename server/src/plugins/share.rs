@@ -784,7 +784,7 @@ impl Plugin for SharePlugin {
                                     })
                                 },
                                 modified,
-                                replace: kept.is_some(),
+                                replace: kept.as_ref().map(|k| k.top.as_path()),
                             },
                         )
                         .await
@@ -1704,9 +1704,10 @@ struct Incoming<'a> {
     /// The date the file was last changed where it came from (K1), set
     /// once it is in place; none keeps the arrival's.
     modified: Option<std::time::SystemTime>,
-    /// A kept folder's file replaces its older copy of the same name; any
-    /// other never overwrites one (`name (1)`).
-    replace: bool,
+    /// A kept folder's file replaces its older copy of the same name, and
+    /// is checked to land inside this folder (the kept folder itself); any
+    /// other file never overwrites one (`name (1)`).
+    replace: Option<&'a Path>,
 }
 
 /// Reach the phone by `route` and receive one file with the resumable
@@ -1833,12 +1834,12 @@ async fn receive_file(route: Route, key: &str, incoming: Incoming<'_>) -> Result
                 let records = Store::new(store.dir().to_path_buf());
                 let device = device.to_string();
                 let source = source.clone();
+                let replace = replace.map(Path::to_path_buf);
                 async move {
                     let _in_use = in_use_guard;
-                    let placed = if replace {
-                        place_replacing(&part_path, &dir, &name, modified).await
-                    } else {
-                        place(&part_path, &dir, &name, modified).await
+                    let placed = match &replace {
+                        Some(top) => place_replacing(&part_path, &dir, &name, modified, top).await,
+                        None => place(&part_path, &dir, &name, modified).await,
                     };
                     records.remove(&device, &source);
                     let _ = std::fs::remove_file(&part_path);
@@ -1911,7 +1912,7 @@ pub(crate) async fn receive_offered(
                 on_received(path, size, &announced, top.as_deref())
             }),
             modified: received_date(offer),
-            replace: false,
+            replace: None,
         },
     )
     .await
@@ -1995,17 +1996,31 @@ pub(crate) async fn place(
 /// (a kept folder is a mirror, not a pile of copies), and return where it
 /// went. A rename replaces on both Linux and Windows; across volumes the
 /// bytes are copied beside the file first and renamed over it, so the old
-/// copy is never left half written. A folder at the place is refused.
+/// copy is never left half written. A folder at the place is refused, and so
+/// is a folder that no longer lies inside `top` (the kept folder): its real
+/// path is read again right before the move, since a link could have been
+/// put in the way since the file was accepted, and the folder is not made
+/// again here, so nothing is made through one.
 pub(crate) async fn place_replacing(
     part: &Path,
     dir: &Path,
     name: &str,
     modified: Option<std::time::SystemTime>,
+    top: &Path,
 ) -> Result<PathBuf> {
-    tokio::fs::create_dir_all(dir)
+    let real_dir = tokio::fs::canonicalize(dir)
         .await
-        .map_err(|e| io_error("create_dir", e))?;
-    let final_path = dir.join(name);
+        .map_err(|e| io_error("place", format!("the file's folder is not there: {e}")))?;
+    let real_top = tokio::fs::canonicalize(top)
+        .await
+        .map_err(|e| io_error("place", format!("the kept folder is not there: {e}")))?;
+    if !real_dir.starts_with(&real_top) {
+        return Err(io_error(
+            "place",
+            "the file's folder leads out of the kept folder",
+        ));
+    }
+    let final_path = real_dir.join(name);
     if tokio::fs::symlink_metadata(&final_path)
         .await
         .is_ok_and(|m| !m.is_file())
@@ -2179,7 +2194,7 @@ mod tests {
         std::fs::write(dir.join("in").join("a.txt"), b"old").unwrap();
         let part = dir.join("a.part");
         std::fs::write(&part, b"newer bytes").unwrap();
-        let placed = place_replacing(&part, &dir.join("in"), "a.txt", Some(june))
+        let placed = place_replacing(&part, &dir.join("in"), "a.txt", Some(june), &dir)
             .await
             .unwrap();
         assert_eq!(
@@ -2203,11 +2218,40 @@ mod tests {
         let part = dir.join("c.part");
         std::fs::write(&part, b"x").unwrap();
         assert!(
-            place_replacing(&part, &dir.join("in"), "d", None)
+            place_replacing(&part, &dir.join("in"), "d", None, &dir)
                 .await
                 .is_err()
         );
         assert!(dir.join("in").join("d").is_dir());
+        // A folder that stopped being inside the kept folder since the file
+        // was accepted (a link put there meanwhile) gets nothing, and none is
+        // made through it.
+        #[cfg(unix)]
+        {
+            let outside = temp_dir("kept-replace-out");
+            std::os::unix::fs::symlink(&outside, dir.join("in").join("swapped")).unwrap();
+            let part = dir.join("d.part");
+            std::fs::write(&part, b"escape").unwrap();
+            let err = place_replacing(
+                &part,
+                &dir.join("in").join("swapped"),
+                "x.bin",
+                None,
+                &dir.join("in"),
+            )
+            .await;
+            assert!(err.is_err());
+            assert!(!outside.join("x.bin").exists());
+            // A folder that is gone is not made again here.
+            let gone = dir.join("in").join("gone");
+            assert!(
+                place_replacing(&part, &gone, "x.bin", None, &dir.join("in"))
+                    .await
+                    .is_err()
+            );
+            assert!(!gone.exists());
+            let _ = std::fs::remove_dir_all(&outside);
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2641,7 +2685,7 @@ mod tests {
             progress: Box::new(|_| {}),
             on_saved: Box::new(|_| {}),
             modified: None,
-            replace: false,
+            replace: None,
         }
     }
 

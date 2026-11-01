@@ -17,10 +17,18 @@
 //! - all kept folders together stay within `kept_folders_cap_gb`;
 //! - nothing is ever deleted unless the phone's run asks to mirror its
 //!   deletions and `kept_folders_allow_delete` is on, and then only plain
-//!   files below that folder.
+//!   files below that folder, never more than half of what it holds in one
+//!   run and never more than [`MAX_DELETE_PER_RUN`];
+//! - a file in flight holds its bytes against the cap ([`Reservation`]), so
+//!   several at once cannot pass it together;
+//! - a name that differs from another in that folder only by case is
+//!   refused (Windows would make them one), and never deleted by the other's
+//!   name;
+//! - a list of folders this version cannot read is never written over.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use pocketdesk_core::local::config::Config;
@@ -35,11 +43,47 @@ static LOCK: Mutex<()> = Mutex::new(());
 /// of files cannot stall a run's end.
 const MAX_WALK: usize = 2_000_000;
 
+/// The most entries of one folder looked at for a name that differs only by
+/// case, so a folder of millions cannot stall a file.
+const MAX_SCAN: usize = 50_000;
+
+/// The most files a phone's run may delete in all.
+const MAX_DELETE_PER_RUN: u64 = 1000;
+
+/// This few deletions in a run are made whatever the folder holds: one file
+/// deleted from a folder of two is an ordinary deletion.
+const DELETE_FREE: u64 = 2;
+
+/// Bytes the files now arriving hold against the cap, so files that arrive
+/// together cannot pass it together.
+static RESERVED: Mutex<u64> = Mutex::new(0);
+
+/// What each phone folder's current run has deleted so far, by phone and
+/// folder: a run's deletions come in packets of at most 200, and the limits
+/// are for the run, not the packet. A run's start or end forgets it.
+static RUN_DELETED: Mutex<Option<HashMap<(String, String), u64>>> = Mutex::new(None);
+
+/// Bytes held against the cap for a file in flight; given back when the
+/// transfer ends, whether it was placed or not (dropped with the last copy
+/// of its [`Accepted`]).
+#[derive(Debug)]
+pub(crate) struct Reservation(u64);
+
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        let mut held = RESERVED.lock().unwrap_or_else(|e| e.into_inner());
+        *held = held.saturating_sub(self.0);
+    }
+}
+
 /// Where one kept file goes, decided by [`accept`].
 #[derive(Debug, Clone)]
 pub(crate) struct Accepted {
     /// The folder the file lands in (made).
     pub dir: PathBuf,
+    /// The kept folder itself: what the file's place is checked to stay in,
+    /// again right before the file is moved in.
+    pub top: PathBuf,
     /// The file's own name.
     pub name: String,
     pub folder_id: String,
@@ -47,6 +91,8 @@ pub(crate) struct Accepted {
     pub label: String,
     /// Whether a file of this name was there already, and its size.
     pub replaces: Option<u64>,
+    /// The bytes held against the cap while the file arrives.
+    pub _reserved: Arc<Reservation>,
 }
 
 /// Whether `device` is one of the owner's own phones.
@@ -106,7 +152,7 @@ pub(crate) fn accept(
     let root = root(config)?;
     let state = crate::state::state_dir().map_err(|e| e.to_string())?;
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut list = registry::read(&state);
+    let mut list = registry::read_checked(&state).map_err(|e| e.0)?;
     let at = match list
         .iter()
         .position(|f| f.device_id == device && f.folder_id == file.folder_id)
@@ -119,7 +165,8 @@ pub(crate) fn accept(
                     registry::MAX_FOLDERS
                 ));
             }
-            list.push(new_entry(&list, &root, device, file));
+            let entry = new_entry(&list, &root, device, file);
+            list.push(entry);
             list.len() - 1
         }
     };
@@ -129,8 +176,10 @@ pub(crate) fn accept(
     if list[at].label != file.label {
         list[at].label = file.label.clone();
     }
+    // What is held now and what is arriving now, together.
+    let arriving = *RESERVED.lock().unwrap_or_else(|e| e.into_inner());
     let cap = registry::cap_refusal(
-        registry::used_bytes(&list),
+        registry::used_bytes(&list).saturating_add(arriving),
         size,
         existing_len(&top, &file.path).unwrap_or(0),
         config.kept_folders_cap_gb,
@@ -151,12 +200,17 @@ pub(crate) fn accept(
     match placed {
         Ok((dir, name, replaces)) => {
             let _ = registry::write(&state, &list);
+            // Held under the same lock as the check, so two files cannot
+            // both pass it.
+            *RESERVED.lock().unwrap_or_else(|e| e.into_inner()) += size;
             Ok(Accepted {
                 dir,
                 name,
+                top,
                 folder_id: file.folder_id.clone(),
                 label: file.label.clone(),
                 replaces,
+                _reserved: Arc::new(Reservation(size)),
             })
         }
         Err(why) => {
@@ -179,14 +233,19 @@ fn new_entry(list: &[KeptFolder], root: &Path, device: &str, file: &KeptFile) ->
         .map(|f| f.phone_dir.clone())
         .unwrap_or_else(|| {
             let taken: Vec<String> = list.iter().map(|f| f.phone_dir.clone()).collect();
-            registry::unique_name(&taken, &kept::folder_name(&phone))
+            registry::unique_name_where(&taken, &kept::folder_name(&phone), &|n| {
+                exists_like(root, n)
+            })
         });
     let taken: Vec<String> = list
         .iter()
         .filter(|f| f.device_id == device)
         .map(|f| f.folder_dir.clone())
         .collect();
-    let folder_dir = registry::unique_name(&taken, &kept::folder_name(&file.label));
+    let under_phone = root.join(&phone_dir);
+    let folder_dir = registry::unique_name_where(&taken, &kept::folder_name(&file.label), &|n| {
+        exists_like(&under_phone, n)
+    });
     KeptFolder {
         device_id: device.to_string(),
         folder_id: file.folder_id.clone(),
@@ -211,6 +270,102 @@ fn new_entry(list: &[KeptFolder], root: &Path, device: &str, file: &KeptFile) ->
     }
 }
 
+/// Whether `parent` already holds a name like `name`, in any case (made by
+/// hand, or by an earlier registry).
+fn exists_like(parent: &Path, name: &str) -> bool {
+    std::fs::read_dir(parent).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .take(MAX_SCAN)
+            .any(|e| registry::fold(&e.file_name().to_string_lossy()) == registry::fold(name))
+    })
+}
+
+/// Whether `meta` is a link: a symbolic link, or on Windows a junction or any
+/// other reparse point, none of which a kept folder may have in its way.
+fn is_link(meta: &std::fs::Metadata) -> bool {
+    meta.file_type().is_symlink() || is_reparse_point(meta)
+}
+
+#[cfg(windows)]
+fn is_reparse_point(meta: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn is_reparse_point(_: &std::fs::Metadata) -> bool {
+    false
+}
+
+/// Refuse a link, or a file where a folder goes, anywhere from `top` down
+/// the folders `within` names, looking at each before anything is made, so
+/// no folder is made through one. Below the first name that is not there,
+/// nothing exists to be a link.
+fn no_links(top: &Path, within: &[String]) -> Result<(), String> {
+    if std::fs::symlink_metadata(top).is_ok_and(|m| is_link(&m)) {
+        return Err("a link is where the kept folder is".to_string());
+    }
+    let mut at = top.to_path_buf();
+    for part in within {
+        at.push(part);
+        match std::fs::symlink_metadata(&at) {
+            Ok(meta) if is_link(&meta) => {
+                return Err("a link is in the file's folder".to_string());
+            }
+            Ok(meta) if !meta.is_dir() => {
+                return Err("a file is where the file's folder goes".to_string());
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Ok(())
+}
+
+/// Refuse a new `name` in `parent` that differs from a name there only by
+/// case: Windows would make the two one file. A name that is there exactly
+/// is the same file, and is not looked for.
+fn no_case_clash(parent: &Path, name: &str) -> Result<(), String> {
+    if cfg!(not(windows)) && std::fs::symlink_metadata(parent.join(name)).is_ok() {
+        return Ok(());
+    }
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return Ok(());
+    };
+    let folded = registry::fold(name);
+    for entry in entries.flatten().take(MAX_SCAN) {
+        let there = entry.file_name().to_string_lossy().into_owned();
+        if there != name && registry::fold(&there) == folded {
+            return Err(
+                "another name in that folder differs from this one only by case".to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Whether `name` is in `dir` exactly as spelled and no other name there
+/// differs from it only by case, so a delete by it can reach no other file.
+fn only_this_spelling(dir: &Path, name: &str) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    let folded = registry::fold(name);
+    let mut found = false;
+    for entry in entries.flatten().take(MAX_SCAN) {
+        let there = entry.file_name().to_string_lossy().into_owned();
+        if there == name {
+            found = true;
+        } else if registry::fold(&there) == folded {
+            return false;
+        }
+    }
+    found
+}
+
 /// The size of the file at `path` under `top`, when it is a plain file.
 fn existing_len(top: &Path, path: &[String]) -> Option<u64> {
     let meta = std::fs::symlink_metadata(join(top, path)).ok()?;
@@ -233,7 +388,17 @@ fn place(
     path: &[String],
 ) -> Result<(PathBuf, String, Option<u64>), String> {
     let (name, within) = path.split_last().ok_or("no file name")?;
+    // No link anywhere on the way, looked for before a folder is made.
+    no_links(top, within)?;
     std::fs::create_dir_all(top).map_err(|e| format!("could not make {}: {e}", top.display()))?;
+    // No name that differs only by case from one already in a folder on
+    // the way, or in the file's own.
+    let mut at = top.to_path_buf();
+    for part in within {
+        no_case_clash(&at, part)?;
+        at.push(part);
+    }
+    no_case_clash(&at, name)?;
     let dir = join(top, within);
     std::fs::create_dir_all(&dir).map_err(|e| format!("could not make {}: {e}", dir.display()))?;
     let real_top = std::fs::canonicalize(top).map_err(|e| e.to_string())?;
@@ -263,7 +428,9 @@ pub(crate) fn placed(device: &str, accepted: &Accepted, size: u64) {
         return;
     };
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut list = registry::read(&state);
+    let Ok(mut list) = registry::read_checked(&state) else {
+        return;
+    };
     if let Some(folder) = list
         .iter_mut()
         .find(|f| f.device_id == device && f.folder_id == accepted.folder_id)
@@ -315,13 +482,13 @@ pub(crate) fn run(device: &str, body: &serde_json::Value, config: &Config) -> Re
     let run = kept::run_of(body)?;
     let state = crate::state::state_dir().map_err(|e| e.to_string())?;
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut list = registry::read(&state);
+    let mut list = registry::read_checked(&state).map_err(|e| e.0)?;
     let Some(folder) = list
         .iter_mut()
         .find(|f| f.device_id == device && f.folder_id == run.folder_id)
     else {
         // A run's start for a folder not kept yet: its first file makes it.
-        if run.gone.is_empty() && run.end.is_none() {
+        if run.gone.is_empty() && run.empty.is_empty() && run.end.is_none() {
             return Ok(());
         }
         return Err("no such kept folder here".to_string());
@@ -334,19 +501,49 @@ pub(crate) fn run(device: &str, body: &serde_json::Value, config: &Config) -> Re
 fn apply_run(folder: &mut KeptFolder, run: &Run, computer_allows: bool) {
     let now = now_unix();
     folder.mirror = run.mirror;
+    let key = (folder.device_id.clone(), folder.folder_id.clone());
+    // A run's start (no deletions, no end) begins its count anew.
+    if run.gone.is_empty() && run.empty.is_empty() && run.end.is_none() {
+        forget_run_deleted(&key);
+    }
     if !run.gone.is_empty() {
-        if registry::deletes_allowed(run.mirror, computer_allows) {
+        let already = run_deleted(&key);
+        let refusal = deletions_refusal(already, run.gone.len(), folder.files);
+        if !registry::deletes_allowed(run.mirror, computer_allows) {
+            folder.deletes_skipped = folder.deletes_skipped.saturating_add(run.gone.len() as u64);
+        } else if let Some(why) = refusal {
+            // Counts only: no name is logged.
+            tracing::warn!(
+                "A kept folder's run asked to delete {} files and was refused: {why}",
+                run.gone.len()
+            );
+            folder.deletes_skipped = folder.deletes_skipped.saturating_add(run.gone.len() as u64);
+            registry::push_error(folder, now, &format!("deletions refused: {why}"));
+        } else {
             let top = PathBuf::from(&folder.path);
+            let mut made = 0u64;
             for path in &run.gone {
                 if delete_one(&top, path) {
-                    folder.deleted = folder.deleted.saturating_add(1);
+                    made += 1;
                 }
             }
-        } else {
-            folder.deletes_skipped = folder.deletes_skipped.saturating_add(run.gone.len() as u64);
+            folder.deleted = folder.deleted.saturating_add(made);
+            add_run_deleted(&key, run.gone.len() as u64);
+        }
+    }
+    if !run.empty.is_empty() {
+        let top = PathBuf::from(&folder.path);
+        for path in &run.empty {
+            if let Some(size_before) = make_empty(&top, path) {
+                if size_before.is_none() {
+                    folder.files = folder.files.saturating_add(1);
+                }
+                folder.bytes = folder.bytes.saturating_sub(size_before.unwrap_or(0));
+            }
         }
     }
     if let Some(end) = run.end {
+        forget_run_deleted(&key);
         let (files, bytes) = count(Path::new(&folder.path));
         folder.files = files;
         folder.bytes = bytes;
@@ -366,6 +563,58 @@ fn apply_run(folder: &mut KeptFolder, run: &Run, computer_allows: bool) {
     }
 }
 
+fn run_deleted(key: &(String, String)) -> u64 {
+    let held = RUN_DELETED.lock().unwrap_or_else(|e| e.into_inner());
+    held.as_ref().and_then(|m| m.get(key)).copied().unwrap_or(0)
+}
+
+fn add_run_deleted(key: &(String, String), n: u64) {
+    let mut held = RUN_DELETED.lock().unwrap_or_else(|e| e.into_inner());
+    let entry = held
+        .get_or_insert_with(HashMap::new)
+        .entry(key.clone())
+        .or_insert(0);
+    *entry = entry.saturating_add(n);
+}
+
+fn forget_run_deleted(key: &(String, String)) {
+    let mut held = RUN_DELETED.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(map) = held.as_mut() {
+        map.remove(key);
+    }
+}
+
+/// Why a run that has deleted `already` files may not delete `now` more from
+/// a folder holding `kept` files, or `None` when it may: never more than
+/// [`MAX_DELETE_PER_RUN`] in all, and never more than half of what the
+/// folder holds (the phone checks this too; a phone that does not, or a
+/// confused one, is stopped here), unless [`DELETE_FREE`] or fewer.
+fn deletions_refusal(already: u64, now: usize, kept: u64) -> Option<String> {
+    let total = already.saturating_add(now as u64);
+    if total > MAX_DELETE_PER_RUN {
+        return Some(format!(
+            "a run may delete at most {MAX_DELETE_PER_RUN} files, and this one asked for {total}"
+        ));
+    }
+    if total > DELETE_FREE && total.saturating_mul(2) > kept {
+        return Some(format!(
+            "{total} deletions in one run are more than half of the {kept} files kept"
+        ));
+    }
+    None
+}
+
+/// Make the file at `path` under `top` empty (a phone's file of no bytes,
+/// which a share cannot carry), made if it was not there; the size it had,
+/// `Some(None)` when it was new, and `None` when it was refused (a link, a
+/// folder, a name that differs only by case, a place that leads out).
+fn make_empty(top: &Path, path: &[String]) -> Option<Option<u64>> {
+    let made_under = top.parent().and_then(Path::parent)?;
+    let (dir, name, replaces) = place(top, made_under, path).ok()?;
+    std::fs::File::create(dir.join(name)).ok()?;
+    Some(replaces)
+}
+
 /// Delete the plain file at `path` under `top`, then the folders it leaves
 /// empty up to (not including) `top`; whether a file went. A folder or a
 /// link at the place, or a place that leads out of `top`, is left alone.
@@ -381,6 +630,10 @@ fn delete_one(top: &Path, path: &[String]) -> bool {
         return false;
     };
     if !real_dir.starts_with(&real_top) {
+        return false;
+    }
+    // By the name as spelled, and by no other that differs only by case.
+    if !only_this_spelling(&real_dir, name) {
         return false;
     }
     let target = real_dir.join(name);
@@ -474,6 +727,7 @@ mod tests {
             label: "Notes".to_string(),
             mirror,
             gone: gone.iter().map(|p| path(p)).collect(),
+            empty: Vec::new(),
             end,
         }
     }
@@ -520,7 +774,7 @@ mod tests {
         std::fs::create_dir_all(&top).unwrap();
         std::os::unix::fs::symlink(&outside, top.join("out")).unwrap();
         let err = place(&top, &root, &path(&["out", "evil.txt"])).unwrap_err();
-        assert!(err.contains("leads out"), "{err}");
+        assert!(err.contains("link"), "{err}");
         assert!(!outside.join("evil.txt").exists());
         // A kept folder that is itself a link out of the root is refused too.
         let top2 = root.join("Phone").join("Linked");
@@ -812,6 +1066,235 @@ mod tests {
         assert!(run("kept-stranger-del", &body, &config).is_err());
         let other = serde_json::json!({"folderId": "d".repeat(32), "gone": [["x"]]});
         assert!(run("kept-owner-del", &other, &config).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn deletions_are_limited_to_half_of_what_is_kept_and_a_number_for_the_run() {
+        assert_eq!(deletions_refusal(0, 1, 10), None);
+        assert_eq!(deletions_refusal(0, 5, 10), None, "exactly half");
+        assert!(deletions_refusal(0, 6, 10).is_some());
+        assert_eq!(deletions_refusal(0, 2, 2), None, "the free few");
+        assert!(deletions_refusal(0, 3, 4).is_some());
+        // A run's packets add up.
+        assert_eq!(deletions_refusal(0, 4, 10), None);
+        assert!(deletions_refusal(4, 4, 10).is_some());
+        // And a number for the run, however large the folder.
+        assert_eq!(deletions_refusal(0, 1000, 100_000), None);
+        assert!(deletions_refusal(0, 1001, 100_000).is_some());
+        assert!(deletions_refusal(900, 101, u64::MAX).is_some());
+        // Nothing overflows.
+        assert!(deletions_refusal(u64::MAX, usize::MAX, 0).is_some());
+    }
+
+    #[test]
+    fn a_run_cannot_delete_most_of_a_folder_even_when_the_phone_says_to() {
+        let root = temp_dir("guard");
+        let top = root.join("Notes");
+        std::fs::create_dir_all(&top).unwrap();
+        let fill = || {
+            for n in 0..6 {
+                std::fs::write(top.join(format!("f{n}")), b"x").unwrap();
+            }
+        };
+        fill();
+        let mut folder = entry(&top);
+        folder.device_id = "kept-guard-phone".to_string();
+        folder.files = 6;
+        // Five of six in one packet: refused, every file stays, and it says so.
+        let five = a_run(true, &[&["f0"], &["f1"], &["f2"], &["f3"], &["f4"]], None);
+        apply_run(&mut folder, &five, true);
+        assert!((0..6).all(|n| top.join(format!("f{n}")).exists()));
+        assert_eq!((folder.deleted, folder.deletes_skipped), (0, 5));
+        assert!(
+            folder
+                .errors
+                .iter()
+                .any(|e| e.message.contains("refused") && !e.message.contains("f0"))
+        );
+        // A run's packets count together: two and two is four of six.
+        apply_run(&mut folder, &a_run(true, &[], None), true);
+        apply_run(&mut folder, &a_run(true, &[&["f0"], &["f1"]], None), true);
+        assert_eq!(folder.deleted, 2);
+        apply_run(&mut folder, &a_run(true, &[&["f2"], &["f3"]], None), true);
+        assert!(
+            top.join("f2").exists() && top.join("f3").exists(),
+            "the second packet is over half"
+        );
+        assert_eq!(folder.deleted, 2);
+        // The run's end counts the folder again and a new run starts afresh.
+        apply_run(
+            &mut folder,
+            &a_run(true, &[], Some(RunEnd { sent: 0, failed: 0 })),
+            true,
+        );
+        assert_eq!(folder.files, 4);
+        apply_run(&mut folder, &a_run(true, &[&["f2"]], None), true);
+        assert!(!top.join("f2").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_anywhere_on_the_way_is_refused_before_a_folder_is_made() {
+        let root = temp_dir("links");
+        let top = root.join("Phone").join("Notes");
+        let outside = temp_dir("links-out");
+        std::fs::create_dir_all(top.join("real")).unwrap();
+        // A link to a folder inside the kept folder: it stays inside, and is
+        // still refused (what is checked is the path, not only where it ends).
+        std::os::unix::fs::symlink(top.join("real"), top.join("alias")).unwrap();
+        let err = place(&top, &root, &path(&["alias", "x.txt"])).unwrap_err();
+        assert!(err.contains("link"), "{err}");
+        assert!(!top.join("real").join("x.txt").exists());
+        // A link out, with new names below it: nothing is made through it.
+        std::os::unix::fs::symlink(&outside, top.join("out")).unwrap();
+        let err = place(&top, &root, &path(&["out", "b", "c.txt"])).unwrap_err();
+        assert!(err.contains("link"), "{err}");
+        assert!(!outside.join("b").exists(), "no folder made through a link");
+        // A file where a folder goes.
+        std::fs::write(top.join("plain"), b"x").unwrap();
+        assert!(place(&top, &root, &path(&["plain", "y.txt"])).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn a_name_that_differs_only_by_case_is_refused_and_never_deleted_by_the_other() {
+        let root = temp_dir("case");
+        let top = root.join("Phone").join("Notes");
+        std::fs::create_dir_all(top.join("Docs")).unwrap();
+        std::fs::write(top.join("A.txt"), b"one").unwrap();
+        // A second spelling of a file's name, and of a folder's.
+        let err = place(&top, &root, &path(&["a.txt"])).unwrap_err();
+        assert!(err.contains("case"), "{err}");
+        let err = place(&top, &root, &path(&["docs", "x.txt"])).unwrap_err();
+        assert!(err.contains("case"), "{err}");
+        // The same spelling is the same file.
+        assert!(place(&top, &root, &path(&["A.txt"])).is_ok());
+        assert!(place(&top, &root, &path(&["Docs", "x.txt"])).is_ok());
+        // Where both spellings exist (a disk that tells them apart), a delete
+        // by either name removes neither.
+        #[cfg(unix)]
+        {
+            std::fs::write(top.join("a.txt"), b"two").unwrap();
+            assert!(!delete_one(&top, &path(&["a.txt"])));
+            assert!(!delete_one(&top, &path(&["A.txt"])));
+            assert!(top.join("a.txt").exists() && top.join("A.txt").exists());
+        }
+        // A name spelled otherwise than the file on the disk deletes nothing.
+        std::fs::write(top.join("Only.txt"), b"x").unwrap();
+        assert!(!delete_one(&top, &path(&["only.txt"])));
+        assert!(top.join("Only.txt").exists());
+        assert!(delete_one(&top, &path(&["Only.txt"])));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn files_arriving_together_cannot_pass_the_cap_together() {
+        let state = crate::state::use_test_dirs();
+        // This test's own folders only: the list is shared by the process.
+        let _ = std::fs::remove_file(state.join(pocketdesk_core::local::paths::KEPT_FOLDERS_FILE));
+        let root = temp_dir("reserve");
+        let mut config = setup("kept-owner-reserve", &root);
+        config.kept_folders_cap_gb = 1;
+        const MB: u64 = 1024 * 1024;
+        let id = "f".repeat(32);
+        let first = accept(
+            "kept-owner-reserve",
+            &file(&id, &["a.bin"]),
+            600 * MB,
+            &config,
+        )
+        .unwrap();
+        let second = accept(
+            "kept-owner-reserve",
+            &file(&id, &["b.bin"]),
+            600 * MB,
+            &config,
+        );
+        assert!(
+            second.unwrap_err().starts_with(kept::FULL),
+            "600 and 600 MB are over 1 GB"
+        );
+        // Given back when the transfer ends, placed or not.
+        drop(first);
+        assert!(
+            accept(
+                "kept-owner-reserve",
+                &file(&id, &["b.bin"]),
+                600 * MB,
+                &config
+            )
+            .is_ok()
+        );
+        let _ = std::fs::remove_file(state.join(pocketdesk_core::local::paths::KEPT_FOLDERS_FILE));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_list_this_version_cannot_read_is_kept_and_nothing_is_written_over_it() {
+        let state = crate::state::use_test_dirs();
+        let list = state.join(pocketdesk_core::local::paths::KEPT_FOLDERS_FILE);
+        let root = temp_dir("unreadable");
+        let config = setup("kept-owner-unreadable", &root);
+        std::fs::write(&list, "{ records of another version").unwrap();
+        let id = "9".repeat(32);
+        let err = accept("kept-owner-unreadable", &file(&id, &["x.txt"]), 1, &config).unwrap_err();
+        assert!(err.contains("not readable"), "{err}");
+        let body = serde_json::json!({"folderId": id, "done": true, "sent": 0, "failed": 0});
+        assert!(run("kept-owner-unreadable", &body, &config).is_err());
+        assert_eq!(
+            std::fs::read_to_string(&list).unwrap(),
+            "{ records of another version",
+            "the records are as they were"
+        );
+        assert!(!root.join("Notes").exists());
+        let _ = std::fs::remove_file(&list);
+        let _ = std::fs::remove_file(format!("{}.unreadable", list.display()));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_file_of_no_bytes_is_made_or_emptied_and_never_through_a_link() {
+        let root = temp_dir("empties");
+        let top = root.join("Notes");
+        std::fs::create_dir_all(&top).unwrap();
+        std::fs::write(top.join("e.txt"), b"hello").unwrap();
+        let mut folder = entry(&top);
+        folder.files = 1;
+        folder.bytes = 5;
+        let told = Run {
+            empty: vec![path(&["e.txt"]), path(&["sub", "n.txt"])],
+            ..a_run(false, &[], None)
+        };
+        apply_run(&mut folder, &told, false);
+        assert_eq!(
+            std::fs::metadata(top.join("e.txt")).unwrap().len(),
+            0,
+            "emptied"
+        );
+        assert_eq!(
+            std::fs::metadata(top.join("sub").join("n.txt"))
+                .unwrap()
+                .len(),
+            0,
+            "made"
+        );
+        assert_eq!((folder.files, folder.bytes), (2, 0));
+        #[cfg(unix)]
+        {
+            let outside = temp_dir("empties-out");
+            std::fs::write(outside.join("secret"), b"keep me").unwrap();
+            std::os::unix::fs::symlink(outside.join("secret"), top.join("link")).unwrap();
+            let told = Run {
+                empty: vec![path(&["link"])],
+                ..a_run(false, &[], None)
+            };
+            apply_run(&mut folder, &told, false);
+            assert_eq!(std::fs::read(outside.join("secret")).unwrap(), b"keep me");
+            let _ = std::fs::remove_dir_all(&outside);
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 }
