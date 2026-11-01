@@ -15,6 +15,7 @@ Three things worth knowing before you pair a phone. [SECURITY.md](../SECURITY.md
 | From | What it needs | Port forward on your router |
 |---|---|---|
 | The same network | nothing | no |
+| No shared network at all (a train, a café with client isolation, a guest Wi-Fi) | Linux only for now: Pair page, [Make a direct link](#a-direct-link-no-shared-network); the phone joins this computer's own Wi-Fi for Pocketdesk only | no |
 | Anywhere, through Tailscale | both on one tailnet | no |
 | Anywhere, over the internet | one session at home first (same network or Tailscale), where the phone learns the computer and registers its key. After that, iroh punches a direct path, or falls back to a relay (n0's free ones, or [your own](#away-from-home-your-own-relay)). On by default; "Reachable from the internet" in the desktop's Settings turns it off (`internet_path = false`) | no |
 | Your own relay | a machine the internet can reach | on the relay's machine: one port (plain, 3340), or 80 and 443 (HTTPS) |
@@ -639,6 +640,20 @@ says so on the session's ready stream (the status a session already carries
 for what the computer takes): another computer's window shows it view-only,
 and a phone is no longer offered the pen. The phone app has no banner for it
 yet.
+
+### A Direct Link: No Shared Network
+
+On a train, in a café whose Wi-Fi keeps devices apart, or on a guest network, a phone cannot reach the computer at all. A direct link makes this computer's own Wi-Fi network for one phone, for a while: the phone joins it for Pocketdesk only, keeps its mobile data for everything else, and then the session, files and clipboard work as at home. Nothing needs the internet. Linux only for now (Windows is its own change).
+
+1. Pair page, Phone, **Make a direct link**. If this computer's Wi-Fi card cannot host a network beside its own connection, the page says *This computer's Wi-Fi will disconnect while the direct link is on* first, and asks once more before it goes ahead. A card that allows both at once (see `iw list`, "valid interface combinations") and a server with the right to add an interface (`CAP_NET_ADMIN`, which `iw` inherits: for example a system service with `User=<you>` and `AmbientCapabilities=CAP_NET_ADMIN`, which you set up yourself; Pocketdesk never grants it) makes the network on a second virtual interface and keeps your own connection. A server run as you in your session lacks that right, so the usual case is that the Wi-Fi goes down while the link is on.
+2. In the phone app, **Scan pairing code**. Android asks once to join the network (the name starts `pocketdesk-` and the passphrase is random for each link). Allow it. The phone pairs and starts the session over it.
+3. **Turn off** on the Pair page ends it. It also turns itself off after the idle time in Settings (default 10 minutes with no phone using it, which includes the time the phone has to scan), when the server stops, and when the setting is turned off. A server that was killed leaves the network up; the next start removes it.
+
+What it needs: NetworkManager (it makes the hotspot over D-Bus, as a volatile connection kept in memory only, so the passphrase never reaches a file of NetworkManager's), `dnsmasq` (NetworkManager's sharing mode uses it to give the phone an address), `iw` (to read the card), and a card that can host an access point. On the phone: Android 10 or newer and **Join computers' direct links** on (the default). If a firewall blocks the computer's own network, allow Pocketdesk's ports (1716 TCP, 4716 UDP) on it, as in [Linux firewall](#linux-firewall); firewalld's `nm-shared` zone allows them already.
+
+Settings (Connection): **Offer a direct link** (`direct_link`, on), **Direct link's band** (`direct_link_band`: `auto`, which is 2.4 GHz and joined by every phone, `2.4` or `5`; a card that keeps one channel for both connections follows its connection's band) and **Turn the direct link off after** (`direct_link_idle_minutes`, 1 to 120, default 10).
+
+The phone binds Pocketdesk's own sockets to that network by binding its process (`ConnectivityManager.bindProcessToNetwork`), and lets it go when the session ends or the pairing is left. Other apps on the phone are untouched. The QR is the usual pairing link with the network's name and passphrase on the end ([protocol §2.6](protocol.md)). It is as private as the PIN it carries: anyone who sees it while the link is on can join the network and pair, so show it only to the phone you mean. [SECURITY.md](../SECURITY.md) limit 76 says what joining the network reaches.
 
 ### Away From Home: Your Own Relay
 

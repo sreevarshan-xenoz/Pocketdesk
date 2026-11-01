@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1116 open items.
+1127 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
 | A second computer | 153 |
-| A Linux desktop (the Azure VM serves for some) | 198 |
+| A Linux desktop (the Azure VM serves for some) | 209 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
 
@@ -1664,6 +1664,20 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - With the switch off, or on KDE or Sway with it on, the capture goes through the portal as before (no mutter call in `busctl --user monitor org.gnome.Mutter.ScreenCast`). (where: linux)
 - An older GNOME whose mutter has the ScreenCast API but no `org.gnome.Mutter.RemoteDesktop` (or refuses it): the same single log line and the portal's dialog. (where: linux)
 - The desktop app's Settings → Connection shows "Unattended on GNOME" on Linux only, off by default, and a session started after turning it on takes the new path with no server restart. (where: linux)
+
+**255. A direct link (no shared network): this computer's own Wi-Fi, joined by the phone for Pocketdesk only**
+
+- A throwaway server (not the laptop's own ssh Wi-Fi: a USB Wi-Fi adapter as the card, the built-in one keeping ssh) with a request left in `direct_link_out/` (or the Pair page's button): the hotspot comes up (`nmcli -t -f NAME,TYPE connection show --active` names "Pocketdesk direct link"; print nothing else), `direct_link.json` says `on` with an address, mode 0600, and `nmcli connection show` lists no saved "Pocketdesk direct link" (volatile). (where: linux)
+- The second-interface road: the server run with `AmbientCapabilities=CAP_NET_ADMIN` on a card whose `iw list` allows AP and managed together: the plan is "second interface", `iw dev` shows `pdlink0` of type AP beside the card's managed interface on the same channel, the laptop's own connection never drops, and `iw dev pdlink0 del` has run when the link ends. (where: linux)
+- The takes-over road, on the USB adapter only: the Pair page says "This computer's Wi-Fi will disconnect while the direct link is on" before the first click, and asks once more ("Disconnect Wi-Fi and make the link"); a request without `accept_takeover` is refused with a status of `failed` and nothing changes. (where: linux)
+- The OPPO, in range, scanning the Pair page's code from a screenshot pushed by adb: Pocketdesk asks "Pair with the computer at 10.42.x.1?" with the direct-link note, Android's own prompt to join `pocketdesk-…` comes up once, the phone joins, pairs, and a session starts; a file moves both ways (counts and a checksum only), and a 30 s session counts frames. `dumpsys connectivity` meanwhile shows the phone's mobile data still the default network. (where: linux)
+- The OPPO refusing Android's prompt (or the code scanned out of range): "The phone did not join the computer's Wi-Fi", nothing paired, nothing left bound, Cancel and back both leave. (where: linux)
+- After the session ends, and after Cancel, the phone is back on its own Wi-Fi (`dumpsys connectivity | grep -c WifiNetworkSpecifier` is 0) and Pocketdesk's sockets are no longer bound. (where: linux)
+- "Join computers' direct links" off on the phone: scanning a direct link says joining is turned off, joins nothing. (where: linux)
+- The idle timer on a real link: with no phone it turns off after the setting (a 1-minute setting is enough), the Pair page counting down; with a phone connected it does not, and starts counting again once the phone leaves. (where: linux)
+- The server stopped (`pocketdesk stop`) with a link on: the hotspot is gone at once; the server killed with `kill -9` and started again: the first start's log says it swept one, and no "Pocketdesk direct link" is left. (where: linux)
+- A firewall on the computer (firewalld, then ufw with its default deny): the phone reaches 1716 and 4716 on the hotspot's address under firewalld's `nm-shared` zone, and what ufw needs is what the guide says. (where: linux)
+- The Settings rows: "Offer a direct link" off hides the card and a running link goes off within 5 s; the band row's 5 GHz on a card that allows it makes a 5 GHz network, and on one that does not says why the link failed. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
