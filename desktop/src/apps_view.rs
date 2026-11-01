@@ -69,7 +69,17 @@ pub enum Status {
     NeedsScreen(String),
     /// The phone would not open the app, and why.
     OpenRefused(AppResult, String),
+    /// Hands-free could not accept the phone's screen-sharing question: one
+    /// tap on the phone's notification is all it needs, and the app opens
+    /// after.
+    NeedsTap(String),
 }
+
+/// How a locked phone can be reached without anyone giving a PIN away: the
+/// phone never bypasses a secure lock, and Android's own Extend Unlock
+/// keeps it unlocked near a trusted device. Generic, as phone makers name
+/// it differently.
+pub const EXTEND_UNLOCK_HINT: &str = "Unlock the phone, or let Android keep it unlocked near this computer: Settings \u{2192} Security \u{2192} Extend Unlock / Smart Lock \u{2192} Trusted devices.";
 
 /// What the page knows, for [`status`].
 pub struct Known<'a> {
@@ -104,6 +114,7 @@ pub fn status(k: &Known) -> Status {
         return match answer.map(|o| o.report.result) {
             Some(AppResult::Opened) => Status::Opened(open.name.clone()),
             Some(AppResult::NeedsScreen) => Status::NeedsScreen(open.name.clone()),
+            Some(AppResult::NeedsTap) => Status::NeedsTap(open.name.clone()),
             Some(other) => Status::OpenRefused(other, open.name.clone()),
             None if k.now.saturating_sub(open.asked_at) < ANSWER_WITHIN_SECS => {
                 Status::Opening(open.name.clone())
@@ -175,6 +186,9 @@ impl Status {
             Status::NeedsScreen(app) => format!(
                 "{app} opens after you tap the notification on {who} to show its screen here (Android asks once for the connection)."
             ),
+            Status::NeedsTap(app) => format!(
+                "{app} needs one tap on {who}: tap its notification to share the screen here (Pocketdesk could not press Android's own question for you), and the app opens after."
+            ),
             Status::OpenRefused(result, app) => match result {
                 AppResult::ControlOff => format!(
                     "Pocketdesk's control service is off on {who}. To open {app} from here, turn on Pocketdesk control in Android's Accessibility settings; it is used only to start apps and to control the screen shown here."
@@ -182,6 +196,9 @@ impl Status {
                 AppResult::Locked => {
                     format!("{who} is locked: unlock the phone once, then open {app} again.")
                 }
+                AppResult::LockedSecure => format!(
+                    "{who} has a lock Pocketdesk never bypasses. {EXTEND_UNLOCK_HINT} Then open {app} again."
+                ),
                 AppResult::Asleep => {
                     format!("{who}'s screen is off: wake it, then open {app} again.")
                 }
@@ -212,6 +229,12 @@ impl Status {
         }
     }
 
+    /// Whether the owner has one tap to make at the phone, drawn as a
+    /// notice of its own (not a failure, not a wait).
+    pub fn needs_tap(&self) -> bool {
+        matches!(self, Status::NeedsTap(_))
+    }
+
     /// Whether this is a problem, drawn as one.
     pub fn is_problem(&self) -> bool {
         !matches!(
@@ -221,6 +244,7 @@ impl Status {
                 | Status::Opening(_)
                 | Status::Opened(_)
                 | Status::NeedsScreen(_)
+                | Status::NeedsTap(_)
         )
     }
 }
@@ -513,6 +537,9 @@ impl AppsPage {
                         ui.spinner();
                     }
                     let text = RichText::new(&message);
+                    if status.needs_tap() {
+                        ui.label(RichText::new("Tap needed on the phone").strong());
+                    }
                     ui.label(if status.is_problem() {
                         text.color(crate::theme::warn(ui))
                     } else {
@@ -891,6 +918,7 @@ mod tests {
         for (result, words) in [
             (AppResult::ControlOff, "Accessibility"),
             (AppResult::Locked, "unlock the phone once"),
+            (AppResult::LockedSecure, "Extend Unlock"),
             (AppResult::Asleep, "wake it"),
             (AppResult::Off, "Let the computer open my apps"),
             (AppResult::NotFound, "no longer on"),
@@ -917,6 +945,37 @@ mod tests {
             Fix::Retry
         );
         assert!(!Status::Opened("Example".into()).is_problem());
+    }
+
+    /// Hands-free: a phone that could not press its own screen-sharing
+    /// question says it needs a tap, which the page draws as one to make,
+    /// not as a failure; a secure lock names Android's own Extend Unlock.
+    #[test]
+    fn a_phone_that_needs_a_tap_says_so() {
+        let open = opening();
+        let tap = outcome("open", Some("org.example.app"), AppResult::NeedsTap, 101);
+        let s = status(&known(Some(&tap), Some(&open)));
+        assert_eq!(s, Status::NeedsTap("Example".into()));
+        assert!(s.message("Phone").contains("one tap on Phone"));
+        assert!(s.needs_tap());
+        assert!(!s.is_problem());
+        assert!(!Status::NeedsScreen("Example".into()).needs_tap());
+        assert!(!Status::Opened("Example".into()).needs_tap());
+        let secure = outcome(
+            "open",
+            Some("org.example.app"),
+            AppResult::LockedSecure,
+            101,
+        );
+        let s = status(&known(Some(&secure), Some(&open)));
+        assert_eq!(
+            s,
+            Status::OpenRefused(AppResult::LockedSecure, "Example".into())
+        );
+        let words = s.message("Phone");
+        assert!(words.contains("Trusted devices"));
+        assert!(words.contains("never bypasses"));
+        assert!(s.is_problem());
     }
 
     /// P2 review: only a list made since the ask answers it.
