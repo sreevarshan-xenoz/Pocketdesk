@@ -397,6 +397,12 @@ fn away_lock_unavailable() -> Option<&'static str> {
 
 /// Settings → Other computers' pointer to the Pair page (UX 2).
 pub const PAIR_ELSEWHERE: &str = "Pair a computer on the Pair page.";
+
+/// What the wake helper row says with no helper.
+const WAKE_HELPER_NONE: &str = "None. On a spare phone paired as one of yours, turn on \"Wake helper for this home\" in its Settings and leave it on a charger on the home Wi-Fi: your other phones can then wake this computer from anywhere.";
+
+/// What the wake helper row says beside a helper.
+const WAKE_HELPER_ABOUT: &str = "It sends this computer's magic packet onto your home network when one of your other phones asks, at most once every 30 seconds per phone, and serves nothing else. Removing it here is not a security control: it stops this computer using the phone as its helper, but the phone itself can still be switched on again by whoever holds it. To take its access away, unpair the phone.";
 /// Its button, and the fix where no computer is paired.
 pub const PAIR_A_COMPUTER: &str = "Pair a computer";
 
@@ -3511,6 +3517,11 @@ impl PocketdeskApp {
                     {
                         self.muted_apps_setting(ui);
                     }
+                    crate::settings_view::Section::Wake
+                        if extra(crate::settings_view::EXTRA_WAKE_HELPER) =>
+                    {
+                        self.wake_helper_setting(ui);
+                    }
                     crate::settings_view::Section::KdeConnect
                         if extra(crate::settings_view::EXTRA_KDE) =>
                     {
@@ -3723,6 +3734,41 @@ impl PocketdeskApp {
 
     /// Phone numbers' links open on the phone (M8): registered by the
     /// server program, which says so in `<config>/tel_handler.json`.
+    /// The phone this computer holds as its wake helper, and Remove. The
+    /// phone offers itself ("Wake helper for this home" on it, an owner
+    /// phone only); removing it here tells it, and it stays removed until
+    /// its owner turns that switch off and on again on the phone.
+    fn wake_helper_setting(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(8.0);
+        ui.label(RichText::new(crate::settings_view::EXTRA_WAKE_HELPER).strong());
+        let held = pocketdesk_core::local::wake_helper::read(&self.state_dir).helper;
+        let Some(helper) = held else {
+            ui.label(
+                RichText::new(WAKE_HELPER_NONE)
+                    .small()
+                    .color(crate::theme::muted(ui)),
+            );
+            return;
+        };
+        let name = model::device_label(&self.snapshot.devices, &helper.device_id);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(format!("{name} is this computer's wake helper."));
+            if ui.button("Remove").clicked() {
+                self.notice = match pocketdesk_core::local::wake_helper::remove(&self.state_dir) {
+                    Ok(_) => crate::notice::Notice::done(format!(
+                        "{name} is no longer this computer's wake helper"
+                    )),
+                    Err(e) => crate::notice::Notice::error(format!("Not removed: {e}")),
+                };
+            }
+        });
+        ui.label(
+            RichText::new(WAKE_HELPER_ABOUT)
+                .small()
+                .color(crate::theme::muted(ui)),
+        );
+    }
+
     fn tel_setting(&mut self, ui: &mut egui::Ui) {
         let Ok(config) = pocketdesk_core::local::paths::config_dir() else {
             return;

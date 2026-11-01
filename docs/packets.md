@@ -103,6 +103,9 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.pocketdesk.tasks` | yes | yes | Tasks | tasks |
 | `kdeconnect.pocketdesk.type` |  | yes |  | typing |
 | `kdeconnect.pocketdesk.virtual_screen` | yes | yes | Input | virtual_screen |
+| `kdeconnect.pocketdesk.wake_helper` | yes |  | none (an owner phone only) | wake_helper |
+| `kdeconnect.pocketdesk.wake_helper_duty` |  | yes |  | server |
+| `kdeconnect.pocketdesk.wake_helper_info` |  | yes |  | server |
 | `kdeconnect.pocketdesk.wake_info` |  | yes |  | server |
 | `kdeconnect.pocketdesk.wan_key` | yes |  | none (any paired phone) | pair |
 | `kdeconnect.pocketdesk.windows` | yes | yes | none (any paired phone) | windows |

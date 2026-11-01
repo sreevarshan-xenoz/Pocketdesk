@@ -184,6 +184,9 @@ pub const PHONE_MEDIA_DIR: &str = "phone_media_out";
 /// Phone notifications cleared here, to clear on the phone (L1).
 pub const NOTIFICATION_CLEARS_DIR: &str = "notification_clears";
 pub const DEVICE_KEYS_FILE: &str = "device_keys.json";
+/// The phone held as this computer's wake helper (a key it announced, its
+/// relays), and the phones the owner removed.
+pub const WAKE_HELPER_FILE: &str = "wake_helper.json";
 /// What the server measured about its internet path (N1): yes/no facts,
 /// never an address.
 pub const WAN_STATUS_FILE: &str = "wan_status.json";
@@ -490,6 +493,7 @@ pub fn is_temp_beside_file(name: &str) -> bool {
         PHONE_NOTES_FILE,
         NOTIFICATION_ANSWERS_FILE,
         DEVICE_KEYS_FILE,
+        WAKE_HELPER_FILE,
         APPROVE_KEYS_FILE,
         WAN_STATUS_FILE,
         super::sms::SMS_FILE,

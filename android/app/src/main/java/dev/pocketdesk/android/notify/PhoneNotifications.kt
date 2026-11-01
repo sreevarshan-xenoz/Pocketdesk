@@ -414,6 +414,7 @@ class PhoneNotificationListener : NotificationListenerService() {
 
     override fun onDestroy() {
         calls.stop()
+        dev.pocketdesk.android.watch.WatchLinkServer.stop()
         answerTicker.shutdownNow()
         inUseAsker.shutdownNow()
         keeperTicker.shutdownNow()
@@ -962,6 +963,13 @@ class PhoneNotificationListener : NotificationListenerService() {
         media.sync()
         // Its inputs (the features, shared folders' grants, the saved
         // computers) cost a read each: every 10 s is soon enough (M1 review).
+        if (keeperTicks % 5 == 0) {
+            // What computers said of wake helpers, kept for the Wake button.
+            if (runCatching { dev.pocketdesk.android.wake.WakeHelperKeeper.poll(this) }.getOrDefault(false)) {
+                // A computer removed this phone as its helper: the listener stops now.
+                dev.pocketdesk.android.service.WakeHelperService.sync(this)
+            }
+        }
         if (keeperTicks++ % 5 == 0) dev.pocketdesk.android.service.LinkKeeperService.sync(this)
     }
 
@@ -1048,6 +1056,8 @@ class PhoneNotificationListener : NotificationListenerService() {
         }
         // BF3: questions from `pocketdesk ask`, offered with no session open.
         dev.pocketdesk.android.ask.Asks.take(this, own)
+        // Item 9: the watch's Bluetooth service, while Watch controls is on.
+        dev.pocketdesk.android.watch.WatchLinkServer.sync(this)
         // BF1: alerts from `pocketdesk done`, shown with no session open.
         own?.let { dev.pocketdesk.android.notify.ComputerAlerts.take(this, it.address, it.controlPort) }
         // O2: screenshots and locks the computer asks for, taken whatever

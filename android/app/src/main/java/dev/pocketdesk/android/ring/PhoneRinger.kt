@@ -60,7 +60,7 @@ object PhoneRinger {
     private var tone: android.media.Ringtone? = null
 
     /** Ring, naming [computer] (U3) when it has a name. */
-    fun ring(ctx: Context, computer: String? = null) {
+    fun ring(ctx: Context, computer: String? = null, fromWatch: Boolean = false) {
         val app = ctx.applicationContext
         val manager = app.getSystemService(NotificationManager::class.java)
         ensureChannel(app, manager)
@@ -80,10 +80,11 @@ object PhoneRinger {
         val notification = Notification.Builder(app, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_pocketdesk)
             .setContentTitle(
-                if (computer != null) {
-                    app.getString(R.string.ring_title_named, computer)
-                } else {
-                    app.getString(R.string.ring_title)
+                when {
+                    // Item 9: the watch asked, not the computer.
+                    fromWatch -> app.getString(R.string.ring_title_watch)
+                    computer != null -> app.getString(R.string.ring_title_named, computer)
+                    else -> app.getString(R.string.ring_title)
                 },
             )
             .setContentText(app.getString(R.string.ring_text))

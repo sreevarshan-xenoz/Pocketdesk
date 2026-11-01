@@ -938,6 +938,12 @@ fun RemoteScreen(
             // How to wake it later, from this phone (N6).
             withContext(Dispatchers.IO) { RustCore.wakeInfo(address, controlPort) }
                 ?.let { HostStore.saveWakeInfo(context, address, it) }
+            // Where its wake helper is, when it has one, kept for the Wake button.
+            withContext(Dispatchers.IO) {
+                val removed = runCatching { dev.pocketdesk.android.wake.WakeHelperKeeper.poll(context) }.getOrDefault(false)
+                // A computer removed this phone as its helper: the listener stops now.
+                if (removed) dev.pocketdesk.android.service.WakeHelperService.sync(context)
+            }
             delay(5_000)
         }
     }

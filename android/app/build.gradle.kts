@@ -77,6 +77,9 @@ dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
     implementation(composeBom)
 
+    // Item 9: the wire a Wear OS watch uses to ask this phone (no dependency of its own).
+    implementation(project(":watchlink"))
+
     implementation("androidx.activity:activity-compose:1.11.0")
     implementation("androidx.core:core-ktx:1.16.0")
     // N4: turn a copied photo upright (the platform reader has known bugs).

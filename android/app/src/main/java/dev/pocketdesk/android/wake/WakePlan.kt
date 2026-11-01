@@ -28,6 +28,12 @@ data class WakeSettings(
     val outsideHost: String = "",
     val outsidePort: Int = 0,
     val mac: String = "",
+    /**
+     * "Wake through my helper" (a spare phone at home, which this computer
+     * introduced): when this phone is away, ask it to send the wake. Off by
+     * default, and only offered once a helper has been introduced.
+     */
+    val viaHelper: Boolean = false,
 )
 
 /** Where the phone sends a wake. Pure, for JVM tests. */
@@ -69,6 +75,9 @@ object WakePlan {
 
         /** Ask the saved computer at [relay] to send it on its network. */
         data class Relay(val relay: String, val mac: String, val broadcast: String) : Plan
+
+        /** Ask the computer's wake helper, a spare phone at home, to send it. */
+        data object Helper : Plan
 
         data object Off : Plan
 
@@ -116,10 +125,18 @@ object WakePlan {
      * WAN identity's `directAddrs`) and whether the phone is on its network
      * ([atHome]). Away from home its MAC is not broadcast on someone else's
      * network; with nothing learned (a typed MAC) the phone cannot tell, so
-     * it broadcasts.
+     * it broadcasts. With "Wake through my helper" on and a helper known ([helperKnown]), a
+     * phone that is away asks the helper instead: it holds the MAC itself, from the computer.
      */
-    fun plan(settings: WakeSettings, learned: WakeInfo?, wanAddrs: List<String>, atHome: Boolean): Plan {
+    fun plan(
+        settings: WakeSettings,
+        learned: WakeInfo?,
+        wanAddrs: List<String>,
+        atHome: Boolean,
+        helperKnown: Boolean = false,
+    ): Plan {
         if (settings.method == WakeMethod.OFF) return Plan.Off
+        if (settings.viaHelper && helperKnown && !atHome) return Plan.Helper
         val mac = settings.mac.trim().takeIf { validMac(it) } ?: learned?.mac?.takeIf { validMac(it) }
             ?: return Plan.NoMac
         val broadcast = learned?.broadcast?.takeIf { isIpv4(it) }

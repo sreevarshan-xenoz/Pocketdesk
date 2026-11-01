@@ -8,7 +8,7 @@
 Its live screen under your fingers, its sound, and the clipboard, files, notifications and texts moving both ways: on your network, through Tailscale, or over the internet with no port forward and no account.</p>
 
 <p align="center">
-  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-orange?logo=rust" alt="Written in Rust"></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/server%20and%20desktop%20app-Rust-orange?logo=rust" alt="Server and desktop app written in Rust"></a>
   <a href="#license"><img src="https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue" alt="License: MIT OR Apache-2.0"></a>
   <a href="https://github.com/sreevarshan-xenoz/Pocketdesk/actions"><img src="https://github.com/sreevarshan-xenoz/Pocketdesk/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/sreevarshan-xenoz/Pocketdesk/issues"><img src="https://img.shields.io/github/issues/sreevarshan-xenoz/Pocketdesk" alt="Issues"></a>
@@ -22,7 +22,7 @@ Its live screen under your fingers, its sound, and the clipboard, files, notific
 
 ## What is Pocketdesk?
 
-A server for Linux (Wayland-native, Hyprland first) and Windows 10/11, a desktop app to manage it, and a native Android app. It is written in Rust and uses FFmpeg for video encoding. Together they give you:
+A server for Linux (Wayland-native, Hyprland first) and Windows 10/11, a desktop app to manage it, and a native Android app. The server and desktop app are written in Rust and the phone app in Kotlin with a Rust bridge. Video encoding uses FFmpeg, as a library or as the `ffmpeg` program (Windows needs `ffmpeg.exe`). Together they give you:
 
 **Your computer on your phone**
 - **The screen at low latency:** hardware H.264/HEVC over QUIC, decoded by the phone's MediaCodec, with the computer's sound.
@@ -53,10 +53,19 @@ A server for Linux (Wayland-native, Hyprland first) and Windows 10/11, a desktop
 - On your network, through Tailscale, or over the internet with no port forward and no VPN (iroh punches a direct path, or uses a relay).
 - No account and no Pocketdesk server. Each end holds the other to its key (TLS 1.3), and each phone has its own permissions.
 
-**Linux hosts**
-- **KDE Plasma:** screen sharing through the desktop portal now gets a picture, and the grant can be remembered or allowed ahead (checked headless only; GNOME is supported but not yet checked).
-- **Firewall check:** Diagnostics reads ufw, firewalld, nftables and iptables and says which Pocketdesk ports get in, and the Pair page says so when the firewall is why a pairing times out. It only reads the rules.
-- **Software encoding on stock Fedora** through Cisco's OpenH264, where `ffmpeg-free` has no libx264 (tested in a container; a phone session on real Fedora is still owed).
+**KDE Plasma**
+- Screen sharing through the desktop portal gets a picture, and the grant can be remembered or allowed ahead (checked headless only).
+
+**In the next release** (merged to `main` since 0.8.3, not yet tagged; the [guide](docs/guide.md#features) has each one's switches, and most are off until you turn them on)
+- **Any app of the phone, from the computer:** a Phone apps page (Windows and Linux) lists the phone's apps; a click opens one on the phone and shows its screen in a window. Pin an app to the Start menu or applications menu, and where Android allows it open with no tap at the phone. No adb, Shizuku or wireless debugging.
+- **The phone's camera as a webcam on Linux:** apps see a PipeWire camera, with no kernel module; a tap on the phone starts it.
+- **Approve with the phone, on Linux:** sudo, polkit prompts and the lock screen can wait for the phone's fingerprint or screen lock, and the password keeps working ([how](docs/guide.md#approve-with-my-phone-sudo-polkit-and-the-lock-screen)).
+- **The phone's location for Linux apps** through GeoClue, now that Mozilla's service is gone ([how](docs/guide.md#your-phones-location-for-this-computer-geoclue)).
+- **A direct link** for when no network is shared: the computer makes its own Wi-Fi for one phone, on Linux through NetworkManager and on Windows through Mobile Hotspot ([how](docs/guide.md#a-direct-link-no-shared-network)).
+- **Folders kept on the computer:** phone folders picked with Android's folder picker (no all-files permission) are copied one way to the computer on a schedule.
+- **A spare phone as the wake helper:** an old phone on a charger at home sends the magic packet, so waking the computer from outside needs no router setting ([how](docs/guide.md#a-spare-phone-at-home-as-the-wake-helper)).
+- **Fit the screen to the window** (a Linux computer on Hyprland or Sway shows a screen the size of the window on another) and **Unattended on GNOME** (no dialog, off by default; [how](docs/guide.md#gnome-unattended-with-no-dialog)).
+- **On Linux hosts:** a firewall check (Diagnostics reads ufw, firewalld, nftables and iptables and says which Pocketdesk ports get in; the Pair page says so when the firewall is why a pairing times out; it only reads the rules), and software encoding on stock Fedora through Cisco's OpenH264, where `ffmpeg-free` has no libx264 (tested in a container; a phone session on real Fedora is still owed).
 
 ## Quickstart
 
@@ -68,7 +77,8 @@ A server for Linux (Wayland-native, Hyprland first) and Windows 10/11, a desktop
 | Windows, winget | The manifests are in [`packaging/winget/`](packaging/winget/), not yet in winget's own catalogue; the [guide](docs/guide.md#the-phone-app-and-windows-through-winget) has the command. |
 | Debian, Ubuntu | `sudo apt install ./pocketdesk-…-linux-amd64.deb` |
 | Arch | `yay -S pocketdesk` ([AUR](https://aur.archlinux.org/packages/pocketdesk)) |
-| Other Linux | `curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh \| bash` installs the portable `linux-x86_64` tarball. It needs glibc 2.39 or newer, PipeWire and FFmpeg; the script offers to install what is missing. |
+| Other Linux | `curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh \| bash` installs the portable `linux-x86_64` tarball. It needs glibc 2.39 or newer, PipeWire and FFmpeg; the script offers to install what is missing. 0.8.3's tarball did not start on Arch; that is fixed on `main`, for the next release. |
+| Fedora | The same script. It installs `ffmpeg-free` and, from the next release, uses Cisco's OpenH264 for software encoding, since `ffmpeg-free` has no libx264 ([details](docs/guide.md#installation)). |
 
 **2. Install the app on your phone** (Android 8 or newer): `pocketdesk-...-android-arm64.apk` from the same release, or add `https://github.com/sreevarshan-xenoz/Pocketdesk` to [Obtainium](https://github.com/ImranR98/Obtainium) to keep it updated. F-Droid is not available yet: the metadata is ready but has not been submitted.
 
@@ -95,7 +105,7 @@ Something not working? The desktop app's **Diagnostics** page checks the server,
 
 Close calls were checked against each project's documentation on 2026-10-31 (the rest were not rechecked). The other columns come from those projects' public documentation and may be out of date. Each tool is good at what it was made for, and some do things Pocketdesk does not: Phone Link and scrcpy are mature at showing a phone on a computer, and LocalSend and Deskflow are small and focused. If a cell is wrong, [open an issue](https://github.com/sreevarshan-xenoz/Pocketdesk/issues/new/choose).
 
-**Status: beta.** 0.8.3 is the latest release; main has since fixed the Linux tarball on other distros (it did not start on Arch) and added the Fedora OpenH264 fallback and the firewall check, which ship with the next release. Partly device-checked: Hyprland on a laptop and Sway in a VM (on Linux, not yet files, notifications or sound), and Windows with a Galaxy A71 and an OPPO phone. KDE Plasma 6 has been checked headless only (the screen, input and remembered grants through its portal, with no phone); GNOME is supported but not yet checked. Your computers paired both ways and their window onto each other's screen (new in 0.8.3, with its extras) have run between throwaway servers and from the Linux laptop viewing Windows, view-only; at a desk with two real computers, not yet. The shared keyboard and mouse (new in 0.8, with Linux driving too from 0.8.2) is checked only in parts: from scripts, its receiving end on the Linux laptop and the phone as a screen, and live on Hyprland, Linux driving through its portal; two real computers at a desk, and Linux driving on GNOME and KDE, are not yet. [What works where](docs/guide.md#what-works-where) has the details, and [the checklist](docs/device-verification-checklist.md) every check still open.
+**Status: beta.** 0.8.3 is the latest release; main has since fixed the Linux tarball on other distros (it did not start on Arch) and merged everything under "In the next release" above, which ships with the next release (not yet tagged). Partly device-checked: Hyprland on a laptop and Sway in a VM (on Linux, not yet files, notifications or sound), and Windows with a Galaxy A71 and an OPPO phone. KDE Plasma 6 has been checked headless only (the screen, input and remembered grants through its portal, with no phone); GNOME 51 has been checked headless too, and not yet with a phone. Your computers paired both ways and their window onto each other's screen (new in 0.8.3, with its extras) have run between throwaway servers and from the Linux laptop viewing Windows, view-only; at a desk with two real computers, not yet. The shared keyboard and mouse (new in 0.8, with Linux driving too from 0.8.2) is checked only in parts: from scripts, its receiving end on the Linux laptop and the phone as a screen, and live on Hyprland, Linux driving through its portal; two real computers at a desk, and Linux driving on GNOME and KDE, are not yet. [What works where](docs/guide.md#what-works-where) has the details, and [the checklist](docs/device-verification-checklist.md) every check still open.
 
 ## Learn more
 
