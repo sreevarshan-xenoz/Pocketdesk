@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tile_wake">எழுப்பு</string>
+    <string name="tile_ring">தொலைபேசியை ஒலிக்கச் செய்</string>
+    <string name="tile_play">இயக்கு / இடைநிறுத்து</string>
+    <string name="tile_next">அடுத்தது</string>
+    <string name="tile_deck">டெக்</string>
+    <string name="tile_deny">இல்லை: %1$s</string>
+    <string name="tile_nothing_on">தொலைபேசியின் கடிகாரக் கட்டுப்பாடுகளில் எதுவும் இயக்கப்படவில்லை</string>
+
+    <string name="said_sent">அனுப்பப்பட்டது</string>
+    <string name="said_off">அந்தப் பொத்தான் தொலைபேசியில் அணைக்கப்பட்டுள்ளது</string>
+    <string name="said_busy">மிக விரைவு, சிறிது காத்திருக்கவும்</string>
+    <string name="said_unreachable">தொலைபேசியை அடைய முடியவில்லை</string>
+    <string name="said_not_paired">முதலில் தொலைபேசியுடன் இணைக்கவும்</string>
+    <string name="said_set_lock">இதைப் பயன்படுத்த கடிகாரப் பூட்டை அமைக்கவும்</string>
+    <string name="said_locked">முதலில் கடிகாரத்தைத் திறக்கவும்</string>
+    <string name="said_failed">வேலை செய்யவில்லை</string>
+    <string name="said_no_bluetooth">முதலில் அருகிலுள்ள சாதனங்களை அனுமதிக்கவும்</string>
+    <string name="said_answered">இல்லை என்று சொல்லப்பட்டது</string>
+
+    <string name="main_title">Pocketdesk</string>
+    <string name="main_need_permission">இந்தக் கடிகாரம் உங்கள் தொலைபேசியை அடைய அருகிலுள்ள சாதனங்களை அனுமதிக்கவும்</string>
+    <string name="main_allow">அனுமதி</string>
+    <string name="main_pair_title">உங்கள் தொலைபேசியுடன் இணை</string>
+    <string name="main_pair_steps">தொலைபேசியில்: அமைப்புகள், கடிகாரக் கட்டுப்பாடுகள், கடிகாரத்தை இணை. பிறகு இங்கே தொலைபேசியைத் தேர்ந்தெடுக்கவும்.</string>
+    <string name="main_no_phone">இந்தக் கடிகாரத்துடன் எந்தத் தொலைபேசியும் இணைக்கப்படவில்லை. முதலில் Wear OS செயலியில் இணைக்கவும்.</string>
+    <string name="main_code">தொலைபேசியில் %1$s ஐத் தட்டச்சு செய்யவும்</string>
+    <string name="main_waiting">தொலைபேசிக்காகக் காத்திருக்கிறது…</string>
+    <string name="main_pair_failed">இணைக்கப்படவில்லை: %1$s</string>
+    <string name="main_refresh">புதுப்பி</string>
+    <string name="main_forget">தொலைபேசியை மற</string>
+    <string name="main_wake">என் கணினியை எழுப்பு</string>
+    <string name="main_ring">என் தொலைபேசியை ஒலிக்கச் செய்</string>
+    <string name="main_play">இயக்கு / இடைநிறுத்து</string>
+    <string name="main_next">அடுத்தது</string>
+    <string name="main_previous">முந்தையது</string>
+    <string name="main_deck_title">டெக்</string>
+    <string name="main_asks_title">கேள்விகள்</string>
+    <string name="main_ask_no">இல்லை</string>
+    <string name="main_ask_on_phone">ஆம் என்பதற்கு உங்கள் தொலைபேசியின் கைரேகை தேவை: தொலைபேசியில் பதிலளிக்கவும்.</string>
+    <string name="main_loading">தொலைபேசியிடம் கேட்கிறது…</string>
+</resources>
