@@ -200,6 +200,13 @@ pub struct Config {
     /// fingers at once to a phone, and some online games flag injected input.
     #[serde(default)]
     pub phone_app_keymaps: bool,
+    /// Linux, with NetworkManager: after "Use my phone's hotspot" asks a
+    /// phone to turn its hotspot on, join the Wi-Fi network of this name, but
+    /// only if it is one already saved here (its password stays in
+    /// NetworkManager; Pocketdesk never stores or sees it). Empty (the
+    /// default): only tell the owner to connect.
+    #[serde(default)]
+    pub phone_hotspot_network: String,
     /// Offer phones as this computer's camera (F6 part 2, Linux): a phone
     /// with the Webcam permission, asked from here, is published as a
     /// PipeWire camera apps can open. Off by default: a camera from afar.
@@ -810,6 +817,7 @@ impl Default for Config {
             phone_drop_share: true,
             phone_app_windows: true,
             phone_app_keymaps: false,
+            phone_hotspot_network: String::new(),
             phone_camera: false,
             phone_camera_lens: default_phone_camera_lens(),
             phone_camera_height: default_phone_camera_height(),
@@ -1106,6 +1114,7 @@ impl Config {
         "phone_drop_share",
         "phone_app_windows",
         "phone_app_keymaps",
+        "phone_hotspot_network",
         "phone_camera",
         "phone_camera_lens",
         "phone_camera_height",

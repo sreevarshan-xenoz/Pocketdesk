@@ -56,6 +56,7 @@ pub mod phone_app_icons;
 pub mod phone_apps;
 pub mod phone_contacts;
 pub mod phone_files;
+pub mod phone_hotspot;
 pub mod phone_live;
 pub mod phone_media;
 pub mod phone_notes;

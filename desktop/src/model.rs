@@ -794,6 +794,13 @@ pub const FEATURES: &[Feature] = &[
         permission_name: "Peek at this screen",
         android: "",
     },
+    Feature {
+        key: "hotspot",
+        what: "Turning on its hotspot from here",
+        phone_switch: "Let my computers turn on my hotspot",
+        permission_name: "Screenshot, lock and open its apps",
+        android: "Shizuku running and allowed, and notification access",
+    },
 ];
 
 /// Whether O2's screenshot and lock reach a phone now: [`linked`] to this
@@ -807,6 +814,29 @@ pub fn phone_action_reach(linked: bool, allowed: bool) -> Result<(), &'static st
     } else {
         Ok(())
     }
+}
+
+/// Use my phone's hotspot: whether the buttons are shown for a phone. They are
+/// shown only once the phone said its own switch is on, so a phone that never
+/// offers it (or whose owner has not turned it on) shows nothing.
+pub fn hotspot_shown(
+    switches: Option<&pocketdesk_core::local::phone_switches::PhoneSwitches>,
+) -> bool {
+    switches
+        .and_then(|s| s.switches.get("hotspot"))
+        .is_some_and(|s| s.on)
+}
+
+/// Whether "Use my phone's hotspot" reaches a phone now: the phone linked here
+/// with its Phone actions permission on, and the phone saying it can (its
+/// switch on, Shizuku usable); else why not.
+pub fn hotspot_reach(
+    linked: bool,
+    allowed: bool,
+    switches: Option<&pocketdesk_core::local::phone_switches::PhoneSwitches>,
+) -> Result<(), &'static str> {
+    phone_action_reach(linked, allowed)?;
+    pocketdesk_core::local::phone_hotspot::offered(switches.and_then(|s| s.switches.get("hotspot")))
 }
 
 /// Whether this computer can ask the phone to be its camera (F6 part 2),
@@ -1656,6 +1686,32 @@ mod tests {
     fn the_pages_features_are_the_phones() {
         let ours: Vec<&str> = super::FEATURES.iter().map(|f| f.key).collect();
         assert_eq!(ours, pocketdesk_core::local::phone_switches::FEATURES);
+    }
+
+    /// Use my phone's hotspot: shown only when the phone's own switch is on,
+    /// and working only when the phone also says Shizuku lets it.
+    #[test]
+    fn the_hotspot_button_is_shown_and_works_only_as_the_phone_says() {
+        use pocketdesk_core::local::phone_switches::{PhoneSwitches, from_body};
+        let said = |body: serde_json::Value| PhoneSwitches {
+            switches: from_body(&serde_json::json!({ "switches": body })).unwrap(),
+            updated_unix: 1,
+        };
+        assert!(!super::hotspot_shown(None));
+        assert!(
+            !super::hotspot_shown(Some(&said(serde_json::json!({})))),
+            "an old phone"
+        );
+        let off = said(serde_json::json!({"hotspot": {"on": false, "android": true}}));
+        assert!(!super::hotspot_shown(Some(&off)), "its switch is off");
+        let no_shizuku = said(serde_json::json!({"hotspot": {"on": true, "android": false}}));
+        assert!(super::hotspot_shown(Some(&no_shizuku)));
+        assert!(super::hotspot_reach(true, true, Some(&no_shizuku)).is_err());
+        let ready = said(serde_json::json!({"hotspot": {"on": true, "android": true}}));
+        assert_eq!(super::hotspot_reach(true, true, Some(&ready)), Ok(()));
+        // The permission and the link are said first.
+        assert!(super::hotspot_reach(true, false, Some(&ready)).is_err());
+        assert!(super::hotspot_reach(false, true, Some(&ready)).is_err());
     }
 
     /// O2: a screenshot and a lock reach a linked phone with its permission

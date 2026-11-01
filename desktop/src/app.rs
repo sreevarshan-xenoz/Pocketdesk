@@ -481,6 +481,9 @@ pub struct PocketdeskApp {
     /// A setting that runs a program (the file manager's menu, the
     /// browser's host), off the UI thread: what it says once done.
     setting_job: Option<std::thread::JoinHandle<Result<String, String>>>,
+    /// Joining a phone's hotspot network after it was asked to turn it on
+    /// (Linux, a saved network the owner named), off the UI thread.
+    hotspot_join: Option<std::thread::JoinHandle<Result<String, String>>>,
     /// Restart was asked for while phones are connected; awaiting a yes.
     confirm_restart: bool,
     /// Held sessions already brought to the owner's attention.
@@ -606,6 +609,7 @@ impl PocketdeskApp {
             job: None,
             started_at: None,
             setting_job: None,
+            hotspot_join: None,
             confirm_restart: false,
             raised_approvals: Vec::new(),
             send_to: None,
@@ -779,6 +783,21 @@ impl PocketdeskApp {
         self.send_menu_installed = None;
         self.browser_registered = None;
         self.tel_registered = None;
+    }
+
+    /// Use my phone's hotspot: say how joining its network went, once it is over.
+    fn finish_hotspot_join(&mut self) {
+        if !self.hotspot_join.as_ref().is_some_and(|h| h.is_finished()) {
+            return;
+        }
+        let Some(handle) = self.hotspot_join.take() else {
+            return;
+        };
+        self.notice = crate::notice::Notice::outcome(
+            handle
+                .join()
+                .unwrap_or_else(|_| Err("Joining the phone's network failed.".to_string())),
+        );
     }
 
     fn finish_job(&mut self) {
@@ -2215,6 +2234,23 @@ impl PocketdeskApp {
                     PhoneAction::Open => format!("Asked {who} to open an app."),
                     PhoneAction::Contacts => format!("Asked {who} for its contacts."),
                     PhoneAction::Share => format!("Asked {who} to share a file."),
+                    PhoneAction::HotspotOn => {
+                        // Linux, a saved network the owner named: join it once it appears.
+                        let join = self.config.as_ref().and_then(|c| {
+                            crate::phone_hotspot::network_to_join(
+                                &c.phone_hotspot_network,
+                                cfg!(target_os = "linux"),
+                            )
+                        });
+                        if let Some(name) = join.clone()
+                            && self.hotspot_join.is_none()
+                        {
+                            self.hotspot_join =
+                                Some(std::thread::spawn(move || crate::phone_hotspot::join(&name)));
+                        }
+                        crate::phone_hotspot::asked_words(&who, join.as_deref())
+                    }
+                    PhoneAction::HotspotOff => format!("Asked {who} to turn its hotspot off."),
                 }),
                 Err(e) => Err(format!("Could not ask {who}: {e}")),
             },
@@ -2500,6 +2536,38 @@ impl PocketdeskApp {
                             .clicked()
                         {
                             phone_action = Some((device.id.clone(), action));
+                        }
+                    }
+                    // Use my phone's hotspot: only for a phone that said its own
+                    // switch is on (it is off by default there, and shown only
+                    // with Shizuku running), so most phones show nothing here.
+                    if model::hotspot_shown(device.switches.as_ref()) {
+                        let hotspot_reach = model::hotspot_reach(
+                            device.linked,
+                            device.permissions.allows(Capability::PhoneActions),
+                            device.switches.as_ref(),
+                        );
+                        for (label, action, why) in [
+                            (
+                                "Use my phone's hotspot",
+                                pocketdesk_core::protocol::phone_action::PhoneAction::HotspotOn,
+                                "The phone turns on its own Wi-Fi hotspot, as it is set in Android (nothing about its name or password is sent), so this computer can get internet through it. Then connect to its network here (or, on Linux, name it in Settings to be joined when it is already saved). The phone shows its usual hotspot indicator.",
+                            ),
+                            (
+                                "Turn its hotspot off",
+                                pocketdesk_core::protocol::phone_action::PhoneAction::HotspotOff,
+                                "The phone turns its hotspot off. It also turns it off by itself after the minutes set on the phone.",
+                            ),
+                        ] {
+                            let why = hotspot_reach.err().unwrap_or(why);
+                            if ui
+                                .add_enabled(hotspot_reach.is_ok(), egui::Button::new(label))
+                                .on_hover_text(why)
+                                .on_disabled_hover_text(why)
+                                .clicked()
+                            {
+                                phone_action = Some((device.id.clone(), action));
+                            }
                         }
                     }
                     // P2: one of the phone's apps opened from here.
@@ -4673,6 +4741,7 @@ impl eframe::App for PocketdeskApp {
         }
         self.finish_job();
         self.finish_setting();
+        self.finish_hotspot_join();
         // Closing hides to the tray; Quit (or no tray to come back from) exits.
         if ctx.input(|i| i.viewport().close_requested())
             && !self.quitting

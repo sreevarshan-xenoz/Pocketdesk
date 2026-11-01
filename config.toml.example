@@ -130,6 +130,13 @@ video_quality = "balanced"
 # Off by default: some online games flag injected input.
 # phone_app_keymaps = false
 
+# Linux with NetworkManager: after "Use my phone's hotspot" (Overview, for a
+# phone whose "Let my computers turn on my hotspot" is on, which needs Shizuku)
+# asks the phone to turn its hotspot on, join the Wi-Fi network of this name,
+# but only if it is already saved on this computer. The phone's password is
+# never asked for, kept or sent. Empty: you are only told to connect.
+# phone_hotspot_network = ""
+
 # Linux: offer phones as this computer's camera. A phone with "Use its camera
 # as a webcam" on in the desktop app (Devices) and "Let the computer use
 # my camera" on in its Settings, asked from the Overview, is published as a
