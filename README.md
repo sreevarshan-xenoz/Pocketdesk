@@ -77,7 +77,8 @@ A server for Linux (Wayland-native, Hyprland first) and Windows 10/11, a desktop
 | Windows, winget | The manifests are in [`packaging/winget/`](packaging/winget/), not yet in winget's own catalogue; the [guide](docs/guide.md#the-phone-app-and-windows-through-winget) has the command. |
 | Debian, Ubuntu | `sudo apt install ./pocketdesk-…-linux-amd64.deb` |
 | Arch | `yay -S pocketdesk` ([AUR](https://aur.archlinux.org/packages/pocketdesk)) |
-| Other Linux | `curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh \| bash` installs the portable `linux-x86_64` tarball. It needs glibc 2.39 or newer, PipeWire and FFmpeg; the script offers to install what is missing. |
+| Other Linux | `curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh \| bash` installs the portable `linux-x86_64` tarball. It needs glibc 2.39 or newer, PipeWire and FFmpeg; the script offers to install what is missing. 0.8.3's tarball did not start on Arch; that is fixed on `main`, for the next release. |
+| Fedora | The same script. It installs `ffmpeg-free` and, from the next release, uses Cisco's OpenH264 for software encoding, since `ffmpeg-free` has no libx264 ([details](docs/guide.md#installation)). |
 
 **2. Install the app on your phone** (Android 8 or newer): `pocketdesk-...-android-arm64.apk` from the same release, or add `https://github.com/sreevarshan-xenoz/Pocketdesk` to [Obtainium](https://github.com/ImranR98/Obtainium) to keep it updated. F-Droid is not available yet: the metadata is ready but has not been submitted.
 
