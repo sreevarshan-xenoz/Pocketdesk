@@ -77,6 +77,14 @@ pub const SESSION_MODE_PHONE_SOUND: u8 = 4;
 /// takes none of the computer's few config streams (PR #604 review N3).
 pub const CAST_WEBCAM_FLAG: u8 = 1;
 
+/// A cast of app windows only (Phone apps tier 2): this byte follows a
+/// [`SESSION_MODE_CAST`] mode on the same mode stream, `[0xFB, 0x00, 2,
+/// 2]`. The phone shows no screen of its own, only apps in windows of their
+/// own ([`super::cast::CAST_WINDOW`]); a computer that does not know the
+/// byte takes the session as an ordinary cast, which waits for a screen
+/// that never comes.
+pub const CAST_WINDOWS_FLAG: u8 = 2;
+
 /// A sound session's ready stream carries one byte of what the computer
 /// allows (N5 review): this bit marks the byte as said, so a computer that
 /// says nothing reads as not known.
@@ -211,6 +219,10 @@ pub enum SessionMode {
     /// The phone's camera as the computer's camera (F6 part 2): a cast
     /// whose mode stream says [`CAST_WEBCAM_FLAG`] too.
     Webcam,
+    /// Phone apps in windows of their own, no screen of the phone's
+    /// (Phone apps tier 2): a cast whose mode stream says
+    /// [`CAST_WINDOWS_FLAG`] too.
+    Windows,
 }
 
 impl SessionMode {
@@ -220,7 +232,9 @@ impl SessionMode {
         match self {
             SessionMode::Screen => None,
             SessionMode::InputOnly => Some(SESSION_MODE_INPUT_ONLY),
-            SessionMode::Cast | SessionMode::Webcam => Some(SESSION_MODE_CAST),
+            SessionMode::Cast | SessionMode::Webcam | SessionMode::Windows => {
+                Some(SESSION_MODE_CAST)
+            }
             SessionMode::Sound => Some(SESSION_MODE_SOUND),
             SessionMode::PhoneSound => Some(SESSION_MODE_PHONE_SOUND),
         }
@@ -749,6 +763,10 @@ impl StreamingClient {
                     if mode == SessionMode::Webcam {
                         buf.push(CAST_WEBCAM_FLAG);
                     }
+                    // Tier 2: a cast of app windows says so too.
+                    if mode == SessionMode::Windows {
+                        buf.push(CAST_WINDOWS_FLAG);
+                    }
                     if let Err(e) = mode_stream.write_all(&buf).await {
                         warn!(error = %e, "Failed to send the session mode");
                     }
@@ -793,7 +811,10 @@ impl StreamingClient {
                 input_only,
                 cast: matches!(
                     mode,
-                    SessionMode::Cast | SessionMode::PhoneSound | SessionMode::Webcam
+                    SessionMode::Cast
+                        | SessionMode::PhoneSound
+                        | SessionMode::Webcam
+                        | SessionMode::Windows
                 ),
                 phone_sound: mode == SessionMode::PhoneSound,
                 sound: mode == SessionMode::Sound,
@@ -1207,6 +1228,8 @@ mod remote_tests {
         assert!(!SessionMode::Sound.gets_picture());
         // F6 part 2: a camera cast is a cast, said with a marker after.
         assert_eq!(SessionMode::Webcam.wire(), Some(SESSION_MODE_CAST));
+        assert_eq!(SessionMode::Windows.wire(), Some(SESSION_MODE_CAST));
+        assert!(!SessionMode::Windows.gets_picture());
         assert!(!SessionMode::Webcam.gets_picture());
     }
 

@@ -191,8 +191,8 @@ object ControlPlan {
     /** At most this many events a second are taken. */
     const val MAX_EVENTS_PER_SECOND = 200
 
-    /** Counts events per second; more than [MAX_EVENTS_PER_SECOND] are refused. */
-    class Rate {
+    /** Counts events per second; more than [limit] (by default [MAX_EVENTS_PER_SECOND]) are refused. */
+    class Rate(private val limit: Int = MAX_EVENTS_PER_SECOND) {
         private var second = -1L
         private var count = 0
 
@@ -202,7 +202,7 @@ object ControlPlan {
                 second = s
                 count = 0
             }
-            if (count >= MAX_EVENTS_PER_SECOND) return false
+            if (count >= limit) return false
             count++
             return true
         }

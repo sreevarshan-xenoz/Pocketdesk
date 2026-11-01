@@ -12,6 +12,13 @@
 //! scrolls, the right button is Back and the middle Home, typing goes to
 //! the phone's focused field, and a bar holds Back, Home, Recents and a
 //! switch to watch without touching.
+//!
+//! Phone apps tier 2: an app opened in a window of its own is shown by a
+//! second `CastView` of the same kind, one per window id, reading that
+//! window's file (`cast-window-<n>.json`); its window carries the app's
+//! name, takes touch and typing only as the phone says that window does, and
+//! closing it asks the phone to close the app's window and give its display
+//! back.
 
 use std::io::{self, BufReader, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
@@ -28,9 +35,31 @@ use crate::video::{
     user_folder,
 };
 
-/// The window's id among the app's viewports.
-fn viewport_id() -> egui::ViewportId {
-    egui::ViewportId::from_hash_of("pocketdesk-cast")
+/// The window's id among the app's viewports: the phone's screen, or app
+/// window `n`.
+fn viewport_id(window: Option<u8>) -> egui::ViewportId {
+    match window {
+        None => egui::ViewportId::from_hash_of("pocketdesk-cast"),
+        Some(n) => egui::ViewportId::from_hash_of(("pocketdesk-cast-window", n)),
+    }
+}
+
+/// Repaint the window `shared` belongs to.
+fn repaint(shared: &Mutex<State>, ctx: &egui::Context) {
+    let window = lock(shared).window;
+    ctx.request_repaint_of(viewport_id(window));
+}
+
+/// What tells one cast from the next in a window's state: the session for
+/// the phone's screen, and for an app window its token, which is made again
+/// each time a window opens (the session outlives its windows).
+fn identity(file: &CastFile) -> u64 {
+    match (file.window, file.token_bytes()) {
+        (Some(_), Some(token)) if token.len() >= 8 => {
+            u64::from_le_bytes(token[..8].try_into().unwrap_or([0; 8]))
+        }
+        _ => file.session_id,
+    }
 }
 
 /// How often the worker looks for a cast.
@@ -42,7 +71,10 @@ const LONG_SIDE: f32 = 800.0;
 
 #[derive(Default)]
 struct State {
-    /// The cast being shown, and its phone.
+    /// The app window this state is for (Phone apps tier 2); none for the
+    /// phone's screen. Set once and kept.
+    window: Option<u8>,
+    /// The cast being shown (see [`identity`]), and its phone.
     session_id: Option<u64>,
     device_id: String,
     /// The phone's screen as it is encoded now.
@@ -66,6 +98,9 @@ struct State {
     watch_only: bool,
     /// The primary button is down on the phone.
     pressing: bool,
+    /// Keys to taps for this app window (Phone apps tier 2); none for the
+    /// phone's own screen window and for a window with no known app.
+    keys: Option<crate::keymap_view::Keys>,
     /// Where the last touch went, for a release the window did not see.
     last_touch: (u16, u16),
     /// What a drop on the window did, and when (L2).
@@ -228,11 +263,41 @@ pub struct CastView {
     shared: Arc<Mutex<State>>,
     /// Where drops are queued (L2).
     state_dir: PathBuf,
+    /// The app window this shows (Phone apps tier 2); none for the screen.
+    window: Option<u8>,
 }
 
 impl CastView {
     pub fn new(ctx: &egui::Context, state_dir: PathBuf) -> Self {
-        let shared = Arc::new(Mutex::new(State::default()));
+        Self::spawn(ctx, state_dir, None, None)
+    }
+
+    /// The viewer of app window `window` (Phone apps tier 2), for the phone's
+    /// app `package` when it is known (it has the window's keymap).
+    pub fn for_window(
+        ctx: &egui::Context,
+        state_dir: PathBuf,
+        window: u8,
+        package: Option<&str>,
+    ) -> Self {
+        Self::spawn(ctx, state_dir, Some(window), package)
+    }
+
+    fn spawn(
+        ctx: &egui::Context,
+        state_dir: PathBuf,
+        window: Option<u8>,
+        package: Option<&str>,
+    ) -> Self {
+        let keys = window
+            .and(package)
+            .filter(|p| pocketdesk_core::local::keymap::package_ok(p))
+            .map(|p| crate::keymap_view::Keys::new(p, state_dir.clone()));
+        let shared = Arc::new(Mutex::new(State {
+            window,
+            keys,
+            ..State::default()
+        }));
         let worker = shared.clone();
         let ctx = ctx.clone();
         let watched = state_dir.clone();
@@ -241,7 +306,11 @@ impl CastView {
             .spawn(move || watch(&watched, &worker, &ctx));
         // Without the thread no cast is ever shown, and nothing else breaks.
         drop(spawned);
-        Self { shared, state_dir }
+        Self {
+            shared,
+            state_dir,
+            window,
+        }
     }
 
     /// The cast now, and whether its window was closed.
@@ -266,7 +335,7 @@ impl CastView {
             }
             state.dismissed = None;
         }
-        ctx.send_viewport_cmd_to(viewport_id(), egui::ViewportCommand::Focus);
+        ctx.send_viewport_cmd_to(viewport_id(self.window), egui::ViewportCommand::Focus);
         ctx.request_repaint();
     }
 
@@ -282,6 +351,7 @@ impl CastView {
         control: bool,
         targets: Vec<String>,
         share: bool,
+        keymaps: bool,
     ) {
         let (title, size) = {
             let state = lock(&self.shared);
@@ -309,10 +379,46 @@ impl CastView {
             .with_min_inner_size([160.0, 160.0]);
         let shared = self.shared.clone();
         let state_dir = self.state_dir.clone();
-        ctx.show_viewport_deferred(viewport_id(), builder, move |ui, _class| {
+        ctx.show_viewport_deferred(viewport_id(self.window), builder, move |ui, _class| {
             take_drops(&shared, ui.ctx(), &state_dir, &targets, share);
             watch_share(&shared, ui.ctx(), &state_dir);
-            draw(&shared, ui, control);
+            draw(&shared, ui, control, keymaps);
+        });
+    }
+
+    /// An app window's window, while its cast is there (Phone apps tier 2):
+    /// titled with the app's `name` and the phone's. Files dropped on it
+    /// are not taken (it is not the phone's screen), and touch and typing
+    /// go only as far as the phone says this window takes them.
+    pub fn show_window(
+        &self,
+        ctx: &egui::Context,
+        devices: &[crate::model::Device],
+        control: bool,
+        name: &str,
+        keymaps: bool,
+    ) {
+        let (title, size) = {
+            let state = lock(&self.shared);
+            let Some(id) = state.session_id else { return };
+            if state.dismissed == Some(id) {
+                return;
+            }
+            let phone = devices
+                .iter()
+                .find(|d| d.id == state.device_id)
+                .and_then(|d| d.name.clone())
+                .unwrap_or_else(|| short(&state.device_id));
+            (format!("{name} \u{b7} {phone}"), state.size)
+        };
+        let (w, h) = window_size(size);
+        let builder = egui::ViewportBuilder::default()
+            .with_title(title)
+            .with_inner_size([w, h])
+            .with_min_inner_size([160.0, 160.0]);
+        let shared = self.shared.clone();
+        ctx.show_viewport_deferred(viewport_id(self.window), builder, move |ui, _class| {
+            draw(&shared, ui, control, keymaps);
         });
     }
 }
@@ -555,11 +661,35 @@ fn take_drops(
     ctx.request_repaint_after(DROP_NOTE);
 }
 
-fn draw(shared: &Arc<Mutex<State>>, ui: &mut egui::Ui, control: bool) {
+fn draw(shared: &Arc<Mutex<State>>, ui: &mut egui::Ui, control: bool, keymaps: bool) {
     let ctx = ui.ctx().clone();
     let mut state = lock(shared);
     if ctx.input(|i| i.viewport().close_requested()) {
         state.dismissed = state.session_id;
+        // Fingers held for a game are lifted before the window goes, and
+        // the pointer lock for aiming goes with it.
+        let lifts = state
+            .keys
+            .as_mut()
+            .map(|keys| {
+                let lifts = keys.release();
+                keys.close(&ctx);
+                lifts
+            })
+            .unwrap_or_default();
+        if !lifts.is_empty()
+            && let Some(mut writer) = state.writer.as_ref().and_then(|w| w.try_clone().ok())
+        {
+            let _ = send_control(&mut writer, lifts);
+        }
+        // An app window closed here is closed on the phone too, and its
+        // display given back (best effort: the relay closes one nobody
+        // shows after a while anyway).
+        if state.window.is_some()
+            && let Some(mut writer) = state.writer.take()
+        {
+            let _ = Message::CloseWindow.write(&mut writer);
+        }
         state.writer = None;
         if let Some(stream) = state.stream.take() {
             let _ = stream.shutdown(std::net::Shutdown::Both);
@@ -591,6 +721,7 @@ fn draw(shared: &Arc<Mutex<State>>, ui: &mut egui::Ui, control: bool) {
     let texture = state.texture.clone();
     let note = state.note.clone();
     let phone_takes = state.control_on && state.writer.is_some();
+    let window = state.window;
     let controlling = control && phone_takes && !state.watch_only;
     let mut watch_only = state.watch_only;
     let recording = state.recording.clone();
@@ -600,6 +731,18 @@ fn draw(shared: &Arc<Mutex<State>>, ui: &mut egui::Ui, control: bool) {
         .clone()
         .filter(|(_, at)| at.elapsed() < SAVED_NOTE)
         .map(|(note, _)| note);
+    // Keys to taps (an app window's own state, put back below). Off in
+    // Settings, they are off here too.
+    let mut keys = state.keys.take();
+    if !keymaps
+        && let Some(k) = keys.as_mut()
+        && (k.on || k.editing)
+    {
+        k.on = false;
+        k.set_editing(false);
+    }
+    // While the pointer is locked for aiming the bar is not clicked.
+    let keys_locked = keys.as_ref().is_some_and(|k| k.lock.locked());
     drop(state);
     let mut buttons = Vec::new();
     // L5: a screenshot and a recording, whatever control says.
@@ -667,12 +810,19 @@ fn draw(shared: &Arc<Mutex<State>>, ui: &mut egui::Ui, control: bool) {
                 ui.style_mut().visuals = egui::Visuals::dark();
                 ui.horizontal_wrapped(|ui| {
                     if phone_takes {
-                        ui.add_enabled_ui(!watch_only, |ui| {
-                            for (label, global) in [
-                                ("Back", Global::Back),
-                                ("Home", Global::Home),
-                                ("Recents", Global::Recents),
-                            ] {
+                        ui.add_enabled_ui(!watch_only && !keys_locked, |ui| {
+                            // An app window has no Home or Recents: only
+                            // the phone's screen does.
+                            let globals: &[(&str, Global)] = if window.is_some() {
+                                &[("Back", Global::Back)]
+                            } else {
+                                &[
+                                    ("Back", Global::Back),
+                                    ("Home", Global::Home),
+                                    ("Recents", Global::Recents),
+                                ]
+                            };
+                            for &(label, global) in globals {
                                 let button = ui.button(label);
                                 if button.clicked() {
                                     // Enter and Space go to the phone, not
@@ -688,10 +838,34 @@ fn draw(shared: &Arc<Mutex<State>>, ui: &mut egui::Ui, control: bool) {
                         if switch.clicked() {
                             switch.surrender_focus();
                         }
+                        // Keys to taps: an app window only (the phone's own
+                        // screen takes accessibility gestures, too slow for
+                        // a game, and needs no Shizuku).
+                        if keymaps {
+                            match keys.as_mut() {
+                                Some(k) => {
+                                    ui.add_enabled_ui(!watch_only && !keys_locked, |ui| k.bar(ui));
+                                }
+                                None => {
+                                    ui.colored_label(
+                                        egui::Color32::LIGHT_GRAY,
+                                        if window.is_some() {
+                                            "Keys to taps: this window's app is not known here, so it has no keymap."
+                                        } else {
+                                            "Keys to taps works in an app window (Shizuku on the phone), not in the phone's own screen."
+                                        },
+                                    );
+                                }
+                            }
+                        }
                     } else {
                         ui.colored_label(
                             egui::Color32::LIGHT_GRAY,
-                            "To control the phone from here, turn on \u{201c}Let the computer control this phone\u{201d} in Pocketdesk's Settings on the phone.",
+                            if window.is_some() {
+                                "This window shows the app only: touch and typing go to it when \u{201c}Separate windows (Shizuku)\u{201d} is on in Pocketdesk's Settings on the phone."
+                            } else {
+                                "To control the phone from here, turn on \u{201c}Let the computer control this phone\u{201d} in Pocketdesk's Settings on the phone."
+                            },
                         );
                     }
                 });
@@ -725,11 +899,29 @@ fn draw(shared: &Arc<Mutex<State>>, ui: &mut egui::Ui, control: bool) {
                     });
             });
     }
+    if keymaps
+        && let Some(k) = keys.as_mut()
+        && k.editing
+    {
+        egui::Panel::right("cast-keys")
+            .resizable(false)
+            .exact_size(270.0)
+            .frame(
+                egui::Frame::NONE
+                    .fill(egui::Color32::from_gray(24))
+                    .inner_margin(8.0),
+            )
+            .show(ui, |ui| {
+                ui.style_mut().visuals = egui::Visuals::dark();
+                egui::ScrollArea::vertical().show(ui, |ui| k.edit_panel(ui));
+            });
+    }
     egui::CentralPanel::default()
         .frame(egui::Frame::NONE.fill(egui::Color32::BLACK))
         .show(ui, |ui| {
             let area = ui.max_rect();
             let mut picture_rect = None;
+            let mut picture_response = None;
             match (&texture, note) {
                 (_, Some(note)) => {
                     ui.centered_and_justified(|ui| {
@@ -741,15 +933,16 @@ fn draw(shared: &Arc<Mutex<State>>, ui: &mut egui::Ui, control: bool) {
                     let rect = letterbox(area, w, h);
                     picture_rect = Some(rect);
                     // The picture takes the pointer, so egui does not.
-                    ui.interact(
+                    let response = ui.interact(
                         rect,
                         ui.id().with("cast-picture"),
                         egui::Sense::click_and_drag(),
-                    )
+                    );
                     // Named for a screen reader (E5).
-                    .widget_info(|| {
+                    response.widget_info(|| {
                         egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Phone screen")
                     });
+                    picture_response = Some(response);
                     ui.painter().image(
                         texture.id(),
                         rect,
@@ -776,7 +969,34 @@ fn draw(shared: &Arc<Mutex<State>>, ui: &mut egui::Ui, control: bool) {
                 _ => false,
             };
             let mut events = Vec::new();
-            if controlling && !watch_only && current {
+            // Keys to taps: the editor takes the picture's clicks, and the
+            // keys act only on a window with the focus, a picture and control.
+            let editing = keymaps && keys.as_ref().is_some_and(|k| k.editing);
+            let keys_can = keymaps && controlling && !watch_only && current;
+            let focused = ctx.input(|i| i.viewport().focused == Some(true));
+            if let Some(k) = keys.as_mut().filter(|_| keymaps) {
+                k.follow(&ctx, picture_rect, area, focused, keys_can);
+                if k.editing
+                    && let Some(rect) = picture_rect
+                {
+                    let typed = ctx.input(|i| i.events.clone());
+                    k.editor_keys(&typed);
+                    if let Some(response) = &picture_response {
+                        k.editor_pointer(response, rect);
+                    }
+                    k.overlay(ui.painter(), rect);
+                    // Written once the mouse is up, not for each step of a drag.
+                    if !ctx.input(|i| i.pointer.any_down()) {
+                        k.save();
+                    }
+                }
+            }
+            let keys_live = keys_can
+                && focused
+                && picture_rect.is_some()
+                && keys.as_ref().is_some_and(|k| k.acting());
+            let mut fingers = Vec::new();
+            if controlling && !watch_only && current && !editing {
                 events = buttons;
                 if let Some(rect) = picture_rect {
                     let (input, hover, down) = ctx.input(|i| {
@@ -786,6 +1006,16 @@ fn draw(shared: &Arc<Mutex<State>>, ui: &mut egui::Ui, control: bool) {
                             i.pointer.primary_down(),
                         )
                     });
+                    // The keymap takes the keys it is drawn for (and, while
+                    // the pointer is locked, the mouse); the rest goes on.
+                    let input = match keys.as_mut().filter(|_| keys_live) {
+                        Some(k) => {
+                            let t = k.translate(&input, rect, std::time::Instant::now());
+                            fingers.extend(t.fingers);
+                            t.rest
+                        }
+                        None => input,
+                    };
                     events.extend(control_events(&input, rect, hover, &mut state.pressing));
                     // A paste cut to the road's limit says so (L2 review).
                     let max = pocketdesk_core::streaming::cast_control::MAX_TEXT;
@@ -828,18 +1058,40 @@ fn draw(shared: &Arc<Mutex<State>>, ui: &mut egui::Ui, control: bool) {
             {
                 state.last_touch = (*x, *y);
             }
+            // Swipes go on and a still aim finger lifts with time; and when
+            // the keys stop acting (focus lost, control or the keys off, the
+            // editor open) every finger lifts.
+            if let Some(k) = keys.as_mut() {
+                if keys_live {
+                    let now = std::time::Instant::now();
+                    fingers.extend(k.tick(now));
+                    k.pace(&mut fingers, now);
+                    if k.busy() {
+                        ctx.request_repaint_after(Duration::from_millis(8));
+                    }
+                } else {
+                    fingers.extend(k.release());
+                }
+            }
             // Written outside the window's lock, so a slow relay holds
             // nothing else; the first broken write ends control here.
-            let writer = (!events.is_empty())
+            let writer = (!events.is_empty() || !fingers.is_empty())
                 .then(|| state.writer.as_ref().and_then(|w| w.try_clone().ok()))
                 .flatten();
             drop(state);
-            if let Some(mut writer) = writer
-                && !send_control(&mut writer, events)
-            {
-                lock(shared).writer = None;
+            // Fingers go in batches of their own: a phone older than keys
+            // to taps drops a batch it cannot read, and then loses only these.
+            // Both are always tried: the fingers carry the lifts, which are tried
+            // even when the first write failed.
+            if let Some(mut writer) = writer {
+                let sent = send_control(&mut writer, events);
+                let lifted = send_control(&mut writer, fingers);
+                if !(sent && lifted) {
+                    lock(shared).writer = None;
+                }
             }
         });
+    lock(shared).keys = keys;
 }
 
 /// A recording ended (its ffmpeg has finished the file): the window says
@@ -881,7 +1133,7 @@ fn screenshot(shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
     std::thread::spawn(move || {
         let note = crate::video::save_png(&stem, width, height, rgba);
         lock(&shared).saved_note = Some((note, std::time::Instant::now()));
-        ctx.request_repaint_of(viewport_id());
+        repaint(&shared, &ctx);
     });
 }
 
@@ -889,22 +1141,29 @@ fn screenshot(shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
 fn watch(state_dir: &std::path::Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
     loop {
         std::thread::sleep(POLL);
-        let Some(file) = wire::read(state_dir) else {
+        let window = lock(shared).window;
+        let found = match window {
+            None => wire::read(state_dir),
+            Some(n) => wire::read_window(state_dir, n),
+        };
+        let Some(file) = found else {
             forget(shared, ctx);
             continue;
         };
+        let who = identity(&file);
         let dismissed = {
             let mut state = lock(shared);
-            if state.session_id != Some(file.session_id) {
+            if state.session_id != Some(who) {
                 *state = State {
-                    session_id: Some(file.session_id),
+                    window: state.window,
+                    session_id: Some(who),
                     device_id: file.device_id.clone(),
                     dismissed: state.dismissed,
                     ..State::default()
                 };
                 ctx.request_repaint();
             }
-            state.dismissed == Some(file.session_id)
+            state.dismissed == Some(who)
         };
         if dismissed {
             continue;
@@ -914,7 +1173,7 @@ fn watch(state_dir: &std::path::Path, shared: &Arc<Mutex<State>>, ctx: &egui::Co
         let _ = view(&file, shared, ctx);
         // A recording ends with its cast, however it ended (L5 review).
         end_recording(shared, Some("the phone's screen stopped"));
-        ctx.request_repaint_of(viewport_id());
+        repaint(shared, ctx);
         let mut state = lock(shared);
         state.stream = None;
         state.writer = None;
@@ -933,6 +1192,7 @@ fn forget(shared: &Mutex<State>, ctx: &egui::Context) {
     if state.session_id.is_some() {
         let dismissed = state.dismissed;
         *state = State {
+            window: state.window,
             dismissed,
             ..State::default()
         };
@@ -996,7 +1256,7 @@ fn view(file: &CastFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
         } else if stop && recorder.is_some() {
             recorder = None;
             end_recording(shared, None);
-            ctx.request_repaint_of(viewport_id());
+            repaint(shared, ctx);
         }
         match message {
             Message::Config { width, height } => {
@@ -1018,7 +1278,7 @@ fn view(file: &CastFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                         state.note = Some(crate::video::decoder_words(&e, "a phone's screen"));
                     }
                 }
-                ctx.request_repaint_of(viewport_id());
+                repaint(shared, ctx);
             }
             Message::Frame {
                 keyframe,
@@ -1044,14 +1304,17 @@ fn view(file: &CastFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                 if let Err(e) = d.feed(&data) {
                     decoder = None;
                     lock(shared).note = Some(format!("The decoder stopped ({e})."));
-                    ctx.request_repaint_of(viewport_id());
+                    repaint(shared, ctx);
                 }
             }
             Message::ControlState { on } => {
                 lock(shared).control_on = on;
-                ctx.request_repaint_of(viewport_id());
+                repaint(shared, ctx);
             }
-            Message::Heartbeat | Message::WantKeyframe | Message::Control(_) => {}
+            Message::Heartbeat
+            | Message::WantKeyframe
+            | Message::Control(_)
+            | Message::CloseWindow => {}
             Message::End => return Ok(()),
         }
     }
@@ -1063,7 +1326,7 @@ fn publisher(shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> Box<dyn FnMut(P
     let ctx = ctx.clone();
     Box::new(move |picture| {
         lock(&shared).picture = Some(picture);
-        ctx.request_repaint_of(viewport_id());
+        repaint(&shared, &ctx);
     })
 }
 

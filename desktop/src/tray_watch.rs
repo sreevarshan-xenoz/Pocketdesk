@@ -72,6 +72,7 @@ mod tests {
                 device_id: "phone-a".into(),
                 port: 1,
                 token: String::new(),
+                window: None,
             },
         )
         .unwrap();

@@ -89,6 +89,9 @@ struct ClientClaim {
     /// A cast for this computer's camera (F6 part 2): its picture goes to a
     /// camera device, not a window. Said with [`super::client::CAST_WEBCAM_FLAG`].
     webcam: bool,
+    /// A cast of app windows only (Phone apps tier 2), no screen of the
+    /// phone's. Said with [`super::client::CAST_WINDOWS_FLAG`].
+    windows: bool,
 }
 
 /// Tells the relay a cast ended, however its session ends (T10k).
@@ -735,6 +738,8 @@ impl StreamingServer {
         let cast = claim.cast;
         // F6 part 2: its camera as this computer's camera, not in a window.
         let webcam = cast && claim.webcam;
+        // Phone apps tier 2: app windows and no screen of the phone's.
+        let windows_only = cast && !webcam && claim.windows;
         // The phone as this computer's speaker and mic (N5).
         let sound = claim.sound;
         // The phone's sound alone (M7): a cast's sound with no screen.
@@ -1007,6 +1012,9 @@ impl StreamingServer {
         // while the phone's last word was that it takes them.
         let (cast_control_tx, cast_control_rx) = mpsc::channel::<Vec<u8>>(CAST_CONTROL_QUEUE);
         let cast_control_on = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // Phone apps tier 2: bit `n - 1` is set while app window `n` takes
+        // the computer's touch and typing, as the phone said in its config.
+        let cast_window_input = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
         let _cast_ended = match &cast_tx {
             Some(tx) => {
                 let start = super::cast::CastEvent::Start {
@@ -1015,6 +1023,7 @@ impl StreamingServer {
                     want_keyframe: cast_want_tx.clone(),
                     control: cast_control_tx.clone(),
                     webcam,
+                    windows_only,
                 };
                 if tx.send(start).await.is_err() {
                     warn!("The cast relay is gone");
@@ -1070,6 +1079,7 @@ impl StreamingServer {
             let control_conn = connection.clone();
             let mut control_rx = cast_control_rx;
             let control_on = cast_control_on.clone();
+            let window_input = cast_window_input.clone();
             let control_cancel = cancel.clone();
             tasks.spawn(async move {
                 loop {
@@ -1077,7 +1087,11 @@ impl StreamingServer {
                         _ = control_cancel.cancelled() => break,
                         batch = control_rx.recv() => match batch {
                             Some(batch) => {
-                                if control_on.load(std::sync::atomic::Ordering::Acquire) {
+                                if super::cast_control::passes(
+                                    &batch,
+                                    control_on.load(std::sync::atomic::Ordering::Acquire),
+                                    window_input.load(std::sync::atomic::Ordering::Acquire),
+                                ) {
                                     send_cast_control(&control_conn, &batch).await;
                                 } else {
                                     debug!("Control for a phone that does not take it, dropped");
@@ -1807,7 +1821,11 @@ impl StreamingServer {
         let monitor_cast_tx = cast_tx.clone();
         let monitor_cast_want = cast_want_tx;
         let monitor_cast_control_on = cast_control_on;
+        let monitor_window_input = cast_window_input;
         let mut cast_chain = super::cast::CastChain::default();
+        // Each app window is its own decode chain (Phone apps tier 2).
+        let mut window_chains: [super::cast::CastChain; super::cast::MAX_WINDOWS as usize] =
+            Default::default();
         // A cast's frames are far larger than input packets.
         let client_stream_max = if casting {
             super::cast::MAX_CAST_STREAM
@@ -1897,6 +1915,32 @@ impl StreamingServer {
                                                         .store(*on, std::sync::atomic::Ordering::Release);
                                                     false
                                                 }
+                                                super::cast::CastPayload::WindowConfig { window, width, height, input } => {
+                                                    info!(window, width, height, input, "The phone's cast started an app window");
+                                                    let slot = usize::from(*window) - 1;
+                                                    window_chains[slot].restart();
+                                                    let bit = 1u8 << slot;
+                                                    if *input {
+                                                        monitor_window_input
+                                                            .fetch_or(bit, std::sync::atomic::Ordering::AcqRel);
+                                                    } else {
+                                                        monitor_window_input
+                                                            .fetch_and(!bit, std::sync::atomic::Ordering::AcqRel);
+                                                    }
+                                                    false
+                                                }
+                                                super::cast::CastPayload::WindowFrame { window, keyframe, seq, .. } => {
+                                                    window_chains[usize::from(*window) - 1]
+                                                        .on_frame(*keyframe, *seq, now)
+                                                }
+                                                super::cast::CastPayload::WindowClosed { window } => {
+                                                    info!(window, "The phone's cast ended an app window");
+                                                    let slot = usize::from(*window) - 1;
+                                                    window_chains[slot].restart();
+                                                    monitor_window_input
+                                                        .fetch_and(!(1u8 << slot), std::sync::atomic::Ordering::AcqRel);
+                                                    false
+                                                }
                                                 // Its sound (K5): to the player, never
                                                 // the viewer; stale sound is worse than
                                                 // a gap, so a full channel drops it.
@@ -1909,6 +1953,12 @@ impl StreamingServer {
                                                     continue;
                                                 }
                                             };
+                                            let payload_window = match &payload {
+                                                super::cast::CastPayload::WindowConfig { window, .. }
+                                                | super::cast::CastPayload::WindowFrame { window, .. }
+                                                | super::cast::CastPayload::WindowClosed { window } => Some(*window),
+                                                _ => None,
+                                            };
                                             let delivered = monitor_cast_tx.as_ref().is_some_and(|tx| {
                                                 tx.try_send(super::cast::CastEvent::Payload {
                                                     session_id: live_id,
@@ -1916,7 +1966,15 @@ impl StreamingServer {
                                                 })
                                                 .is_ok()
                                             });
-                                            if ask || (!delivered && cast_chain.lost(now)) {
+                                            // A window frame that missed the viewer breaks that window's
+            // chain, not the screen's (asked lazily: asking costs the pace).
+            if ask
+                || (!delivered
+                    && match payload_window {
+                        Some(window) => window_chains[usize::from(window) - 1].lost(now),
+                        None => cast_chain.lost(now),
+                    })
+            {
                                                 let _ = monitor_cast_want.try_send(());
                                             }
                                             continue;
@@ -2331,7 +2389,7 @@ async fn read_client_config(
     hevc_allowed: bool,
 ) -> ClientClaim {
     use super::client::{
-        CAST_WEBCAM_FLAG, CODEC_CAPS_MARKER, DEVICE_ID_MARKER, IROH_KEY_MARKER,
+        CAST_WEBCAM_FLAG, CAST_WINDOWS_FLAG, CODEC_CAPS_MARKER, DEVICE_ID_MARKER, IROH_KEY_MARKER,
         MONITOR_CONFIG_MARKER, SESSION_MODE_CAST, SESSION_MODE_INPUT_ONLY, SESSION_MODE_MARKER,
         SESSION_MODE_PHONE_SOUND, SESSION_MODE_SOUND,
     };
@@ -2425,9 +2483,14 @@ async fn read_client_config(
             // stream that ends there (any other session) says nothing more.
             if claim.cast {
                 let mut flag = [0u8; 1];
-                if read_with_timeout(&mut *stream, &mut flag).await && flag[0] == CAST_WEBCAM_FLAG {
-                    claim.webcam = true;
-                    info!("Client cast is for this computer's camera");
+                if read_with_timeout(&mut *stream, &mut flag).await {
+                    if flag[0] == CAST_WEBCAM_FLAG {
+                        claim.webcam = true;
+                        info!("Client cast is for this computer's camera");
+                    } else if flag[0] == CAST_WINDOWS_FLAG {
+                        claim.windows = true;
+                        info!("Client cast is for app windows only");
+                    }
                 }
             }
         } else {
@@ -3336,6 +3399,44 @@ mod tests {
         let claim = read_client_config(&server_conn, &mut config, true).await;
         assert!(claim.cast && claim.webcam && claim.input_only);
         assert_eq!(claim.device_id.as_deref(), Some("device-w1"));
+    }
+
+    /// Phone apps tier 2: a cast of app windows only says so after its mode,
+    /// and is neither the camera nor an ordinary screen cast.
+    #[tokio::test]
+    async fn a_windows_cast_says_so_after_its_mode() {
+        use super::super::client::StreamingClient;
+
+        let certs = std::sync::Arc::new(CertManager::new().expect("certs"));
+        let alpn = vec![StreamTransportConfig::default().alpn];
+        let server_endpoint = quinn::Endpoint::server(
+            certs.server_config(alpn.clone()).expect("server config"),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .expect("bind");
+        let addr = server_endpoint.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let incoming = server_endpoint.accept().await.expect("incoming");
+            QuinnConnection::shared(incoming.await.expect("accept"))
+        });
+        let (client, _frames, _audio) = StreamingClient::connect(
+            &addr.to_string(),
+            certs,
+            None,
+            Some("device-w2"),
+            None,
+            None,
+            super::super::client::SessionMode::Windows,
+        )
+        .await
+        .expect("connect");
+        assert!(client.remote().cast);
+        let server_conn = accept.await.expect("accept task");
+        let mut config = StreamingConfig::default();
+        let claim = read_client_config(&server_conn, &mut config, true).await;
+        assert!(claim.cast && claim.windows && claim.input_only);
+        assert!(!claim.webcam, "app windows are not the camera");
+        assert_eq!(claim.device_id.as_deref(), Some("device-w2"));
     }
 
     #[test]

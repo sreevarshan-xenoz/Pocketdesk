@@ -291,6 +291,16 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Phones,
     ),
     (
+        "phone_app_windows",
+        "Open phone apps in windows of their own",
+        Section::Phones,
+    ),
+    (
+        "phone_app_keymaps",
+        "Keymaps for phone apps",
+        Section::Phones,
+    ),
+    (
         "gamepad_controller",
         "The phone's gamepad as a game controller",
         Section::Phones,
@@ -813,6 +823,8 @@ pub fn applies_live(key: &str) -> bool {
             | "phone_apps_page"
             | "phone_apps_pin"
             | "phone_drop_share"
+            | "phone_app_windows"
+            | "phone_app_keymaps"
             | "gamepad_controller"
             | "downloads_folder"
             // Read by the server at each kept file and each run's end.
@@ -2025,6 +2037,26 @@ impl SettingsForm {
                     note(
                         ui,
                         "One file at a time; if the app takes no such file it stays in Downloads and the window says so. On the phone it needs \"Let the computer open my apps\" on (off by default) and Pocketdesk's control service, with the screen shown to this computer. Pocketdesk reads only which app is in front, once, when the file is dropped.",
+                    );
+                });
+                row(ui, "phone_app_windows", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_app_windows,
+                        "open a phone's app in a window of its own, several at once, when the phone offers it",
+                    );
+                    note(
+                        ui,
+                        "Only with the phone's \"Separate windows (Shizuku)\" on, which is off by default and shown there only when Shizuku is installed and running. Each app then runs on a screen of its own on the phone, and the phone's own screen stays off or shows something else. Off, or with a phone that does not offer it, an app opens on the phone's screen as before.",
+                    );
+                });
+                row(ui, "phone_app_keymaps", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_app_keymaps,
+                        "play a phone's game from this computer's keyboard and mouse, in its app window",
+                    );
+                    note(
+                        ui,
+                        "Off by default. Each app window then has \u{201c}Keys to taps\u{201d} on its bar: draw where keys tap, a stick and a swipe on the picture, and lock the pointer to aim with the mouse (Ctrl+Alt+Shift+M). It sends several fingers at once and needs the window setting above, so Shizuku on the phone: the phone's own screen window and a phone without Shizuku have no keymaps. Some online games flag injected input as cheating: use it where that is fine. The keymaps are kept on this computer only, one per app.",
                     );
                 });
                 // F6 part 2: a PipeWire camera, so Linux only.

@@ -35,6 +35,12 @@ object AppOpenRule {
     /** Apps part 2: the app in front takes no file of that type, so the file stays in Downloads. */
     const val CANNOT_TAKE = "cannot_take"
 
+    /** Tier 2: no window can be made now (the switch is off, Shizuku is not running, Android refused): the computer opens the app the ordinary way. */
+    const val WINDOWS_UNAVAILABLE = "windows_unavailable"
+
+    /** Tier 2: as many windows as the phone takes are open already. */
+    const val WINDOW_LIMIT = "window_limit"
+
     /**
      * The word for a refused ask, or null when nothing is said: a computer
      * that is not the phone's own is never answered, so it learns nothing
@@ -92,12 +98,16 @@ object AppOpenRule {
         else -> Plan.SHOW_SCREEN_FIRST
     }
 
-    /** The body of the report to the computer: `{about, app?, name?, result}` (`name`: the file of a share). */
-    fun report(about: String, app: String?, result: String, name: String? = null): JSONObject =
+    /**
+     * The body of the report to the computer: `{about, app?, name?, window?, result}`
+     * (`name`: the file of a share; `window`: the app window an open was for).
+     */
+    fun report(about: String, app: String?, result: String, name: String? = null, window: Int? = null): JSONObject =
         JSONObject().put("about", about)
             .apply {
                 if (app != null) put("app", app)
                 if (name != null) put("name", name)
+                if (window != null) put("window", window)
             }
             .put("result", result)
 }

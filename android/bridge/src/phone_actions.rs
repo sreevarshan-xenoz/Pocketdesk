@@ -41,6 +41,15 @@ pub(crate) fn receive(body: &serde_json::Value, host: &str, port: u16) {
             if body.get("screen").and_then(|v| v.as_bool()) == Some(true) {
                 ask["screen"] = serde_json::Value::from(true);
             }
+            // Phone apps tier 2: the computer wants the app in a window of its
+            // own: a sound one (an id the cap allows, a size and density in
+            // bounds) or none; and then it wants no screen of the phone's.
+            if let Some(window) =
+                pocketdesk_core::protocol::phone_action::WindowAsk::from_body(body)
+            {
+                ask["window"] = serde_json::to_value(window).unwrap_or_default();
+                ask.as_object_mut().map(|o| o.remove("screen"));
+            }
         }
         (PhoneAction::Open, _) => {
             tracing::warn!("An ask to open an app was dropped: no app named");
@@ -181,6 +190,42 @@ mod tests {
                 { "host": "192.0.2.7", "port": 1716, "action": "apps", "have": {"org.example.a": 3} },
                 { "host": "192.0.2.7", "port": 1716, "action": "open", "app": "org.example.a", "screen": true },
                 { "host": "192.0.2.7", "port": 1716, "action": "open", "app": "org.example.b" },
+            ])
+        );
+    }
+
+    /// Phone apps tier 2: an open for a window passes on a sound window (and
+    /// no screen), and an unsound one is read as the ordinary open.
+    #[tokio::test]
+    async fn an_open_may_name_a_window_of_its_own() {
+        let _globals = crate::api::TRANSFER_TEST_LOCK.lock().await;
+        forget();
+        receive(
+            &serde_json::json!({ "action": "open", "app": "org.example.a", "screen": true,
+                "window": {"id": 2, "width": 720, "height": 1280, "dpi": 320} }),
+            "192.0.2.7",
+            1716,
+        );
+        receive(
+            &serde_json::json!({ "action": "open", "app": "org.example.b",
+                "window": {"id": 9, "width": 720, "height": 1280, "dpi": 320} }),
+            "192.0.2.7",
+            1716,
+        );
+        receive(
+            &serde_json::json!({ "action": "open", "app": "org.example.c",
+                "window": {"id": 1, "width": 1, "height": 1280, "dpi": 320} }),
+            "192.0.2.7",
+            1716,
+        );
+        let waiting: serde_json::Value = serde_json::from_str(&take_json()).unwrap();
+        assert_eq!(
+            waiting,
+            serde_json::json!([
+                { "host": "192.0.2.7", "port": 1716, "action": "open", "app": "org.example.a",
+                  "window": {"id": 2, "width": 720, "height": 1280, "dpi": 320} },
+                { "host": "192.0.2.7", "port": 1716, "action": "open", "app": "org.example.b" },
+                { "host": "192.0.2.7", "port": 1716, "action": "open", "app": "org.example.c" },
             ])
         );
     }
