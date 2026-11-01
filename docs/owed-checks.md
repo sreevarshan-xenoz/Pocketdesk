@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1170 open items.
+1171 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 55 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 56 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 17 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 188 |
 | A phone with a SIM | 40 |
@@ -155,7 +155,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Run again with nothing changed: nothing is sent (no transfer notification stays in the shade, the phone's log says 0 sent). Change one file, add one, run: only those two go, the changed one replacing its older copy (no `(1)` copy), and its date is the phone's. (where: OPPO)
 - Kill mid-file: with the 200 MB file part way (turn Wi-Fi off, or force-stop the app), then run again: the transfer continues from where it stopped (the server's log says "Continued ... from N of M bytes") and the final file's hash is the phone's. (where: OPPO)
 - Mirror deletions off (the default): delete a file on the phone, run: it stays on the computer. With the phone's switch on and the computer's `kept_folders_allow_delete` off: it stays, and the Files page says one file was kept although deleted. With both on: it is deleted on the computer, and the folder it leaves empty goes too. (where: OPPO)
-- The guards: with both switches on, hide the phone's storage from the app (revoke the folder's access in Android's settings) and run: nothing is deleted on the computer, and the row says the access is gone; remove 30 of 40 files at once and run: the deletions are held and the row says so. (where: OPPO)
+- The guards: with both switches on, hide the phone's storage from the app (revoke the folder's access in Android's settings) and run: nothing is deleted on the computer, and the row says the access is gone; remove 30 of 40 files at once, or empty the whole folder, and run: the deletions are held and the row says so; with the phone's guard bypassed by hand (a computer-side check: a run that names 5 of 6 files, sent by a stub), the computer refuses it and the Files page says so. (where: OPPO)
+- An emptied file: empty one file on the phone (keep its name) and run: the computer's copy is emptied (size 0), not left with its old content, and a file that is empty on the phone from the start is made empty there. (where: OPPO)
 - The size cap: set "Size cap for kept folders" to 1 GB and keep more than that: the run stops with the notice on the phone ("the computer's kept folders are full"), the Files page row shows the problem, and one desktop notification came, not one per file. Raising the cap and running again finishes it. (where: OPPO)
 - A phone that is not one of this computer's owner phones (a guest's pairing) is refused ("Kept folders take only the owner's own phones") and nothing is made on the computer. With "Phones may keep folders here" off, every run is refused with its reason on the phone. (where: OPPO)
 - Names: a file named with a colon, a Windows device name (`NUL.txt`), a hidden file and a trailing-dot name on the phone are left out (the phone's log counts them) and the run goes on. A folder renamed on the phone keeps its place on the computer. (where: OPPO)
