@@ -425,6 +425,17 @@
     <string name="connect_anyway">Conectar igualmente</string>
     <string name="settings_offer_wake">Ofrecer encender un equipo que no responde</string>
     <string name="settings_offer_wake_summary">Conectar comprueba antes y ofrece Encender y conectar</string>
+    <string name="settings_wake_helper">Ayudante de encendido para este hogar</string>
+    <string name="settings_wake_helper_summary">Desactivado por defecto. En un teléfono de repuesto que queda en un cargador con la Wi-Fi de casa, envía el paquete de encendido de tu equipo cuando tus otros teléfonos lo piden desde cualquier lugar. Solo atiende eso, solo a los teléfonos que tu equipo presentó, como máximo una vez cada 30 segundos por teléfono, y solo mientras carga con Wi-Fi.</string>
+    <string name="wake_helper_via">Encender a través de mi ayudante</string>
+    <string name="wake_helper_via_summary">Cuando este teléfono está fuera de casa, pide a %1$s que envíe el encendido</string>
+    <string name="wake_helper_unnamed">el teléfono de repuesto</string>
+    <string name="wake_helper_via_none">Aún no hay ayudante de encendido. En un teléfono de repuesto emparejado con este equipo, activa \"Ayudante de encendido para este hogar\" en Ajustes; este teléfono lo sabrá la próxima vez que se conecte mientras el equipo esté encendido.</string>
+    <string name="channel_wake_helper">Ayudante de encendido</string>
+    <string name="channel_wake_helper_desc">Se muestra mientras este teléfono está configurado como ayudante de encendido de tu hogar.</string>
+    <string name="wake_helper_title">Ayudante de encendido</string>
+    <string name="wake_helper_serving">Encendiendo tus equipos para tus otros teléfonos</string>
+    <string name="wake_helper_waiting">Esperando un cargador y Wi-Fi</string>
     <string name="version_runs">ejecuta %1$s</string>
     <string name="version_runs_older">ejecuta %1$s, más antigua que esta app: actualízala</string>
     <string name="version_runs_newer">ejecuta %1$s, más nueva que esta app: actualiza esta app</string>

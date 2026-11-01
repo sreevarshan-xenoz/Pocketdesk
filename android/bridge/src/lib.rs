@@ -38,6 +38,7 @@ mod session;
 mod tasks;
 mod typing;
 mod unpaired;
+mod wake_helper;
 
 pub(crate) use session::*;
 
@@ -1113,6 +1114,8 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeNetwork
     _class: JClass<'_>,
 ) {
     RUNTIME.spawn(pocketdesk_core::streaming::network_changed());
+    // The wake helper's own endpoint, if it listens.
+    RUNTIME.spawn(wake_helper::network_changed());
     // A new network may reach a computer the old one could not (BB5).
     api::INTERNET_PAUSE.clear();
 }
@@ -2500,5 +2503,89 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWakeVia
     let broadcast = jstring_to_string(&mut env, &broadcast);
     let json =
         envelope_unit(RUNTIME.block_on(api::wake_via_relay(address, port as u16, mac, broadcast)));
+    to_jstring(&mut env, json)
+}
+
+/// Start the wake helper's listener (its switch is on, on a charger, on
+/// Wi-Fi): `{"ok": "{running, id, relays, ...}"}`. The helper key is its
+/// own, kept in the data folder.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWakeHelperStart(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(RUNTIME.block_on(wake_helper::start()));
+    to_jstring(&mut env, json)
+}
+
+/// Stop the wake helper's listener.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWakeHelperStop(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    RUNTIME.block_on(wake_helper::stop());
+    to_jstring(&mut env, envelope_unit(Ok(())))
+}
+
+/// The wake helper's state: `{"ok": "{running, id, relays, sent, refused,
+/// dropped}"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWakeHelperStatus(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(RUNTIME.block_on(wake_helper::status())));
+    to_jstring(&mut env, json)
+}
+
+/// Set the duties the helper serves, from the computers' words the app
+/// kept (a JSON array of `wake_helper_duty` bodies): how many are held.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWakeHelperSetDuties(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    duties_json: JString<'_>,
+) -> jstring {
+    let duties_json = jstring_to_string(&mut env, &duties_json);
+    let json = envelope(wake_helper::set_duties(&duties_json).map(|n| n.to_string()));
+    to_jstring(&mut env, json)
+}
+
+/// Set the broadcast addresses of the networks the phone is on (a JSON
+/// array of strings): how many read.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWakeHelperSetNetworks(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    networks_json: JString<'_>,
+) -> jstring {
+    let networks_json = jstring_to_string(&mut env, &networks_json);
+    let json = envelope(wake_helper::set_networks(&networks_json).map(|n| n.to_string()));
+    to_jstring(&mut env, json)
+}
+
+/// What the computer said about wake helpers since the last call:
+/// `{"ok": "[{type, host, port, body}]"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeWakeHelper(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(wake_helper::take_json()));
+    to_jstring(&mut env, json)
+}
+
+/// Ask the wake helper a computer named (its `wake_helper_info` body) to
+/// wake that computer: `{"ok": "sent" | "slow_down" | "unknown" |
+/// "failed"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWakeViaHelper(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    info_json: JString<'_>,
+) -> jstring {
+    let info_json = jstring_to_string(&mut env, &info_json);
+    let json = envelope(RUNTIME.block_on(wake_helper::ask(&info_json)));
     to_jstring(&mut env, json)
 }

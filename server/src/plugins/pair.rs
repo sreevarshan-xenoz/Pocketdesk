@@ -2585,6 +2585,9 @@ forged log line"
             "kdeconnect.pocketdesk.introduce",
             "kdeconnect.pocketdesk.introduce_phone",
             "kdeconnect.pocketdesk.introduce_phone_answer",
+            // A spare phone offering to be the wake helper: taken only from
+            // an owner phone (the plugin holds the gate).
+            "kdeconnect.pocketdesk.wake_helper",
             // The phone's location (GeoClue): an answer, taken only from the
             // paired phone this computer asked, once, with the setting on;
             // anything else is dropped unread. The setting, the phone chosen

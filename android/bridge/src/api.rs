@@ -908,6 +908,20 @@ pub async fn connect_to_peer(
                                         from_peer.1,
                                     );
                                 }
+                                // What the computer says of wake helpers: a
+                                // helper's duty, an owner phone's word of the
+                                // helper. Read again here; only a body that
+                                // reads is kept for the app.
+                                if trimmed.contains("pocketdesk.wake_helper_")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                {
+                                    crate::wake_helper::receive(
+                                        &pkt.packet_type,
+                                        &pkt.body,
+                                        &from_peer.0,
+                                        from_peer.1,
+                                    );
+                                }
                                 // The computer's mutes for this phone (D2).
                                 if trimmed.contains("pocketdesk.quiet")
                                     && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
@@ -2856,7 +2870,7 @@ pub async fn connect_streaming_wan(
 /// the desktop can bind its WAN sessions to it (device keys). `None` without
 /// a data directory, or if the key cannot be read; the dial then uses a
 /// throwaway key, which a desktop that has bound one refuses.
-fn device_wan_key() -> Option<pocketdesk_core::streaming::IrohSecretKey> {
+pub(crate) fn device_wan_key() -> Option<pocketdesk_core::streaming::IrohSecretKey> {
     // One caller at a time: two first calls at once (a LAN connect and a WAN
     // dial) must not each make a key.
     static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());

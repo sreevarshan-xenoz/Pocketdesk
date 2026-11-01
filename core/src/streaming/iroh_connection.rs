@@ -636,6 +636,45 @@ impl IrohDial {
         })
     }
 
+    /// One exchange with a wake helper (`protocol::wake_helper`): dial it on
+    /// [`crate::protocol::wake_helper::ALPN_WAKE`] as `device_key` (the
+    /// helper reads which owner phone is asking from the key the connection
+    /// proves), write `request` and read its answer, at most `limit` bytes.
+    /// The helper's own address is its id, its relays and, in tests, direct
+    /// addresses.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn wake_exchange(
+        endpoint_id: &str,
+        relay_urls: &[String],
+        direct_addrs: &[String],
+        use_relays: bool,
+        timeout: Duration,
+        device_key: Option<iroh::SecretKey>,
+        request: &[u8],
+        limit: usize,
+    ) -> Result<Vec<u8>> {
+        let dial = Self::dial_alpn(
+            crate::protocol::wake_helper::ALPN_WAKE,
+            endpoint_id,
+            relay_urls,
+            direct_addrs,
+            use_relays,
+            timeout,
+            device_key,
+            None,
+        )
+        .await?;
+        let exchange = async {
+            let (mut send, mut recv) = dial.raw.open_bi().await.context("no stream")?;
+            send.write_all(request).await.context("request not sent")?;
+            send.finish().context("request not finished")?;
+            recv.read_to_end(limit).await.context("no answer")
+        };
+        let answer = tokio::time::timeout(timeout, exchange).await;
+        dial.close().await;
+        answer.context("the helper did not answer in time")?
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn dial_alpn(
         alpn: &[u8],

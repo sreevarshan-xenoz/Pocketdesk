@@ -420,6 +420,17 @@
     <string name="connect_anyway">இருந்தாலும் இணை</string>
     <string name="settings_offer_wake">பதிலளிக்காத கணினியை எழுப்ப முன்வை</string>
     <string name="settings_offer_wake_summary">இணைப்பதற்கு முன் சரிபார்த்து, எழுப்பி இணைக்க முன்வைக்கும்</string>
+    <string name="settings_wake_helper">இந்த வீட்டிற்கான எழுப்பும் உதவியாளர்</string>
+    <string name="settings_wake_helper_summary">இயல்பாக அணைந்திருக்கும். வீட்டு Wi-Fi-யில் சார்ஜரில் இருக்கும் உதிரி தொலைபேசியில், உங்கள் மற்ற தொலைபேசிகள் எங்கிருந்தும் கேட்கும்போது உங்கள் கணினியின் எழுப்பும் பாக்கெட்டை அனுப்பும். அது இதை மட்டுமே செய்யும்: உங்கள் கணினி அறிமுகப்படுத்திய தொலைபேசிகளுக்கு மட்டும், ஒவ்வொன்றுக்கும் 30 வினாடிக்கு ஒருமுறை மட்டும், Wi-Fi-யில் சார்ஜ் ஆகும்போது மட்டும்.</string>
+    <string name="wake_helper_via">என் உதவியாளர் வழியாக எழுப்பு</string>
+    <string name="wake_helper_via_summary">இந்த தொலைபேசி வீட்டிற்கு வெளியே இருக்கும்போது, எழுப்புவதை அனுப்ப %1$s-ஐக் கேட்கும்</string>
+    <string name="wake_helper_unnamed">உதிரி தொலைபேசி</string>
+    <string name="wake_helper_via_none">இன்னும் எழுப்பும் உதவியாளர் இல்லை. இந்த கணினியுடன் இணைத்த உதிரி தொலைபேசியில் அமைப்புகளில் \"இந்த வீட்டிற்கான எழுப்பும் உதவியாளர்\" என்பதை இயக்குங்கள்; கணினி இயங்கும்போது இந்த தொலைபேசி அடுத்து இணையும்போது இது தெரிந்துகொள்ளும்.</string>
+    <string name="channel_wake_helper">எழுப்பும் உதவியாளர்</string>
+    <string name="channel_wake_helper_desc">இந்த தொலைபேசி உங்கள் வீட்டிற்கான எழுப்பும் உதவியாளராக அமைக்கப்பட்டிருக்கும்போது காட்டப்படும்.</string>
+    <string name="wake_helper_title">எழுப்பும் உதவியாளர்</string>
+    <string name="wake_helper_serving">உங்கள் மற்ற தொலைபேசிகளுக்காக உங்கள் கணினிகளை எழுப்புகிறது</string>
+    <string name="wake_helper_waiting">சார்ஜர் மற்றும் Wi-Fi-க்காக காத்திருக்கிறது</string>
     <string name="version_runs">%1$s இயங்குகிறது</string>
     <string name="version_runs_older">%1$s இயங்குகிறது, இந்த செயலியை விடப் பழையது: அதைப் புதுப்பிக்கவும்</string>
     <string name="version_runs_newer">%1$s இயங்குகிறது, இந்த செயலியை விடப் புதியது: இந்த செயலியைப் புதுப்பிக்கவும்</string>

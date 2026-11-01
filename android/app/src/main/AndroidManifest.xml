@@ -208,6 +208,12 @@
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
 
+        <!-- A spare phone as the wake helper: in the foreground while its switch is on, listening only on a charger and Wi-Fi. -->
+        <service
+            android:name=".service.WakeHelperService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
         <service
             android:name=".service.TransferService"
             android:exported="false"
