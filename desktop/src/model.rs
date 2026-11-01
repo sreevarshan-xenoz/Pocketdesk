@@ -75,6 +75,9 @@ pub struct Snapshot {
     pub kde_devices: Vec<(String, String)>,
     /// Files moving now, as the running server last wrote (C1).
     pub under_way: Vec<pocketdesk_core::local::transfers::Transfer>,
+    /// The phone folders kept on this computer, as the server last wrote
+    /// them: each with its place, size and how its last run went.
+    pub kept: Vec<pocketdesk_core::local::kept_folders::KeptFolder>,
     /// The port the running server bound (T1): its own record, not one an
     /// earlier run left.
     pub listening: Option<pocketdesk_core::local::listening::Listening>,
@@ -219,7 +222,53 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
         } else {
             Vec::new()
         },
+        // What was kept stays kept, running or not.
+        kept: pocketdesk_core::local::kept_folders::read(state_dir),
     }
+}
+
+/// What a kept folder's row says of its size and last run: "12 files · 3.1
+/// MB · last run 5 min ago", or that no run has ended yet.
+pub fn kept_summary(folder: &pocketdesk_core::local::kept_folders::KeptFolder, now: u64) -> String {
+    let held = format!(
+        "{} · {}",
+        crate::words::count(folder.files as usize, "file", "files"),
+        crate::words::human_size(folder.bytes)
+    );
+    if folder.last_unix == 0 {
+        return format!("{held} · nothing kept yet");
+    }
+    let mut words = format!(
+        "{held} · last run {}",
+        crate::words::ago(now, folder.last_unix)
+    );
+    if folder.last_failed > 0 {
+        words.push_str(&format!(
+            " · {} not sent",
+            crate::words::count(folder.last_failed as usize, "file", "files")
+        ));
+    }
+    words
+}
+
+/// What a kept folder's row says of deletions, if there is anything: files
+/// deleted here as the phone mirrored its own, and the ones left because
+/// this computer does not allow it.
+pub fn kept_deletions(folder: &pocketdesk_core::local::kept_folders::KeptFolder) -> Option<String> {
+    let mut parts = Vec::new();
+    if folder.deleted > 0 {
+        parts.push(format!(
+            "{} deleted here as on the phone",
+            crate::words::count(folder.deleted as usize, "file", "files")
+        ));
+    }
+    if folder.deletes_skipped > 0 {
+        parts.push(format!(
+            "{} kept although deleted on the phone (Settings, Kept folders may mirror deletions, is off)",
+            crate::words::count(folder.deletes_skipped as usize, "file", "files")
+        ));
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
 /// A file under way by its place: "Holiday/beach.jpg" for a file of a
@@ -2898,6 +2947,80 @@ mod tests {
             ..session(4, false)
         };
         assert_eq!(control_cell(&alone, 2, false), ControlCell::Nothing);
+    }
+
+    fn kept(
+        files: u64,
+        bytes: u64,
+        last_unix: u64,
+    ) -> pocketdesk_core::local::kept_folders::KeptFolder {
+        pocketdesk_core::local::kept_folders::KeptFolder {
+            device_id: "phone".to_string(),
+            folder_id: "0".repeat(32),
+            phone: "Phone".to_string(),
+            label: "Notes".to_string(),
+            path: "/kept/Phone/Notes".to_string(),
+            phone_dir: "Phone".to_string(),
+            folder_dir: "Notes".to_string(),
+            files,
+            bytes,
+            last_unix,
+            last_sent: 0,
+            last_failed: 0,
+            deleted: 0,
+            deletes_skipped: 0,
+            mirror: false,
+            errors: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_kept_folders_row_says_its_size_and_its_last_run() {
+        assert_eq!(
+            kept_summary(&kept(0, 0, 0), 1_000),
+            "0 files · 0 B · nothing kept yet"
+        );
+        assert_eq!(
+            kept_summary(&kept(1, 2_100_000, 700), 1_000),
+            "1 file · 2.0 MB · last run 5 min ago"
+        );
+        let mut failing = kept(12, 1024, 940);
+        failing.last_failed = 2;
+        assert_eq!(
+            kept_summary(&failing, 1_000),
+            "12 files · 1.0 KB · last run 1 min ago · 2 files not sent"
+        );
+    }
+
+    #[test]
+    fn a_kept_folders_deletions_are_said_only_when_there_were_any() {
+        assert_eq!(kept_deletions(&kept(1, 1, 1)), None);
+        let mut folder = kept(1, 1, 1);
+        folder.deleted = 1;
+        assert_eq!(
+            kept_deletions(&folder).as_deref(),
+            Some("1 file deleted here as on the phone")
+        );
+        folder.deletes_skipped = 3;
+        let said = kept_deletions(&folder).unwrap();
+        assert!(
+            said.contains("3 files kept although deleted on the phone"),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn the_kept_folders_are_read_whether_or_not_the_server_runs() {
+        let dir = temp_dir("kept-folders");
+        let folders = vec![kept(2, 20, 5)];
+        pocketdesk_core::local::kept_folders::write(&dir, &folders).unwrap();
+        assert_eq!(snapshot_with(&dir, 10, false).kept, folders);
+        assert_eq!(snapshot_with(&dir, 10, true).kept, folders);
+        assert!(
+            snapshot_with(&temp_dir("kept-none"), 10, false)
+                .kept
+                .is_empty()
+        );
     }
 
     #[test]
