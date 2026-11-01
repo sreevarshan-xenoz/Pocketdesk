@@ -139,16 +139,27 @@ pub fn probe() -> Result<Plan, Unavailable> {
     })
 }
 
-fn text(s: windows::core::Result<HSTRING>) -> String {
-    s.map(|s| s.to_string_lossy()).unwrap_or_default()
+/// The hotspot's name as set now. A failed read is an error, never an
+/// empty name: an empty one would be taken for the owner's.
+fn read_ssid(config: &AccessPoint) -> Result<String, String> {
+    config
+        .Ssid()
+        .map(|s| s.to_string_lossy())
+        .map_err(|e| failed("read its name", &e))
 }
 
-fn read_settings(config: &AccessPoint) -> HotspotSettings {
-    HotspotSettings {
-        ssid: text(config.Ssid()),
-        passphrase: text(config.Passphrase()),
+/// The owner's settings as set now, or why they could not be read (a read
+/// that failed is never recorded as empty: the owner's passphrase would
+/// then be lost to the restore).
+fn read_settings(config: &AccessPoint) -> Result<HotspotSettings, String> {
+    Ok(HotspotSettings {
+        ssid: read_ssid(config)?,
+        passphrase: config
+            .Passphrase()
+            .map(|s| s.to_string_lossy())
+            .map_err(|e| failed("read its passphrase", &e))?,
         band: config.Band().ok().map(|b| b.0),
-    }
+    })
 }
 
 /// Put `ssid`, `passphrase` and (where this Windows has a band setting)
@@ -239,8 +250,14 @@ pub fn start(
         .map_err(|e| failed("read its settings", &e))?;
     let before = HotspotRestore {
         was_on: is_on(&manager),
-        settings: read_settings(&config),
+        settings: read_settings(&config)?,
     };
+    // Before anything is recorded or changed: a hotspot that is on (it came
+    // on since the probe), that could not be read, or that is a left-over
+    // link's is not made into a link.
+    if let Some(why) = dl::hotspot_start_refusal(&before) {
+        return Err(why.to_string());
+    }
     remember(&before)?;
     match bring_up(&manager, &config, join, band) {
         Ok(address) => Ok((before, address)),
@@ -296,19 +313,29 @@ fn put_back(
     let current = if ours {
         dl::SSID_PREFIX.to_string()
     } else {
-        text(config.Ssid())
+        // A name that cannot be read is not "not ours": the record stays.
+        read_ssid(config)?
     };
     let mut result = Ok(());
+    // Set when the owner's settings did not go back: the hotspot still
+    // carries the link's name and passphrase, and must not come up as if it
+    // were the owner's.
+    let mut configure_failed = false;
     for step in dl::hotspot_restore_steps(restore, &current, is_on(manager)) {
         let done = match step {
             HotspotStep::Stop => stop_hotspot(manager),
-            HotspotStep::Configure => apply(
-                manager,
-                config,
-                &restore.settings.ssid,
-                &restore.settings.passphrase,
-                restore.settings.band,
-            ),
+            HotspotStep::Configure => {
+                let done = apply(
+                    manager,
+                    config,
+                    &restore.settings.ssid,
+                    &restore.settings.passphrase,
+                    restore.settings.band,
+                );
+                configure_failed = done.is_err();
+                done
+            }
+            HotspotStep::Start if configure_failed => continue,
             HotspotStep::Start => start_hotspot(manager),
         };
         // A step that failed does not stop the ones after it: a hotspot
@@ -397,16 +424,15 @@ mod tests {
 
     /// Read-only: the probe asks Windows what it could do and changes
     /// nothing. Whatever the runner's network is, it answers (a plan or a
-    /// reason) from several threads at once without crashing.
+    /// reason) on a thread of its own, as the server runs it.
     #[test]
-    fn the_probe_answers_from_many_threads_without_changing_anything() {
-        let threads: Vec<_> = (0..4).map(|_| std::thread::spawn(probe)).collect();
-        for thread in threads {
-            let answer = thread.join().expect("the probe did not crash");
-            if let Ok(plan) = answer {
-                assert_eq!(plan.mode, Mode::SecondInterface);
-                assert!(!plan.disconnects);
-            }
+    fn the_probe_answers_on_a_worker_thread_without_changing_anything() {
+        let answer = std::thread::spawn(probe)
+            .join()
+            .expect("the probe did not crash");
+        if let Ok(plan) = answer {
+            assert_eq!(plan.mode, Mode::SecondInterface);
+            assert!(!plan.disconnects);
         }
     }
 

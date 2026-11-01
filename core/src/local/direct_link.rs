@@ -908,6 +908,31 @@ impl std::fmt::Debug for HotspotRestore {
     }
 }
 
+/// Whether the Mobile Hotspot as it is now can be made into a link, and
+/// recorded as the owner's to put back: why not, in words, or none. It must
+/// be off (a link would change it under whatever uses it), have a name and
+/// a passphrase that were really read (an empty one could never be put back
+/// and the owner's would be lost), and not be named like a link (that is a
+/// left-over link's, never the owner's, and recording it would lose the
+/// owner's settings for good).
+pub fn hotspot_start_refusal(before: &HotspotRestore) -> Option<&'static str> {
+    if before.was_on {
+        return Some(Unavailable::HotspotInUse.words());
+    }
+    let settings = &before.settings;
+    if settings.ssid.is_empty() || settings.passphrase.is_empty() {
+        return Some(
+            "Windows' Mobile Hotspot has no name or passphrase Pocketdesk could read, so it could not be put back afterwards. Set the hotspot up in Windows' Settings first.",
+        );
+    }
+    if settings.ssid.starts_with(SSID_PREFIX) {
+        return Some(
+            "Windows' Mobile Hotspot is still named like a direct link's (an earlier link did not end cleanly). Give it a name of your own in Windows' Settings, then try again.",
+        );
+    }
+    None
+}
+
 /// One step of putting the Mobile Hotspot back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HotspotStep {
@@ -1432,6 +1457,32 @@ mod tests {
         assert_eq!(pick_link_address(&[lan, gw], &[lan, gw]), Some(gw));
         assert_eq!(pick_link_address(&[lan], &[lan]), None);
         assert_eq!(pick_link_address(&[], &[]), None);
+    }
+
+    #[test]
+    fn a_hotspot_that_cannot_be_put_back_is_never_recorded_as_the_owners() {
+        let ok = hotspot(false);
+        assert_eq!(hotspot_start_refusal(&ok), None);
+        // On: a link would change it under what uses it.
+        assert_eq!(
+            hotspot_start_refusal(&hotspot(true)),
+            Some(Unavailable::HotspotInUse.words())
+        );
+        // A failed read is empty, and an empty passphrase cannot be put back.
+        let mut empty = hotspot(false);
+        empty.settings.passphrase = String::new();
+        assert!(
+            hotspot_start_refusal(&empty)
+                .unwrap()
+                .contains("could not be put back")
+        );
+        let mut nameless = hotspot(false);
+        nameless.settings.ssid = String::new();
+        assert!(hotspot_start_refusal(&nameless).is_some());
+        // A left-over link's name is not the owner's.
+        let mut left = hotspot(false);
+        left.settings.ssid = format!("{SSID_PREFIX}ab12");
+        assert!(hotspot_start_refusal(&left).unwrap().contains("named like"));
     }
 
     #[test]
