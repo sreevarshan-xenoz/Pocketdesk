@@ -196,7 +196,11 @@ mod tests {
         ] {
             assert!(join_argv(bad).is_none(), "{bad:?}");
         }
-        let all: Vec<String> = join_argv(U1).unwrap().into_iter().chain(list_argv()).collect();
+        let all: Vec<String> = join_argv(U1)
+            .unwrap()
+            .into_iter()
+            .chain(list_argv())
+            .collect();
         for word in ["password", "device", "connect", "secrets", "--ask", "id"] {
             assert!(!all.iter().any(|a| a == word), "{word}");
         }
@@ -209,14 +213,22 @@ mod tests {
     #[test]
     fn only_one_saved_wifi_connection_is_joined_by_its_uuid() {
         let listing = format!(
-            "Wired connection 1:{U3}:802-3-ethernet\nMy phone:{U1}:802-11-wireless\nA\:B:{U2}:802-11-wireless\nvpn one:{U3}:vpn\nSame:{U3}:wifi\n"
+            "Wired connection 1:{U3}:802-3-ethernet\nMy phone:{U1}:802-11-wireless\nA\\:B:{U2}:802-11-wireless\nvpn one:{U3}:vpn\nSame:{U3}:wifi\n"
         );
         assert_eq!(saved_wifi_uuid(&listing, "My phone").as_deref(), Some(U1));
         assert_eq!(saved_wifi_uuid(&listing, "A:B").as_deref(), Some(U2));
         assert_eq!(saved_wifi_uuid(&listing, "Same").as_deref(), Some(U3));
-        assert_eq!(saved_wifi_uuid(&listing, "Wired connection 1"), None, "not Wi-Fi");
+        assert_eq!(
+            saved_wifi_uuid(&listing, "Wired connection 1"),
+            None,
+            "not Wi-Fi"
+        );
         assert_eq!(saved_wifi_uuid(&listing, "vpn one"), None);
-        assert_eq!(saved_wifi_uuid(&listing, "Unknown"), None, "not saved: never joined");
+        assert_eq!(
+            saved_wifi_uuid(&listing, "Unknown"),
+            None,
+            "not saved: never joined"
+        );
         assert_eq!(saved_wifi_uuid(&listing, "My"), None, "a whole name only");
         assert_eq!(saved_wifi_uuid("", "My phone"), None);
     }
@@ -228,8 +240,18 @@ mod tests {
         let twice = format!("Dup:{U1}:802-11-wireless\nDup:{U2}:802-11-wireless\n");
         assert_eq!(saved_wifi_uuid(&twice, "Dup"), None);
         let one_wifi_one_vpn = format!("Dup:{U1}:802-11-wireless\nDup:{U2}:vpn\n");
-        assert_eq!(saved_wifi_uuid(&one_wifi_one_vpn, "Dup").as_deref(), Some(U1));
-        assert_eq!(saved_wifi_uuid("Odd:not-a-uuid:802-11-wireless\n", "Odd"), None);
-        assert_eq!(saved_wifi_uuid("Odd:802-11-wireless\n", "Odd"), None, "no uuid field");
+        assert_eq!(
+            saved_wifi_uuid(&one_wifi_one_vpn, "Dup").as_deref(),
+            Some(U1)
+        );
+        assert_eq!(
+            saved_wifi_uuid("Odd:not-a-uuid:802-11-wireless\n", "Odd"),
+            None
+        );
+        assert_eq!(
+            saved_wifi_uuid("Odd:802-11-wireless\n", "Odd"),
+            None,
+            "no uuid field"
+        );
     }
 }
