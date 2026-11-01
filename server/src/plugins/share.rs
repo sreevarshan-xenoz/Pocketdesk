@@ -2052,7 +2052,10 @@ pub(crate) async fn place_replacing(
     if let Some(at) = modified {
         set_date(&final_path, at);
     }
-    Ok(final_path)
+    // Written through the real path (checked above), but named as the
+    // caller knows it: on Windows the real one has the verbatim prefix
+    // and the long user name, which the owner would see in messages.
+    Ok(dir.join(name))
 }
 
 /// Connect to the phone at `from`, receive `size` bytes (at most `max`)
