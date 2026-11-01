@@ -1,6 +1,8 @@
 package dev.pocketdesk.android.windows
 
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.SystemClock
 import android.util.Log
 import dev.pocketdesk.android.bridge.RustCore
@@ -57,6 +59,11 @@ class WindowCast(private val context: Context, private val onEmpty: () -> Unit) 
             making.remove(ask.id)
             return done(AppOpenRule.WINDOW_LIMIT)
         }
+        // Never the phone's own settings, installer, permission screens, Shizuku or Pocketdesk.
+        if (WindowRule.denied(pkg, context.packageName, deniedPackages(context))) {
+            making.remove(ask.id)
+            return done(AppOpenRule.WINDOWS_UNAVAILABLE)
+        }
         val component = context.packageManager.getLaunchIntentForPackage(pkg)?.component?.flattenToShortString()
         if (component == null || !WindowRule.componentOk(component)) {
             making.remove(ask.id)
@@ -87,6 +94,12 @@ class WindowCast(private val context: Context, private val onEmpty: () -> Unit) 
         val encoder = CastEncoder(ask.width, ask.height, { close(ask.id) }, window = ask.id, input = true)
         val displayId = host.createDisplay("Pocketdesk window ${ask.id}", ask.width, ask.height, ask.dpi, encoder.surface)
         if (displayId < 0) {
+            encoder.release()
+            return AppOpenRule.WINDOWS_UNAVAILABLE
+        }
+        // Everything was given back while the display was being made: it goes too.
+        if (closing) {
+            runCatching { host.release(displayId) }
             encoder.release()
             return AppOpenRule.WINDOWS_UNAVAILABLE
         }
@@ -149,6 +162,8 @@ class WindowCast(private val context: Context, private val onEmpty: () -> Unit) 
             all.forEach { window ->
                 runCatching { ShizukuBridge.currentHost()?.release(window.displayId) }
                 window.encoder.release()
+                // The computer is told each one ended, so its window closes with it.
+                runCatching { RustCore.castWindowClosed(window.id) }
             }
             ShizukuBridge.release()
         }, "window-close-all").start()
@@ -156,5 +171,31 @@ class WindowCast(private val context: Context, private val onEmpty: () -> Unit) 
 
     private companion object {
         const val TAG = "WindowCast"
+
+        /** What the phone's settings, application management, install and permission screens resolve to. */
+        fun deniedPackages(context: Context): Set<String> {
+            val pm = context.packageManager
+            val intents = listOf(
+                Intent(android.provider.Settings.ACTION_SETTINGS),
+                Intent(android.provider.Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS),
+                Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS),
+                Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS),
+                Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:x.y")),
+                Intent(Intent.ACTION_INSTALL_PACKAGE).setDataAndType(android.net.Uri.parse("content://x/y.apk"), "application/vnd.android.package-archive"),
+                Intent(Intent.ACTION_UNINSTALL_PACKAGE, android.net.Uri.parse("package:x.y")),
+            )
+            val found = HashSet<String>()
+            for (intent in intents) {
+                runCatching {
+                    pm.queryIntentActivities(intent, 0).forEach { found.add(it.activityInfo.packageName) }
+                }
+            }
+            // The permission controller, by the platform's own name for it, where it can be asked.
+            runCatching {
+                (PackageManager::class.java.getMethod("getPermissionControllerPackageName").invoke(pm) as? String)
+                    ?.let { found.add(it) }
+            }
+            return found
+        }
     }
 }

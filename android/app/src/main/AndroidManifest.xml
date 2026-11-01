@@ -71,6 +71,35 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
+        <!--
+            Phone apps tier 2: which apps are the phone's own settings, application
+            management, installer and permission screens, so that none of them is ever
+            opened in a window of its own. Only package names are read.
+        -->
+        <intent>
+            <action android:name="android.settings.SETTINGS" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.MANAGE_APPLICATIONS_SETTINGS" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.SECURITY_SETTINGS" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.ACCESSIBILITY_SETTINGS" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.APPLICATION_DETAILS_SETTINGS" />
+            <data android:scheme="package" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.INSTALL_PACKAGE" />
+            <data android:mimeType="application/vnd.android.package-archive" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.UNINSTALL_PACKAGE" />
+            <data android:scheme="package" />
+        </intent>
     </queries>
     <!-- Scanning a desktop's pairing code; the app works without a camera. -->
     <uses-permission android:name="android.permission.CAMERA" />

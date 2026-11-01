@@ -148,10 +148,19 @@ class CastService : Service() {
 
         /** The computer's input to app windows (from [dev.pocketdesk.android.control.ControlRunner]). */
         fun windowInput(context: Context, events: List<WindowInput.For>) {
-            // Checked again here, not only each half second: the switch just went off.
-            if (!Prefs.separateWindows(context)) return
-            val cast = current?.windowCast ?: return
-            events.forEach { cast.input(it.window, it.event) }
+            // Checked again for every batch, not only each half second: the switch, the apps
+            // switch or Shizuku may just have gone.
+            if (!Prefs.separateWindows(context) || !Prefs.appsFromComputer(context) || !ShizukuBridge.running()) return
+            val service = current ?: return
+            val cast = service.windowCast ?: return
+            val now = SystemClock.uptimeMillis()
+            for (one in events) {
+                // A press or release always goes (dropping one leaves a finger down); the rest is limited.
+                val edge = (one.event as? WindowInput.Event.Touch)?.let { it.action != WindowInput.ACTION_MOVE } == true ||
+                    one.event is WindowInput.Event.Close
+                if (!edge && !service.windowRate.take(now)) continue
+                cast.input(one.window, one.event)
+            }
         }
 
         /**
@@ -266,6 +275,9 @@ class CastService : Service() {
     private class PendingWindow(val ask: WindowRule.Ask, val pkg: String, val controlPort: Int)
 
     private val pendingWindows = java.util.concurrent.CopyOnWriteArrayList<PendingWindow>()
+
+    /** The most input events a second go to app windows, as to the phone's screen. */
+    private val windowRate = dev.pocketdesk.android.control.ControlPlan.Rate()
 
     /** The cast was admitted: app windows may be made. */
     @Volatile
@@ -538,7 +550,7 @@ class CastService : Service() {
                         resuming = false
                         update(getString(R.string.cast_showing_windows, shown))
                         // The computer's touch and typing in the windows.
-                        control = dev.pocketdesk.android.control.ControlRunner(this) { }.also { it.start() }
+                        control = dev.pocketdesk.android.control.ControlRunner(this, windowsOnly = true) { }.also { it.start() }
                     } else if (!showing && soundAlone) {
                         showing = true
                         // M7: its sound only: no picture, no control.

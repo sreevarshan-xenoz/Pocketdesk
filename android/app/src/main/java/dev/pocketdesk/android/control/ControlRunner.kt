@@ -17,7 +17,15 @@ import org.json.JSONObject
  * waiting for each batch rather than polling, from the cast being shown to
  * its end.
  */
-class ControlRunner(private val context: Context, private val onState: (Boolean) -> Unit) {
+class ControlRunner(
+    private val context: Context,
+    /**
+     * A session of app windows alone (Phone apps tier 2): there is no screen of the phone's
+     * to control, so it never says control is on and drops every batch that is not for a window.
+     */
+    private val windowsOnly: Boolean = false,
+    private val onState: (Boolean) -> Unit,
+) {
     @Volatile
     private var running = true
     private val rate = ControlPlan.Rate()
@@ -40,7 +48,7 @@ class ControlRunner(private val context: Context, private val onState: (Boolean)
     private fun loop() {
         while (running) {
             val service = ControlService.instance
-            val on = Prefs.controlFromComputer(context) && service != null
+            val on = !windowsOnly && Prefs.controlFromComputer(context) && service != null
             if (on != said && RustCore.castControlState(on) == CastPlan.QUEUED) {
                 said = on
                 onState(on)
@@ -53,8 +61,9 @@ class ControlRunner(private val context: Context, private val onState: (Boolean)
             if (json == null) continue
             // Phone apps tier 2: a batch for an app window goes to that window,
             // whatever the phone's own screen control says (it has its own switch).
-            if (windows(json)) continue
-            if (!on || service == null) continue
+            val forWindows = windows(json)
+            val target = dev.pocketdesk.android.windows.WindowRule.target(windowsOnly, forWindows, on)
+            if (target != dev.pocketdesk.android.windows.WindowRule.Target.SCREEN || service == null) continue
             perform(service, json)
         }
     }

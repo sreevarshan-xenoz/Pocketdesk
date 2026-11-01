@@ -65,31 +65,60 @@ object ShizukuBridge {
     /** The helper process if it is up now, else null. */
     fun currentHost(): IWindowHost? = host?.takeIf { it.asBinder().pingBinder() }
 
+    /** Askers waiting for the helper process while it starts; one bind serves them all. */
+    private val waiting = ArrayList<(IWindowHost?) -> Unit>()
+    private var binding = false
+
+    /** Hand [made] (or null) to everyone waiting. */
+    private fun answer(made: IWindowHost?) {
+        val askers = synchronized(this) {
+            binding = false
+            host = made
+            ArrayList(waiting).also { waiting.clear() }
+        }
+        askers.forEach { it(made) }
+    }
+
     /** The helper process, started if need be; [onReady] gets it, or null when it could not start. */
-    @Synchronized
     fun host(context: Context, onReady: (IWindowHost?) -> Unit) {
-        host?.takeIf { it.asBinder().pingBinder() }?.let { return onReady(it) }
-        if (!running() || !permitted()) return onReady(null)
+        val bind = synchronized(this) {
+            host?.takeIf { it.asBinder().pingBinder() }?.let { up ->
+                // Up already: answered outside the lock.
+                return@synchronized up
+            }
+            if (!running() || !permitted()) return@synchronized false
+            waiting.add(onReady)
+            // One bind at a time: a second ask while one is under way only waits for it.
+            if (binding) return@synchronized null
+            binding = true
+            true
+        }
+        when (bind) {
+            is IWindowHost -> return onReady(bind)
+            false -> return onReady(null)
+            null -> return
+            else -> Unit
+        }
         val service = object : android.content.ServiceConnection {
             override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-                val made = binder?.takeIf { it.pingBinder() }?.let { IWindowHost.Stub.asInterface(it) }
-                host = made
-                onReady(made)
+                answer(binder?.takeIf { it.pingBinder() }?.let { IWindowHost.Stub.asInterface(it) })
             }
 
             override fun onServiceDisconnected(name: ComponentName?) {
-                host = null
+                synchronized(this@ShizukuBridge) { host = null }
             }
         }
         val userService = Shizuku.UserServiceArgs(ComponentName(context.packageName, WindowHostService::class.java.name))
             .processNameSuffix("windows")
             .daemon(false)
             .version(1)
-        args = userService
-        connection = service
+        synchronized(this) {
+            args = userService
+            connection = service
+        }
         runCatching { Shizuku.bindUserService(userService, service) }.onFailure {
             Log.w(TAG, "the helper process did not start", it)
-            onReady(null)
+            answer(null)
         }
     }
 
