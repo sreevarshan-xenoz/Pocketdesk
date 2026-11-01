@@ -2,6 +2,7 @@ package dev.pocketdesk.android.pair
 
 import android.content.Context
 import dev.pocketdesk.android.HostStore
+import dev.pocketdesk.android.bridge.RustCore
 
 /**
  * Save the computer a pairing [link] paired with at [address]: its card,
@@ -15,6 +16,12 @@ fun savePaired(context: Context, link: PairLink, address: String, serverId: Stri
     link.endpoint?.let { HostStore.saveWanIdentity(context, address, it) }
 }
 
-/** The ids of the computers this phone is paired with, by their cards. */
+/**
+ * The ids of the computers this phone is paired with, by their cards; not
+ * one whose card says it no longer pairs with this phone (BB3).
+ */
 fun pairedComputerIds(context: Context): Set<String> =
-    HostStore.hosts(context).mapNotNull { HostStore.pairedDesktopId(context, it.address) }.toSet()
+    IntroduceRule.pairedIds(
+        HostStore.hosts(context).associate { it.address to HostStore.pairedDesktopId(context, it.address) },
+        RustCore::unpairedBy,
+    )

@@ -21,6 +21,15 @@ object IntroduceRule {
     /** A computer as shown: its name, else the start of its id. */
     fun shownName(offer: Offer): String = offer.name.trim().ifEmpty { offer.id.take(8) }
 
+    /**
+     * The ids of the computers this phone is still paired with, from its
+     * cards (address to the id it paired with, if any): a card whose
+     * computer said it no longer pairs with this phone (BB3, "No longer
+     * paired") counts as not paired, so that computer can be offered again.
+     */
+    fun pairedIds(cards: Map<String, String?>, unpairedBy: (String) -> Boolean): Set<String> =
+        cards.filter { (address, id) -> id != null && !unpairedBy(address) }.values.filterNotNull().toSet()
+
     /** The offers to ask about: not one this phone is already paired with, each once. */
     fun fresh(offers: List<Offer>, pairedIds: Set<String>): List<Offer> =
         offers.filter { it.id.isNotBlank() && it.id !in pairedIds }.distinctBy { it.id }

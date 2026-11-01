@@ -24,6 +24,19 @@ class IntroduceRuleTest {
     }
 
     @Test
+    fun aCardItsComputerNoLongerPairsWithIsNotCountedAsPaired() {
+        val cards = mapOf("192.0.2.1" to "a", "192.0.2.2" to "b", "192.0.2.3" to null)
+        val unpaired = setOf("192.0.2.2")
+        val paired = IntroduceRule.pairedIds(cards) { it in unpaired }
+        assertEquals(setOf("a"), paired)
+        assertEquals(
+            listOf(IntroduceRule.Offer("b", "Arch")),
+            IntroduceRule.fresh(listOf(IntroduceRule.Offer("a", "Office"), IntroduceRule.Offer("b", "Arch")), paired),
+        )
+        assertEquals(setOf("a", "b"), IntroduceRule.pairedIds(cards) { false })
+    }
+
+    @Test
     fun aComputerWithoutANameShowsTheStartOfItsId() {
         assertEquals("Arch", IntroduceRule.shownName(IntroduceRule.Offer("b", " Arch ")))
         assertEquals("01234567", IntroduceRule.shownName(IntroduceRule.Offer("0123456789", "")))
