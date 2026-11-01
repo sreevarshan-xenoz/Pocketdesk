@@ -390,7 +390,7 @@ fn write_shortcut(
         CoUninitialize, IPersistFile,
     };
     use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
-    use windows::core::{BOOL, HSTRING, Interface};
+    use windows::core::{HSTRING, Interface};
 
     let arguments = arguments(phone, app)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "not an app"))?;
@@ -411,7 +411,7 @@ fn write_shortcut(
             link.SetIconLocation(&HSTRING::from(icon), 0)?;
             link.SetDescription(&HSTRING::from(format!("Open {label} on the phone")))?;
             let file: IPersistFile = link.cast()?;
-            file.Save(&HSTRING::from(path.as_os_str()), BOOL::from(true))
+            file.Save(&HSTRING::from(path.as_os_str()), true)
         })();
         if init.is_ok() {
             CoUninitialize();
