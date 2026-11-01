@@ -3739,9 +3739,74 @@ impl PocketdeskApp {
             self.send_box(ui);
             ui.add_space(12.0);
             self.under_way_list(ui);
+            self.kept_list(ui);
             self.sent_list(ui);
             self.received_list(ui);
         });
+    }
+
+    /// The phone folders kept on this computer, by themselves: each phone
+    /// folder with its place, size, last run and any problem (the cap, a
+    /// refused name). Nothing is shown until a phone keeps one.
+    fn kept_list(&mut self, ui: &mut egui::Ui) {
+        if self.snapshot.kept.is_empty() {
+            return;
+        }
+        crate::theme::section(ui, "Kept folders");
+        ui.label(
+            RichText::new(
+                "Folders your phones keep here, on their own (the phone's Settings, Folders kept on my computer).",
+            )
+            .color(crate::theme::muted(ui)),
+        );
+        let now = now_unix();
+        let mut show = None;
+        for folder in &self.snapshot.kept {
+            let there = std::path::Path::new(&folder.path).is_dir();
+            crate::theme::card(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    crate::theme::dot(
+                        ui,
+                        if folder.errors.is_empty() {
+                            crate::theme::GOOD
+                        } else {
+                            crate::theme::BAD
+                        },
+                    );
+                    ui.label(
+                        RichText::new(format!("{} / {}", folder.phone, folder.label)).strong(),
+                    )
+                    .on_hover_text(&folder.path);
+                    ui.label(
+                        RichText::new(model::kept_summary(folder, now))
+                            .color(crate::theme::muted(ui)),
+                    );
+                    if there && ui.button("Show in folder").clicked() {
+                        show = Some(folder.path.clone());
+                    }
+                });
+                if let Some(deletions) = model::kept_deletions(folder) {
+                    ui.label(RichText::new(deletions).color(crate::theme::muted(ui)));
+                }
+                // The newest problems, newest first: a full cap says so here.
+                for error in folder.errors.iter().rev().take(3) {
+                    ui.label(
+                        RichText::new(format!(
+                            "{}: {}",
+                            crate::words::ago(now, error.at_unix),
+                            error.message
+                        ))
+                        .color(crate::theme::bad(ui)),
+                    );
+                }
+            });
+        }
+        if let Some(path) = show
+            && let Err(e) = crate::reveal::show_in_folder(std::path::Path::new(&path))
+        {
+            self.notice = crate::notice::Notice::error(format!("Could not open the folder: {e}"));
+        }
+        ui.add_space(12.0);
     }
 
     /// Files dropped with several phones or computers to take them: which

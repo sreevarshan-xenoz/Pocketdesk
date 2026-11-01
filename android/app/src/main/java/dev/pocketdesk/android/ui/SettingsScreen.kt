@@ -504,6 +504,8 @@ fun SettingsScreen(onBack: () -> Unit) {
                 )
                 ScreenshotsSection()
                 CameraUploadsSection()
+                // Folders the owner picks, kept on the computer by themselves.
+                KeptFoldersSection()
                 RecentPhotosSection()
                 // M5: a photo's place kept when it is sent.
                 PhotoPlaceSection()

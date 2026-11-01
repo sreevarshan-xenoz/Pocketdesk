@@ -405,6 +405,18 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakesLi
     crate::peer_names::takes_live(&address) as jboolean
 }
 
+/// Whether the computer at `address` keeps a phone's folders, as it said when
+/// last heard: an older one would take a kept folder's files as folder sends.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakesKept(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+) -> jboolean {
+    let address = jstring_to_string(&mut env, &address);
+    crate::peer_names::takes_kept(&address) as jboolean
+}
+
 /// Whether a streaming session is currently active.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeIsStreamingActive(
@@ -1290,7 +1302,9 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFil
 /// `source` so a retry continues it (T6a), and, for a file of a folder send,
 /// where it sits (`folder_id`, `folder`, `path_json` a JSON array of names;
 /// T6b), and with its modified time (`last_modified`, ms since 1970, 0 for
-/// none; K1): `{"ok": null}` or `{"err": "..."}`.
+/// none; K1), and, with `keep`, as a file of a folder this phone keeps on the
+/// computer (the folder fields then name that folder): `{"ok": null}` or
+/// `{"err": "..."}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFileFd(
     mut env: JNIEnv<'_>,
@@ -1306,6 +1320,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFil
     path_json: JString<'_>,
     drive: JString<'_>,
     last_modified: jlong,
+    keep: jboolean,
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let name = jstring_to_string(&mut env, &name);
@@ -1335,6 +1350,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFil
             folder,
             drive,
             modified: u64::try_from(last_modified).ok().filter(|ms| *ms > 0),
+            keep: keep != 0,
         },
     ))));
     to_jstring(&mut env, json)

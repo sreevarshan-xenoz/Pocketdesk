@@ -1201,4 +1201,36 @@
     <string name="there_refused_off">தொலைவிலிருந்து சாதனங்களை நீக்குவதைக் கணினியின் உரிமையாளர் அணைத்துள்ளார். கணினியிலேயே நீக்குங்கள்: சாதனங்கள், இணைப்பை நீக்கு.</string>
     <string name="there_refused_busy">ஒரு நிமிடத்தில் மிக அதிகக் கோரிக்கைகள். ஒரு நிமிடம் காத்திருந்து மீண்டும் முயலுங்கள்.</string>
     <string name="there_refused_failed">கணினியால் அதைச் செய்ய முடியவில்லை. மீண்டும் முயலுங்கள்.</string>
+    <!-- Folders kept on my computer -->
+    <string name="kept_title">என் கணினியில் வைத்திருக்கும் கோப்புறைகள்</string>
+    <string name="kept_summary">இங்கே தேர்ந்தெடுக்கும் கோப்புறைகள் தானாகவே உங்கள் கணினிக்கு ஒரு வழியாக நகலெடுக்கப்படும். புதியவை அல்லது மாறியவை மட்டுமே அனுப்பப்படும்; தொலைபேசியில் வேறெதுவும் படிக்கப்படாது.</string>
+    <string name="kept_empty">இன்னும் எந்த கோப்புறையும் வைக்கப்படவில்லை. ஒன்றைச் சேர்: Android அதைத் தேர்ந்தெடுக்கக் கேட்கும்; ஆப் அந்தக் கோப்புறையை மட்டுமே பெறும்.</string>
+    <string name="kept_add">கோப்புறையைச் சேர்</string>
+    <string name="kept_not_kept">அந்தக் கோப்புறைக்கான அணுகலை Android வைத்திருக்கவில்லை</string>
+    <string name="kept_remove">நீக்கு</string>
+    <string name="kept_remove_named">%1$s ஐ வைப்பதை நிறுத்து</string>
+    <string name="kept_status_never">இன்னும் இயக்கப்படவில்லை</string>
+    <string name="kept_status_run">கடைசியாக %1$s: %2$d அனுப்பப்பட்டன, %3$d தோல்வி</string>
+    <string name="kept_access_lost">%1$s க்கான அணுகலை Android இனி இந்த ஆப்புக்கு வழங்கவில்லை: மீண்டும் சேர்</string>
+    <string name="kept_schedule">எப்போது</string>
+    <string name="kept_schedule_summary">இயல்பாக Wi-Fi மற்றும் சார்ஜ் செய்யும்போது மட்டுமே, எனவே மொபைல் டேட்டாவையோ பேட்டரியையோ செலவழிக்காது. சரியான நேரத்தை Android தீர்மானிக்கும்; தொலைபேசி தூங்கும்போது தாமதிக்கலாம்.</string>
+    <string name="kept_mode_charging">Wi-Fi மற்றும் சார்ஜிங்</string>
+    <string name="kept_mode_every">சில மணிநேரத்துக்கு ஒருமுறை</string>
+    <string name="kept_hours">%1$d மணி</string>
+    <string name="kept_every_summary">எத்தனை முறை, Wi-Fi இல் (சார்ஜ் ஆனாலும் இல்லாவிட்டாலும்)</string>
+    <string name="kept_computer">இதில் வை</string>
+    <string name="kept_computer_own">இந்த தொலைபேசியின் கணினி (%1$s)</string>
+    <string name="kept_computer_summary">உங்கள் கணினிகளுக்கிடையே மாற தட்டவும். மற்றொரு கணினி புதிதாகத் தொடங்கும்.</string>
+    <string name="kept_mirror">நீக்கங்களை பிரதிபலி</string>
+    <string name="kept_mirror_summary">அணைந்தால்: இங்கே நீக்கும் கோப்பு கணினியில் இருக்கும். இயக்கினால்: அந்த கணினி தன் அமைப்புகளில் அனுமதித்தால் மட்டுமே, இந்த தொலைபேசி வைத்த கோப்புகளை மட்டும் அங்கும் நீக்கும்.</string>
+    <string name="kept_run_now">இப்போதே இயக்கு</string>
+    <string name="kept_run_now_summary">அட்டவணை எதுவாக இருந்தாலும் புதியவற்றை நகலெடு</string>
+    <string name="kept_no_computer">கோப்புறைகளை வைக்க இணைக்கப்பட்ட கணினி இல்லை</string>
+    <string name="kept_run_started">கோப்புறைகளை வைக்கிறது…</string>
+    <string name="kept_unreachable">கணினி பதிலளிக்கவில்லை: கோப்புறைகள் அடுத்த முறைக்காகக் காத்திருக்கும்</string>
+    <string name="kept_old_computer">இந்த கணினி இன்னும் கோப்புறைகளை வைக்க முடியாது: அதில் Pocketdesk ஐப் புதுப்பிக்கவும்</string>
+    <string name="kept_full">கணினியின் கோப்புறைகள் நிரம்பிவிட்டன: அங்கே அளவு வரம்பை உயர்த்தவும் அல்லது இடத்தை விடுவிக்கவும்</string>
+    <string name="kept_refused">இந்த தொலைபேசிக்கான கோப்புறைகளை கணினி வைக்கவில்லை: அதன் அமைப்புகளைப் பார்க்கவும்</string>
+    <string name="kept_held_many">நீக்கங்கள் நிறுத்தப்பட்டன: பெரும்பாலான கோப்புகள் ஒரே நேரத்தில் காணவில்லை, அட்டை இல்லாதது போல் தெரிகிறது</string>
+    <string name="kept_held_part">நீக்கங்கள் நிறுத்தப்பட்டன: கோப்புறையின் ஒரு பகுதியைப் படிக்க முடியவில்லை</string>
 </resources>

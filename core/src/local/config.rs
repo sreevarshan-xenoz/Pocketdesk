@@ -148,6 +148,25 @@ pub struct Config {
     /// Downloads. A folder that is gone falls back to Downloads.
     #[serde(default)]
     pub downloads_folder: String,
+    /// Phones may keep folders on this computer (the phone's "Folders kept
+    /// on my computer"): only an owner phone, into `kept_folders_root`. On
+    /// by default; each phone folder is still the owner's own pick.
+    #[serde(default = "default_true")]
+    pub kept_folders: bool,
+    /// Where phones' kept folders land, one folder per phone and per kept
+    /// folder: an absolute folder, or empty for `Documents/Pocketdesk
+    /// phones`.
+    #[serde(default)]
+    pub kept_folders_root: String,
+    /// The most all kept folders may hold, in GiB; 0 for no limit. A file
+    /// that would pass it is refused, and the Files page says so.
+    #[serde(default = "default_kept_folders_cap_gb")]
+    pub kept_folders_cap_gb: u32,
+    /// A phone that mirrors deletions may delete, from its kept folder
+    /// here, the files it deleted. Off by default: nothing is ever deleted
+    /// here unless this and the phone's own switch are both on.
+    #[serde(default)]
+    pub kept_folders_allow_delete: bool,
     /// The window showing a phone's screen controls the phone, when the
     /// phone allows it (C8); off, the window only shows.
     #[serde(default = "default_true")]
@@ -657,6 +676,11 @@ fn default_true() -> bool {
     true
 }
 
+/// GiB all kept folders may hold by default.
+fn default_kept_folders_cap_gb() -> u32 {
+    50
+}
+
 fn default_notifications_per_minute() -> u32 {
     20
 }
@@ -752,6 +776,10 @@ impl Default for Config {
             phone_live_updates: true,
             notification_pictures: true,
             downloads_folder: String::new(),
+            kept_folders: true,
+            kept_folders_root: String::new(),
+            kept_folders_cap_gb: default_kept_folders_cap_gb(),
+            kept_folders_allow_delete: false,
             cast_control: true,
             phone_apps_page: true,
             phone_camera: false,
@@ -1040,6 +1068,10 @@ impl Config {
         "phone_live_updates",
         "notification_pictures",
         "downloads_folder",
+        "kept_folders",
+        "kept_folders_root",
+        "kept_folders_cap_gb",
+        "kept_folders_allow_delete",
         "cast_control",
         "phone_apps_page",
         "phone_camera",

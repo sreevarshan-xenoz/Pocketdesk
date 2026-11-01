@@ -1226,4 +1226,36 @@
     <string name="settings_copies">Send my copies by themselves</string>
     <string name="settings_copies_summary_off">What you copy on this phone goes to its computer’s clipboard by itself, not only from the clipboard tile. Never a copy an app marks sensitive (a password). Uses the “Pocketdesk control” Accessibility service, and needs Android’s clipboard preview, shown when you copy</string>
     <string name="settings_copies_summary_on">On: what you copy goes to this phone’s own computer by itself, never a sensitive copy. Android says “Pocketdesk pasted from your clipboard” each time</string>
+    <!-- Folders kept on my computer -->
+    <string name="kept_title">Folders kept on my computer</string>
+    <string name="kept_summary">Folders you pick here are copied to your computer by themselves, one way. Only what is new or changed is sent, and nothing else on the phone is read.</string>
+    <string name="kept_empty">No folder is kept yet. Add one: Android asks you to pick it, and the app gets that folder only.</string>
+    <string name="kept_add">Add a folder</string>
+    <string name="kept_not_kept">Android keeps no access to that folder</string>
+    <string name="kept_remove">Remove</string>
+    <string name="kept_remove_named">Stop keeping %1$s</string>
+    <string name="kept_status_never">Not run yet</string>
+    <string name="kept_status_run">Last run %1$s: %2$d sent, %3$d failed</string>
+    <string name="kept_access_lost">Android no longer gives this app %1$s: add it again</string>
+    <string name="kept_schedule">When</string>
+    <string name="kept_schedule_summary">By default only on Wi-Fi and while charging, so it never costs mobile data or battery. Android decides the exact time and may hold it while the phone sleeps.</string>
+    <string name="kept_mode_charging">Wi-Fi and charging</string>
+    <string name="kept_mode_every">Every few hours</string>
+    <string name="kept_hours">%1$d h</string>
+    <string name="kept_every_summary">How often, on Wi-Fi (charging or not)</string>
+    <string name="kept_computer">Keep them on</string>
+    <string name="kept_computer_own">This phone\'s computer (%1$s)</string>
+    <string name="kept_computer_summary">Tap to switch between your computers. Another computer starts from nothing.</string>
+    <string name="kept_mirror">Mirror deletions</string>
+    <string name="kept_mirror_summary">Off: a file you delete here stays on the computer. On: it is deleted there too, only if that computer allows it in its settings, and only files this phone kept.</string>
+    <string name="kept_run_now">Run now</string>
+    <string name="kept_run_now_summary">Copy what is new, whatever the schedule says</string>
+    <string name="kept_no_computer">No paired computer to keep folders on</string>
+    <string name="kept_run_started">Keeping folders…</string>
+    <string name="kept_unreachable">The computer did not answer: the folders wait for the next run</string>
+    <string name="kept_old_computer">This computer cannot keep folders yet: update Pocketdesk on it</string>
+    <string name="kept_full">The computer\'s kept folders are full: raise the size cap there or free space</string>
+    <string name="kept_refused">The computer does not keep folders for this phone: check its Settings</string>
+    <string name="kept_held_many">Deletions held: most files are gone at once, which looks like a missing card</string>
+    <string name="kept_held_part">Deletions held: part of the folder could not be read</string>
 </resources>

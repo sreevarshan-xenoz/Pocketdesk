@@ -111,6 +111,9 @@ pub const DIRECT_LINK_OWNED_FILE: &str = "direct_link_owned.json";
 /// latency, written by the server.
 pub const SHARED_INPUT_LATENCY_FILE: &str = "shared_input_latency.json";
 pub const SENT_FILE: &str = "sent.json";
+/// The phone folders kept on this computer (the phone's "Folders kept on my
+/// computer"), written by the server for the desktop app.
+pub const KEPT_FOLDERS_FILE: &str = "kept_folders.json";
 /// The transfers under way (C1), written by the server for the desktop app.
 pub const TRANSFERS_FILE: &str = "transfers.json";
 /// The desktop app's requests to cancel one, one file each.

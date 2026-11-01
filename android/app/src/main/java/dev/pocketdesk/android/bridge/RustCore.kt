@@ -64,6 +64,7 @@ object RustCore {
     private external fun nativeSessionStatus(): String
     private external fun nativeIsStreamingActive(): Boolean
     private external fun nativeTakesLive(address: String): Boolean
+    private external fun nativeTakesKept(address: String): Boolean
     private external fun nativeStreamClosedReason(): String
     private external fun nativeGetStreamingRtt(): Int
     private external fun nativeGetStreamingStats(): String
@@ -167,6 +168,7 @@ object RustCore {
         pathJson: String,
         drive: String,
         lastModified: Long,
+        keep: Boolean,
     ): String
     private external fun nativeTransferProgress(): LongArray?
     private external fun nativeCancelTransfer()
@@ -523,6 +525,9 @@ object RustCore {
 
     /** Whether the computer at [address] shows ongoing updates as one card (N4); false when unknown. */
     fun takesLive(address: String): Boolean = runCatching { nativeTakesLive(address) }.getOrDefault(false)
+
+    /** Whether the computer at [address] said it keeps a phone's folders, when last heard. */
+    fun takesKept(address: String): Boolean = runCatching { nativeTakesKept(address) }.getOrDefault(false)
 
     /** Why the desktop closed the stream (e.g. "session refused"); null while open. */
     val streamClosedReason: String?
@@ -961,11 +966,17 @@ object RustCore {
                 org.json.JSONArray(part?.path.orEmpty()).toString(),
                 drive.orEmpty(),
                 lastModified,
+                part?.keep == true,
             ),
         ).map { }
 
-    /** Where a file sits in a folder the phone sends (T6b). */
-    data class FolderPart(val folderId: String, val folder: String, val path: List<String>)
+    /**
+     * Where a file sits in a folder the phone sends (T6b). With [keep] it is
+     * one file of a folder this phone keeps on the computer: [folderId] is
+     * that folder's id for good, [folder] its name, and the file replaces
+     * its older copy there.
+     */
+    data class FolderPart(val folderId: String, val folder: String, val path: List<String>, val keep: Boolean = false)
 
     /** The running file transfer as (bytes sent, total). */
     /** Stop the file transfer running now, if any (C1): its call fails with "cancelled on the phone". */
