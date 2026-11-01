@@ -2,13 +2,13 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1146 open items.
+1149 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 43 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 17 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 185 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 188 |
 | A phone with a SIM | 39 |
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
@@ -600,6 +600,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The OPPO scanning the Windows computer's code (a screenshot pushed by adb): Android asks once to join `pocketdesk-…`, the phone joins (WPA2: if Windows' hotspot is set to WPA3 only the phone cannot join, which the first run should report), pairs, and starts the session over it; `direct_link.json` says in use while the phone's session runs. (where: owner)
 - The idle timer and the longest life on a real Windows link (a 1-minute idle setting is enough): with no phone it ends after the setting, the hotspot off and the owner's settings back; with a phone's session it stays on; and turning the hotspot off in Windows' Settings while a link is on is not noticed (a known gap: the page keeps showing the code until the idle time ends the link, and the owner's settings then go back). (where: owner)
 - The band row: 5 GHz on a card that allows a hotspot on it makes a 5 GHz network; on one that does not, the link comes up on the card's own band and does not fail. A card that cannot host beside its own Wi-Fi connection (Windows drops the Wi-Fi uplink) is reported in the first run's words. (where: owner)
+- A put-back that fails is retried: with a link on, unplug the internet and turn the link off (the owner's settings may not go back at once); the log says the hotspot was not fully put back, the record stays, and within a minute of the internet returning the settings are back and the record is gone. The hotspot does not come up with the link's name in the meantime. (where: owner)
+- A hotspot still named `pocketdesk-…` (left by a killed server whose record was lost): "Make a direct link" says to give it a name of your own and starts nothing. (where: owner)
+- The Pair page's card follows the server's plan, not the desktop's own look: with the internet unplugged the card says Mobile Hotspot needs a connection within about 30 s, and after plugging it in the button comes back within about 30 s; the desktop app itself never calls WinRT. (where: owner)
 
 ## A phone with a SIM
 
