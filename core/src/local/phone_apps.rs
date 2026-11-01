@@ -202,7 +202,10 @@ mod tests {
         assert_eq!(outcome.report, report);
         assert!(outcome.answers("open", 10));
         assert!(outcome.answers("open", 9));
-        assert!(!outcome.answers("open", 11), "an earlier word is not the answer");
+        assert!(
+            !outcome.answers("open", 11),
+            "an earlier word is not the answer"
+        );
         assert!(!outcome.answers("apps", 9));
         assert!(!outcome.opened());
         let _ = std::fs::remove_dir_all(&dir);
@@ -219,11 +222,20 @@ mod tests {
         note_open(&dir, "phone-a", "org.example.a", 9).unwrap();
         note_open(&dir, "phone-b", "org.example.a", 2).unwrap();
         let all = read_recent(&dir);
-        assert_eq!(all["phone-a"]["org.example.a"], 9, "an app once, at its last open");
+        assert_eq!(
+            all["phone-a"]["org.example.a"], 9,
+            "an app once, at its last open"
+        );
         assert_eq!(all["phone-a"].len(), 2);
         assert_eq!(all["phone-b"].len(), 1);
         for i in 0..MAX_RECENT + 5 {
-            note_open(&dir, "phone-c", &format!("org.example.n{i}"), 100 + i as u64).unwrap();
+            note_open(
+                &dir,
+                "phone-c",
+                &format!("org.example.n{i}"),
+                100 + i as u64,
+            )
+            .unwrap();
         }
         let c = &read_recent(&dir)["phone-c"];
         assert_eq!(c.len(), MAX_RECENT);

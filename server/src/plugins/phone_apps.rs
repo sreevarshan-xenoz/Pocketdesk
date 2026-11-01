@@ -22,7 +22,8 @@ pub struct PhoneAppsPlugin;
 /// The longest base64 text an icon may be: [`MAX_ICON_BYTES`] encoded.
 ///
 /// [`MAX_ICON_BYTES`]: pocketdesk_core::local::notification_icons::MAX_ICON_BYTES
-const MAX_ICON_BASE64: usize = pocketdesk_core::local::notification_icons::MAX_ICON_BYTES / 3 * 4 + 4;
+const MAX_ICON_BASE64: usize =
+    pocketdesk_core::local::notification_icons::MAX_ICON_BYTES / 3 * 4 + 4;
 
 /// One writer at a time to these small files (P2 review: two lists at once
 /// could lose one).
@@ -41,8 +42,13 @@ fn icons_of(body: &serde_json::Value) -> Vec<(String, u64, Vec<u8>)> {
         .filter_map(|icon| {
             let id = icon.get("id")?.as_str().filter(|id| valid_app_id(id))?;
             let version = icon.get("v").and_then(|v| v.as_u64()).unwrap_or(0);
-            let text = icon.get("png")?.as_str().filter(|t| t.len() <= MAX_ICON_BASE64)?;
-            let png = base64::engine::general_purpose::STANDARD.decode(text).ok()?;
+            let text = icon
+                .get("png")?
+                .as_str()
+                .filter(|t| t.len() <= MAX_ICON_BASE64)?;
+            let png = base64::engine::general_purpose::STANDARD
+                .decode(text)
+                .ok()?;
             Some((id.to_string(), version, png))
         })
         .collect()

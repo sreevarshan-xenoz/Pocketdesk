@@ -206,10 +206,15 @@ mod tests {
         // Apps part 1: an open may want the screen, an ask for the list never does.
         let plain = request_open(&dir, "phone-a", "org.example.app", 1_000).unwrap();
         assert!(!plain.screen);
-        let shown = request_open_with_screen(&dir, "phone-a", "org.example.app", true, 1_001).unwrap();
+        let shown =
+            request_open_with_screen(&dir, "phone-a", "org.example.app", true, 1_001).unwrap();
         assert!(shown.screen);
         assert_eq!(take_all(&dir, 1_001), vec![plain, shown]);
-        assert!(!request(&dir, "phone-a", PhoneAction::Apps, 1_000).unwrap().screen);
+        assert!(
+            !request(&dir, "phone-a", PhoneAction::Apps, 1_000)
+                .unwrap()
+                .screen
+        );
         let _ = take_all(&dir, 1_000);
         let mut odd = request(&dir, "phone-a", PhoneAction::Open, 1_000).unwrap();
         odd.app = None;

@@ -268,12 +268,9 @@ pub async fn run_phone_actions() {
             // Apps part 1: a list ask says which icons are kept, an open
             // may want the screen shown here too.
             let ask_body = match (action, ask.app.as_deref()) {
-                (pocketdesk_core::protocol::phone_action::PhoneAction::Apps, _) => {
-                    apps_body(&pocketdesk_core::local::phone_app_icons::have(
-                        &dir,
-                        &ask.device_id,
-                    ))
-                }
+                (pocketdesk_core::protocol::phone_action::PhoneAction::Apps, _) => apps_body(
+                    &pocketdesk_core::local::phone_app_icons::have(&dir, &ask.device_id),
+                ),
                 (pocketdesk_core::protocol::phone_action::PhoneAction::Open, Some(app)) => {
                     open_body(app, ask.screen)
                 }

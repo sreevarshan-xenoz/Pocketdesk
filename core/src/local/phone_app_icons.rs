@@ -106,9 +106,7 @@ pub fn forget_unlisted(state_dir: &Path, phone: &str, listed: &BTreeMap<String, 
             continue;
         };
         // An app listed with no version (0, an old phone) keeps what it sent.
-        let current = listed
-            .get(&id)
-            .is_some_and(|v| *v == version || *v == 0);
+        let current = listed.get(&id).is_some_and(|v| *v == version || *v == 0);
         if !current {
             let _ = std::fs::remove_file(entry.path());
         }
