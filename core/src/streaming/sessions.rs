@@ -38,6 +38,9 @@ pub struct Streamed {
     pub cast: bool,
     /// The phone's sound plays here with its screen (K5).
     pub phone_sound: bool,
+    /// The cast is for this computer's camera (F6 part 2): it ends when its
+    /// Webcam permission or the owner's offer is taken away.
+    pub webcam: bool,
 }
 
 /// One currently-live streaming session, safe to render or serialize.

@@ -66,6 +66,8 @@ class RecentPhotos(private val ctx: Context) {
         val take: Boolean = false,
         val before: Long = -1,
         val clipboard: Boolean = false,
+        /** F6 part 2: to be the computer's camera, as it asked. */
+        val webcam: dev.pocketdesk.android.cast.WebcamAsk.Ask? = null,
     )
 
     /** The ids the last answer listed: the only ones a fetch may name. */
@@ -79,7 +81,8 @@ class RecentPhotos(private val ctx: Context) {
         val on = RecentPhotoPrefs.on(ctx)
         // F3: a photo asked for comes on the same link (F3 review: it was kept
         // only for Recent photos, so an ask never reached a phone without it).
-        val camera = CameraAsk.enabled(ctx)
+        // F6 part 2: and an ask to be its camera.
+        val camera = CameraAsk.enabled(ctx) || dev.pocketdesk.android.Prefs.webcam(ctx)
         // Nothing turned on and nothing asked: nothing to do (N7).
         if (!on && !camera && requests.isEmpty()) return
         val own = PhoneLink.target(ctx)
@@ -93,6 +96,16 @@ class RecentPhotos(private val ctx: Context) {
         }
         for (request in requests) {
             val ownComputer = PhoneFilesRule.fromOwnComputer(request.host, request.port, own?.address, own?.controlPort)
+            // F6 part 2: the camera asked for is offered to the owner in a notification.
+            if (request.webcam != null) {
+                val enabled = dev.pocketdesk.android.Prefs.webcam(ctx)
+                if (dev.pocketdesk.android.cast.WebcamAsk.shouldOffer(enabled, ownComputer)) {
+                    dev.pocketdesk.android.cast.WebcamAsk.offer(ctx, request.host, request.port, request.webcam)
+                } else {
+                    Log.i(TAG, "the computer asked for the camera; not offered (switch off, or not this phone's computer)")
+                }
+                continue
+            }
             // F3: a photo asked for is offered to the owner, whatever Recent photos says.
             if (request.take) {
                 if (CameraAsk.shouldOffer(CameraAsk.enabled(ctx), ownComputer)) CameraAsk.offer(ctx, request.host, request.port)
@@ -117,6 +130,15 @@ class RecentPhotos(private val ctx: Context) {
                     o.optBoolean("take", false),
                     o.optLong("before", -1),
                     o.optBoolean("clipboard", false),
+                    if (o.optBoolean("webcam", false)) {
+                        dev.pocketdesk.android.cast.WebcamAsk.Ask.of(
+                            o.optString("lens", "back"),
+                            o.optInt("height", 720),
+                            o.optInt("fps", 30),
+                        )
+                    } else {
+                        null
+                    },
                 )
             }
         }.getOrDefault(emptyList())

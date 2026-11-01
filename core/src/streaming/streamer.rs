@@ -86,6 +86,9 @@ struct ClientClaim {
     /// The phone's sound alone, played here (M7): no input, no picture
     /// either way, and no window.
     phone_sound: bool,
+    /// A cast for this computer's camera (F6 part 2): its picture goes to a
+    /// camera device, not a window. Said with [`super::client::CAST_WEBCAM_FLAG`].
+    webcam: bool,
 }
 
 /// Tells the relay a cast ended, however its session ends (T10k).
@@ -421,6 +424,10 @@ pub struct StreamingServer {
     /// player). Bounded with drop-on-full, as the mic's. Unset, a cast's
     /// sound is not taken, and the phone is told so.
     phone_sound_tx: Option<tokio::sync::mpsc::Sender<Vec<u8>>>,
+    /// F6 part 2: whether this computer offers phones as a camera now (the
+    /// owner's setting, read at each session). Unset, a camera cast is
+    /// refused.
+    webcam_offer: Option<fn() -> bool>,
     /// Optional session gate (pairing, F5 permissions and approval): called
     /// with the device id the client announced in-band (None if it sent
     /// none); `None` rejects the session before capture starts, `Some` is what
@@ -478,6 +485,7 @@ impl StreamingServer {
             mic_tx: None,
             cast_tx: None,
             phone_sound_tx: None,
+            webcam_offer: None,
             session_gate: None,
             telemetry: false,
             view_only: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -548,6 +556,12 @@ impl StreamingServer {
     /// Set where cast sessions' screens go (T10k). See the `cast_tx` field docs.
     pub fn set_cast_channel(&mut self, tx: tokio::sync::mpsc::Sender<super::cast::CastEvent>) {
         self.cast_tx = Some(tx);
+    }
+
+    /// Say whether phones may be this computer's camera (F6 part 2), asked
+    /// as each camera cast arrives. See the `webcam_offer` field docs.
+    pub fn set_webcam_offer(&mut self, offered: fn() -> bool) {
+        self.webcam_offer = Some(offered);
     }
 
     /// Decide each session before any video/input pipeline starts: `None`
@@ -674,6 +688,8 @@ impl StreamingServer {
         let input_only = claim.input_only;
         // The phone's own screen, shown here (T10k).
         let cast = claim.cast;
+        // F6 part 2: its camera as this computer's camera, not in a window.
+        let webcam = cast && claim.webcam;
         // The phone as this computer's speaker and mic (N5).
         let sound = claim.sound;
         // The phone's sound alone (M7): a cast's sound with no screen.
@@ -778,7 +794,15 @@ impl StreamingServer {
         }
         // A cast needs its own permission, and somewhere to show it.
         let cast_tx = if cast {
-            let refusal: Option<&[u8]> = if !permissions.allows(Capability::Cast) {
+            let refusal: Option<&[u8]> = if webcam {
+                // Its own permission and the owner's setting, not the
+                // screen's: a phone may show its screen without being a
+                // camera, and the other way round.
+                webcam_refusal(
+                    permissions.allows(Capability::Webcam),
+                    self.cast_tx.is_some() && self.webcam_offer.is_some_and(|offered| offered()),
+                )
+            } else if !permissions.allows(Capability::Cast) {
                 Some(b"phone screen not allowed")
             } else if self.cast_tx.is_none() {
                 Some(b"phone screen not shown here")
@@ -854,6 +878,7 @@ impl StreamingServer {
                 video: !no_picture,
                 cast,
                 phone_sound: allow_phone_sound,
+                webcam,
             },
         );
         // Where this session's absolute moves land (PC11 on Linux): read
@@ -944,11 +969,16 @@ impl StreamingServer {
                     device_id: device_id.clone(),
                     want_keyframe: cast_want_tx.clone(),
                     control: cast_control_tx.clone(),
+                    webcam,
                 };
                 if tx.send(start).await.is_err() {
                     warn!("The cast relay is gone");
                 }
-                info!("Cast session: the phone's screen is shown here");
+                if webcam {
+                    info!("Cast session: the phone's camera is this computer's camera");
+                } else {
+                    info!("Cast session: the phone's screen is shown here");
+                }
                 Some(CastEnded {
                     tx: tx.clone(),
                     session_id: _live_session.id(),
@@ -2244,9 +2274,9 @@ async fn read_client_config(
     hevc_allowed: bool,
 ) -> ClientClaim {
     use super::client::{
-        CODEC_CAPS_MARKER, DEVICE_ID_MARKER, IROH_KEY_MARKER, MONITOR_CONFIG_MARKER,
-        SESSION_MODE_CAST, SESSION_MODE_INPUT_ONLY, SESSION_MODE_MARKER, SESSION_MODE_PHONE_SOUND,
-        SESSION_MODE_SOUND,
+        CAST_WEBCAM_FLAG, CODEC_CAPS_MARKER, DEVICE_ID_MARKER, IROH_KEY_MARKER,
+        MONITOR_CONFIG_MARKER, SESSION_MODE_CAST, SESSION_MODE_INPUT_ONLY, SESSION_MODE_MARKER,
+        SESSION_MODE_PHONE_SOUND, SESSION_MODE_SOUND,
     };
 
     let mut claim = ClientClaim::default();
@@ -2334,11 +2364,33 @@ async fn read_client_config(
             claim.sound = mode[0] == SESSION_MODE_SOUND;
             claim.phone_sound = mode[0] == SESSION_MODE_PHONE_SOUND;
             info!(mode = mode[0], "Client session mode");
+            // F6 part 2: a camera cast's flag follows its mode; a mode
+            // stream that ends there (any other session) says nothing more.
+            if claim.cast {
+                let mut flag = [0u8; 1];
+                if read_with_timeout(&mut *stream, &mut flag).await && flag[0] == CAST_WEBCAM_FLAG {
+                    claim.webcam = true;
+                    info!("Client cast is for this computer's camera");
+                }
+            }
         } else {
             debug!("Unknown config marker: {:02X?}", &marker);
         }
     }
     claim
+}
+
+/// Why a camera cast (F6 part 2) is refused, or `None` when it may go:
+/// the phone needs its Webcam permission, and the computer must offer
+/// phones as a camera (its setting, and somewhere for the picture to go).
+fn webcam_refusal(allowed: bool, offered: bool) -> Option<&'static [u8]> {
+    if !allowed {
+        Some(b"phone camera not allowed")
+    } else if !offered {
+        Some(b"phone camera not offered here")
+    } else {
+        None
+    }
 }
 
 /// R4 C1: pick the session codec from the client's capability bits and the
@@ -3191,6 +3243,59 @@ mod tests {
         assert!(claim.cast);
         assert!(claim.input_only, "a cast is sent no picture");
         assert_eq!(claim.device_id.as_deref(), Some("device-c1"));
+    }
+
+    /// F6 part 2: a camera cast is a cast that says so after its mode.
+    #[tokio::test]
+    async fn a_camera_cast_says_so_after_its_mode() {
+        use super::super::client::StreamingClient;
+
+        let certs = std::sync::Arc::new(CertManager::new().expect("certs"));
+        let alpn = vec![StreamTransportConfig::default().alpn];
+        let server_endpoint = quinn::Endpoint::server(
+            certs.server_config(alpn.clone()).expect("server config"),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .expect("bind");
+        let addr = server_endpoint.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let incoming = server_endpoint.accept().await.expect("incoming");
+            QuinnConnection::shared(incoming.await.expect("accept"))
+        });
+        let (client, _frames, _audio) = StreamingClient::connect(
+            &addr.to_string(),
+            certs,
+            None,
+            Some("device-w1"),
+            None,
+            None,
+            super::super::client::SessionMode::Webcam,
+        )
+        .await
+        .expect("connect");
+        assert!(client.remote().cast);
+        let server_conn = accept.await.expect("accept task");
+        let mut config = StreamingConfig::default();
+        let claim = read_client_config(&server_conn, &mut config, true).await;
+        assert!(claim.cast && claim.webcam && claim.input_only);
+        assert_eq!(claim.device_id.as_deref(), Some("device-w1"));
+    }
+
+    #[test]
+    fn a_camera_cast_needs_its_permission_and_the_owners_offer() {
+        assert_eq!(
+            webcam_refusal(false, true),
+            Some(&b"phone camera not allowed"[..])
+        );
+        assert_eq!(
+            webcam_refusal(true, false),
+            Some(&b"phone camera not offered here"[..])
+        );
+        assert_eq!(
+            webcam_refusal(false, false),
+            Some(&b"phone camera not allowed"[..])
+        );
+        assert_eq!(webcam_refusal(true, true), None);
     }
 
     #[test]

@@ -50,6 +50,9 @@ iroh-mainline-address-lookup = "0.6"
 futures-lite = "2"
 # Relay hosts in the DHT record (N3).
 url = "2"
+# Shared input's datagrams carved from one buffer (already in the graph
+# through iroh, which takes them as `Bytes`).
+bytes = "1"
 # Clipboard images (N4): PNG on the wire, DIB for Windows apps.
 png = "0.18"
 # O7: a received JPEG goes onto the clipboard as PNG.
@@ -105,6 +108,10 @@ libc.workspace = true
 # libei stream, received in pure Rust (reis, MIT; no C libei).
 ashpd = { workspace = true, features = ["input_capture"] }
 reis = { version = "0.7.1", features = ["tokio"] }
+# A phone's camera published as a PipeWire camera (F6 part 2); the
+# version core's capture uses. 0.3.34 (2021) brings the driver's
+# `trigger_process`, which sends each picture as it is decoded.
+pipewire = { workspace = true, features = ["v0_3_34"] }
 
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true

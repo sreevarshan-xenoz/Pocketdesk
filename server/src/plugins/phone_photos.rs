@@ -10,6 +10,7 @@ use std::time::Duration;
 use pocketdesk_core::error::Result;
 use pocketdesk_core::local::phone_photos::{self as store, Ask};
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
+use pocketdesk_core::protocol::phone_camera::{self, CameraAsk};
 use pocketdesk_core::protocol::phone_photos::{
     FETCH, LIST, PHOTOS, Photos, TAKE, fetch_body, list_body,
 };
@@ -34,7 +35,7 @@ impl Plugin for PhonePhotosPlugin {
     }
 
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
-        &[LIST, FETCH, TAKE]
+        &[LIST, FETCH, TAKE, phone_camera::START]
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
@@ -75,14 +76,16 @@ impl Plugin for PhonePhotosPlugin {
     }
 }
 
-/// The packet a request sends.
-pub(crate) fn request_packet(request: &store::Request) -> NetworkPacket {
+/// The packet a request sends; a camera ask (F6 part 2) carries `camera`,
+/// the computer's camera settings.
+pub(crate) fn request_packet(request: &store::Request, camera: &CameraAsk) -> NetworkPacket {
     match request.ask {
         Ask::List => NetworkPacket::new(LIST).with_body(list_body(None)),
         Ask::ListBefore(id) => NetworkPacket::new(LIST).with_body(list_body(Some(id))),
         Ask::Fetch(id) => NetworkPacket::new(FETCH).with_body(fetch_body(id, false)),
         Ask::Copy(id) => NetworkPacket::new(FETCH).with_body(fetch_body(id, true)),
         Ask::Take => NetworkPacket::new(TAKE).with_body(serde_json::json!({})),
+        Ask::Webcam => NetworkPacket::new(phone_camera::START).with_body(camera.body()),
     }
 }
 
@@ -105,10 +108,20 @@ pub async fn run_watcher() {
             continue;
         }
         let clients = crate::state::clone_clients().await;
+        let camera = crate::phone_camera::ask_now();
         for request in requests {
-            let packet = request_packet(&request);
+            // F6 part 2: only while this computer offers phones as a camera.
+            if request.ask == Ask::Webcam && camera.is_none() {
+                tracing::info!(
+                    "A camera ask was dropped: this computer does not offer phones as a camera"
+                );
+                continue;
+            }
+            let packet = request_packet(&request, &camera.unwrap_or_default());
             if !crate::plugins::pair::permits(&request.device_id, &packet.packet_type) {
-                tracing::info!("A request for a phone's photos was dropped: Files is off");
+                tracing::info!(
+                    "A request for a phone's photos or camera was dropped: its permission is off"
+                );
                 continue;
             }
             let Some(phone) = clients.iter().find(|c| c.device_id() == request.device_id) else {
@@ -143,23 +156,32 @@ mod tests {
             ask,
             created_unix: 1,
         };
-        let list = request_packet(&request(Ask::List));
+        let camera = CameraAsk::default();
+        let list = request_packet(&request(Ask::List), &camera);
         assert_eq!(list.packet_type, LIST);
-        let fetch = request_packet(&request(Ask::Fetch(7)));
+        let fetch = request_packet(&request(Ask::Fetch(7)), &camera);
         assert_eq!(fetch.packet_type, FETCH);
         assert_eq!(fetch.body["id"], 7);
         assert!(fetch.body.get("clipboard").is_none());
         // T4: an older page, and a copy the phone puts on the clipboard.
-        let older = request_packet(&request(Ask::ListBefore(9)));
+        let older = request_packet(&request(Ask::ListBefore(9)), &camera);
         assert_eq!(
             (older.packet_type.as_str(), &older.body["before"]),
             (LIST, &serde_json::json!(9))
         );
-        let copy = request_packet(&request(Ask::Copy(7)));
+        let copy = request_packet(&request(Ask::Copy(7)), &camera);
         assert_eq!(copy.packet_type, FETCH);
         assert_eq!(copy.body["clipboard"], true);
         // F3: the camera, offered to the phone's owner.
-        assert_eq!(request_packet(&request(Ask::Take)).packet_type, TAKE);
+        assert_eq!(
+            request_packet(&request(Ask::Take), &camera).packet_type,
+            TAKE
+        );
+        // F6 part 2: the camera, with what the computer asks of it.
+        let front = CameraAsk::new("front", 1080, 24);
+        let webcam = request_packet(&request(Ask::Webcam), &front);
+        assert_eq!(webcam.packet_type, phone_camera::START);
+        assert_eq!(CameraAsk::from_body(&webcam.body), front);
     }
 
     #[test]

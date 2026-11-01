@@ -2077,7 +2077,14 @@ fn each_permission_group_switch_saves_its_permissions() {
         ("Control", vec![C::Input, C::SharedInput, C::Power, C::Peek]),
         (
             "Screen, sound and media",
-            vec![C::Cast, C::Audio, C::Mic, C::Media, C::PhoneSound],
+            vec![
+                C::Cast,
+                C::Webcam,
+                C::Audio,
+                C::Mic,
+                C::Media,
+                C::PhoneSound,
+            ],
         ),
         (
             "Files and clipboard",
