@@ -261,6 +261,49 @@ fun PhoneActionsSetting() {
 }
 
 /**
+ * Hands-free: Pocketdesk presses Android's own screen-sharing question for the
+ * phone's own computer, so an app the computer opens needs no tap. Off by
+ * default; it needs "Let the computer open my apps" and the control service,
+ * and presses only that one question, just after Pocketdesk raises it.
+ */
+@Composable
+fun AutoAcceptSetting() {
+    val context = LocalContext.current
+    val resumes = rememberResumes()
+    var on by remember { mutableStateOf(Prefs.autoAcceptScreen(context)) }
+    val serviceOn = remember(resumes, on) { ControlRunner.serviceEnabled(context) }
+    val appsOn = remember(resumes, on) { Prefs.appsFromComputer(context) }
+    val openAccessibility = {
+        runCatching {
+            context.startActivity(
+                Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
+    SettingSwitch(
+        title = stringResource(R.string.settings_auto_accept),
+        summary = stringResource(
+            when {
+                !on -> R.string.settings_auto_accept_summary_off
+                !appsOn -> R.string.settings_auto_accept_summary_needs_apps
+                !serviceOn -> R.string.settings_control_summary_needs_service
+                else -> R.string.settings_auto_accept_summary_on
+            },
+        ),
+        checked = on,
+        warning = on && (!serviceOn || !appsOn),
+        onChange = { want ->
+            on = want
+            Prefs.setAutoAcceptScreen(context, want)
+            if (want && !ControlRunner.serviceEnabled(context)) openAccessibility()
+        },
+    )
+    if (on && appsOn && !serviceOn) {
+        SettingLink(stringResource(R.string.settings_control_open_accessibility), null) { openAccessibility() }
+    }
+}
+
+/**
  * M10: copies made on the phone sent by themselves. Its own switch, needing
  * C8's Accessibility service, which then watches for Android's clipboard
  * preview; Android 13 and later only, where the preview is shown.

@@ -79,7 +79,69 @@ class ControlService : AccessibilityService() {
         }
         serviceInfo = info
         watchingCopies = on
+        // A screen-sharing question being accepted still needs the view ids.
+        syncViewIds()
         Log.i(TAG, "watching copies: $on")
+    }
+
+    /** Hands-free: the screen-sharing question being accepted now, if any. */
+    private var consent: ConsentPress? = null
+    private var consentArmedFlag = false
+
+    /**
+     * Hands-free: accept Android's screen-sharing question that Pocketdesk is
+     * launching right now for an open [address] asked (see [ConsentRule]):
+     * only when the owner's opt-in, the apps switch and the computer all
+     * still say so, for [ConsentRule.APPEAR_MS] + [ConsentRule.STEPS_MS] at
+     * most, ending at its first press. [consentPackage] is the app Android
+     * resolved the question to. [done] is told once, on the main thread, with
+     * [ConsentRule.PRESSED], [ConsentRule.NOT_FOUND] or [ConsentRule.NOT_ALLOWED].
+     */
+    fun armConsent(address: String, label: String, consentPackage: String?, done: (String) -> Unit) = main.post {
+        val own = dev.pocketdesk.android.notify.PhoneLink.target(this)?.address == address
+        val allowed = ConsentRule.mayArm(
+            autoOn = dev.pocketdesk.android.Prefs.autoAcceptScreen(this),
+            appsOn = dev.pocketdesk.android.Prefs.appsFromComputer(this),
+            own = own,
+            service = instance === this,
+        )
+        if (!allowed || consent != null) {
+            Log.i(TAG, "the screen-sharing question is not accepted by itself: ${if (allowed) "one is already waiting" else "not allowed now"}")
+            done(ConsentRule.NOT_ALLOWED)
+            return@post
+        }
+        consentArmedFlag = true
+        syncViewIds()
+        val press = ConsentPress(this, label, ConsentRule.packages(consentPackage, packageName)) { result ->
+            consent = null
+            consentArmedFlag = false
+            syncViewIds()
+            done(result)
+        }
+        consent = press
+        press.start()
+    }
+
+    /** Stop accepting (the cast came up, or the service is going). */
+    fun disarmConsent() = main.post {
+        consent?.cancel()
+        consent = null
+        consentArmedFlag = false
+        syncViewIds()
+    }
+
+    /** The view ids are reported while copies are watched or a question is being accepted. */
+    private fun syncViewIds() {
+        val info = serviceInfo ?: return
+        val want = watchingCopies || consentArmedFlag
+        val has = info.flags and AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS != 0
+        if (want == has) return
+        info.flags = if (want) {
+            info.flags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+        } else {
+            info.flags and AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS.inv()
+        }
+        serviceInfo = info
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
@@ -100,6 +162,7 @@ class ControlService : AccessibilityService() {
 
     override fun onDestroy() {
         if (instance === this) instance = null
+        consent?.cancel()
         removePointer()
         typing.quitSafely()
         super.onDestroy()

@@ -305,13 +305,56 @@ object PhoneActions {
         if (result != null) Thread { report(own.address, own.controlPort, "open", ask.app, result) }.start()
     }
 
-    /** The owner is asked once, at the phone, for the screen; the computer is told so. */
-    private fun showScreenFirst(context: Context, ask: RustCore.PhoneActionAsk, own: HostStore.Host): String {
-        val pm = context.packageManager
-        val label = runCatching { pm.getApplicationLabel(pm.getApplicationInfo(ask.app, 0)).toString() }
-            .getOrDefault(ask.app)
-        dev.pocketdesk.android.cast.ScreenForApp.offer(context, own, ask.app, label)
+    /**
+     * The owner is asked once, at the phone, for the screen; the computer is
+     * told so. With "Accept screen sharing for my computers" on and everything
+     * it needs in place, Pocketdesk starts the question itself instead and
+     * presses it ([ConsentRule]); then nothing is told yet: the app opens (and
+     * the computer is told) when the cast is up, or [consentNeedsTap] says why not.
+     */
+    private fun showScreenFirst(context: Context, ask: RustCore.PhoneActionAsk, own: HostStore.Host): String? {
+        val service = ControlService.instance
+        if (service != null && ConsentRule.mayArm(
+                autoOn = Prefs.autoAcceptScreen(context),
+                appsOn = Prefs.appsFromComputer(context),
+                own = true,
+                service = true,
+            )
+        ) {
+            val started = runCatching {
+                service.startActivity(
+                    Intent(context, dev.pocketdesk.android.cast.ScreenForAppActivity::class.java)
+                        .putExtra(dev.pocketdesk.android.cast.ScreenForApp.EXTRA_ADDRESS, own.address)
+                        .putExtra(dev.pocketdesk.android.cast.ScreenForApp.EXTRA_PORT, own.port)
+                        .putExtra(dev.pocketdesk.android.cast.ScreenForApp.EXTRA_CONTROL_PORT, own.controlPort)
+                        .putExtra(dev.pocketdesk.android.cast.ScreenForApp.EXTRA_APP, ask.app)
+                        .putExtra(dev.pocketdesk.android.cast.ScreenForApp.EXTRA_AUTO, true)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+            if (started.isSuccess) return null
+            Log.w(TAG, "the screen-sharing window did not start from the service", started.exceptionOrNull())
+        }
+        offerScreen(context, ask.app, own)
         return AppOpenRule.NEEDS_SCREEN
+    }
+
+    /** The one-tap notification for the screen, naming the app. */
+    private fun offerScreen(context: Context, pkg: String, own: HostStore.Host) {
+        val pm = context.packageManager
+        val label = runCatching { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() }
+            .getOrDefault(pkg)
+        dev.pocketdesk.android.cast.ScreenForApp.offer(context, own, pkg, label)
+    }
+
+    /**
+     * Hands-free could not accept the screen-sharing question by itself: the
+     * ordinary one-tap notification is offered, silently, and the computer is
+     * told a tap is needed ("needs_tap").
+     */
+    fun consentNeedsTap(context: Context, own: HostStore.Host, pkg: String) {
+        offerScreen(context, pkg, own)
+        Thread { report(own.address, own.controlPort, "open", pkg, AppOpenRule.NEEDS_TAP) }.start()
     }
 
     /** Take the asks waiting; [own] is the computer the phone works with. */
