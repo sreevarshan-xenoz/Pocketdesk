@@ -1530,11 +1530,21 @@ impl SettingsForm {
                     row(ui, "phone_approves_lock_screen", |ui| {
                         ui.checkbox(
                             &mut e.phone_approves_lock_screen,
-                            "unlock the lock screen from the phone (hyprlock, swaylock, KDE, GNOME)",
+                            "unlock the lock screen from the phone (hyprlock, swaylock, KDE, gtklock)",
                         );
                         note(
                             ui,
                             "Its own switch, off by default, and its own PAM line. The phone is asked when the lock screen starts checking; the password works as before.",
+                        );
+                    });
+                    row(ui, "phone_approves_polkit", |ui| {
+                        ui.checkbox(
+                            &mut e.phone_approves_polkit,
+                            "approve polkit's administrator prompts from the phone",
+                        );
+                        note(
+                            ui,
+                            "Its own switch, off by default. polkit does not tell PAM which action it asks for, so the phone cannot show it; a request from another user is refused; and the newer socket-started polkit helper has no parent processes to tell ssh by, so \"Only from this desk\" cannot judge it.",
                         );
                     });
                     row(ui, "phone_approves_local_only", |ui| {
@@ -1544,7 +1554,7 @@ impl SettingsForm {
                         );
                         note(
                             ui,
-                            "On by default: sudo typed over ssh asks for the password, not the phone.",
+                            "On by default: a best-effort guard, not a boundary. sudo typed in an ssh session asks for the password, not the phone; but sudo run over ssh inside a tmux started at this desk, or through systemd-run or a timer, is not seen as remote.",
                         );
                     });
                     row(ui, "phone_approves_timeout_secs", |ui| {

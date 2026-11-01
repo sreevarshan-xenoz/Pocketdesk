@@ -14,7 +14,7 @@ use pocketdesk_core::protocol::approve::{HELPER_PATH, PAM_SERVICES, PIN_DIR, pam
 /// What the section keeps between frames.
 #[derive(Default)]
 pub struct ApproveUi {
-    /// The keys the phones gave, read again every 2 s.
+    /// The keys root pinned for this user, read again every 2 s.
     keys: Option<(Instant, Vec<PhoneKey>)>,
     /// A Test running: its output when done.
     test: Option<std::thread::JoinHandle<String>>,
@@ -47,8 +47,13 @@ impl ApproveUi {
             .as_ref()
             .is_none_or(|(at, _)| at.elapsed() > Duration::from_secs(2));
         if stale {
-            let keys = pocketdesk_core::local::paths::state_dir()
-                .map(|dir| pocketdesk_core::local::approve::keys(&dir))
+            // Root's pin (world-readable), not the phones' own word.
+            let keys = std::fs::read_to_string(Path::new(PIN_DIR).join(format!("{}.json", user())))
+                .ok()
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                .and_then(|pin| {
+                    serde_json::from_value::<Vec<PhoneKey>>(pin.get("keys")?.clone()).ok()
+                })
                 .unwrap_or_default();
             self.keys = Some((Instant::now(), keys));
         }
@@ -73,10 +78,27 @@ impl ApproveUi {
         ui.label(RichText::new("1. On the phone").strong());
         crate::settings_view::note(
             ui,
-            "Turn on \"Answer my questions\" for the phone on the Devices page here, then \"Approve my computer's requests\" in Pocketdesk's Settings on the phone. It makes a key that signs only after your fingerprint (or screen lock), and gives this computer its public key.",
+            "Turn on \"Answer my questions\" for the phone on the Devices page here, then \"Approve my computer's requests\" in Pocketdesk's Settings on the phone.",
         );
+
+        ui.add_space(4.0);
+        ui.label(RichText::new("2. Pin the phone's key as root").strong());
+        let pin = format!("sudo {HELPER_PATH} --pin {}", user());
+        copy_line(ui, &pin);
+        crate::settings_view::note(
+            ui,
+            "The phone asks \"Allow this phone to approve sudo?\" and takes your fingerprint; it then makes its key in its secure hardware, and root checks the key's Android attestation up to Google's roots before pinning it in /etc/pocketdesk/pam, where only root can change it. It prints the key's whole fingerprint: check every digit against the phone's Settings. A phone without attestation can be pinned with --pin-without-attestation, which warns that nothing then proves where the key lives. Pin again after the phone makes a new key; forget them with --unpin.",
+        );
+        if !Path::new(HELPER_PATH).is_file() {
+            ui.label(
+                RichText::new(format!(
+                    "{HELPER_PATH} is not installed: the AUR and .deb packages install it; from source, sudo install -Dm755 target/release/pocketdesk-pam-ask {HELPER_PATH}. It must belong to root."
+                ))
+                .color(crate::theme::bad(ui)),
+            );
+        }
         if keys.is_empty() {
-            ui.label(RichText::new("No phone has given its key yet.").color(crate::theme::bad(ui)));
+            ui.label(RichText::new("No phone is pinned yet.").color(crate::theme::bad(ui)));
         }
         for key in &keys {
             let name = phones
@@ -85,13 +107,19 @@ impl ApproveUi {
                 .map_or(key.device_id.as_str(), |(_, n)| n.as_str());
             let mut on = chosen.is_empty() || chosen.contains(&key.device_id);
             let label = format!(
-                "{name}: key {}{}",
-                key.fingerprint,
+                "{name}: {}{}
+key {}",
+                match key.attested.as_deref() {
+                    Some("strongbox") => "attested, in StrongBox",
+                    Some(_) => "attested, in the TEE",
+                    None => "NOT attested",
+                },
                 if key.biometric_only {
                     ", fingerprint only"
                 } else {
                     ""
-                }
+                },
+                key.fingerprint,
             );
             if ui.checkbox(&mut on, label).changed() {
                 // Empty is every phone: a first untick names the others.
@@ -109,33 +137,10 @@ impl ApproveUi {
         }
 
         ui.add_space(4.0);
-        ui.label(RichText::new("2. Pin the keys as root").strong());
-        let pin = format!("sudo {HELPER_PATH} --pin {}", user());
-        copy_line(ui, &pin);
-        crate::settings_view::note(
-            ui,
-            "It copies the phones' keys and this computer's certificate hash into /etc/pocketdesk/pam, where only root can change them, and prints each key: check it matches the phone's Settings. Pin again after the phone makes a new key; forget them with --unpin.",
-        );
-        let pinned = Path::new(PIN_DIR)
-            .join(format!("{}.json", user()))
-            .is_file();
-        if pinned {
-            ui.label("Pinned for you.");
-        }
-        if !Path::new(HELPER_PATH).is_file() {
-            ui.label(
-                RichText::new(format!(
-                    "{HELPER_PATH} is not installed: the AUR and .deb packages install it; from source, sudo install -Dm755 target/release/pocketdesk-pam-ask {HELPER_PATH}. It must belong to root."
-                ))
-                .color(crate::theme::bad(ui)),
-            );
-        }
-
-        ui.add_space(4.0);
         ui.label(RichText::new("3. Add the line to PAM yourself").strong());
         crate::settings_view::note(
             ui,
-            "As root, put this line first among the auth lines of each service you want (Pocketdesk never edits /etc/pam.d). It is \"sufficient\": when the phone does not approve, the password prompt comes as before. Keep a root shell open while you try it.",
+            "As root, add this line to each service you want (Pocketdesk never edits /etc/pam.d): after pam_faillock.so preauth where your distribution has it, and before pam_unix (on Arch and Fedora, sudo includes system-auth, so put \"auth required pam_faillock.so preauth\" and then this line above that include). It is \"sufficient\": when the phone does not approve, the password prompt comes as before; a Yes does not unlock your keyring. Keep a root shell open while you try it; docs/guide.md has the way back.",
         );
         copy_line(ui, &pam_line());
         let services: Vec<String> = PAM_SERVICES
@@ -145,7 +150,7 @@ impl ApproveUi {
         crate::settings_view::note(
             ui,
             format!(
-                "Services: {}. The lock-screen ones only with \"The lock screen too\" on.",
+                "Services: {}. polkit only with \"polkit too\" on, the lock-screen ones only with \"The lock screen too\" on.",
                 services.join(", ")
             ),
         );
