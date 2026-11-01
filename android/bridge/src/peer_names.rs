@@ -31,12 +31,23 @@ fn lives() -> &'static Mutex<HashMap<String, bool>> {
     LIVES.get_or_init(Default::default)
 }
 
+fn kepts() -> &'static Mutex<HashMap<String, bool>> {
+    static KEPTS: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
+    KEPTS.get_or_init(Default::default)
+}
+
 /// Keep what the computer at `address` said (its name already cleaned by
 /// the core's handshake); no name keeps the last one heard, and no identity
 /// keeps the last word on answering.
 pub(crate) fn note(address: &str, claims: PeerClaims) {
     if let Some(takes) = claims.takes_live() {
         lives()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(address.to_string(), takes);
+    }
+    if let Some(takes) = claims.takes_kept() {
+        kepts()
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(address.to_string(), takes);
@@ -82,6 +93,10 @@ pub(crate) fn forget(address: &str) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(address);
+    kepts()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(address);
     versions()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -103,6 +118,18 @@ pub(crate) fn acks_notifications(address: &str) -> bool {
 /// a phone's ongoing updates as one card (N4).
 pub fn takes_live(address: &str) -> bool {
     lives()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(address)
+        .copied()
+        .unwrap_or(false)
+}
+
+/// Whether the computer at `address` said, when last heard, that it keeps
+/// a phone's folders (the phone's "Folders kept on my computer"): an older
+/// one would take their files as folder sends and pile copies in Downloads.
+pub fn takes_kept(address: &str) -> bool {
+    kepts()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .get(address)
@@ -140,6 +167,7 @@ mod tests {
             name: name.map(str::to_string),
             sends: None,
             version: None,
+            takes: None,
         }
     }
 
@@ -165,6 +193,7 @@ mod tests {
                 vec![]
             }),
             version: None,
+            takes: None,
         };
         assert!(!acks_notifications("192.0.2.50"), "never heard");
         note("192.0.2.50", says(true));
@@ -189,6 +218,7 @@ mod tests {
                     "kdeconnect.pocketdesk.notification_open".to_string(),
                 ]),
                 version: Some("0.8.1".to_string()),
+                takes: None,
             },
         );
         assert!(acks_notifications(address) && takes_live(address));
@@ -208,6 +238,7 @@ mod tests {
             name: None,
             sends: Some(sends.into_iter().map(str::to_string).collect()),
             version: None,
+            takes: None,
         };
         assert!(!takes_live("192.0.2.60"));
         note(
@@ -217,6 +248,34 @@ mod tests {
         assert!(takes_live("192.0.2.60"));
         note("192.0.2.60", says(vec!["kdeconnect.notification.ack"]));
         assert!(!takes_live("192.0.2.60"), "an older computer");
+    }
+
+    /// A computer that takes a kept folder's run keeps folders; an older one,
+    /// or one never heard, does not, and a handshake with no identity
+    /// changes nothing.
+    #[test]
+    fn a_computer_keeps_folders_only_when_it_says_it_takes_the_run() {
+        let says = |takes: Vec<&str>| PeerClaims {
+            takes: Some(takes.into_iter().map(str::to_string).collect()),
+            ..Default::default()
+        };
+        let address = "192.0.2.95";
+        assert!(!takes_kept(address), "never heard");
+        note(
+            address,
+            says(vec![pocketdesk_core::protocol::kept::KEEP_RUN]),
+        );
+        assert!(takes_kept(address));
+        note(address, named(None));
+        assert!(takes_kept(address), "no identity, no change");
+        note(address, says(vec!["kdeconnect.share.request"]));
+        assert!(!takes_kept(address), "an older computer now");
+        note(
+            address,
+            says(vec![pocketdesk_core::protocol::kept::KEEP_RUN]),
+        );
+        forget(address);
+        assert!(!takes_kept(address), "let go with the rest");
     }
 
     /// Item 4: the release a computer says is kept per address; a handshake
@@ -229,6 +288,7 @@ mod tests {
             name: None,
             sends: Some(Vec::new()),
             version: release.map(str::to_string),
+            takes: None,
         };
         assert_eq!(version(address), None, "never heard");
         note(address, says(Some("0.8.1")));
