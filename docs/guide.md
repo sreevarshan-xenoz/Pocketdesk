@@ -38,7 +38,7 @@ Tailscale is not required. It carries everything, adds a second encrypted layer 
 
 ## What works where
 
-The desktop end runs on Linux and Windows; the phone end is the Android app. It describes 0.8.3 and what has merged to `main` since (PRs #592 to #598, among them: the portable Linux tarball, the Linux firewall row, shared input's receiving end, and the OpenH264 fallback), which ships with the next release. The last row says what a person has run on real hardware (dates and details in [the checklist](device-verification-checklist.md)); everything else is unit- or integration-tested only.
+The desktop end runs on Linux and Windows; the phone end is the Android app. It describes 0.8.3 and what has merged to `main` since (PRs #592 onward, among them: the portable Linux tarball, the Linux firewall row, shared input, the OpenH264 fallback, the phone's camera as a webcam, approving sudo with the phone, the phone's location, the direct link, phone apps on the computer, kept folders and the wake helper), which ships with the next release. The last row says what a person has run on real hardware (dates and details in [the checklist](device-verification-checklist.md)); everything else is unit- or integration-tested only.
 
 | | Linux host | Windows host |
 |---|---|---|
@@ -305,7 +305,7 @@ The package installs:
 
 - **Android, kept up to date with Obtainium:** add `https://github.com/sreevarshan-xenoz/Pocketdesk`; each release since 0.4.0 has one APK (`pocketdesk-vX.Y.Z-android-arm64.apk`), signed with the release key, whose certificate's SHA-256 is `3a2452b38b4be5ac8493b330a91ed5a43e8490e6c74b8a7934599bc5e8ac3a0f` (for AppVerifier or `apksigner verify --print-certs`). Or download the APK from the release page.
 - **Windows with winget:** the manifests are in `packaging/winget/`, one folder per release (0.8.3's the newest, written by `scripts/winget_manifest.py` as each release's is; 0.7.0's was validated with `winget validate`; not yet in winget's own catalogue, and not yet installed from on a clean machine). `winget install --manifest packaging/winget/manifests/s/SreevarshanXenoz/Pocketdesk/0.8.3` should install `pocketdesk` and `pocketdesk-app` as commands, with FFmpeg as a dependency (it needs `winget settings --enable LocalManifestFiles` from an administrator). Then run `pocketdesk install`, and again after every upgrade, with `pocketdesk stop` before it: the logon task names the version's folder.
-- **F-Droid:** the metadata is ready in `packaging/fdroid/`, not yet submitted. [packaging/README.md](../packaging/README.md) has the steps.
+- **F-Droid:** submitted (fdroiddata merge request !54623), its build reproduces the release APK byte for byte, and it waits in F-Droid's review queue; not yet published. The metadata is in `packaging/fdroid/`, and [packaging/README.md](../packaging/README.md) has the steps.
 
 ### Install Script Options
 
