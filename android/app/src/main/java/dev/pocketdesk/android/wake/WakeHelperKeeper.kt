@@ -46,6 +46,9 @@ object WakeHelperKeeper {
                         HostStore.clearWakeHelperDuty(ctx, saved.address)
                         if (on) refused = true
                     }
+                    // It can give no duty now (the helper is off its
+                    // networks): what was held, requesters included, goes.
+                    WakeHelperRule.withdrawn(body) -> HostStore.clearWakeHelperDuty(ctx, saved.address)
                     on && own?.address == saved.address ->
                         HostStore.saveWakeHelperDuty(ctx, saved.address, body.toString())
                 }

@@ -152,6 +152,7 @@ object HostStore {
             KEY_WAKE_SETTINGS_PREFIX,
             // A spare phone as the wake helper: what the computer said of it.
             KEY_HELPER_DUTY_PREFIX,
+            KEY_HELPER_DUTY_AT_PREFIX,
             KEY_HELPER_INFO_PREFIX,
             KEY_WAN_IDENTITY_PREFIX,
             KEY_MONITOR_PREFIX,
@@ -353,28 +354,47 @@ object HostStore {
     }
 
     private const val KEY_HELPER_DUTY_PREFIX = "wake_helper_duty:"
+    private const val KEY_HELPER_DUTY_AT_PREFIX = "wake_helper_duty_at:"
     private const val KEY_HELPER_INFO_PREFIX = "wake_helper_info:"
 
     /**
      * What the computer at [address] told this phone to do as its wake helper
      * (a `wake_helper_duty` body), or null. Kept only for a computer this
-     * phone paired with.
+     * phone paired with, and only while it is held: one the computer has not
+     * said again in a week is dropped ([dev.pocketdesk.android.wake.WakeHelperRule.dutyHeld]).
      */
-    fun wakeHelperDuty(ctx: Context, address: String): String? =
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString("$KEY_HELPER_DUTY_PREFIX$address", null)?.takeIf { it.isNotBlank() }
-
-    /** Keep the duty the computer sent; returns whether it changed. */
-    fun saveWakeHelperDuty(ctx: Context, address: String, json: String): Boolean {
+    fun wakeHelperDuty(ctx: Context, address: String, now: Long = System.currentTimeMillis()): String? {
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (prefs.getString("$KEY_HELPER_DUTY_PREFIX$address", null) == json) return false
-        prefs.edit { putString("$KEY_HELPER_DUTY_PREFIX$address", json) }
-        return true
+        val json = prefs.getString("$KEY_HELPER_DUTY_PREFIX$address", null)?.takeIf { it.isNotBlank() } ?: return null
+        val at = prefs.getLong("$KEY_HELPER_DUTY_AT_PREFIX$address", 0L)
+        return json.takeIf { dev.pocketdesk.android.wake.WakeHelperRule.dutyHeld(now, at) }
+    }
+
+    /**
+     * Keep the duty the computer sent, and when it was heard (it says it
+     * again every hour while linked); returns whether the duty changed.
+     */
+    fun saveWakeHelperDuty(
+        ctx: Context,
+        address: String,
+        json: String,
+        now: Long = System.currentTimeMillis(),
+    ): Boolean {
+        val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val changed = prefs.getString("$KEY_HELPER_DUTY_PREFIX$address", null) != json
+        prefs.edit {
+            putString("$KEY_HELPER_DUTY_PREFIX$address", json)
+            putLong("$KEY_HELPER_DUTY_AT_PREFIX$address", now)
+        }
+        return changed
     }
 
     /** Forget the duty kept for [address]: it removed this phone as its helper. */
     fun clearWakeHelperDuty(ctx: Context, address: String) {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { remove("$KEY_HELPER_DUTY_PREFIX$address") }
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            remove("$KEY_HELPER_DUTY_PREFIX$address")
+            remove("$KEY_HELPER_DUTY_AT_PREFIX$address")
+        }
     }
 
     /**

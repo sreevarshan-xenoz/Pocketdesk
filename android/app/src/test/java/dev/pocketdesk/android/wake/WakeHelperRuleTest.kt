@@ -49,6 +49,25 @@ class WakeHelperRuleTest {
     }
 
     @Test
+    fun `a duty not heard in a week is dropped`() {
+        val day = 24 * 60 * 60_000L
+        val now = 100 * day
+        assertTrue(WakeHelperRule.dutyHeld(now, now))
+        assertTrue(WakeHelperRule.dutyHeld(now, now - 6 * day))
+        assertTrue(WakeHelperRule.dutyHeld(now, now - WakeHelperRule.DUTY_KEEP_MS))
+        assertFalse(WakeHelperRule.dutyHeld(now, now - WakeHelperRule.DUTY_KEEP_MS - 1))
+        assertFalse("never heard", WakeHelperRule.dutyHeld(now, 0))
+        assertTrue("the clock went back: held, and told again within the hour", WakeHelperRule.dutyHeld(now, now + day))
+    }
+
+    @Test
+    fun `a withdrawn duty is read from the word`() {
+        assertTrue(WakeHelperRule.withdrawn(JSONObject("""{"computer":"c","withdrawn":true}""")))
+        assertFalse(WakeHelperRule.withdrawn(JSONObject("""{"computer":"c","mac":"x"}""")))
+        assertFalse(WakeHelperRule.withdrawn(JSONObject("""{"computer":"c","refused":true}""")))
+    }
+
+    @Test
     fun `a refusal is read from the duty`() {
         assertTrue(WakeHelperRule.refused(JSONObject("""{"computer":"c","refused":true}""")))
         assertFalse(WakeHelperRule.refused(JSONObject("""{"computer":"c","mac":"x"}""")))

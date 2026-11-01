@@ -70,6 +70,20 @@ object WakeHelperRule {
     fun keep(bodyComputer: String?, pairedId: String?): Boolean =
         !bodyComputer.isNullOrEmpty() && pairedId != null && bodyComputer == pairedId
 
+    /** A duty not heard again in this long is dropped: a week. */
+    const val DUTY_KEEP_MS = 7 * 24 * 60 * 60_000L
+
+    /**
+     * Whether a duty last heard at [at] (ms since the epoch, 0 for never) is
+     * still held at [now]. The computer says it again every hour while the
+     * phone is linked, so a duty this old is from a computer long out of
+     * reach, whose list of phones may be out of date.
+     */
+    fun dutyHeld(now: Long, at: Long): Boolean = at > 0 && now - at <= DUTY_KEEP_MS
+
+    /** Whether a computer's word says it can give this phone no duty now. */
+    fun withdrawn(duty: JSONObject): Boolean = duty.optBoolean("withdrawn", false)
+
     /** Whether a computer's word says it refuses this phone as its helper. */
     fun refused(duty: JSONObject): Boolean = duty.optBoolean("refused", false)
 
