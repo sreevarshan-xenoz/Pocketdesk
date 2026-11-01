@@ -16,7 +16,15 @@ object FolderWalk {
     const val MAX_BYTES = 32L * 1024 * 1024 * 1024
 
     /** One child of a folder, as the documents provider lists it; [modified] in ms, 0 when it does not say. */
-    data class Entry(val id: String, val name: String, val isDir: Boolean, val size: Long, val modified: Long = 0)
+    data class Entry(
+        val id: String,
+        val name: String,
+        val isDir: Boolean,
+        val size: Long,
+        val modified: Long = 0,
+        /** The provider gave a row with no id, name or (when one is needed) size: counted, never silently left out. */
+        val unreadable: Boolean = false,
+    )
 
     /** One file to send. */
     data class File(val id: String, val path: List<String>, val size: Long, val modified: Long = 0)
@@ -60,6 +68,12 @@ object FolderWalk {
             }
             for (entry in listed) {
                 if (truncated) return
+                // A row the provider gave half: a part of the folder, not the whole.
+                if (entry.unreadable) {
+                    skipped++
+                    listFailed++
+                    continue
+                }
                 if (entry.name.startsWith(".")) continue
                 if (!sendable(entry.name)) {
                     skipped++

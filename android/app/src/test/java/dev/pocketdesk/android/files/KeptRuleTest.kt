@@ -71,10 +71,36 @@ class KeptRuleTest {
         val few = KeptRule.diff(plan(*many.drop(5).toTypedArray()), record(*many.toTypedArray()))
         assertNull(few.held)
         assertEquals(5, few.gone.size)
-        // A small folder emptied is not "many".
-        val small = KeptRule.diff(plan(), record(file("a"), file("b")))
-        assertNull(small.held)
-        assertEquals(2, small.gone.size)
+    }
+
+    @Test
+    fun aSmallFolderEmptiedOrMostlyGoneIsHeldToo() {
+        val a = file("a")
+        val b = file("b")
+        val c = file("c")
+        val d = file("d")
+        // An empty listing with a record is held, however small the record.
+        assertEquals(KeptRule.Held.MANY, KeptRule.diff(plan(), record(a, b)).held)
+        assertEquals(KeptRule.Held.MANY, KeptRule.diff(plan(), record(a)).held)
+        // More than half gone, whatever the size: 2 of 3 held, 1 of 2 not.
+        val twoOfThree = KeptRule.diff(plan(c, d), record(a, b, c))
+        assertEquals(KeptRule.Held.MANY, twoOfThree.held)
+        assertTrue(twoOfThree.gone.isEmpty())
+        val oneOfTwo = KeptRule.diff(plan(a), record(a, b))
+        assertNull(oneOfTwo.held)
+        assertEquals(listOf("b"), oneOfTwo.gone)
+        // 1 of 1 mirrors only while the listing is healthy: a file is there.
+        val healthy = KeptRule.diff(plan(d), record(a))
+        assertNull(healthy.held)
+        assertEquals(listOf("a"), healthy.gone)
+    }
+
+    @Test
+    fun anEmptiedFileIsSentAgainAsEmpty() {
+        val before = file("a.txt", size = 10)
+        val after = file("a.txt", size = 0, modified = 200)
+        val diff = KeptRule.diff(plan(after), record(before))
+        assertEquals(listOf(after), diff.send)
     }
 
     @Test

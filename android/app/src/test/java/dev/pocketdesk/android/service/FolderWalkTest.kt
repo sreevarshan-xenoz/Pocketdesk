@@ -122,6 +122,21 @@ class FolderWalkTest {
     }
 
     @Test
+    fun aRowTheProviderGaveHalfIsAPartNotTheWhole() {
+        val rows = mapOf(
+            "root" to listOf(
+                file("f1", "a.txt"),
+                FolderWalk.Entry("", "", isDir = false, size = 0, unreadable = true),
+            ),
+        )
+        val plan = FolderWalk.plan("root") { rows[it].orEmpty() }
+        assertEquals(1, plan.files.size)
+        assertEquals(1, plan.listFailed)
+        assertEquals(1, plan.skipped)
+        assertFalse("nothing is known gone from it", plan.whole)
+    }
+
+    @Test
     fun namesTheComputerRefusesAreSkipped() {
         for (bad in listOf(
             "NUL", "com1.txt", "COM0", "lpt0.log", "a?b", "name.", "name ", "x\u0000y",

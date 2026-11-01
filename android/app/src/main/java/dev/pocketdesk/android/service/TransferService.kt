@@ -442,13 +442,14 @@ class TransferService : Service() {
             keepStatus(folder, sent = 0, failed = 0, note = getString(R.string.kept_access_lost, folder.label))
             return true
         }
-        val plan = FolderWalk.plan(rootId, KEPT_LIMITS) { children(tree, it) }
+        val plan = FolderWalk.plan(rootId, KEPT_LIMITS) { children(tree, it, sizeRequired = true) }
         val record = KeptFolders.record(this, folder, computerId).toMutableMap()
         val diff = KeptRule.diff(plan, record)
-        // An empty file cannot be shared (the computer refuses a share of no
-        // bytes): left out, never sent and never counted as failed.
-        val send = diff.send.filter { it.size > 0 }
-        plannedSends += send.size
+        // A file of no bytes cannot be shared (a share names its bytes), so
+        // it is told in the run's own packet: a file emptied on the phone is
+        // emptied there too, and not left holding its old content.
+        val (empties, send) = diff.send.partition { it.size == 0L }
+        plannedSends += send.size + empties.size
         var sent = 0
         var failed = 0
         var stop = false
@@ -485,6 +486,23 @@ class TransferService : Service() {
             sendCount += left
             stop = true
             break
+        }
+        if (!stop) {
+            for (chunk in empties.chunked(KeptRule.MAX_GONE_PER_PACKET)) {
+                val told = keepPacket(job, folder, mirror) {
+                    put("empty", org.json.JSONArray(chunk.map { org.json.JSONArray(it.path) }))
+                }
+                sendCount += chunk.size
+                if (told.isSuccess) {
+                    sentTotal += chunk.size
+                    sent += chunk.size
+                    chunk.forEach { record[KeptRule.key(it.path)] = KeptRule.Mark(0, it.modified) }
+                } else {
+                    failed += chunk.size
+                    lastError = told.exceptionOrNull()?.message
+                    break
+                }
+            }
         }
         // Deletions: only from a whole read of the folder, only when the
         // owner mirrors them, and told only after the files are sent.
@@ -596,7 +614,7 @@ class TransferService : Service() {
     }
 
     /** The children of folder [id] in the picked [tree]; null when the provider could not list it. */
-    private fun children(tree: Uri, id: String): List<FolderWalk.Entry>? {
+    private fun children(tree: Uri, id: String, sizeRequired: Boolean = false): List<FolderWalk.Entry>? {
         val projection = arrayOf(
             DocumentsContract.Document.COLUMN_DOCUMENT_ID,
             DocumentsContract.Document.COLUMN_DISPLAY_NAME,
@@ -609,11 +627,21 @@ class TransferService : Service() {
             contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
                 buildList {
                     while (cursor.moveToNext()) {
+                        val rowId = cursor.getString(0)
+                        val rowName = cursor.getString(1)
+                        val isDir = cursor.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR
+                        // A row with no id or name cannot be sent, and is said so;
+                        // with [sizeRequired] (a kept folder, where size 0 means an
+                        // emptied file) a file with no size is as unreadable.
+                        if (rowId == null || rowName == null || (sizeRequired && !isDir && cursor.isNull(3))) {
+                            add(FolderWalk.Entry("", "", isDir = false, size = 0, unreadable = true))
+                            continue
+                        }
                         add(
                             FolderWalk.Entry(
-                                id = cursor.getString(0) ?: continue,
-                                name = cursor.getString(1) ?: continue,
-                                isDir = cursor.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR,
+                                id = rowId,
+                                name = rowName,
+                                isDir = isDir,
                                 size = if (cursor.isNull(3)) 0 else cursor.getLong(3),
                                 modified = if (cursor.isNull(4)) 0 else cursor.getLong(4),
                             ),

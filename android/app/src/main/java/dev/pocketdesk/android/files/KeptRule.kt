@@ -37,8 +37,15 @@ object KeptRule {
         MANY,
     }
 
-    /** At least this many gone, and over half of the record: held (MANY). */
-    const val MANY_GONE = 20
+    /**
+     * Deletions are held when more than half of what was kept is gone at
+     * once, whatever the folder's size, unless this few ([FREE_GONE]) are
+     * gone: one file deleted from a folder of two still mirrors. A listing
+     * with no file in it while the record holds some is always held (an
+     * emptied folder looks like a storage that went away), so 1 of 1 is
+     * mirrored only when the listing is otherwise healthy.
+     */
+    const val FREE_GONE = 1
 
     /**
      * The files [plan] holds that [record] does not hold as they are, and
@@ -57,7 +64,8 @@ object KeptRule {
         val held = when {
             gone.isEmpty() -> null
             !plan.whole -> Held.PART
-            gone.size >= MANY_GONE && gone.size * 2 > record.size -> Held.MANY
+            plan.files.isEmpty() -> Held.MANY
+            gone.size > FREE_GONE && gone.size * 2 > record.size -> Held.MANY
             else -> null
         }
         return Diff(send, if (held == null) gone else emptyList(), held)
