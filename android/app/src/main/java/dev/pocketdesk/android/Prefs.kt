@@ -8,6 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.edit
+import dev.pocketdesk.watchlink.WatchButton
 
 /**
  * App-level UI preferences (theme mode, dynamic color, screen behavior,
@@ -42,6 +43,8 @@ object Prefs {
     private const val KEY_QUESTIONS = "questions_from_computer"
     private const val KEY_APPROVE = "approve_requests"
     private const val KEY_APPROVE_BIOMETRIC_ONLY = "approve_biometric_only"
+    private const val KEY_WATCH_CONTROLS = "watch_controls"
+    private const val KEY_WATCH_BUTTONS = "watch_buttons"
     private const val KEY_SHARE_BATTERY = "share_battery"
     private const val KEY_STATE_WIDGET_AUTO = "state_widget_auto"
     private const val KEY_PHONE_MEDIA = "phone_media_on_computer"
@@ -354,6 +357,25 @@ object Prefs {
 
     fun setApproveRequests(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_APPROVE, enabled) }
+        bump()
+    }
+
+    /** Watch controls (item 9): a paired Wear OS watch may ask this phone for things; off until chosen. */
+    fun watchControls(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_WATCH_CONTROLS, false)
+
+    fun setWatchControls(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_WATCH_CONTROLS, enabled) }
+        bump()
+    }
+
+    /** Which buttons a watch has, as the watch link's bit mask; [WatchButton.DEFAULT] until chosen. */
+    fun watchButtons(ctx: Context): Set<WatchButton> {
+        val p = prefs(ctx)
+        return if (p.contains(KEY_WATCH_BUTTONS)) WatchButton.fromMask(p.getInt(KEY_WATCH_BUTTONS, 0)) else WatchButton.DEFAULT
+    }
+
+    fun setWatchButtons(ctx: Context, buttons: Set<WatchButton>) {
+        prefs(ctx).edit { putInt(KEY_WATCH_BUTTONS, WatchButton.mask(buttons)) }
         bump()
     }
 

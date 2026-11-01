@@ -369,6 +369,8 @@ fun SettingsScreen(onBack: () -> Unit) {
                 )
                 // Approve with my phone: sudo, polkit, the lock screen.
                 ApproveSetting()
+                // Item 9: a Wear OS watch's buttons, over Bluetooth.
+                WatchSetting()
                 // L4: the dialer opens with a number the computer sends.
                 SettingSwitch(
                     stringResource(R.string.settings_calls_from_computer),

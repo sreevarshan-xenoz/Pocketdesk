@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1202 open items.
+1216 open items.
 
 | Where | Items |
 |---|---|
@@ -12,10 +12,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 40 |
 | A second phone | 20 |
 | Away from home: another network, or through a router | 42 |
-| A second computer | 155 |
+| A second computer | 159 |
 | A Linux desktop (the Azure VM serves for some) | 214 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 66 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 392 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 75 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 393 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -1239,6 +1239,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The guards: "Let the computer open my apps" off, then the control service off, then a secure lock, then the screen shown to another computer only: each drop leaves the file in Downloads and the line names the reason; the foreground package is read once per drop (the phone's log names no package of any other window), and Pocketdesk's own screen in front is refused. Whether a share started from the service with another app in front appears on ColorOS 14 and Android 15 or 16, and whether Android's chooser fallback shows when the direct share is refused. (where: OPPO)
 
+**264. Wear OS tile, complication and list (Settings, Watch controls; `android/wear`)**
+
+- Wake: with the laptop asleep by hand (never by Pocketdesk's tests), the tile's Wake wakes it as the phone's Wake tile does, and says "Sent"; with wake off for that computer it says why. (where: second computer)
+- Music: play/pause and next on the tile change the computer's player as the phone's music tile does; with Audio off for the phone on the computer the tile says the computer refused. (where: second computer)
+- A question: with a `pocketdesk ask` waiting, the tile shows "No: ..." and the list shows its words; No on the watch answers No on the computer and takes the phone's notification away; with the watch's lock set it works unlocked and says "Unlock the watch first" when locked; with no watch lock it says "Set a watch lock to use this". (where: second computer)
+- Deck: with Deck switched on the list shows the computer's buttons (at most eight) and a press runs it (a button the computer's own rules refuse says so); with it off the list shows none. Two presses within 1.5 s: the second says "Too soon". (where: second computer)
+
 ## A Linux desktop (the Azure VM serves for some)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -2005,6 +2012,18 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **262. A spare phone at home as the wake helper (Settings, Wake helper for this home)**
 
 - A stranger: a phone paired with nothing, or another owner's phone, dialing the helper by its key is closed (the helper's counts show a dropped request, no packet sent). A request line with a MAC in it sends nothing (the packet capture shows none). (where: other hardware)
+
+**264. Wear OS tile, complication and list (Settings, Watch controls; `android/wear`)**
+
+- **The one assumption the design rests on:** a secure RFCOMM socket from the watch to the phone's Pocketdesk service connects on a real Wear OS 3, 4 and 5 watch (a Pixel Watch and a Galaxy Watch, if both can be had). On the phone, Settings → Watch controls on, then on the watch Pair: the connect succeeds and the phone logs "a watch was paired" (no address). If `connect()` fails on a model ("read failed", "service discovery failed") note the model and Wear OS version: the fallback is an L2CAP channel (Android 10 and later) or a BLE GATT service behind the same `watchlink` frames, which only changes the socket in `PhoneLink` and `WatchLinkServer`. (where: other hardware)
+- Pairing: Settings → Watch controls → Pair a watch, then on the watch Pocketdesk → the phone → six digits; typing them on the phone pairs ("Paired with ..."). A wrong code: the watch says "Not paired: the phone refused"; three wrong codes from the watch shut it out until the window is opened again. A second bonded device (earbuds, a car) that connects during the window and fails does not use up the watch's tries. Closing the dialog, or two minutes, closes it: a later watch connect gets nothing. With the window closed, a bonded device that connects is dropped at once. (where: other hardware)
+- The permission: turning "Watch controls" on the first time shows Android's nearby-devices question once; declining leaves the switch off; the phone's Settings never asks for location. On the watch, Pocketdesk asks for the same once. (where: other hardware)
+- The tile: add it on the watch; it shows the buttons the phone has on (and no Deck chip by default), the computer's name, and "Nothing is on in the phone's Watch controls" when every switch is off. Turning a switch off on the phone removes its chip the next time the tile is shown. (where: other hardware)
+- An "Approve with my phone" request (sudo): the list shows its command and "Yes needs your phone's fingerprint"; there is no Yes on the watch; No on the watch denies it; Yes on the phone still takes the fingerprint and signs. (where: other hardware)
+- The phone not near: switch the phone's Bluetooth off, or walk out of range: the tile says "The phone is not reachable" within about twelve seconds, and a wake pressed then does not go out when the phone comes back. Phone's Pocketdesk "Watch controls" off: the watch says the buttons are off or the phone is not reachable; "Forget" on the phone: the tile says "Pair with the phone first". (where: other hardware)
+- The complication ("PD") opens the list from a watch face that offers it; it shows no live data and never refreshes. (where: other hardware)
+- Battery and idle: with the setting on and the phone idle overnight, the tile still works in the morning and the phone's battery stats show no wake lock for Pocketdesk's Bluetooth service; the tile's own connect ends within the timeout and leaves no open socket on the phone (`adb shell dumpsys bluetooth_manager` shows none after a press). (where: other hardware)
+- The size: the release watch APK is about 1 MB; note the installed size on a watch. (where: other hardware)
 
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 
@@ -2882,3 +2901,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Charger and Wi-Fi gate: unplug the helper: within a few seconds the notification says it is waiting and the log says "not listening" (the endpoint is closed: a wake asked now says the helper could not be reached); plug it in: it listens again. Turn Wi-Fi off with the charger on: same. On the battery for 30 minutes with the switch on, the app uses no measurable battery (no timer, no wake lock). (where: OPPO)
 - A refused helper stops listening at once: remove it on the desktop while it is serving: within a minute the notification goes and the endpoint is closed (the log says "not listening"), and it sends no offer again. (where: OPPO)
 - The words in Spanish and Tamil (Settings, the Wake settings dialog, the notification), and the desktop's Settings, Wake row, light and dark, in a narrow window, by hand on Windows and on Linux. (where: by hand)
+
+**264. Wear OS tile, complication and list (Settings, Watch controls; `android/wear`)**
+
+- Ring: the tile's "Ring phone" makes the phone sound the alarm for 30 s with Stop on the phone; the notification says "Your watch is ringing this phone"; a second press within a minute says "Too soon, wait a moment". (where: by hand)
