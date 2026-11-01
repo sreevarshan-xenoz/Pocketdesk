@@ -31,16 +31,21 @@ import java.util.concurrent.Executors
 class PocketdeskTile : TileService() {
     override fun onTileRequest(requestParams: RequestBuilders.TileRequest): ListenableFuture<TileBuilders.Tile> {
         val clicked = requestParams.currentState.lastClickableId.takeIf { it.isNotEmpty() }
-        val act = TilePlan.act(clicked)
         val app = applicationContext
+        // The last tap comes back each time the tile is shown: acted on once.
+        val prefs = app.getSharedPreferences("pocketdesk-tile", Context.MODE_PRIVATE)
+        val guard = TilePlan.ClickGuard({ prefs.getString("last", null) }, { prefs.edit().putString("last", it).apply() })
+        val act = if (guard.fresh(clicked)) TilePlan.act(clicked) else null
+        // One drawing, one nonce: its taps are new ids.
+        val nonce = TilePlan.nonce()
         return CallbackToFutureAdapter.getFuture { completer ->
             worker.execute {
                 val tile = try {
                     val run = Phone.run(app, act)
-                    tile(app, TileView.layout(app, run))
+                    tile(app, TileView.layout(app, run, nonce))
                 } catch (e: Throwable) {
                     // Never a tile that stays loading for good.
-                    tile(app, TileView.layout(app, Run(TilePlan.Line.Failed, Result.failure(e))))
+                    tile(app, TileView.layout(app, Run(TilePlan.Line.Failed, Result.failure(e)), nonce))
                 }
                 completer.set(tile)
             }
@@ -75,7 +80,7 @@ internal object TileView {
     private const val TEXT = 0xFFFFFFFF.toInt()
     private const val DIM = 0xFFB0B0B8.toInt()
 
-    fun layout(ctx: Context, run: Run): LayoutElementBuilders.LayoutElement {
+    fun layout(ctx: Context, run: Run, nonce: String): LayoutElementBuilders.LayoutElement {
         val look = run.look.getOrNull()
         // The tap's own line, else why there is nothing to show.
         val said = LineText.of(ctx, run.line)
@@ -91,7 +96,7 @@ internal object TileView {
         }
         for (pair in chips.chunked(2)) {
             val row = LayoutElementBuilders.Row.Builder().setWidth(expand()).setHeight(wrap())
-            for (chip in pair) row.addContent(chipBox(ctx, chip))
+            for (chip in pair) row.addContent(chipBox(ctx, chip, nonce))
             column.addContent(row.build())
         }
         if (said != null) column.addContent(text(said, 11f, DIM))
@@ -113,7 +118,7 @@ internal object TileView {
             )
             .build()
 
-    private fun chipBox(ctx: Context, chip: TilePlan.Chip): LayoutElementBuilders.LayoutElement {
+    private fun chipBox(ctx: Context, chip: TilePlan.Chip, nonce: String): LayoutElementBuilders.LayoutElement {
         val action: ActionBuilders.Action = if (chip.opensList) {
             ActionBuilders.LaunchAction.Builder()
                 .setAndroidActivity(
@@ -133,7 +138,7 @@ internal object TileView {
             .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_CENTER)
             .setModifiers(
                 ModifiersBuilders.Modifiers.Builder()
-                    .setClickable(ModifiersBuilders.Clickable.Builder().setId(chip.id).setOnClick(action).build())
+                    .setClickable(ModifiersBuilders.Clickable.Builder().setId(TilePlan.clickId(chip.id, nonce)).setOnClick(action).build())
                     .setBackground(
                         ModifiersBuilders.Background.Builder()
                             .setColor(argb(if (chip.label == TilePlan.Label.Deny) CHIP_DENY else CHIP))

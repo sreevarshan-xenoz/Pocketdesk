@@ -43,16 +43,49 @@ object TilePlan {
     }
 
     private val ASK_ID = Regex("^[A-Za-z0-9-]{1,64}$")
+    private val NONCE = Regex("^[0-9a-f]{8}$")
 
-    /** The request a clickable's [id] stands for, or null for none (a stale or foreign id). */
-    fun act(id: String?): Act? = when {
-        id == null -> null
-        id == WAKE -> Act.Wake
-        id == RING -> Act.Ring
-        id == PLAY -> Act.Music(MusicCommand.PlayPause)
-        id == NEXT -> Act.Music(MusicCommand.Next)
-        id.startsWith(DENY) -> id.removePrefix(DENY).takeIf { ASK_ID.matches(it) }?.let(Act::Deny)
-        else -> null
+    /**
+     * A clickable's id as drawn: the chip's id and a nonce made for this
+     * drawing. The watch hands the last clicked id back each time the tile
+     * is shown again; the nonce is what tells that from a new tap
+     * ([ClickGuard]).
+     */
+    fun clickId(chipId: String, nonce: String): String = "$chipId#$nonce"
+
+    /** A fresh nonce for one drawing. */
+    fun nonce(random: java.security.SecureRandom = java.security.SecureRandom()): String =
+        "%08x".format(random.nextInt())
+
+    /** The request a clickable's [id] stands for, or null for none (a stale, foreign or nonce-less id). */
+    fun act(id: String?): Act? {
+        if (id == null) return null
+        val at = id.lastIndexOf('#')
+        if (at < 0 || !NONCE.matches(id.substring(at + 1))) return null
+        val chip = id.substring(0, at)
+        return when {
+            chip == WAKE -> Act.Wake
+            chip == RING -> Act.Ring
+            chip == PLAY -> Act.Music(MusicCommand.PlayPause)
+            chip == NEXT -> Act.Music(MusicCommand.Next)
+            chip.startsWith(DENY) -> chip.removePrefix(DENY).takeIf { ASK_ID.matches(it) }?.let(Act::Deny)
+            else -> null
+        }
+    }
+
+    /**
+     * Whether a request's clickable id is a new tap. The watch asks for the
+     * tile again whenever it is shown, with the id of the last tap in its
+     * state, so a Wake would be sent again by a glance: an id is acted on
+     * once. [last] and [keep] hold the last one handled, between processes.
+     */
+    class ClickGuard(private val last: () -> String?, private val keep: (String) -> Unit) {
+        @Synchronized
+        fun fresh(id: String?): Boolean {
+            if (id.isNullOrEmpty() || id == last()) return false
+            keep(id)
+            return true
+        }
     }
 
     enum class Label { Wake, Ring, PlayPause, Next, Deck, Deny }

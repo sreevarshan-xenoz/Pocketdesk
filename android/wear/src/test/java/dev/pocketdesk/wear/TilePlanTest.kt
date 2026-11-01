@@ -8,6 +8,7 @@ import dev.pocketdesk.watchlink.WatchStatus
 import dev.pocketdesk.watchlink.WatchWire
 import java.io.IOException
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -40,24 +41,29 @@ class TilePlanTest {
 
     @Test
     fun aClickableMapsToItsRequest() {
-        assertEquals(TilePlan.Act.Wake, TilePlan.act("wake"))
-        assertEquals(TilePlan.Act.Ring, TilePlan.act("ring"))
-        assertEquals(TilePlan.Act.Music(MusicCommand.PlayPause), TilePlan.act("play"))
-        assertEquals(TilePlan.Act.Music(MusicCommand.Next), TilePlan.act("next"))
-        assertEquals(TilePlan.Act.Deny("a-1"), TilePlan.act("deny:a-1"))
-        assertEquals(WatchOp.AskDeny, TilePlan.act("deny:a-1")!!.op)
-        assertEquals(WatchOp.Music, TilePlan.act("play")!!.op)
+        assertEquals(TilePlan.Act.Wake, TilePlan.act("wake#0a1b2c3d"))
+        assertEquals(TilePlan.Act.Ring, TilePlan.act("ring#0a1b2c3d"))
+        assertEquals(TilePlan.Act.Music(MusicCommand.PlayPause), TilePlan.act("play#0a1b2c3d"))
+        assertEquals(TilePlan.Act.Music(MusicCommand.Next), TilePlan.act("next#0a1b2c3d"))
+        assertEquals(TilePlan.Act.Deny("a-1"), TilePlan.act("deny:a-1#0a1b2c3d"))
+        assertEquals(WatchOp.AskDeny, TilePlan.act("deny:a-1#0a1b2c3d")!!.op)
+        assertEquals(WatchOp.Music, TilePlan.act("play#0a1b2c3d")!!.op)
     }
 
     @Test
     fun aStaleOrForeignIdAsksForNothing() {
         assertNull(TilePlan.act(null))
         assertNull(TilePlan.act(""))
-        assertNull(TilePlan.act("deck"))
-        assertNull(TilePlan.act("deny:"))
-        assertNull(TilePlan.act("deny:../../x"))
-        assertNull(TilePlan.act("deny:" + "a".repeat(65)))
-        assertNull(TilePlan.act("WAKE"))
+        assertNull(TilePlan.act("deck#0a1b2c3d"))
+        assertNull(TilePlan.act("deny:#0a1b2c3d"))
+        assertNull(TilePlan.act("deny:../../x#0a1b2c3d"))
+        assertNull(TilePlan.act("deny:" + "a".repeat(65) + "#0a1b2c3d"))
+        assertNull(TilePlan.act("WAKE#0a1b2c3d"))
+        // An id with no nonce, or a bad one, is not one this drawing made.
+        assertNull(TilePlan.act("wake"))
+        assertNull(TilePlan.act("wake#"))
+        assertNull(TilePlan.act("wake#xyz"))
+        assertNull(TilePlan.act("wake#0a1b2c3d4"))
     }
 
     @Test
@@ -93,5 +99,40 @@ class TilePlanTest {
         assertEquals(TilePlan.Line.NoBluetooth, Phone.failed(NoBluetoothException()))
         assertEquals(TilePlan.Line.Unreachable, Phone.failed(IOException("no route")))
         assertEquals(TilePlan.Line.Unreachable, Phone.failed(null))
+    }
+
+    @Test
+    fun aTapIsActedOnOnceWhateverHowOftenTheTileIsShownAgain() {
+        var last: String? = null
+        val guard = TilePlan.ClickGuard({ last }, { last = it })
+        val tap = TilePlan.clickId(TilePlan.WAKE, "0a1b2c3d")
+        assertTrue(guard.fresh(tap))
+        // The watch hands the same id back each time the tile is shown.
+        repeat(3) { assertFalse(guard.fresh(tap)) }
+        // Nothing clicked is not a tap.
+        assertFalse(guard.fresh(null))
+        assertFalse(guard.fresh(""))
+        // The next drawing's tap on the same button is a new one.
+        assertTrue(guard.fresh(TilePlan.clickId(TilePlan.WAKE, "11223344")))
+        assertEquals(TilePlan.Act.Wake, TilePlan.act(TilePlan.clickId(TilePlan.WAKE, "11223344")))
+    }
+
+    @Test
+    fun aGuardKeptBetweenProcessesStillRefusesTheLastTap() {
+        var stored: String? = null
+        val before = TilePlan.ClickGuard({ stored }, { stored = it })
+        val tap = TilePlan.clickId(TilePlan.RING, "deadbeef")
+        assertTrue(before.fresh(tap))
+        // A new process: a new guard over the same storage.
+        val after = TilePlan.ClickGuard({ stored }, { stored = it })
+        assertFalse(after.fresh(tap))
+    }
+
+    @Test
+    fun aNonceIsEightHexDigitsAndDiffersEachDrawing() {
+        val a = TilePlan.nonce()
+        val b = TilePlan.nonce()
+        assertTrue(Regex("^[0-9a-f]{8}$").matches(a))
+        assertTrue(a != b)
     }
 }
