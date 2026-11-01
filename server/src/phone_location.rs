@@ -104,6 +104,9 @@ pub trait Asker: Send + Sync + 'static {
     async fn ask(&self, precision: Precision) -> std::result::Result<(String, Fix), String>;
 }
 
+/// What is told of a new fix: the fix as given, and the phone it came from.
+type Told = Box<dyn Fn(&Fix, &str) + Send + Sync>;
+
 /// The fix GeoClue's clients are given: the cache and the asking, one ask at
 /// a time (clients that come together wait for the one answer).
 pub struct Fixes {
@@ -111,7 +114,7 @@ pub struct Fixes {
     cache: tokio::sync::Mutex<Cache>,
     /// Told when a new fix goes out: the fix as given, and the phone it came
     /// from.
-    told: Box<dyn Fn(&Fix, &str) + Send + Sync>,
+    told: Told,
 }
 
 impl Fixes {
