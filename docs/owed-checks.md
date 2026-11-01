@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1157 open items.
+1170 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 45 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 55 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 17 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 188 |
-| A phone with a SIM | 39 |
+| A phone with a SIM | 40 |
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
 | A second computer | 154 |
 | A Linux desktop (the Azure VM serves for some) | 214 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 64 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 381 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 65 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 382 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -147,6 +147,19 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The page lists the apps with their icons within a few seconds of opening, Pocketdesk itself left out; opening it again sends no icons (the phone's log says "0 of 0 app icons" or none), and after one app is updated (or its icon file deleted from the throwaway state folder) only that one comes. (where: OPPO)
 - "Let the computer open my apps" off on the phone: the page says the phone keeps its apps to itself and names the setting; turned on, "Ask again" lists them. A computer that is not the phone's own gets no word from it at all. (where: OPPO)
+
+**259. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
+
+- Add a folder: "Add a folder" opens Android's folder picker; no permission dialog about all files or storage appears, and the app lists the folder with "Not run yet". Adding the same folder twice makes one row. (where: OPPO)
+- "Run now": the files land under `<root>/<phone>/<folder>/` with the same paths; the Files page's Kept folders row shows the same count and total bytes as the test folder, and a hash of each file there equals the phone's (generate the files from a seed so both sides can be recomputed). (where: OPPO)
+- Run again with nothing changed: nothing is sent (no transfer notification stays in the shade, the phone's log says 0 sent). Change one file, add one, run: only those two go, the changed one replacing its older copy (no `(1)` copy), and its date is the phone's. (where: OPPO)
+- Kill mid-file: with the 200 MB file part way (turn Wi-Fi off, or force-stop the app), then run again: the transfer continues from where it stopped (the server's log says "Continued ... from N of M bytes") and the final file's hash is the phone's. (where: OPPO)
+- Mirror deletions off (the default): delete a file on the phone, run: it stays on the computer. With the phone's switch on and the computer's `kept_folders_allow_delete` off: it stays, and the Files page says one file was kept although deleted. With both on: it is deleted on the computer, and the folder it leaves empty goes too. (where: OPPO)
+- The guards: with both switches on, hide the phone's storage from the app (revoke the folder's access in Android's settings) and run: nothing is deleted on the computer, and the row says the access is gone; remove 30 of 40 files at once and run: the deletions are held and the row says so. (where: OPPO)
+- The size cap: set "Size cap for kept folders" to 1 GB and keep more than that: the run stops with the notice on the phone ("the computer's kept folders are full"), the Files page row shows the problem, and one desktop notification came, not one per file. Raising the cap and running again finishes it. (where: OPPO)
+- A phone that is not one of this computer's owner phones (a guest's pairing) is refused ("Kept folders take only the owner's own phones") and nothing is made on the computer. With "Phones may keep folders here" off, every run is refused with its reason on the phone. (where: OPPO)
+- Names: a file named with a colon, a Windows device name (`NUL.txt`), a hidden file and a trailing-dot name on the phone are left out (the phone's log counts them) and the run goes on. A folder renamed on the phone keeps its place on the computer. (where: OPPO)
+- Remove a folder in Settings: its row goes, the computer's copy stays, and Android no longer lists the folder in its granted folders for the app (`adb shell dumpsys package` shows no persisted grant for it) unless Folders the computer may open still shares it. (where: OPPO)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -724,6 +737,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **203. The phone's contacts on the computer (P10)**
 
 - Texts turned off on Devices and the phone unpaired: the list forgotten.
+
+**259. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
+
+- The schedule: the job is queued with its constraints (`adb shell dumpsys jobscheduler` lists the app's WorkManager job needing an unmetered network and charging; with "Every few hours" the charging need goes); on mobile data with Wi-Fi off, nothing runs; plugged in on Wi-Fi it runs within the period, and on ColorOS 14 the transfer service's notification shows during the run and goes when it ends (or the run waits for the app to be opened or the notification listener's next look, which the log says). (where: OPPO)
 
 ## A second phone
 
@@ -1939,6 +1956,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Whether a background start by the control service itself works on the OPPO (ColorOS 14) and, if it can, on a phone with Android 15 or 16: the app starts from the service's own context with the phone's screen on another app. If it only appears behind, the fallback (N3's opt-in) is the next thing to try. (where: other hardware)
 
+**259. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
+
+- A computer that is too old (a throwaway built from before this change): the phone says the computer cannot keep folders yet and sends nothing; no copies appear in that computer's Downloads. (where: other hardware)
+
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -2795,3 +2816,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The control service off: a click is answered `control_off`, the page says to turn on Pocketdesk control in Android's Accessibility settings, and nothing is asked of the phone's owner by itself. (where: OPPO)
 - The phone locked (a secure lock) and asleep: "locked" and "unlock the phone once", then the same click works after the unlock. A swipe-only lock is also answered "locked" (it is not dismissed). (where: OPPO)
 - The page by hand on Windows and on Linux: the search narrows as it is typed, "Opened from here" shows the last apps in the order opened, the phone's name picker with two phones, the layout in a narrow window, and Settings' "Show the Phone apps page" off takes the page out of the list. (where: by hand)
+
+**259. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
+
+- The Files page's Kept folders section and the three Settings rows on the desktop (the folder box with Choose folder, the cap, the deletion switch) by hand on Windows and on Linux, light and dark, and in a narrow window; the Show in folder button opens the folder. (where: by hand)
