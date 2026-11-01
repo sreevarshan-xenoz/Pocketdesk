@@ -30,6 +30,13 @@ class WindowCast(private val context: Context, private val onEmpty: () -> Unit) 
     ) {
         /** The fingers down in this window now (one gesture, however many fingers). */
         val fingers = PointerTracker()
+
+        /** Fingers going down in this window, limited per second. */
+        val downs = dev.pocketdesk.android.control.ControlPlan.Rate(WindowInput.MAX_DOWNS_PER_SECOND)
+
+        /** When the computer last sent anything for this window (uptime ms). */
+        @Volatile
+        var lastWord = SystemClock.uptimeMillis()
     }
 
     private val windows = java.util.concurrent.ConcurrentHashMap<Int, Window>()
@@ -111,15 +118,28 @@ class WindowCast(private val context: Context, private val onEmpty: () -> Unit) 
         return AppOpenRule.OPENED
     }
 
-    /** One event of the computer's input to window [id]; a close ends it. Never on the main thread. */
-    fun input(id: Int, event: WindowInput.Event) {
+    init {
+        // The helper dying takes its displays with it: no finger is down on them any more.
+        ShizukuBridge.onLost = { windows.values.forEach { synchronized(it.fingers) { it.fingers.releaseAll() } } }
+    }
+
+    /**
+     * One event of the computer's input to window [id], limited by [limits] at [now]; a close ends
+     * it. Never on the main thread.
+     */
+    fun input(id: Int, event: WindowInput.Event, now: Long, limits: WindowLimits) {
         val window = windows[id] ?: return
+        window.lastWord = now
         if (event is WindowInput.Event.Close) return close(id)
         val host = runCatching { ShizukuBridge.currentHost() }.getOrNull() ?: return
+        // Moves, wheel, keys and text share one limit; fingers are limited by what they would do.
+        val limited = event !is WindowInput.Event.Touch && event !is WindowInput.Event.Pointer
+        if (limited && !limits.move(now)) return
         runCatching {
             when (event) {
-                is WindowInput.Event.Touch -> finger(host, window, 0, event.action, event.x, event.y)
-                is WindowInput.Event.Pointer -> finger(host, window, event.pointer, event.action, event.x, event.y)
+                is WindowInput.Event.Touch -> finger(host, window, 0, event.action, event.x, event.y, now, limits)
+                is WindowInput.Event.Pointer ->
+                    finger(host, window, event.pointer, event.action, event.x, event.y, now, limits)
                 is WindowInput.Event.Scroll -> host.injectScroll(
                     window.displayId,
                     WindowInput.pixel(event.x, window.width),
@@ -134,10 +154,23 @@ class WindowCast(private val context: Context, private val onEmpty: () -> Unit) 
     }
 
     /** One finger's change in [window], injected with every finger then down (one gesture). */
-    private fun finger(host: IWindowHost, window: Window, pointer: Int, action: Int, x: Int, y: Int) {
+    private fun finger(
+        host: IWindowHost,
+        window: Window,
+        pointer: Int,
+        action: Int,
+        x: Int,
+        y: Int,
+        now: Long,
+        limits: WindowLimits,
+    ) {
         val frame = synchronized(window.fingers) {
-            window.fingers.apply(pointer, action, x, y, SystemClock.uptimeMillis())
+            window.fingers.limited(pointer, action, x, y, now, { window.downs.take(it) }, { limits.move(it) })
         } ?: return
+        inject(host, window, frame)
+    }
+
+    private fun inject(host: IWindowHost, window: Window, frame: PointerTracker.Frame) {
         host.injectPointers(
             window.displayId,
             frame.action,
@@ -146,6 +179,31 @@ class WindowCast(private val context: Context, private val onEmpty: () -> Unit) 
             FloatArray(frame.ids.size) { WindowInput.pixel(frame.ys[it], window.height) },
             frame.downTime,
         )
+    }
+
+    /** Lift every finger down in [window], through the helper if it is there. */
+    private fun lift(window: Window) {
+        val frames = synchronized(window.fingers) { window.fingers.releaseAll() }
+        if (frames.isEmpty()) return
+        val host = runCatching { ShizukuBridge.currentHost() }.getOrNull() ?: return
+        frames.forEach { runCatching { inject(host, window, it) }.onFailure { e -> Log.w(TAG, "lift failed", e) } }
+    }
+
+    /** Lift every finger in every window, off this thread (the control stream dropped, the switch went off). */
+    fun liftAll() {
+        val all = windows.values.toList()
+        if (all.none { synchronized(it.fingers) { it.fingers.active } }) return
+        Thread({ all.forEach(::lift) }, "window-lift").start()
+    }
+
+    /** The watchdog, each half second: fingers down in a window the computer has gone silent on are lifted. */
+    fun watchdog(now: Long) {
+        val quiet = windows.values.filter {
+            WindowInput.silent(synchronized(it.fingers) { it.fingers.active }, it.lastWord, now)
+        }
+        if (quiet.isEmpty()) return
+        Log.i(TAG, "no word from the computer: ${quiet.size} window(s) have their fingers lifted")
+        Thread({ quiet.forEach(::lift) }, "window-lift").start()
     }
 
     /** Close window [id]: its display is given back (the app on it ends), its encoder freed, the computer told. */
@@ -168,8 +226,10 @@ class WindowCast(private val context: Context, private val onEmpty: () -> Unit) 
         closing = true
         val all = windows.values.toList()
         windows.clear()
+        ShizukuBridge.onLost = null
         Thread({
             all.forEach { window ->
+                lift(window)
                 runCatching { ShizukuBridge.currentHost()?.release(window.displayId) }
                 window.encoder.release()
                 // The computer is told each one ended, so its window closes with it.

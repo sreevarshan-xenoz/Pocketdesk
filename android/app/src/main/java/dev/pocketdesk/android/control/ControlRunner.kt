@@ -43,6 +43,8 @@ class ControlRunner(
     fun stop() {
         running = false
         ControlService.instance?.release()
+        // Fingers held in app windows are lifted with the stream.
+        dev.pocketdesk.android.cast.CastService.liftWindowFingers()
     }
 
     private fun loop() {

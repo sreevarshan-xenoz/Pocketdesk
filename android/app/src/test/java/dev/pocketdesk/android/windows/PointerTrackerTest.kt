@@ -121,18 +121,109 @@ class PointerTrackerTest {
         assertNull(WindowInput.forWindows(screen))
     }
 
+    /** A limiter that lets [n] through, as a counter. */
+    private class Budget(var n: Int) {
+        fun take(now: Long): Boolean {
+            if (now < 0 || n <= 0) return false
+            n--
+            return true
+        }
+    }
+
+    private fun PointerTracker.limit(pointer: Int, action: Int, x: Int, y: Int, downs: Budget, moves: Budget) =
+        limited(pointer, action, x, y, 1, downs::take, moves::take)
+
     @Test
-    fun aFingerGoingDownOrUpIsNeverRateLimited() {
-        val edge = { e: WindowInput.Event -> WindowInput.isEdge(e) }
-        assertTrue(edge(WindowInput.Event.Pointer(2, ACTION_DOWN, 1, 1)))
-        assertTrue(edge(WindowInput.Event.Pointer(2, ACTION_UP, 1, 1)))
-        assertFalse(edge(WindowInput.Event.Pointer(2, ACTION_MOVE, 1, 1)))
-        assertTrue(edge(WindowInput.Event.Touch(ACTION_UP, 1, 1)))
-        assertFalse(edge(WindowInput.Event.Touch(ACTION_MOVE, 1, 1)))
-        assertTrue(edge(WindowInput.Event.Close))
-        assertFalse(edge(WindowInput.Event.Scroll(1, 1, 3)))
-        assertFalse(edge(WindowInput.Event.Key(WindowInput.KEYCODE_ENTER)))
-        assertFalse(edge(WindowInput.Event.Text("a")))
+    fun fingersGoingDownAreLimitedAndAnUpIsNeverRefused() {
+        val t = PointerTracker()
+        val downs = Budget(2)
+        val moves = Budget(1000)
+        assertNotNull(t.limit(1, ACTION_DOWN, 1, 1, downs, moves))
+        assertNotNull(t.limit(2, ACTION_DOWN, 2, 2, downs, moves))
+        // Past the downs' budget a new finger is refused and the tracker does not hold it.
+        assertNull(t.limit(3, ACTION_DOWN, 3, 3, downs, moves))
+        assertEquals(2, t.count)
+        // An up of finger 3 does nothing and costs nothing: it was never down.
+        assertNull(t.limit(3, ACTION_UP, 3, 3, downs, moves))
+        // Lifts of fingers that are down go whatever the budgets are, and there are as many as the downs.
+        downs.n = 0
+        moves.n = 0
+        assertNotNull(t.limit(2, ACTION_UP, 2, 2, downs, moves))
+        assertNotNull(t.limit(1, ACTION_UP, 1, 1, downs, moves))
+        assertFalse(t.active)
+        assertNull("a second up of the same finger", t.limit(1, ACTION_UP, 1, 1, downs, moves))
+    }
+
+    @Test
+    fun aMoveAndARepeatedDownAreLimitedAsMovesAndNothingElse() {
+        val t = PointerTracker()
+        val downs = Budget(10)
+        val moves = Budget(1)
+        assertNotNull(t.limit(1, ACTION_DOWN, 1, 1, downs, moves))
+        // A down of a finger already down is only a move: it spends the moves' budget, not the downs'.
+        assertNotNull(t.limit(1, ACTION_DOWN, 5, 5, downs, moves))
+        assertEquals(9, downs.n)
+        assertEquals(0, moves.n)
+        assertNull("over the moves' budget", t.limit(1, ACTION_DOWN, 6, 6, downs, moves))
+        assertNull("over the moves' budget", t.limit(1, ACTION_MOVE, 7, 7, downs, moves))
+        // The refused move changed nothing: the next one that is let through starts from where it was.
+        moves.n = 1
+        val frame = t.limit(1, ACTION_MOVE, 8, 8, downs, moves)!!
+        assertEquals(8, frame.xs[0])
+        // A move that moved nothing, or of a finger not down, costs nothing.
+        moves.n = 5
+        assertNull(t.limit(1, ACTION_MOVE, 8, 8, downs, moves))
+        assertNull(t.limit(4, ACTION_MOVE, 8, 8, downs, moves))
+        assertEquals(5, moves.n)
+        // The finger that is down may be lifted, and the lift is never refused.
+        moves.n = 0
+        assertNotNull(t.limit(1, ACTION_UP, 8, 8, downs, moves))
+    }
+
+    @Test
+    fun aBatchOverItsLimitIsReadForReleasesOnly() {
+        assertTrue(WindowInput.isRelease(WindowInput.Event.Pointer(2, ACTION_UP, 1, 1)))
+        assertTrue(WindowInput.isRelease(WindowInput.Event.Touch(ACTION_UP, 1, 1)))
+        assertTrue(WindowInput.isRelease(WindowInput.Event.Close))
+        // A down is not a release, whatever finger, and neither is a move or any other event.
+        assertFalse(WindowInput.isRelease(WindowInput.Event.Pointer(2, ACTION_DOWN, 1, 1)))
+        assertFalse(WindowInput.isRelease(WindowInput.Event.Touch(ACTION_DOWN, 1, 1)))
+        assertFalse(WindowInput.isRelease(WindowInput.Event.Pointer(2, ACTION_MOVE, 1, 1)))
+        assertFalse(WindowInput.isRelease(WindowInput.Event.Scroll(1, 1, 3)))
+        assertFalse(WindowInput.isRelease(WindowInput.Event.Text("a")))
+        // The limits let batches and moves through a number of times a second, then refuse.
+        val limits = WindowLimits()
+        assertEquals(WindowInput.MAX_BATCHES_PER_SECOND, (0 until 400).count { limits.batch(5_000) })
+        assertTrue("a new second starts again", limits.batch(6_000))
+        assertEquals(200, (0 until 400).count { limits.move(5_000) })
+    }
+
+    @Test
+    fun aBatchIsReadForNoMoreEventsThanTheCap() {
+        val events = (0 until WindowInput.MAX_EVENTS_PER_BATCH + 20).joinToString(",") {
+            """{"type":"pointer","pointer":1,"action":"move","x":$it,"y":0}"""
+        }
+        val got = WindowInput.forWindows(JSONObject("""{"sent":1,"events":[{"type":"window","window":1},$events]}"""))!!
+        assertEquals(WindowInput.MAX_EVENTS_PER_BATCH, got.size)
+    }
+
+    @Test
+    fun fingersDownAreLiftedWhenTheComputerGoesSilent() {
+        val limit = WindowInput.FINGER_SILENCE_MS
+        // Nothing down: nothing to lift, however long the silence.
+        assertFalse(WindowInput.silent(false, 0, 10 * limit))
+        // Down, and a word within the limit: held; at the limit and past it: lifted.
+        assertFalse(WindowInput.silent(true, 1000, 1000 + limit - 1))
+        assertTrue(WindowInput.silent(true, 1000, 1000 + limit))
+        assertTrue(WindowInput.silent(true, 1000, 1000 + 5 * limit))
+        // A keep-alive (a move that moved nothing) injects nothing, and the finger stays down.
+        val t = PointerTracker()
+        t.apply(1, ACTION_DOWN, 1, 1, 0)
+        assertNull(t.limited(1, ACTION_MOVE, 1, 1, 1, { true }, { true }))
+        assertTrue(t.active)
+        // Lifting what is down ends with an UP and leaves nothing for a second watchdog to do.
+        assertEquals(ACTION_UP, t.releaseAll().last().action)
+        assertFalse(WindowInput.silent(t.active, 0, 10 * limit))
     }
 
     @Test

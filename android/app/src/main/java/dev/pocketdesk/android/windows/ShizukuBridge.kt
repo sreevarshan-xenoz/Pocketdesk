@@ -62,6 +62,10 @@ object ShizukuBridge {
     private var args: Shizuku.UserServiceArgs? = null
     private var connection: android.content.ServiceConnection? = null
 
+    /** Told when the helper process dies, so the windows forget the fingers they thought were down. */
+    @Volatile
+    var onLost: (() -> Unit)? = null
+
     /** The helper process if it is up now, else null. */
     fun currentHost(): IWindowHost? = host?.takeIf { it.asBinder().pingBinder() }
 
@@ -106,12 +110,14 @@ object ShizukuBridge {
 
             override fun onServiceDisconnected(name: ComponentName?) {
                 synchronized(this@ShizukuBridge) { host = null }
+                // The helper's displays went with it: no finger is down on them any more.
+                onLost?.invoke()
             }
         }
         val userService = Shizuku.UserServiceArgs(ComponentName(context.packageName, WindowHostService::class.java.name))
             .processNameSuffix("windows")
             .daemon(false)
-            .version(1)
+            .version(2)
         synchronized(this) {
             args = userService
             connection = service

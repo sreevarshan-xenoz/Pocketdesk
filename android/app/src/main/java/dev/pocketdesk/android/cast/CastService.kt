@@ -150,16 +150,26 @@ class CastService : Service() {
         fun windowInput(context: Context, events: List<WindowInput.For>) {
             // Checked again for every batch, not only each half second: the switch, the apps
             // switch or Shizuku may just have gone.
-            if (!Prefs.separateWindows(context) || !Prefs.appsFromComputer(context) || !ShizukuBridge.running()) return
             val service = current ?: return
             val cast = service.windowCast ?: return
-            val now = SystemClock.uptimeMillis()
-            for (one in events) {
-                // A press or release always goes (dropping one leaves a finger down); the rest is limited.
-                val edge = WindowInput.isEdge(one.event)
-                if (!edge && !service.windowRate.take(now)) continue
-                cast.input(one.window, one.event)
+            if (!Prefs.separateWindows(context) || !Prefs.appsFromComputer(context) || !ShizukuBridge.running()) {
+                // Whatever is held is let go before input stops being taken.
+                cast.liftAll()
+                return
             }
+            val now = SystemClock.uptimeMillis()
+            // Over its batch limit a batch is read for releases only: a finger lifted does
+            // something only for a finger that is down, so lifts are bounded by the downs let through.
+            val whole = service.windowLimits.batch(now)
+            for (one in events) {
+                if (!whole && !WindowInput.isRelease(one.event)) continue
+                cast.input(one.window, one.event, now, service.windowLimits)
+            }
+        }
+
+        /** The control stream is over or dropped: every finger held in an app window is lifted. */
+        fun liftWindowFingers() {
+            current?.windowCast?.liftAll()
         }
 
         /**
@@ -275,8 +285,8 @@ class CastService : Service() {
 
     private val pendingWindows = java.util.concurrent.CopyOnWriteArrayList<PendingWindow>()
 
-    /** The most input events a second go to app windows, as to the phone's screen. */
-    private val windowRate = dev.pocketdesk.android.control.ControlPlan.Rate()
+    /** What goes on to app windows each second: batches, moves, wheel, keys and text. */
+    private val windowLimits = dev.pocketdesk.android.windows.WindowLimits()
 
     /** The cast was admitted: app windows may be made. */
     @Volatile
@@ -668,6 +678,8 @@ class CastService : Service() {
      */
     private fun watchWindows() {
         val cast = windowCast ?: return
+        // Fingers held while the computer has gone quiet are lifted (a dropped stream, a frozen window).
+        cast.watchdog(SystemClock.uptimeMillis())
         val mode = WindowRule.mode(
             Build.VERSION.SDK_INT,
             ShizukuBridge.running(),

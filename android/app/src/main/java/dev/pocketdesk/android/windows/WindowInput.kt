@@ -42,16 +42,32 @@ object WindowInput {
         return fraction.coerceIn(0, FRACTION_MAX).toFloat() / FRACTION_MAX * (size - 1)
     }
 
+    /** The most events one batch is read for, as the computer's own batch limit. */
+    const val MAX_EVENTS_PER_BATCH = 64
+
+    /** The most batches a second are read in full; past it only releases go on (see [isRelease]). */
+    const val MAX_BATCHES_PER_SECOND = 250
+
+    /** The most fingers a second one window takes going down (a finger lifted is never limited). */
+    const val MAX_DOWNS_PER_SECOND = 100
+
+    /** Fingers down with no word from the computer for this long are lifted. */
+    const val FINGER_SILENCE_MS = 2000L
+
     /**
-     * Whether [event] is one the rate limit never drops: a finger going down or up (dropping
-     * one leaves a finger down or stuck up) and a close. Moves, wheel, keys and text are limited.
+     * Whether [event] lifts something: a finger up or a close. These go even when a batch is over
+     * its limit: an up only does anything for a finger that is down (see [PointerTracker.limited]),
+     * so it is bounded by the downs that were let through.
      */
-    fun isEdge(event: Event): Boolean = when (event) {
-        is Event.Touch -> event.action != ACTION_MOVE
-        is Event.Pointer -> event.action != ACTION_MOVE
+    fun isRelease(event: Event): Boolean = when (event) {
+        is Event.Touch -> event.action == ACTION_UP
+        is Event.Pointer -> event.action == ACTION_UP
         Event.Close -> true
         else -> false
     }
+
+    /** Whether fingers are down ([down]) and the computer has been silent since [lastMs] until [nowMs]. */
+    fun silent(down: Boolean, lastMs: Long, nowMs: Long): Boolean = down && nowMs - lastMs >= FINGER_SILENCE_MS
 
     /** The motion action a touch event's word means, or null for one that is not. */
     fun motionAction(word: String): Int? = when (word) {
@@ -105,6 +121,7 @@ object WindowInput {
                 continue
             }
             if (window == 0) continue
+            if (out.size >= MAX_EVENTS_PER_BATCH) break
             parse(e)?.let { out.add(For(window, it)) }
         }
         return out
@@ -124,6 +141,22 @@ object WindowInput {
         "close" -> Event.Close
         else -> null
     }
+}
+
+/**
+ * What the phone lets through from the computer to app windows, per second: batches in full,
+ * and every event that is not a finger going down or up (moves, wheel, keys, text). Fingers going
+ * down are limited per window ([WindowInput.MAX_DOWNS_PER_SECOND]) by [PointerTracker.limited].
+ */
+class WindowLimits {
+    private val moves = dev.pocketdesk.android.control.ControlPlan.Rate()
+    private val batches = dev.pocketdesk.android.control.ControlPlan.Rate(WindowInput.MAX_BATCHES_PER_SECOND)
+
+    /** Whether a batch arriving at [nowMs] is read in full. */
+    fun batch(nowMs: Long): Boolean = batches.take(nowMs)
+
+    /** Whether one move, wheel step, key or text event at [nowMs] goes on. */
+    fun move(nowMs: Long): Boolean = moves.take(nowMs)
 }
 
 /**
@@ -151,6 +184,39 @@ class PointerTracker {
 
     /** Whether any finger is down. */
     val active: Boolean get() = ids.isNotEmpty()
+
+    /**
+     * [apply] for input from the computer, with what each result costs asked of the limits first:
+     * a finger going down needs [downOk] (a limit per window); a move, and a down of a finger that
+     * is already down (which is only a move), needs [moveOk]; a finger lifted is never refused, and
+     * lifts only a finger that is down, so lifts are bounded by the downs let through. A refused
+     * event changes nothing here.
+     */
+    fun limited(
+        pointer: Int,
+        action: Int,
+        x: Int,
+        y: Int,
+        now: Long,
+        downOk: (Long) -> Boolean,
+        moveOk: (Long) -> Boolean,
+    ): Frame? {
+        if (pointer !in 0 until WindowInput.MAX_POINTERS) return null
+        val at = ids.indexOf(pointer)
+        when (action) {
+            WindowInput.ACTION_DOWN -> {
+                if (at < 0) {
+                    if (ids.size >= WindowInput.MAX_POINTERS || !downOk(now)) return null
+                } else if ((xs[at] == x && ys[at] == y) || !moveOk(now)) {
+                    return null
+                }
+            }
+            WindowInput.ACTION_MOVE -> {
+                if (at < 0 || (xs[at] == x && ys[at] == y) || !moveOk(now)) return null
+            }
+        }
+        return apply(pointer, action, x, y, now)
+    }
 
     /** How many fingers are down. */
     val count: Int get() = ids.size
