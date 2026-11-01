@@ -3400,9 +3400,10 @@ mod tests {
             let features = screen_features(&said[18..]);
             assert_eq!(screen_takes_input(features), Some(false), "view-only");
             assert_eq!(screen_takes_mic(features), Some(mic), "the mic as it was");
+            // A Windows computer is always per screen, whatever the bit says.
             assert_eq!(
                 screen_input_per_screen(features),
-                Some(per_screen),
+                Some(per_screen || cfg!(windows)),
                 "the screen as it was"
             );
             assert_eq!(said.len(), 19, "a header and one byte, as the first");
