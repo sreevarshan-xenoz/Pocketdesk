@@ -186,6 +186,18 @@ impl Helper {
         })
     }
 
+    /// [`Helper::start`] as a phone runs it: n0's relays (the same road the
+    /// phones' internet dials already use) and any local port.
+    pub async fn start_default(key: SecretKey, state: Arc<HelperState>) -> Result<Self> {
+        Self::start(
+            key,
+            RelayMode::Default,
+            SocketAddr::from(([0, 0, 0, 0], 0)),
+            state,
+        )
+        .await
+    }
+
     /// The helper's key, as the computer is told it.
     pub fn id(&self) -> String {
         self.endpoint.id().to_string()
