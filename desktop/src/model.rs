@@ -760,6 +760,28 @@ pub fn phone_action_reach(linked: bool, allowed: bool) -> Result<(), &'static st
     }
 }
 
+/// Whether this computer can ask the phone to be its camera (F6 part 2),
+/// or why not: Linux only, the owner's setting, the phone's permission and
+/// its link.
+pub fn webcam_reach(
+    linux: bool,
+    offered: bool,
+    allowed: bool,
+    linked: bool,
+) -> Result<(), &'static str> {
+    if !linux {
+        Err("A phone can be this computer's camera on Linux only (PipeWire).")
+    } else if !offered {
+        Err("Turn on \u{201c}Offer phones as a camera\u{201d} in Settings (Phones).")
+    } else if !allowed {
+        Err("This phone's \u{201c}Use its camera as a webcam\u{201d} is off in Devices.")
+    } else if !linked {
+        Err("The phone is not linked now: a session, or one of its background features, links it.")
+    } else {
+        Ok(())
+    }
+}
+
 /// One feature as both sides stand (L7): this computer's permission (and
 /// its Settings, L7 review), the phone's switch and Android's grant as the
 /// phone said them (`None`: not said, or Android needs nothing), and what
@@ -931,7 +953,9 @@ pub fn last_sessions(lines: &str) -> std::collections::HashMap<String, u64> {
 
 /// What a live session is, as its chip says (J3).
 pub fn session_kind(session: &pocketdesk_core::local::sessions::MirrorSession) -> &'static str {
-    if session.cast {
+    if session.webcam {
+        "its camera as this computer's camera"
+    } else if session.cast {
         "its screen or camera here"
     } else if session.phone_sound_only {
         "its sound here"
@@ -942,6 +966,16 @@ pub fn session_kind(session: &pocketdesk_core::local::sessions::MirrorSession) -
     } else {
         "screen"
     }
+}
+
+/// The phones whose camera is this computer's camera now (F6 part 2), by
+/// device id: what the Overview's Stop camera ends.
+pub fn cameras(sessions: &[pocketdesk_core::local::sessions::MirrorSession]) -> Vec<String> {
+    sessions
+        .iter()
+        .filter(|s| s.webcam)
+        .filter_map(|s| s.device_id.clone())
+        .collect()
 }
 
 /// A session from the log, as the Sessions page lists it (J3).
@@ -1597,6 +1631,20 @@ mod tests {
         );
     }
 
+    /// F6 part 2: the camera is asked for on Linux, offered, allowed and
+    /// linked; each missing one says what to change.
+    #[test]
+    fn a_phone_is_asked_for_its_camera_only_where_it_can_be_one() {
+        assert_eq!(super::webcam_reach(true, true, true, true), Ok(()));
+        let why = |linux, offered, allowed, linked| {
+            super::webcam_reach(linux, offered, allowed, linked).unwrap_err()
+        };
+        assert!(why(false, true, true, true).contains("Linux only"));
+        assert!(why(true, false, true, true).contains("Settings"));
+        assert!(why(true, true, false, true).contains("Devices"));
+        assert!(why(true, true, true, false).contains("not linked"));
+    }
+
     /// Q2: the phone's own switch against Screenshot and Lock, said.
     #[test]
     fn a_phone_s_switch_off_says_it_refuses_screenshots() {
@@ -1938,6 +1986,7 @@ mod tests {
                 control_only,
                 sound_only,
                 phone_sound_only: false,
+                webcam: false,
                 id: 1,
                 device_id: None,
                 peer: String::new(),
@@ -1957,6 +2006,28 @@ mod tests {
             ..session(false, false, false)
         };
         assert_eq!(session_kind(&alone), "its sound here");
+        let camera = pocketdesk_core::local::sessions::MirrorSession {
+            webcam: true,
+            ..session(true, false, false)
+        };
+        assert_eq!(
+            session_kind(&camera),
+            "its camera as this computer's camera"
+        );
+        assert_eq!(
+            cameras(std::slice::from_ref(&camera)),
+            Vec::<String>::new(),
+            "no device said"
+        );
+        let named = pocketdesk_core::local::sessions::MirrorSession {
+            device_id: Some("phone".into()),
+            ..camera
+        };
+        let screen = pocketdesk_core::local::sessions::MirrorSession {
+            device_id: Some("other".into()),
+            ..session(true, false, false)
+        };
+        assert_eq!(cameras(&[named, screen]), vec!["phone".to_string()]);
     }
 
     /// J3: the Sessions page's recent sessions, newest first, in words.
@@ -2790,6 +2861,7 @@ mod tests {
             control_only: false,
             sound_only: false,
             phone_sound_only: false,
+            webcam: false,
             cast: false,
         }
     }

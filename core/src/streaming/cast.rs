@@ -166,6 +166,8 @@ pub enum CastEvent {
         /// Control batches for the phone (C8), sent while it said it takes
         /// them.
         control: tokio::sync::mpsc::Sender<Vec<u8>>,
+        /// For this computer's camera (F6 part 2), not a window.
+        webcam: bool,
     },
     /// Its config or one of its frames.
     Payload {

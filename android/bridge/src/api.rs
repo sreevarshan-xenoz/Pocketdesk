@@ -883,7 +883,9 @@ pub async fn connect_to_peer(
                                 }
                                 // The computer's requests for this phone's
                                 // recent photos (C7).
-                                if trimmed.contains("phone_photos.")
+                                // F6 part 2: and to be its camera, kept with them.
+                                if (trimmed.contains("phone_photos.")
+                                    || trimmed.contains("phone_camera."))
                                     && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
                                 {
                                     crate::photo_requests::receive(

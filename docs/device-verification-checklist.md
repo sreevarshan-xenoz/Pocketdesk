@@ -3405,6 +3405,21 @@ Built 2026-10-31. The computer driving sends its moves at most every 2 ms with "
 - [ ] The Linux portal driver for real (the owner's Hyprland driving another computer): the same feel check, and the edge still crosses after a screen is plugged in or rescaled. (where: second computer)
 - [ ] A running server at rest with driving on: the `pd-shared*` threads wake about 7 times a second at home (`/proc/<pid>/task/*/status`), and its receive loop about once a second while nobody drives this computer. (where: linux)
 
+## 252. The phone's camera as this computer's webcam (Linux)
+
+Built 2026-11-01. "Use as a camera" on the Overview asks a phone with Webcam on; a tap on the phone's notification starts its camera in the cast service, and the computer publishes "Pocketdesk camera (<phone>)" as a PipeWire camera (NV12, YUY2) until the cast ends.
+- [x] The node, its formats and its frames, on the Linux laptop against a private PipeWire: 90 of 90 pictures to an app taking NV12 only and one taking YUY2 only, the node gone when dropped and after a SIGKILL. (where: linux)
+- [x] The OPPO's back camera through the ask and a tap, at 1280x720 30 fps: 593 pictures in 20 s as NV12 and 292 in 10 s as YUY2; with the screen off 5,345 in 180 s (ColorOS does not stop it); a kick takes the node and the phone's notification away within 4 s; with the setting off the ask is dropped. (where: here)
+      (2026-11-01, a laptop throwaway on a private PipeWire, counts only.)
+- [x] Turning the phone's Webcam permission off, and then the phone's own switch, each end a running camera: the node and the phone's notification gone within about a second. (where: here)
+      (2026-11-01, PR #604 review round, counts only.)
+- [ ] "Offer phones as a camera" turned off and "Stop camera" on the Overview each end a running camera, and the "in use" notification shows plainly (default importance, silent) on the phone. (where: linux)
+- [ ] Stop on the phone's "Your camera is in use" notification ends the cast and the node goes. (where: here)
+- [ ] A real video call on the owner's desk: Firefox (and Zoom or Meet in the browser) picks "Pocketdesk camera (<phone>)" in its camera list, the other side sees the phone's picture, and it stops when the phone's notification's Stop is pressed. (where: linux)
+- [ ] OBS 30+ and GNOME Snapshot list and show the camera; `pw-v4l2` lets a V4L2-only app (e.g. `pw-v4l2 ffplay /dev/video0` or Cheese) open it. (where: linux)
+- [ ] Front camera and 1080p at 24 fps from Settings: the phone's notification says so and the app's picture is 1920x1080. (where: linux)
+- [ ] The ask refused: Webcam off in Devices (the button is greyed and says why), the phone's switch off (no notification), and the setting off (a camera cast from an older ask is closed with "does not offer phones as a camera"). (where: linux)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

@@ -701,6 +701,8 @@ pub async fn spawn_wan_endpoint(
                 if let Some(cast) = cast {
                     streaming_server.set_cast_channel(cast);
                 }
+                // F6 part 2: a camera cast, while the owner offers phones as a camera.
+                streaming_server.set_webcam_offer(crate::phone_camera::offered);
                 streaming_server.set_session_telemetry(true);
                 streaming_server.set_hevc_allowed(allow_hevc);
                 streaming_server.set_slow_link_frame_rate(slow_link_frame_rate);

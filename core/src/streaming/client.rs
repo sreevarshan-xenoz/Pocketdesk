@@ -68,6 +68,15 @@ pub const SESSION_MODE_SOUND: u8 = 3;
 /// stream, whose byte says whether the sound is taken.
 pub const SESSION_MODE_PHONE_SOUND: u8 = 4;
 
+/// A cast for the computer's camera (F6 part 2): this byte follows a
+/// [`SESSION_MODE_CAST`] mode on the same mode stream, `[0xFB, 0x00, 2,
+/// 1]`. An older computer reads the mode's one byte and drops the stream,
+/// so it shows the camera in a window as before; a newer one publishes the
+/// picture as a camera device, with the phone's Webcam permission and its
+/// owner's setting. On the mode stream, not a stream of its own, so it
+/// takes none of the computer's few config streams (PR #604 review N3).
+pub const CAST_WEBCAM_FLAG: u8 = 1;
+
 /// A sound session's ready stream carries one byte of what the computer
 /// allows (N5 review): this bit marks the byte as said, so a computer that
 /// says nothing reads as not known.
@@ -199,6 +208,9 @@ pub enum SessionMode {
     Sound,
     /// The phone's sound on the computer, alone (M7).
     PhoneSound,
+    /// The phone's camera as the computer's camera (F6 part 2): a cast
+    /// whose mode stream says [`CAST_WEBCAM_FLAG`] too.
+    Webcam,
 }
 
 impl SessionMode {
@@ -208,7 +220,7 @@ impl SessionMode {
         match self {
             SessionMode::Screen => None,
             SessionMode::InputOnly => Some(SESSION_MODE_INPUT_ONLY),
-            SessionMode::Cast => Some(SESSION_MODE_CAST),
+            SessionMode::Cast | SessionMode::Webcam => Some(SESSION_MODE_CAST),
             SessionMode::Sound => Some(SESSION_MODE_SOUND),
             SessionMode::PhoneSound => Some(SESSION_MODE_PHONE_SOUND),
         }
@@ -732,7 +744,11 @@ impl StreamingClient {
         if let Some(wire) = mode.wire() {
             match connection.open_uni().await {
                 Ok(mut mode_stream) => {
-                    let buf = [SESSION_MODE_MARKER[0], SESSION_MODE_MARKER[1], wire];
+                    let mut buf = vec![SESSION_MODE_MARKER[0], SESSION_MODE_MARKER[1], wire];
+                    // F6 part 2: a camera cast says so on the same stream.
+                    if mode == SessionMode::Webcam {
+                        buf.push(CAST_WEBCAM_FLAG);
+                    }
                     if let Err(e) = mode_stream.write_all(&buf).await {
                         warn!(error = %e, "Failed to send the session mode");
                     }
@@ -775,7 +791,10 @@ impl StreamingClient {
             video_bytes: Arc::default(),
             remote: RemoteFlags {
                 input_only,
-                cast: matches!(mode, SessionMode::Cast | SessionMode::PhoneSound),
+                cast: matches!(
+                    mode,
+                    SessionMode::Cast | SessionMode::PhoneSound | SessionMode::Webcam
+                ),
                 phone_sound: mode == SessionMode::PhoneSound,
                 sound: mode == SessionMode::Sound,
                 ..Default::default()
@@ -1186,6 +1205,9 @@ mod remote_tests {
         assert!(SessionMode::Screen.gets_picture());
         assert!(!SessionMode::Cast.gets_picture());
         assert!(!SessionMode::Sound.gets_picture());
+        // F6 part 2: a camera cast is a cast, said with a marker after.
+        assert_eq!(SessionMode::Webcam.wire(), Some(SESSION_MODE_CAST));
+        assert!(!SessionMode::Webcam.gets_picture());
     }
 
     #[test]

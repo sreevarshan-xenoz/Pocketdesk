@@ -636,6 +636,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
     address: JString<'_>,
     port: jint,
     sound_alone: jboolean,
+    webcam: jboolean,
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let json = envelope_unit(RUNTIME.block_on(api::connect_streaming(
@@ -643,7 +644,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
         port as u16,
         None,
         0,
-        cast_mode(sound_alone),
+        cast_mode(sound_alone, webcam),
     )));
     to_jstring(&mut env, json)
 }
@@ -657,6 +658,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
     address: JString<'_>,
     identity_json: JString<'_>,
     sound_alone: jboolean,
+    webcam: jboolean,
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let identity = jstring_to_string(&mut env, &identity_json);
@@ -665,15 +667,18 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
         identity,
         None,
         0,
-        cast_mode(sound_alone),
+        cast_mode(sound_alone, webcam),
     )));
     to_jstring(&mut env, json)
 }
 
-/// A cast's mode: its screen, or its sound alone (M7).
-fn cast_mode(sound_alone: jboolean) -> pocketdesk_core::streaming::SessionMode {
+/// A cast's mode: its screen, its sound alone (M7), or its camera as the
+/// computer's camera (F6 part 2).
+fn cast_mode(sound_alone: jboolean, webcam: jboolean) -> pocketdesk_core::streaming::SessionMode {
     if sound_alone != 0 {
         pocketdesk_core::streaming::SessionMode::PhoneSound
+    } else if webcam != 0 {
+        pocketdesk_core::streaming::SessionMode::Webcam
     } else {
         pocketdesk_core::streaming::SessionMode::Cast
     }
