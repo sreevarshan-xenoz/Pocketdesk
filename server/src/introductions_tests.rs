@@ -1221,7 +1221,10 @@ fn phones_a_introduced_lose_the_owner_mark_when_a_is_no_longer_mine() {
     .unwrap();
     // Forgotten here too (no longer listed): its name and kind went with it,
     // so the notice must not call it a phone.
-    computers::update(&e.dir, |file| file.computers.retain(|c| c.device_id != "a-gone")).unwrap();
+    computers::update(&e.dir, |file| {
+        file.computers.retain(|c| c.device_id != "a-gone")
+    })
+    .unwrap();
     let demoted = demote_orphans_in(&e.dir, &e.trust());
     assert_eq!(demoted.len(), 1);
     assert_eq!(demoted[0].1, "a device you removed");

@@ -224,7 +224,10 @@ mod tests {
         let peer: SocketAddr = PEER.parse().unwrap();
         let (summary, body) = prompt_words(true, Some("Desk computer"), "c0ffee", peer);
         assert_eq!(summary, "Pocketdesk: a computer wants to connect");
-        assert!(body.starts_with("Desk computer from 192.0.2.7:51000."), "{body}");
+        assert!(
+            body.starts_with("Desk computer from 192.0.2.7:51000."),
+            "{body}"
+        );
         let (summary, body) = prompt_words(false, None, "a1b2c3", peer);
         assert_eq!(summary, "Pocketdesk: a phone wants to connect");
         assert!(body.starts_with("a1b2c3 from 192.0.2.7:51000."), "{body}");
