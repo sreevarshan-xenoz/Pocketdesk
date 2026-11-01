@@ -70,6 +70,12 @@ struct State {
     last_touch: (u16, u16),
     /// What a drop on the window did, and when (L2).
     drop_note: Option<(String, std::time::Instant)>,
+    /// A share asked of the phone for a dropped file (Apps part 2): the
+    /// phone, the file's name and when it was asked (Unix seconds), until
+    /// the phone says how it went.
+    share_wait: Option<(String, String, u64)>,
+    /// When the phone's word on a share was last looked for.
+    share_looked: Option<std::time::Instant>,
     /// The picture shown, for a screenshot (L5).
     shown: Option<Picture>,
     /// The owner asked to record (L5); the worker starts and stops it.
@@ -103,6 +109,102 @@ pub fn drop_words(reaches: bool, files: usize, folders: usize, failed: &[String]
         total.saturating_sub(failed.len()),
         reasons.join("; ")
     )
+}
+
+/// How long the window waits for the phone's word on a share.
+const SHARE_WAIT_SECS: u64 = 90;
+
+/// How often the phone's word on a share is looked for.
+const SHARE_LOOK: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// What the phone's word on a share says (Apps part 2): `app` is the app it
+/// went to or was tried on, as the phone listed it, if the phone said one.
+pub fn share_words(
+    result: pocketdesk_core::protocol::phone_action::AppResult,
+    app: Option<&str>,
+    name: &str,
+) -> String {
+    use pocketdesk_core::protocol::phone_action::AppResult as R;
+    let front = app.unwrap_or("The app in front");
+    match result {
+        R::Shared => format!("Shared {name} into {}.", app.unwrap_or("the app in front")),
+        R::NoApp => format!(
+            "{name} is in Downloads on the phone: Pocketdesk could not tell which app is in front (or it is not one the phone lists)."
+        ),
+        R::CannotTake => {
+            format!("{front} takes no file like {name}, so it is in Downloads on the phone.")
+        }
+        R::Off => format!(
+            "{name} was not shared: \u{201c}Let the computer open my apps\u{201d} is off on the phone. The file itself is in Downloads."
+        ),
+        R::ControlOff => format!(
+            "{name} was not shared: Pocketdesk control is off on the phone. The file itself is in Downloads."
+        ),
+        R::Locked | R::LockedSecure => {
+            format!("{name} was not shared: the phone is locked. The file itself is in Downloads.")
+        }
+        R::Asleep => format!(
+            "{name} was not shared: the phone's screen is off. The file itself is in Downloads."
+        ),
+        R::NeedsScreen => format!(
+            "{name} was not shared: the phone's screen is not shown to this computer. The file itself is in Downloads."
+        ),
+        R::TooMany => format!(
+            "{name} was not shared: the phone was asked too often. The file itself is in Downloads."
+        ),
+        _ => {
+            format!("Android would not start the share of {name}. The file itself is in Downloads.")
+        }
+    }
+}
+
+/// Look for the phone's word on the share asked for the last drop, once a
+/// second, and put it where the drop's line was (Apps part 2).
+fn watch_share(shared: &Mutex<State>, ctx: &egui::Context, state_dir: &std::path::Path) {
+    let Some((device, name, asked_at)) = lock(shared).share_wait.clone() else {
+        return;
+    };
+    {
+        let mut state = lock(shared);
+        if state
+            .share_looked
+            .is_some_and(|at| at.elapsed() < SHARE_LOOK)
+        {
+            ctx.request_repaint_after(SHARE_LOOK);
+            return;
+        }
+        state.share_looked = Some(std::time::Instant::now());
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let word = pocketdesk_core::local::phone_apps::read_results(state_dir)
+        .remove(&device)
+        .filter(|o| o.answers("share", asked_at) && o.report.name.as_deref() == Some(&name));
+    let said = match word {
+        Some(outcome) => {
+            let label = outcome.report.app.as_deref().map(|id| {
+                pocketdesk_core::local::phone_apps::read(state_dir)
+                    .remove(&device)
+                    .and_then(|l| l.apps.into_iter().find(|a| a.id == id))
+                    .map_or_else(|| id.to_string(), |a| a.name)
+            });
+            Some(share_words(outcome.report.result, label.as_deref(), &name))
+        }
+        None if now.saturating_sub(asked_at) > SHARE_WAIT_SECS => Some(format!(
+            "The phone said nothing about sharing {name}; the file itself is in Downloads if it arrived."
+        )),
+        None => None,
+    };
+    let mut state = lock(shared);
+    match said {
+        Some(said) => {
+            state.share_wait = None;
+            state.drop_note = Some((said, std::time::Instant::now()));
+            ctx.request_repaint();
+        }
+        None => ctx.request_repaint_after(SHARE_LOOK),
+    }
 }
 
 /// `text` cut to the control road's limit for one text, at a character (L2).
@@ -170,13 +272,16 @@ impl CastView {
 
     /// Call each pass: keeps the window open while there is a cast to show.
     /// `control` is the owner's Settings ("Control phones from their screen
-    /// window", C8); `targets`, the phones files reach now (L2).
+    /// window", C8); `targets`, the phones files reach now (L2); `share`,
+    /// Settings' "Share a dropped file into the phone's app in front"
+    /// (Apps part 2).
     pub fn show(
         &self,
         ctx: &egui::Context,
         devices: &[crate::model::Device],
         control: bool,
         targets: Vec<String>,
+        share: bool,
     ) {
         let (title, size) = {
             let state = lock(&self.shared);
@@ -205,7 +310,8 @@ impl CastView {
         let shared = self.shared.clone();
         let state_dir = self.state_dir.clone();
         ctx.show_viewport_deferred(viewport_id(), builder, move |ui, _class| {
-            take_drops(&shared, ui.ctx(), &state_dir, &targets);
+            take_drops(&shared, ui.ctx(), &state_dir, &targets, share);
+            watch_share(&shared, ui.ctx(), &state_dir);
             draw(&shared, ui, control);
         });
     }
@@ -396,6 +502,7 @@ fn take_drops(
     ctx: &egui::Context,
     state_dir: &std::path::Path,
     targets: &[String],
+    share: bool,
 ) {
     let dropped: Vec<PathBuf> = ctx.input(|i| {
         i.raw
@@ -413,20 +520,38 @@ fn take_drops(
     let folders = dropped.iter().filter(|p| p.is_dir()).count();
     let files = dropped.len() - folders;
     let mut failed = Vec::new();
+    // Apps part 2: one file dropped, and the phone asked to share it into
+    // the app in front (it says whether that app takes it).
+    let mut sharing = None;
     if reaches {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
         for path in &dropped {
-            if let Err(e) = crate::model::queue_send(state_dir, &device, path, now) {
-                failed.push(e);
+            match crate::model::queue_send(state_dir, &device, path, now) {
+                Ok(name) if share && files == 1 && folders == 0 => {
+                    let size = std::fs::metadata(path).map_or(0, |m| m.len());
+                    if pocketdesk_core::local::phone_actions::request_share(
+                        state_dir, &device, &name, size, now,
+                    )
+                    .is_ok()
+                    {
+                        sharing = Some((name, now));
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => failed.push(e),
             }
         }
     }
-    lock(shared).drop_note = Some((
-        drop_words(reaches, files, folders, &failed),
-        std::time::Instant::now(),
-    ));
+    let mut words = drop_words(reaches, files, folders, &failed);
+    if let Some((name, now)) = sharing {
+        words = format!(
+            "Sending {name} to the phone; if the app in front there takes it, it is shared into it, else it stays in Downloads."
+        );
+        lock(shared).share_wait = Some((device.clone(), name, now));
+    }
+    lock(shared).drop_note = Some((words, std::time::Instant::now()));
     ctx.request_repaint_after(DROP_NOTE);
 }
 
@@ -944,6 +1069,33 @@ fn publisher(shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> Box<dyn FnMut(P
 
 #[cfg(test)]
 mod tests {
+    /// Apps part 2: the phone's word on a share says where the file went or why not.
+    #[test]
+    fn a_share_says_where_the_file_went() {
+        use pocketdesk_core::protocol::phone_action::AppResult as R;
+        assert_eq!(
+            share_words(R::Shared, Some("Notes"), "a.png"),
+            "Shared a.png into Notes."
+        );
+        assert!(share_words(R::NoApp, None, "a.png").contains("in Downloads"));
+        let cannot = share_words(R::CannotTake, Some("Calculator"), "a.png");
+        assert!(cannot.starts_with("Calculator takes no file like a.png"));
+        assert!(share_words(R::CannotTake, None, "a.png").starts_with("The app in front takes no"));
+        for refused in [
+            R::Off,
+            R::ControlOff,
+            R::LockedSecure,
+            R::Asleep,
+            R::NeedsScreen,
+            R::TooMany,
+            R::Failed,
+        ] {
+            let said = share_words(refused, None, "a.png");
+            assert!(said.contains("Downloads"), "{refused:?}: {said}");
+            assert!(!said.contains("Shared a.png"), "{refused:?}");
+        }
+    }
+
     /// L2: a drop says it is sending, why it cannot, or what failed.
     #[test]
     fn a_drop_says_what_it_did() {

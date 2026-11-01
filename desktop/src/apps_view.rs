@@ -6,12 +6,13 @@
 //! phone as the page opens; its answer, its icons and how an ask went are
 //! read from the state folder once a second while the page shows.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, RichText};
 use pocketdesk_core::local::phone_apps::{self as store, Outcome};
+use pocketdesk_core::local::phone_pins;
 use pocketdesk_core::protocol::permissions::Capability;
 use pocketdesk_core::protocol::phone_action::{AppResult, PhoneAction, PhoneApp};
 
@@ -322,6 +323,10 @@ pub struct AppsPage {
     /// The word of the phone last acted on (when, and what), so each is acted on once.
     acted: Option<(u64, AppResult)>,
     recents: BTreeMap<String, u64>,
+    /// The apps of this phone pinned to Start or the applications menu.
+    pinned: BTreeSet<String>,
+    /// Settings: no pin menu on the apps (Apps part 2).
+    pub pins_off: bool,
     read_at: Option<Instant>,
     icons: HashMap<String, Icon>,
     focus: bool,
@@ -348,6 +353,7 @@ impl AppsPage {
         self.opening = None;
         self.acted = None;
         self.icons.clear();
+        self.pinned.clear();
         self.read_at = None;
     }
 
@@ -370,6 +376,7 @@ impl AppsPage {
         self.recents = store::read_recent(state_dir)
             .remove(phone)
             .unwrap_or_default();
+        self.pinned = phone_pins::pinned(state_dir, phone);
         // An icon that was not there is looked for again: it may have come.
         self.icons.retain(|_, (_, texture)| texture.is_some());
     }
@@ -405,6 +412,48 @@ impl AppsPage {
                 self.notice = crate::notice::Notice::error(format!("Could not ask the phone: {e}"));
             }
         }
+    }
+
+    /// Pin `app` to Start (Windows) or the applications menu (Linux): a
+    /// shortcut that opens it on `phone` from this computer.
+    fn pin(&mut self, state_dir: &Path, phone: &str, app: &PhoneApp) {
+        self.notice = match self.try_pin(state_dir, phone, app) {
+            Ok(()) => {
+                self.pinned.insert(app.id.clone());
+                crate::notice::Notice::done(pinned_words(&app.name))
+            }
+            Err(e) => crate::notice::Notice::error(format!("Could not pin {}: {e}", app.name)),
+        };
+    }
+
+    fn try_pin(&self, state_dir: &Path, phone: &str, app: &PhoneApp) -> std::io::Result<()> {
+        let places = phone_pins::places(state_dir)
+            .ok_or_else(|| std::io::Error::other("this system's folders are not known"))?;
+        let exe = std::env::current_exe()?;
+        // The app's own icon as the phone sent it, else Pocketdesk's.
+        let png =
+            pocketdesk_core::local::phone_app_icons::kept(state_dir, phone, &app.id, app.version)
+                .and_then(|path| std::fs::read(path).ok())
+                // Whatever the phone sent is decoded and written again, so only a
+                // picture this program made lands in a shortcut's icon file.
+                .and_then(|bytes| reencode_png(&bytes))
+                .or_else(own_icon_png)
+                .ok_or_else(|| std::io::Error::other("no icon"))?;
+        phone_pins::pin(state_dir, &places, &exe, phone, &app.id, &app.name, &png).map(|_| ())
+    }
+
+    /// Take `app`'s pin away.
+    fn unpin(&mut self, state_dir: &Path, phone: &str, app: &PhoneApp) {
+        let removed = phone_pins::places(state_dir)
+            .ok_or_else(|| std::io::Error::other("this system's folders are not known"))
+            .and_then(|places| phone_pins::unpin(state_dir, &places, phone, &app.id));
+        self.notice = match removed {
+            Ok(_) => {
+                self.pinned.remove(&app.id);
+                crate::notice::Notice::done(format!("Unpinned {}.", app.name))
+            }
+            Err(e) => crate::notice::Notice::error(format!("Could not unpin {}: {e}", app.name)),
+        };
     }
 
     /// Act once on the result of an open: remember the app as recent and
@@ -579,12 +628,15 @@ impl AppsPage {
         // An open needs the phone's link and its permission, not a fresh list.
         let can_open = allowed && linked && !matches!(status, Status::Opening(_));
         let recents = self.recents.clone();
+        let pinned = self.pinned.clone();
+        let pin_menu = !self.pins_off;
         let apps = self.apps.clone();
         let found = order(&apps, &recents, &self.query);
         if found.is_empty() {
             ui.label(RichText::new("No app matches.").color(crate::theme::muted(ui)));
         }
         let mut open = None;
+        let mut pin_ask: Option<(PhoneApp, bool)> = None;
         let mut budget = DECODE_PER_FRAME;
         let ctx = ui.ctx().clone();
         egui::ScrollArea::vertical()
@@ -597,8 +649,13 @@ impl AppsPage {
                         ui.horizontal_wrapped(|ui| {
                             for app in latest.iter().take(8) {
                                 let icon = self.icon(&ctx, state_dir, &phone, app, &mut budget);
-                                if cell(ui, app, icon.as_ref(), can_open) {
-                                    open = Some((*app).clone());
+                                let pin = pin_menu.then(|| pinned.contains(&app.id));
+                                match cell(ui, app, icon.as_ref(), can_open, pin) {
+                                    Some(CellAction::Open) => open = Some((*app).clone()),
+                                    Some(CellAction::Pin(on)) => {
+                                        pin_ask = Some(((*app).clone(), on))
+                                    }
+                                    None => {}
                                 }
                             }
                         });
@@ -610,8 +667,11 @@ impl AppsPage {
                     ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
                     for app in found.iter().take(MAX_SHOWN) {
                         let icon = self.icon(&ctx, state_dir, &phone, app, &mut budget);
-                        if cell(ui, app, icon.as_ref(), can_open) {
-                            open = Some((*app).clone());
+                        let pin = pin_menu.then(|| pinned.contains(&app.id));
+                        match cell(ui, app, icon.as_ref(), can_open, pin) {
+                            Some(CellAction::Open) => open = Some((*app).clone()),
+                            Some(CellAction::Pin(on)) => pin_ask = Some(((*app).clone(), on)),
+                            None => {}
                         }
                     }
                 });
@@ -625,23 +685,96 @@ impl AppsPage {
         if let Some(app) = open {
             self.open(state_dir, &phone, &app, now);
         }
+        if let Some((app, on)) = pin_ask {
+            if on {
+                self.pin(state_dir, &phone, &app);
+            } else {
+                self.unpin(state_dir, &phone, &app);
+            }
+        }
         action.or_else(|| self.raise.take().map(Action::Raise))
     }
 }
 
-/// One app in the grid: its icon and name, a button. Whether it was clicked.
+/// What a cell was used for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CellAction {
+    /// Clicked: open the app.
+    Open,
+    /// Its pin menu entry: pin it (`true`) or unpin it.
+    Pin(bool),
+}
+
+/// The words for a pin that was made, for this system.
+pub fn pinned_words(app: &str) -> String {
+    if cfg!(windows) {
+        format!(
+            "Pinned {app} to Start. For the taskbar too, right-click it in Start and choose Pin to taskbar."
+        )
+    } else {
+        format!(
+            "Pinned {app} to {}. Some desktops take a moment to list it.",
+            phone_pins::MENU_NAME
+        )
+    }
+}
+
+/// `bytes` decoded as an icon (held to an icon's size by its header and the
+/// decoder's limits, as the page's textures are) and encoded again as a PNG:
+/// nothing but the picture survives. `None` when it is not a small PNG.
+fn reencode_png(bytes: &[u8]) -> Option<Vec<u8>> {
+    use image::ImageEncoder;
+    use pocketdesk_core::local::notification_icons as icons;
+    if !icons::icon_fits(bytes) {
+        return None;
+    }
+    let mut reader =
+        image::ImageReader::with_format(std::io::Cursor::new(bytes), image::ImageFormat::Png);
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(icons::MAX_ICON_SIDE);
+    limits.max_image_height = Some(icons::MAX_ICON_SIDE);
+    limits.max_alloc = Some(8 << 20);
+    reader.limits(limits);
+    let rgba = reader.decode().ok()?.to_rgba8();
+    let mut png = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut png)
+        .write_image(
+            rgba.as_raw(),
+            rgba.width(),
+            rgba.height(),
+            image::ExtendedColorType::Rgba8,
+        )
+        .ok()?;
+    Some(png)
+}
+
+/// Pocketdesk's own icon as a PNG, for an app whose icon the phone has not
+/// sent.
+fn own_icon_png() -> Option<Vec<u8>> {
+    use image::ImageEncoder;
+    let mut png = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut png)
+        .write_image(
+            &pocketdesk_desktop::icon::icon_rgba(64),
+            64,
+            64,
+            image::ExtendedColorType::Rgba8,
+        )
+        .ok()?;
+    Some(png)
+}
+
+/// One app in the grid: its icon and name, a button, and (with `pin` set to
+/// whether it is pinned) a right-click menu to pin it. What it was used for.
 fn cell(
     ui: &mut egui::Ui,
     app: &PhoneApp,
     icon: Option<&egui::TextureHandle>,
     enabled: bool,
-) -> bool {
-    let sense = if enabled {
-        egui::Sense::click()
-    } else {
-        egui::Sense::hover()
-    };
-    let (rect, response) = ui.allocate_exact_size(CELL, sense);
+    pin: Option<bool>,
+) -> Option<CellAction> {
+    // Always a click target, for the pin menu; an open needs `enabled`.
+    let (rect, response) = ui.allocate_exact_size(CELL, egui::Sense::click());
     let label = format!("Open {}", app.name);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, &label));
     if ui.is_rect_visible(rect) {
@@ -699,8 +832,39 @@ fn cell(
         );
         painter.galley(at, galley, ui.visuals().text_color());
     }
-    let response = response.on_hover_text(format!("{} ({})", app.name, app.id));
-    enabled && response.clicked()
+    let hint = if pin.is_some() {
+        format!(
+            "{} ({})\nRight-click to pin it to {}.",
+            app.name,
+            app.id,
+            phone_pins::MENU_NAME
+        )
+    } else {
+        format!("{} ({})", app.name, app.id)
+    };
+    let response = response.on_hover_text(hint);
+    let mut used = (enabled && response.clicked()).then_some(CellAction::Open);
+    if let Some(pinned) = pin {
+        response.context_menu(|ui| {
+            if ui
+                .add_enabled(enabled, egui::Button::new(format!("Open {}", app.name)))
+                .clicked()
+            {
+                used = Some(CellAction::Open);
+                ui.close();
+            }
+            let text = if pinned {
+                format!("Unpin from {}", phone_pins::MENU_NAME)
+            } else {
+                format!("Pin to {}", phone_pins::MENU_NAME)
+            };
+            if ui.button(text).clicked() {
+                used = Some(CellAction::Pin(!pinned));
+                ui.close();
+            }
+        });
+    }
+    used
 }
 
 /// `path` decoded to a texture, if it is a small PNG (held to an icon's
@@ -748,6 +912,44 @@ mod tests {
 
     fn names(found: Vec<&PhoneApp>) -> Vec<&str> {
         found.into_iter().map(|a| a.name.as_str()).collect()
+    }
+
+    /// Apps part 2 review: a phone's icon is decoded and written again before
+    /// it reaches a shortcut's icon file, so anything riding in the file goes.
+    #[test]
+    fn a_phone_s_icon_is_written_again_before_it_is_kept() {
+        let own = own_icon_png().unwrap();
+        // A picture with something after it, or hidden in a chunk, comes out clean.
+        let mut dirty = own.clone();
+        dirty.extend_from_slice(b"MZ-not-a-picture-but-appended-bytes");
+        let clean = reencode_png(&dirty).unwrap();
+        assert!(clean.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(!clean.windows(5).any(|w| w == b"MZ-no"));
+        assert_eq!(&clean[12..16], b"IHDR");
+        assert_eq!(
+            reencode_png(&own).unwrap(),
+            clean,
+            "the same picture, the same file"
+        );
+        for bad in [&b""[..], b"not a png at all, no, none", &own[..40]] {
+            assert!(reencode_png(bad).is_none());
+        }
+        // Past an icon's size it is refused before anything decodes.
+        let big = {
+            use image::ImageEncoder;
+            let side = pocketdesk_core::local::notification_icons::MAX_ICON_SIDE + 1;
+            let mut png = Vec::new();
+            image::codecs::png::PngEncoder::new(&mut png)
+                .write_image(
+                    &vec![0u8; (side * side * 4) as usize],
+                    side,
+                    side,
+                    image::ExtendedColorType::Rgba8,
+                )
+                .unwrap();
+            png
+        };
+        assert!(reencode_png(&big).is_none());
     }
 
     /// P2: a search finds apps by name or id, every word, any case.
@@ -808,6 +1010,7 @@ mod tests {
             report: AppReport {
                 about: about.into(),
                 app: app.map(str::to_string),
+                name: None,
                 result,
             },
             at,
