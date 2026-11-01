@@ -1,0 +1,29 @@
+Pocketdesk
+Licensed under either of the Apache License 2.0 (LICENSE-APACHE) or the MIT
+license (LICENSE-MIT), at your option.
+
+This product depends on, or follows the technique of, the following Apache-2.0
+projects. No source of RustDesk (AGPL-3.0) or Sunshine (GPL-3.0) is included.
+
+Shizuku-API (api and provider libraries)
+  Copyright (c) RikkaApps
+  https://github.com/RikkaApps/Shizuku-API
+  Apache License 2.0. Linked into the Android app; it is used only when the
+  owner runs Shizuku and turns on "Separate windows (Shizuku)".
+
+scrcpy
+  Copyright (C) 2018 Genymobile
+  https://github.com/Genymobile/scrcpy
+  Apache License 2.0. The helper process in
+  android/app/src/main/java/dev/pocketdesk/android/windows/ follows scrcpy's
+  technique for making a display of its own and injecting input into it as the
+  shell user: a display manager built on a context named for the shell's
+  package, the virtual display flags by Android version, and input events
+  given a display id before they are injected through the input service. The
+  code is written for Pocketdesk and is not copied from scrcpy.
+
+Ynkcc/VirtualDisplay
+  https://github.com/Ynkcc/VirtualDisplay
+  Apache License 2.0 (scrcpy-derived). Its approach of starting that helper
+  through Shizuku and handing it the video encoder's surface was followed; the
+  code is written for Pocketdesk and is not copied from it.

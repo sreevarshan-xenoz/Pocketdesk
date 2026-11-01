@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1187 open items.
+1199 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 65 |
-| Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 17 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 188 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 71 |
+| Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 189 |
 | A phone with a SIM | 40 |
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 155 |
+| A second computer | 156 |
 | A Linux desktop (the Azure VM serves for some) | 214 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 65 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 388 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 66 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 390 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -177,6 +177,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Names: a file named with a colon, a Windows device name (`NUL.txt`), a hidden file and a trailing-dot name on the phone are left out (the phone's log counts them) and the run goes on. A folder renamed on the phone keeps its place on the computer. (where: OPPO)
 - Remove a folder in Settings: its row goes, the computer's copy stays, and Android no longer lists the folder in its granted folders for the app (`adb shell dumpsys package` shows no persisted grant for it) unless Folders the computer may open still shares it. (where: OPPO)
 
+**262. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
+
+- Shizuku not running: the phone's Settings has no "Separate windows" row at all, and the computer's Phone apps page says apps open on the phone's screen; the Phone apps page opens an app as before. (where: OPPO)
+- Shizuku running, switch off: the row is shown and off; the page still opens apps on the phone's screen. Turn it on: Shizuku's own permission dialog appears once and nothing else; after Allow the row says on; after Deny the switch stays off and nothing is asked again at once. (where: OPPO)
+- Open a second, third and fourth app: four windows at once, each its own app and stream; a fifth says the phone already shows four and opens nowhere; closing one lets it open. The page says "N of 4 open". (where: OPPO)
+- Close a window on the computer: the app's display goes (the phone's `dumpsys display` no longer lists it) and the encoder stops within a second or two; the last window closing ends the phone's notification after a moment. Quit the desktop app with windows open: the phone closes them about 30 seconds later. (where: OPPO)
+- Turn the switch off with windows open, then separately stop Shizuku, then turn off "Let the computer open my apps", then unpair: each gives every window back within a second and the computer's windows close. (where: OPPO)
+- A foreground service start from the background: with Pocketdesk not in front and the screen off or on another app, a window ask starts the cast service; if Android refuses, the page falls back to opening the app on the phone's screen (`windows_unavailable`) and the log says why. The notification says "Showing app windows on <computer>". (where: OPPO)
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -225,6 +234,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **257. A direct link on Windows: the Mobile Hotspot**
 
 - The server killed with a link on (`taskkill /F` on the server only, and only when the owner says so) and started again: its first start's log says it swept one, the hotspot is off, and the owner's settings are back. A record that could not be put back (the internet unplugged during the kill) stays and the next start retries it. (where: power)
+
+**262. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
+
+- Lock rules: with a PIN lock on, an open for a window is refused like any open (the page says locked and to unlock or use Extend Unlock) and no display is made; after unlocking and opening a window, lock the phone: the window goes on. (where: OPPO)
 
 ## Needs the owner's OK on this box: input reaching Windows, or its display settings
 
@@ -637,6 +650,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A put-back that fails is retried: with a link on, unplug the internet and turn the link off (the owner's settings may not go back at once); the log says the hotspot was not fully put back, the record stays, and within a minute of the internet returning the settings are back and the record is gone. The hotspot does not come up with the link's name in the meantime. (where: owner)
 - A hotspot still named `pocketdesk-…` (left by a killed server whose record was lost): "Make a direct link" says to give it a name of your own and starts nothing. (where: owner)
 - The Pair page's card follows the server's plan, not the desktop's own look: with the internet unplugged the card says Mobile Hotspot needs a connection within about 30 s, and after plugging it in the button comes back within about 30 s; the desktop app itself never calls WinRT. (where: owner)
+
+**262. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
+
+- Touch, scroll, Back and typing in a window (a notes app, a browser with a made-up page): each reaches only that window's app, even with two windows open; Home and Recents are not offered; a letter outside the keyboard's map is skipped, not typed wrong. Watch only (the window's bar) stops input. (where: OPPO)
 
 ## A phone with a SIM
 
@@ -1216,6 +1233,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **261. Phone apps on the computer's Start menu, from notifications, and dropped files shared into the app in front**
 
 - The guards: "Let the computer open my apps" off, then the control service off, then a secure lock, then the screen shown to another computer only: each drop leaves the file in Downloads and the line names the reason; the foreground package is read once per drop (the phone's log names no package of any other window), and Pocketdesk's own screen in front is refused. Whether a share started from the service with another app in front appears on ColorOS 14 and Android 15 or 16, and whether Android's chooser fallback shows when the direct share is refused. (where: OPPO)
+
+**262. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
+
+- A screen cast running at the same time (the phone's screen shown to the same computer): a window opens beside it and each has its own window here; stopping the screen cast keeps no window open unless the session is still up. With the screen shown to another computer, a window ask is answered `windows_unavailable`. (where: OPPO)
 
 ## A Linux desktop (the Azure VM serves for some)
 
@@ -1979,6 +2000,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **261. Phone apps on the computer's Start menu, from notifications, and dropped files shared into the app in front**
 
 - A computer that is too old (a throwaway built from before this change): the phone says the computer cannot keep folders yet and sends nothing; no copies appear in that computer's Downloads. (where: other hardware)
+
+**262. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
+
+- An older computer (a throwaway built before this change) answers no such ask; a computer without the setting (`phone_app_windows` off in the desktop's Settings) opens apps on the phone's screen as before. (where: other hardware)
 
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 
@@ -2849,3 +2874,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Linux (KDE, GNOME, Hyprland with a launcher): Pin to the applications menu: the entry "<App> (phone)" shows in the launcher (after a moment on some desktops) with the icon; running it opens the app and the screen window. An app whose name has quotes, `$`, `%`, a backslash or a path separator pins and runs with the name as given and nothing else started (check the `.desktop` file by eye). Unpin removes `pocketdesk-phone-*.desktop` and the icon. (where: by hand)
 - Settings on both: "Offer to pin phone apps to Start or the applications menu" off removes the right-click menu and keeps made shortcuts working; "Share a dropped file into the phone's app in front" off sends dropped files as before. (where: by hand)
 - The Files page's Kept folders section and the three Settings rows on the desktop (the folder box with Choose folder, the cap, the deletion switch) by hand on Windows and on Linux, light and dark, and in a narrow window; the Show in folder button opens the folder. (where: by hand)
+
+**262. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
+
+- Switch on, "Let the computer open my apps" on, phone unlocked: click an app on the Phone apps page: a window with the app's name opens on the computer, the app's picture in it, and the phone's own screen stays as it was (try with it off, and with another app in front); the log (`WindowCast`, `WindowHost`) names the display. Try Android 14 first, then a phone on 10 to 13 if one is at hand. (where: OPPO)
+- The Phone apps page's line about how apps open, and Settings, "Open phone apps in windows of their own", by hand on Windows and on Linux, light and dark, and in a narrow window; the window's title, its Back-only bar and its control hint; the viewer windows in a Wayland session. (where: by hand)
