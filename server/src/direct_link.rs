@@ -401,7 +401,8 @@ mod backend {
         let running: bool = nm
             .get_property::<u32>("State")
             .await
-            .map(|s| s >= 10)
+            // 10 is asleep (networking switched off): no hotspot there.
+            .map(|s| s >= 20)
             .unwrap_or(false);
         if !running {
             return Err(dl::Unavailable::NoNetworkManager.words().to_string());
