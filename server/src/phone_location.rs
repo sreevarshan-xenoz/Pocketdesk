@@ -289,10 +289,7 @@ impl Plugin for PhoneLocationPlugin {
         // One of the owner's phones, and only the one asked: a fix nobody
         // asked for is dropped unread, never kept.
         let device = sender.device_id();
-        if !is_owner_phone(device)
-            || !offered()
-            || !deliver(device, &packet.body)
-        {
+        if !is_owner_phone(device) || !offered() || !deliver(device, &packet.body) {
             tracing::info!("A phone's location that was not asked for was dropped");
         }
         Ok(())
