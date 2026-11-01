@@ -192,6 +192,7 @@ mod tests {
         let report = AppReport {
             about: "open".into(),
             app: Some("org.example.app".into()),
+            name: None,
             result: AppResult::Locked,
         };
         keep_result(&dir, "old", report.clone(), 1, &|_| true).unwrap();

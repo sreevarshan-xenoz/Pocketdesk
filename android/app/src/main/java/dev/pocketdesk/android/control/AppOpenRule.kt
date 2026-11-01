@@ -26,6 +26,15 @@ object AppOpenRule {
     const val TOO_MANY = "too_many"
     const val FAILED = "failed"
 
+    /** Apps part 2: the file dropped on the screen window was shared into the app in front. */
+    const val SHARED = "shared"
+
+    /** Apps part 2: no app in front that could be told, so the file stays in Downloads. */
+    const val NO_APP = "no_app"
+
+    /** Apps part 2: the app in front takes no file of that type, so the file stays in Downloads. */
+    const val CANNOT_TAKE = "cannot_take"
+
     /**
      * The word for a refused ask, or null when nothing is said: a computer
      * that is not the phone's own is never answered, so it learns nothing
@@ -39,6 +48,8 @@ object AppOpenRule {
         PhoneActionRule.Decision.ASLEEP -> ASLEEP
         PhoneActionRule.Decision.NOT_LISTED -> NOT_LISTED
         PhoneActionRule.Decision.TOO_MANY -> TOO_MANY
+        // Apps part 2: a share needs the control service, as an open that shows the screen does.
+        PhoneActionRule.Decision.NO_SERVICE -> CONTROL_OFF
         else -> FAILED
     }
 
@@ -81,7 +92,12 @@ object AppOpenRule {
         else -> Plan.SHOW_SCREEN_FIRST
     }
 
-    /** The body of the report to the computer: `{about, app?, result}`. */
-    fun report(about: String, app: String?, result: String): JSONObject =
-        JSONObject().put("about", about).apply { if (app != null) put("app", app) }.put("result", result)
+    /** The body of the report to the computer: `{about, app?, name?, result}` (`name`: the file of a share). */
+    fun report(about: String, app: String?, result: String, name: String? = null): JSONObject =
+        JSONObject().put("about", about)
+            .apply {
+                if (app != null) put("app", app)
+                if (name != null) put("name", name)
+            }
+            .put("result", result)
 }

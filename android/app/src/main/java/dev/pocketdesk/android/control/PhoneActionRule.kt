@@ -27,6 +27,9 @@ object PhoneActionRule {
 
         /** P10: list the contacts, names and numbers only. */
         CONTACTS("contacts"),
+
+        /** Apps part 2: share the file the computer is sending into the app in front. */
+        SHARE("share"),
         ;
 
         companion object {
@@ -131,6 +134,19 @@ object PhoneActionRule {
         // Hands-free: a lock that guards nothing, or a screen that is off, is
         // passed through the service (it wakes the phone and swipes the lock
         // screen away); a secure lock never is.
+        // Apps part 2: a file shared into the app in front. With the apps
+        // switch and the service, an unlocked phone with its screen on; which
+        // app takes it is decided when the file is here.
+        action == Action.SHARE -> when {
+            !appsOn -> Decision.OFF
+            !own -> Decision.NOT_OWN
+            !service -> Decision.NO_SERVICE
+            locked && secureLock -> Decision.LOCKED_SECURE
+            locked -> Decision.LOCKED
+            !awake -> Decision.ASLEEP
+            !withinBudget -> Decision.TOO_MANY
+            else -> Decision.DO
+        }
         action == Action.OPEN -> when {
             !appsOn -> Decision.OFF
             !own -> Decision.NOT_OWN

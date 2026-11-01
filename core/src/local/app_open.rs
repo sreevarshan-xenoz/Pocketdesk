@@ -23,6 +23,9 @@ pub struct OpenRequest {
     pub page: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phone: Option<String>,
+    /// The phone's app a [`PHONE_APP`] request opens (its package name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
     pub created_unix: u64,
 }
 
@@ -43,11 +46,47 @@ pub const TYPE: &str = "type";
 /// window, not a page of its own), the computer's id in `phone`.
 pub const COMPUTER_VIEW: &str = "computer_view";
 
+/// The page asked for to open one of a phone's apps there (Apps part 2: a
+/// pinned app's shortcut), the phone's id in `phone` and the package in
+/// `app`. It brings up no page and does not raise the window.
+pub const PHONE_APP: &str = "phone_app";
+
 /// Ask the window to open `page` (for `phone`).
 pub fn request(state_dir: &Path, page: &str, phone: Option<&str>, now_unix: u64) -> io::Result<()> {
+    write(state_dir, page, phone, None, now_unix)
+}
+
+/// Ask the window to open `app` on `phone` (Apps part 2). Both are checked
+/// as the packets' are, here and again when the request is taken.
+pub fn request_phone_app(
+    state_dir: &Path,
+    phone: &str,
+    app: &str,
+    now_unix: u64,
+) -> io::Result<()> {
+    if !is_phone_app(phone, Some(app)) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "not an app"));
+    }
+    write(state_dir, PHONE_APP, Some(phone), Some(app), now_unix)
+}
+
+/// Whether `phone` and `app` can be a [`PHONE_APP`] request's.
+fn is_phone_app(phone: &str, app: Option<&str>) -> bool {
+    super::approval::is_valid_id(phone)
+        && app.is_some_and(crate::protocol::phone_action::valid_app_id)
+}
+
+fn write(
+    state_dir: &Path,
+    page: &str,
+    phone: Option<&str>,
+    app: Option<&str>,
+    now_unix: u64,
+) -> io::Result<()> {
     let request = OpenRequest {
         page: page.to_string(),
         phone: phone.map(str::to_string),
+        app: app.map(str::to_string),
         created_unix: now_unix,
     };
     let path = state_dir.join(APP_OPEN_FILE);
@@ -66,7 +105,13 @@ pub fn take(state_dir: &Path, now_unix: u64) -> Option<OpenRequest> {
     let _ = std::fs::remove_file(&path);
     let request: OpenRequest = serde_json::from_str(&raw).ok()?;
     let fresh = request.created_unix <= now_unix && now_unix - request.created_unix <= TTL_SECS;
-    fresh.then_some(request)
+    // A request to open an app names a valid phone and package, or is not one.
+    let named = request.page != PHONE_APP
+        || is_phone_app(
+            request.phone.as_deref().unwrap_or(""),
+            request.app.as_deref(),
+        );
+    (fresh && named).then_some(request)
 }
 
 #[cfg(test)]
@@ -84,6 +129,7 @@ mod tests {
             Some(OpenRequest {
                 page: "files".into(),
                 phone: Some("phone-a".into()),
+                app: None,
                 created_unix: 100
             })
         );
@@ -95,11 +141,50 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Apps part 2: a pinned app's request carries a valid phone and
+    /// package, or none is made or taken.
+    #[test]
+    fn a_request_to_open_an_app_names_a_valid_phone_and_package() {
+        let dir = std::env::temp_dir().join(format!("pd-app-open-app-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(request_phone_app(&dir, "phone-a", "org.example.app", 100).is_ok());
+        let taken = take(&dir, 101).unwrap();
+        assert_eq!(taken.page, PHONE_APP);
+        assert_eq!(taken.phone.as_deref(), Some("phone-a"));
+        assert_eq!(taken.app.as_deref(), Some("org.example.app"));
+        for (phone, app) in [
+            ("phone a", "org.example.app"),
+            ("phone-a", "org.example.app;x"),
+            ("", "org.example.app"),
+            ("phone-a", "nodots"),
+        ] {
+            assert!(
+                request_phone_app(&dir, phone, app, 100).is_err(),
+                "{phone} {app}"
+            );
+        }
+        // A file written by hand is held to the same rules when taken.
+        std::fs::write(
+            dir.join(APP_OPEN_FILE),
+            r#"{"page":"phone_app","phone":"phone-a","app":"x y","created_unix":100}"#,
+        )
+        .unwrap();
+        assert_eq!(take(&dir, 101), None);
+        std::fs::write(
+            dir.join(APP_OPEN_FILE),
+            r#"{"page":"phone_app","phone":"phone-a","created_unix":100}"#,
+        )
+        .unwrap();
+        assert_eq!(take(&dir, 101), None, "no app named");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_quit_closes_only_a_window_that_was_open_when_it_was_asked() {
         let quit = OpenRequest {
             page: QUIT.into(),
             phone: None,
+            app: None,
             created_unix: 100,
         };
         assert!(quit.quits(90), "the window ran then");

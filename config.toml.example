@@ -107,6 +107,17 @@ video_quality = "balanced"
 # asked ("Let the computer open my apps", off by default). Off: not listed.
 # phone_apps_page = true
 
+# Right-click a phone app on that page to pin it to Start (Windows) or the
+# applications menu (Linux): a shortcut named "<app> (phone)" that opens the
+# app on the phone from this computer. Off: no pin menu; shortcuts already
+# pinned keep working.
+# phone_apps_pin = true
+
+# A file dropped on a phone's screen window is also shared into the app in
+# front on the phone, when that app takes it (the phone's "Let the computer
+# open my apps" must be on, off by default). Off: a dropped file is only sent.
+# phone_drop_share = true
+
 # Linux: offer phones as this computer's camera. A phone with "Use its camera
 # as a webcam" on in the desktop app (Devices) and "Let the computer use
 # my camera" on in its Settings, asked from the Overview, is published as a

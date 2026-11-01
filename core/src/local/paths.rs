@@ -140,6 +140,8 @@ pub const PHONE_APP_ICONS_DIR: &str = "phone_app_icons";
 pub const PHONE_APP_RESULTS_FILE: &str = "phone_app_results.json";
 /// The apps this computer opened on each phone, last first (Apps part 1), written by the desktop app.
 pub const PHONE_APPS_RECENT_FILE: &str = "phone_apps_recent.json";
+/// The phone apps pinned to this computer's Start or applications menu (Apps part 2), written by the desktop app.
+pub const PHONE_PINS_FILE: &str = "phone_pins.json";
 /// Each phone's last media report (T8d), written by the server.
 pub const PHONE_MEDIA_FILE: &str = "phone_media.json";
 /// The phones' ongoing updates shown here (N4), owner-only.

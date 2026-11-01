@@ -1244,6 +1244,9 @@ object RustCore {
         val have: Map<String, Long> = emptyMap(),
         /** Apps part 1: for an open, the phone's screen is wanted shown there too. */
         val screen: Boolean = false,
+        /** Apps part 2: for a share, the file the computer is sending: its name and size. */
+        val name: String = "",
+        val size: Long = -1,
     )
 
     /** The screenshots and locks waiting (O2), taken. */
@@ -1262,6 +1265,8 @@ object RustCore {
                     a.optString("app"),
                     have,
                     a.optBoolean("screen", false),
+                    a.optString("name"),
+                    a.optLong("size", -1),
                 )
             }
         }.getOrDefault(emptyList())
