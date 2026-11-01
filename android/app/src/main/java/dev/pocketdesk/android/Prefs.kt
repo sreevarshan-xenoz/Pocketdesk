@@ -881,6 +881,8 @@ object Prefs {
 
     fun setWebcam(ctx: Context, on: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_WEBCAM, on) }
+        // Off closes a camera the computer uses now (PR #604 review N4).
+        if (!on) dev.pocketdesk.android.cast.CastService.stopWebcam(ctx)
         bump()
     }
 

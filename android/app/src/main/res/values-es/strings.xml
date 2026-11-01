@@ -1012,6 +1012,9 @@
     <string name="cast_showing_webcam">%1$s está usando tu cámara</string>
     <string name="webcam_not_allowed">El equipo no deja que este teléfono sea su cámara: activa “Usar su cámara como webcam aquí” en su página Dispositivos</string>
     <string name="webcam_not_offered">El equipo no ofrece teléfonos como cámara: activa “Ofrecer teléfonos como cámara” en su Configuración</string>
+    <string name="webcam_replaced">Otro teléfono es ahora la cámara del equipo</string>
+    <string name="webcam_failed">El equipo no pudo mostrar la cámara, así que se detuvo</string>
+    <string name="webcam_in_use_channel">Cámara en uso por un equipo</string>
     <string name="cast_no_camera">Este teléfono no tiene una cámara que Pocketdesk pueda mostrar</string>
     <string name="cast_camera_lost">La cámara se detuvo: puede que otra app la haya tomado</string>
     <string name="state_widget_name">Pocketdesk: cómo va</string>

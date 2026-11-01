@@ -1067,6 +1067,9 @@
     <string name="cast_showing_webcam">Your camera is in use by %1$s</string>
     <string name="webcam_not_allowed">The computer does not let this phone be its camera: turn on “Use its camera as a webcam” in its Devices page</string>
     <string name="webcam_not_offered">The computer does not offer phones as a camera: turn on “Offer phones as a camera” in its Settings</string>
+    <string name="webcam_replaced">Another phone is the computer\'s camera now</string>
+    <string name="webcam_failed">The computer could not show the camera, so it stopped</string>
+    <string name="webcam_in_use_channel">Camera in use by a computer</string>
     <string name="cast_no_camera">This phone has no camera Pocketdesk can show</string>
     <string name="cast_camera_lost">The camera stopped: another app may have taken it</string>
     <string name="state_widget_name">Pocketdesk: how it is doing</string>

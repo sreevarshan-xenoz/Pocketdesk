@@ -1002,6 +1002,9 @@
     <string name="cast_showing_webcam">உங்கள் கேமராவை %1$s பயன்படுத்துகிறது</string>
     <string name="webcam_not_allowed">இந்தத் தொலைபேசி தன் கேமராவாக இருக்கக் கணினி அனுமதிக்கவில்லை: அதன் Devices பக்கத்தில் “இங்கே அதன் கேமராவை வெப்கேமாகப் பயன்படுத்து” என்பதை இயக்கவும்</string>
     <string name="webcam_not_offered">கணினி தொலைபேசிகளைக் கேமராவாக வழங்கவில்லை: அதன் Settings இல் “தொலைபேசிகளைக் கேமராவாக வழங்கு” என்பதை இயக்கவும்</string>
+    <string name="webcam_replaced">இப்போது வேறொரு தொலைபேசி கணினியின் கேமராவாக உள்ளது</string>
+    <string name="webcam_failed">கணினியால் கேமராவைக் காட்ட முடியவில்லை, அதனால் அது நின்றது</string>
+    <string name="webcam_in_use_channel">கணினி பயன்படுத்தும் கேமரா</string>
     <string name="cast_no_camera">Pocketdesk காட்டக்கூடிய கேமரா இந்தத் தொலைபேசியில் இல்லை</string>
     <string name="cast_camera_lost">கேமரா நின்றது: வேறொரு செயலி அதை எடுத்திருக்கலாம்</string>
     <string name="state_widget_name">Pocketdesk: கணினி நிலை</string>
