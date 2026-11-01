@@ -117,7 +117,8 @@ object ShizukuBridge {
         val userService = Shizuku.UserServiceArgs(ComponentName(context.packageName, WindowHostService::class.java.name))
             .processNameSuffix("windows")
             .daemon(false)
-            .version(2)
+            // 3: the helper gained the hotspot calls (transactions 9 and 10).
+            .version(3)
         synchronized(this) {
             args = userService
             connection = service
