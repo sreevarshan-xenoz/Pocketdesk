@@ -178,6 +178,7 @@ object PhoneActions {
      */
     internal fun stillRefused(context: Context, address: String): String? = when {
         !Prefs.appsFromComputer(context) -> AppOpenRule.OFF
+        KeyguardDismiss.kind(context) == LockRule.Kind.SECURE -> AppOpenRule.LOCKED_SECURE
         context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked ?: true -> AppOpenRule.LOCKED
         dev.pocketdesk.android.notify.PhoneLink.target(context)?.address != address -> AppOpenRule.OFF
         else -> null
@@ -249,8 +250,41 @@ object PhoneActions {
      */
     private fun openAsked(context: Context, ask: RustCore.PhoneActionAsk, own: HostStore.Host?, service: Boolean) {
         if (own == null) return
+        // Hands-free: a lock that guards nothing is swiped away, and a screen
+        // that is off woken, first (off this tick: it waits for Android). A
+        // secure lock never got here; the window looks again before it acts.
+        val awake = context.getSystemService(PowerManager::class.java)?.isInteractive ?: false
+        if (service && LockRule.needsDismiss(KeyguardDismiss.kind(context), awake)) {
+            val app = context.applicationContext
+            Thread {
+                if (KeyguardDismiss.dismiss(app)) {
+                    openUnlocked(app, ask, own, true)
+                } else {
+                    val why = if (KeyguardDismiss.kind(app) == LockRule.Kind.SECURE) AppOpenRule.LOCKED_SECURE else AppOpenRule.LOCKED
+                    Log.i(TAG, "the lock screen was not dismissed for an open: $why")
+                    report(own.address, own.controlPort, "open", ask.app, why)
+                }
+            }.start()
+            return
+        }
+        openUnlocked(context, ask, own, service)
+    }
+
+    /** The open itself, once the phone is awake and unlocked. */
+    private fun openUnlocked(context: Context, ask: RustCore.PhoneActionAsk, own: HostStore.Host, service: Boolean) {
+        // Right before anything starts, the lock is read once more: an app is never opened
+        // (nor a screen share asked for) over a lock screen, whatever was true when the ask came.
+        val awake = context.getSystemService(PowerManager::class.java)?.isInteractive ?: false
+        val lock = KeyguardDismiss.kind(context)
+        if (service && !LockRule.openNow(lock, awake)) {
+            val why = if (lock == LockRule.Kind.SECURE) AppOpenRule.LOCKED_SECURE else AppOpenRule.LOCKED
+            Log.i(TAG, "the phone is not open at the moment of the open: $why")
+            Thread { report(own.address, own.controlPort, "open", ask.app, why) }.start()
+            return
+        }
         val casting = dev.pocketdesk.android.cast.CastService.screenTo == own.address
-        val result = when (AppOpenRule.plan(ask.screen, service, casting)) {
+        val paused = dev.pocketdesk.android.cast.CastService.pausedFor == own.address
+        val result = when (AppOpenRule.plan(ask.screen, service, casting, paused)) {
             AppOpenRule.Plan.TAP -> {
                 // As P2: at once with the service, else "Tap to open".
                 val done = open(context, ask.app, ask.host, service)
@@ -264,17 +298,73 @@ object PhoneActions {
             }
             AppOpenRule.Plan.CONTROL_OFF -> AppOpenRule.CONTROL_OFF
             // One consent for the connection: the owner is asked once, by a tap, and the app opens after.
-            AppOpenRule.Plan.SHOW_SCREEN_FIRST -> {
-                val pm = context.packageManager
-                val label = runCatching { pm.getApplicationLabel(pm.getApplicationInfo(ask.app, 0)).toString() }
-                    .getOrDefault(ask.app)
-                dev.pocketdesk.android.cast.ScreenForApp.offer(context, own, ask.app, label)
-                AppOpenRule.NEEDS_SCREEN
-            }
+            AppOpenRule.Plan.SHOW_SCREEN_FIRST -> showScreenFirst(context, ask, own)
             // The cast already shown is reused: no new consent.
             AppOpenRule.Plan.START -> launchFromService(context, ask.app)
+            // Hands-free: the share paused when this computer left resumes with the consent already
+            // given; the app opens when it is up (and the computer is told then). Not resumable now
+            // (it ran out, or the switch went off): asked for as if none was kept.
+            AppOpenRule.Plan.RESUME ->
+                if (dev.pocketdesk.android.cast.CastService.resume(context, own.address, own.port)) {
+                    openWhenShown(context.applicationContext, ask.app, own.address, own.controlPort)
+                    null
+                } else {
+                    showScreenFirst(context, ask, own)
+                }
         }
-        Thread { report(own.address, own.controlPort, "open", ask.app, result) }.start()
+        if (result != null) Thread { report(own.address, own.controlPort, "open", ask.app, result) }.start()
+    }
+
+    /**
+     * The owner is asked once, at the phone, for the screen; the computer is
+     * told so. With "Accept screen sharing for my computers" on and everything
+     * it needs in place, Pocketdesk starts the question itself instead and
+     * presses it ([ConsentRule]); then nothing is told yet: the app opens (and
+     * the computer is told) when the cast is up, or [consentNeedsTap] says why not.
+     */
+    private fun showScreenFirst(context: Context, ask: RustCore.PhoneActionAsk, own: HostStore.Host): String? {
+        val service = ControlService.instance
+        if (service != null && ConsentRule.mayArm(
+                autoOn = Prefs.autoAcceptScreen(context),
+                appsOn = Prefs.appsFromComputer(context),
+                own = true,
+                service = true,
+            )
+        ) {
+            val started = runCatching {
+                service.startActivity(
+                    Intent(context, dev.pocketdesk.android.cast.ScreenForAppActivity::class.java)
+                        .putExtra(dev.pocketdesk.android.cast.ScreenForApp.EXTRA_ADDRESS, own.address)
+                        .putExtra(dev.pocketdesk.android.cast.ScreenForApp.EXTRA_PORT, own.port)
+                        .putExtra(dev.pocketdesk.android.cast.ScreenForApp.EXTRA_CONTROL_PORT, own.controlPort)
+                        .putExtra(dev.pocketdesk.android.cast.ScreenForApp.EXTRA_APP, ask.app)
+                        .putExtra(dev.pocketdesk.android.cast.ScreenForApp.EXTRA_AUTO, true)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+            if (started.isSuccess) return null
+            Log.w(TAG, "the screen-sharing window did not start from the service", started.exceptionOrNull())
+        }
+        offerScreen(context, ask.app, own)
+        return AppOpenRule.NEEDS_SCREEN
+    }
+
+    /** The one-tap notification for the screen, naming the app. */
+    private fun offerScreen(context: Context, pkg: String, own: HostStore.Host) {
+        val pm = context.packageManager
+        val label = runCatching { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() }
+            .getOrDefault(pkg)
+        dev.pocketdesk.android.cast.ScreenForApp.offer(context, own, pkg, label)
+    }
+
+    /**
+     * Hands-free could not accept the screen-sharing question by itself: the
+     * ordinary one-tap notification is offered, silently, and the computer is
+     * told a tap is needed ("needs_tap").
+     */
+    fun consentNeedsTap(context: Context, own: HostStore.Host, pkg: String) {
+        offerScreen(context, pkg, own)
+        Thread { report(own.address, own.controlPort, "open", pkg, AppOpenRule.NEEDS_TAP) }.start()
     }
 
     /** Take the asks waiting; [own] is the computer the phone works with. */
@@ -292,6 +382,7 @@ object PhoneActions {
                 service = service != null,
                 sdk = Build.VERSION.SDK_INT,
                 locked = context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked ?: true,
+                secureLock = KeyguardDismiss.kind(context) == LockRule.Kind.SECURE,
                 awake = context.getSystemService(PowerManager::class.java)?.isInteractive ?: false,
                 // T10h carries it, to the clipboard or Downloads (O2 review: with
                 // both off, it would be taken and go nowhere).

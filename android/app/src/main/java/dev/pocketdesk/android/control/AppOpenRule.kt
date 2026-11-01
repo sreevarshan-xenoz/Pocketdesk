@@ -13,6 +13,12 @@ object AppOpenRule {
     const val NEEDS_SCREEN = "needs_screen"
     const val CONTROL_OFF = "control_off"
     const val LOCKED = "locked"
+
+    /** Hands-free: a secure lock is on and is never bypassed. */
+    const val LOCKED_SECURE = "locked_secure"
+
+    /** Hands-free: the phone could not press its own screen-sharing question: one tap is needed. */
+    const val NEEDS_TAP = "needs_tap"
     const val ASLEEP = "asleep"
     const val OFF = "off"
     const val NOT_LISTED = "not_listed"
@@ -29,6 +35,7 @@ object AppOpenRule {
         PhoneActionRule.Decision.DO, PhoneActionRule.Decision.NOT_OWN -> null
         PhoneActionRule.Decision.OFF -> OFF
         PhoneActionRule.Decision.LOCKED -> LOCKED
+        PhoneActionRule.Decision.LOCKED_SECURE -> LOCKED_SECURE
         PhoneActionRule.Decision.ASLEEP -> ASLEEP
         PhoneActionRule.Decision.NOT_LISTED -> NOT_LISTED
         PhoneActionRule.Decision.TOO_MANY -> TOO_MANY
@@ -46,6 +53,12 @@ object AppOpenRule {
         /** The screen is not shown there yet: offer it once, then start. */
         SHOW_SCREEN_FIRST,
 
+        /**
+         * Hands-free: the screen share was paused when this computer left:
+         * resume it with the consent already given, then start.
+         */
+        RESUME,
+
         /** Pocketdesk's control service is off, and the computer asked for it. */
         CONTROL_OFF,
 
@@ -57,13 +70,15 @@ object AppOpenRule {
      * How an open that [PhoneActionRule] allowed goes. [screenWanted]: the
      * computer asked for the phone's screen too; [service]: the control
      * service is bound; [casting]: the screen is already shown to that
-     * computer, so it is reused and no new consent is asked.
+     * computer, so it is reused and no new consent is asked; [paused]: a
+     * share paused for that very computer is kept, so it resumes the same way.
      */
-    fun plan(screenWanted: Boolean, service: Boolean, casting: Boolean): Plan = when {
+    fun plan(screenWanted: Boolean, service: Boolean, casting: Boolean, paused: Boolean = false): Plan = when {
         !screenWanted -> Plan.TAP
         !service -> Plan.CONTROL_OFF
-        !casting -> Plan.SHOW_SCREEN_FIRST
-        else -> Plan.START
+        casting -> Plan.START
+        paused -> Plan.RESUME
+        else -> Plan.SHOW_SCREEN_FIRST
     }
 
     /** The body of the report to the computer: `{about, app?, result}`. */

@@ -627,6 +627,19 @@ object Prefs {
         bump()
     }
 
+    /**
+     * Hands-free: Pocketdesk accepts Android's own screen-sharing question for
+     * the phone's own computer, when that computer asked to open an app (off by
+     * default). It needs "Let the computer open my apps" and Pocketdesk control.
+     */
+    fun autoAcceptScreen(ctx: Context): Boolean =
+        prefs(ctx).getBoolean("auto_accept_screen", false)
+
+    fun setAutoAcceptScreen(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean("auto_accept_screen", enabled) }
+        bump()
+    }
+
     /** C8: the computer this phone casts to may control it (off by default). */
     fun controlFromComputer(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_CONTROL_FROM_COMPUTER, false)
