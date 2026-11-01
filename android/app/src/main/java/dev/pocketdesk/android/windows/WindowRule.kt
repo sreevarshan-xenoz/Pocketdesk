@@ -101,9 +101,84 @@ object WindowRule {
                 dpi in MIN_DPI..MAX_DPI
     }
 
+    /** Where a control batch goes in a session. */
+    enum class Target { WINDOWS, SCREEN, DROP }
+
+    /**
+     * Where a control batch goes: a batch for app windows to them; any other
+     * to the phone's own screen only in a session that shows the screen and
+     * only while its control is on. A session of windows alone has no screen
+     * to control, so every other batch is dropped there.
+     */
+    fun target(windowsOnly: Boolean, forWindows: Boolean, screenControlOn: Boolean): Target = when {
+        forWindows -> Target.WINDOWS
+        windowsOnly || !screenControlOn -> Target.DROP
+        else -> Target.SCREEN
+    }
+
+    /**
+     * Whether an input event may be injected: [setDisplay] gives the event its
+     * display (null when this Android has no such call) and [send] injects it
+     * (null when there is no input service). Both must be there: without a
+     * display id an event would land on the phone's own screen. `setDisplay`
+     * returns nothing, so its result is never taken for an answer.
+     */
+    fun <E> inject(event: E, displayId: Int, setDisplay: ((E, Int) -> Unit)?, send: ((E) -> Boolean)?): Boolean {
+        if (setDisplay == null || send == null) return false
+        setDisplay(event, displayId)
+        return send(event)
+    }
+
+    /** The shell's uid, and root's: Shizuku's own server calls with these. */
+    const val UID_SHELL = 2000
+    const val UID_ROOT = 0
+
+    /**
+     * Whether a call from [caller] is taken by the helper process: this app's
+     * uid ([expected]; -1 while unknown, which takes none), and for the one
+     * call Shizuku itself makes ([destroy]) its shell or root.
+     */
+    fun callerAllowed(caller: Int, expected: Int, destroy: Boolean): Boolean =
+        (expected >= 0 && caller == expected) || (destroy && (caller == UID_SHELL || caller == UID_ROOT))
+
+    /** The only keys the helper presses: Back, Enter and Delete. */
+    fun keyAllowed(code: Int): Boolean =
+        code == WindowInput.KEYCODE_BACK || code == WindowInput.KEYCODE_ENTER || code == WindowInput.KEYCODE_DEL
+
+    /** Apps never shown in a window: the ones that change what the phone or this helper may do. */
+    private val DENIED = setOf(
+        "dev.pocketdesk.android",
+        "com.android.settings",
+        "com.android.settings.intelligence",
+        "com.android.providers.settings",
+        "com.android.systemui",
+        "com.android.shell",
+        "com.android.packageinstaller",
+        "com.google.android.packageinstaller",
+        "com.android.permissioncontroller",
+        "com.google.android.permissioncontroller",
+        "com.android.managedprovisioning",
+        "com.android.vending",
+        "com.android.documentsui",
+        "moe.shizuku.privileged.api",
+        "rikka.shizuku",
+        "com.coloros.safecenter",
+        "com.oplus.battery",
+        "com.samsung.android.settings",
+        "com.miui.securitycenter",
+    )
+
+    /**
+     * Whether [pkg] may not be opened in a window: it is on the fixed list,
+     * is [own] (Pocketdesk), or is one of [resolved] (the packages the
+     * phone's own settings, application-management, install and permission
+     * screens resolve to on this phone). Anything else a phone maker ships
+     * under another name is not caught: SECURITY limit 83 says so.
+     */
+    fun denied(pkg: String, own: String, resolved: Set<String>): Boolean =
+        pkg == own || pkg in DENIED || pkg in resolved
+
     // DisplayManager's VIRTUAL_DISPLAY_FLAG_* (some are hidden), as scrcpy's own display uses them.
-    private const val PUBLIC = 1 shl 0
-    private const val PRESENTATION = 1 shl 1
     private const val OWN_CONTENT_ONLY = 1 shl 3
     private const val SUPPORTS_TOUCH = 1 shl 6
     private const val ROTATES_WITH_CONTENT = 1 shl 7
@@ -115,9 +190,14 @@ object WindowRule {
     private const val OWN_FOCUS = 1 shl 14
     private const val DEVICE_DISPLAY_GROUP = 1 shl 15
 
-    /** The flags an app window's display is made with at Android [sdk] (33: Tiramisu, 34: Upside Down Cake). */
+    /**
+     * The flags an app window's display is made with at Android [sdk]: not public and not a
+     * presentation, so no other app can put anything on it; only the shell that made it launches
+     * there. (Whether `am start --display` from the shell may launch other apps on such a display
+     * before Android 13 is an owed device check.) Android 13 is Tiramisu, 14 Upside Down Cake.
+     */
     fun displayFlags(sdk: Int): Int {
-        var flags = PUBLIC or PRESENTATION or OWN_CONTENT_ONLY or SUPPORTS_TOUCH or ROTATES_WITH_CONTENT or
+        var flags = OWN_CONTENT_ONLY or SUPPORTS_TOUCH or ROTATES_WITH_CONTENT or
             DESTROY_CONTENT_ON_REMOVAL
         if (sdk >= 33) flags = flags or TRUSTED or OWN_DISPLAY_GROUP or ALWAYS_UNLOCKED or TOUCH_FEEDBACK_DISABLED
         if (sdk >= 34) flags = flags or OWN_FOCUS or DEVICE_DISPLAY_GROUP

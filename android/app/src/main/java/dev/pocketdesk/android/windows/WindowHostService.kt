@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
+import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
@@ -41,8 +42,24 @@ import kotlin.system.exitProcess
 @SuppressLint("PrivateApi", "DiscouragedPrivateApi", "SoonBlockedPrivateApi")
 class WindowHostService() : IWindowHost.Stub() {
     /** Shizuku (13.1 and later) hands a user service its [Context]; older ones use the constructor above. */
-    @Suppress("UNUSED_PARAMETER")
-    constructor(context: Context) : this()
+    constructor(context: Context) : this() {
+        // This app's uid, when the context says it (an app's, never the shell's).
+        expectedUid = runCatching { context.applicationInfo.uid }.getOrDefault(-1).takeIf { it > WindowRule.UID_SHELL } ?: -1
+    }
+
+    /**
+     * The one uid whose calls are taken: this app's. Learnt from the first call when the
+     * context did not say; Shizuku hands the binder to the app that bound the service only.
+     */
+    @Volatile
+    private var expectedUid = -1
+
+    /** Refuse a call that is not from this app (or, for [destroy], from Shizuku's own server). */
+    private fun guard(destroy: Boolean = false) {
+        val caller = Binder.getCallingUid()
+        if (expectedUid < 0 && !destroy && caller > WindowRule.UID_SHELL) expectedUid = caller
+        if (!WindowRule.callerAllowed(caller, expectedUid, destroy)) throw SecurityException("a call from $caller")
+    }
 
     private val displays = ConcurrentHashMap<Int, VirtualDisplay>()
 
@@ -65,6 +82,7 @@ class WindowHostService() : IWindowHost.Stub() {
     }
 
     override fun createDisplay(name: String, width: Int, height: Int, dpi: Int, surface: Surface?): Int {
+        guard()
         if (surface == null || !surface.isValid) return -1
         return runCatching {
             val manager = displayManager ?: return -1
@@ -77,23 +95,31 @@ class WindowHostService() : IWindowHost.Stub() {
     }
 
     override fun launch(displayId: Int, component: String): Boolean {
+        guard()
         if (!displays.containsKey(displayId) || !WindowRule.componentOk(component)) return false
         return runCatching {
             val process = ProcessBuilder("/system/bin/am", "start", "--display", displayId.toString(), "-n", component)
                 .redirectErrorStream(true)
                 .start()
-            val output = process.inputStream.bufferedReader().readText()
+            // Waited for first, with a limit, then read: `am` writes a few lines and exits.
             val finished = process.waitFor(LAUNCH_WAIT_S, TimeUnit.SECONDS)
-            if (!finished) process.destroy()
-            finished && process.exitValue() == 0 && !output.contains("Error")
+            if (!finished) {
+                process.destroy()
+                return false
+            }
+            val output = process.inputStream.bufferedReader().readText()
+            process.exitValue() == 0 && !output.contains("Error")
         }.onFailure { Log.w(TAG, "no launch", it) }.getOrDefault(false)
     }
 
     override fun release(displayId: Int) {
+        guard()
         displays.remove(displayId)?.let { runCatching { it.release() } }
     }
 
     override fun injectTouch(displayId: Int, action: Int, x: Float, y: Float, downTime: Long): Boolean {
+        guard()
+        if (!(action == WindowInput.ACTION_DOWN || action == WindowInput.ACTION_UP || action == WindowInput.ACTION_MOVE)) return false
         if (!displays.containsKey(displayId)) return false
         val event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, x, y, 0)
         event.source = InputDevice.SOURCE_TOUCHSCREEN
@@ -101,6 +127,7 @@ class WindowHostService() : IWindowHost.Stub() {
     }
 
     override fun injectScroll(displayId: Int, x: Float, y: Float, vscroll: Float): Boolean {
+        guard()
         if (!displays.containsKey(displayId)) return false
         val now = SystemClock.uptimeMillis()
         val properties = arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_MOUSE })
@@ -119,7 +146,9 @@ class WindowHostService() : IWindowHost.Stub() {
     }
 
     override fun injectKey(displayId: Int, keyCode: Int): Boolean {
-        if (!displays.containsKey(displayId)) return false
+        guard()
+        // Back, Enter and Delete only: nothing that would leave the app (Home, Power, Recents).
+        if (!displays.containsKey(displayId) || !WindowRule.keyAllowed(keyCode)) return false
         val now = SystemClock.uptimeMillis()
         return listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP).all { action ->
             inject(
@@ -130,12 +159,14 @@ class WindowHostService() : IWindowHost.Stub() {
     }
 
     override fun injectText(displayId: Int, text: String): Boolean {
+        guard()
         if (!displays.containsKey(displayId) || text.isEmpty()) return false
         val events = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD).getEvents(text.toCharArray()) ?: return false
         return events.all { inject(it, displayId) }
     }
 
     override fun destroy() {
+        guard(destroy = true)
         displays.keys.toList().forEach(::release)
         exitProcess(0)
     }
@@ -163,8 +194,10 @@ class WindowHostService() : IWindowHost.Stub() {
 
     /** Give [event] its display and inject it, without waiting for the app to take it. */
     private fun inject(event: InputEvent, displayId: Int): Boolean = runCatching {
-        setDisplayId?.invoke(event, displayId) ?: return false
-        injectMethod?.invoke(input, event, INJECT_ASYNC) as? Boolean ?: false
+        // `setDisplayId` returns nothing: only its presence decides (see WindowRule.inject).
+        val setDisplay = setDisplayId?.let { method -> { e: InputEvent, id: Int -> method.invoke(e, id); Unit } }
+        val send = injectMethod?.let { method -> { e: InputEvent -> method.invoke(input, e, INJECT_ASYNC) as? Boolean ?: false } }
+        WindowRule.inject(event, displayId, setDisplay, send)
     }.onFailure { Log.w(TAG, "no injection", it) }.getOrDefault(false)
 
     /** The shell's own package name, so the platform's package checks pass for uid 2000. */
