@@ -9,7 +9,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.Prefs
-import dev.pocketdesk.android.R
 import dev.pocketdesk.android.control.AppOpenRule
 import dev.pocketdesk.android.control.ConsentRule
 import dev.pocketdesk.android.control.ControlService
@@ -108,8 +107,19 @@ class ScreenForAppActivity : ComponentActivity() {
         if (may && service != null) {
             val app = applicationContext
             val host = HostStore.Host(address, port, controlPort)
-            val resolved = packageManager.resolveActivity(question, 0)?.activityInfo?.packageName
-            service.armConsent(address, getString(R.string.app_name), resolved) { result ->
+            // The one activity Android resolves this very question to, and Pocketdesk's own
+            // label as Android writes it in the question: only that window is ever pressed.
+            // Android names it in the intent itself (an explicit component, which package
+            // visibility does not hide); the resolver is the fallback.
+            val named = question.component
+            val resolved = if (named == null) packageManager.resolveActivity(question, 0)?.activityInfo else null
+            val label = applicationInfo.loadLabel(packageManager).toString()
+            service.armConsent(
+                address,
+                label,
+                named?.packageName ?: resolved?.packageName,
+                named?.className ?: resolved?.name,
+            ) { result ->
                 // Pressed: the cast follows from the result below. Anything else: a tap is needed.
                 if (result != ConsentRule.PRESSED) PhoneActions.consentNeedsTap(app, host, pkg)
             }

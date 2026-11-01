@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
 /**
@@ -14,23 +15,29 @@ import android.view.accessibility.AccessibilityNodeInfo
  * [ConsentRule.APPEAR_MS] + [ConsentRule.STEPS_MS], and ends at its first
  * press, so it can never act when no ask is waiting.
  *
- * It looks at the window in front every [ConsentRule.POLL_MS], and only
- * when that window belongs to [packages]; it presses by the node's own
- * click action, on a view found by its id or its words, never by a
- * coordinate. What it sees is compared and dropped: nothing of it is kept
- * or logged but the outcome.
+ * The question is identified exactly: the window-state event whose package
+ * and class are the activity Android resolved Pocketdesk's own question
+ * intent to ([expectedPackage], [expectedClass]) names its window id, and
+ * only that window (looked at every [ConsentRule.POLL_MS], by that id) is
+ * ever read or pressed; its text must name [label] as a whole word. It
+ * presses by the node's own click action, on the confirm button found by its
+ * id or class and known words, never by a coordinate. What it sees is
+ * compared and dropped: nothing of it is kept or logged but the outcome.
  */
 internal class ConsentPress(
     private val service: ControlService,
     private val label: String,
-    private val packages: Set<String>,
+    private val expectedPackage: String,
+    private val expectedClass: String,
     /** Told once, on the main thread: [ConsentRule.PRESSED] or [ConsentRule.NOT_FOUND]. */
     private val done: (String) -> Unit,
 ) {
     private val main = Handler(Looper.getMainLooper())
     private val armedAt = SystemClock.elapsedRealtime()
     private var seenAt: Long? = null
-    private var opens = 0
+
+    /** The question's window, from the event that named it; nothing is pressed before it is known. */
+    private var windowId: Int? = null
     private var looks = 0
     private var finished = false
 
@@ -40,13 +47,31 @@ internal class ConsentPress(
             val now = SystemClock.elapsedRealtime()
             if (!ConsentRule.live(armedAt, seenAt, now)) return end(ConsentRule.NOT_FOUND)
             looks++
-            runCatching { look(now) }.onFailure { Log.w(TAG, "a look at the window failed") }
+            runCatching { look() }.onFailure { Log.w(TAG, "a look at the window failed") }
             if (!finished) main.postDelayed(this, ConsentRule.POLL_MS)
         }
     }
 
     fun start() {
         main.post(tick)
+    }
+
+    /** A window-state event: the question's own window is named by its package and class, exactly. */
+    fun onEvent(event: AccessibilityEvent) {
+        if (finished || windowId != null) return
+        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        val own = service.packageName
+        if (ConsentRule.isQuestionWindow(
+                event.packageName?.toString(),
+                event.className?.toString(),
+                expectedPackage,
+                expectedClass,
+                own,
+            )
+        ) {
+            windowId = event.windowId
+            seenAt = SystemClock.elapsedRealtime()
+        }
     }
 
     /** End it without a result (the cast came up by itself, or the service is going). */
@@ -67,21 +92,17 @@ internal class ConsentPress(
     /** One view of the window, kept with the real node so a click can reach it. */
     private class Seen(val view: ConsentRule.Node, val node: AccessibilityNodeInfo)
 
-    private fun look(now: Long) {
-        val root = service.rootInActiveWindow ?: return
-        // Only the system's own window, never another app's or Pocketdesk's.
-        if (root.packageName?.toString() !in packages) return
+    private fun look() {
+        val id = windowId ?: return
+        // Only the window the event named, and only while it is still the question's package.
+        val root = service.windows.firstOrNull { it.id == id }?.root ?: return
+        if (root.packageName?.toString() != expectedPackage) return
         val seen = flatten(root)
         val nodes = seen.map { it.view }
         val texts = nodes.flatMap { listOfNotNull(it.text, it.description) }
-        val names = ConsentRule.namesApp(texts, label)
-        if (names && seenAt == null) seenAt = now
-        when (val step = ConsentRule.next(nodes, names, seenAt != null, opens)) {
-            ConsentRule.Step.Wait -> {}
-            is ConsentRule.Step.OpenChooser -> if (click(seen[step.index].node)) opens++
-            is ConsentRule.Step.PickEntire -> click(seen[step.index].node)
-            is ConsentRule.Step.Confirm -> if (click(seen[step.index].node)) end(ConsentRule.PRESSED)
-        }
+        if (!ConsentRule.namesApp(texts, label)) return
+        val step = ConsentRule.next(nodes)
+        if (step is ConsentRule.Step.Confirm && click(seen[step.index].node)) end(ConsentRule.PRESSED)
     }
 
     /** The node's own click, or its nearest clickable parent's (three up at most). */
