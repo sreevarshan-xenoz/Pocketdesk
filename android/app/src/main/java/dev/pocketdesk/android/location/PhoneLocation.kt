@@ -38,7 +38,11 @@ object PhoneLocationPrefs {
 
     fun on(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_ON, false)
 
-    fun setOn(ctx: Context, value: Boolean) = prefs(ctx).edit { putBoolean(KEY_ON, value) }
+    fun setOn(ctx: Context, value: Boolean) = prefs(ctx).edit {
+        putBoolean(KEY_ON, value)
+        // Turned off, Exact goes too: on again starts at the city (review).
+        if (!value) putBoolean(KEY_EXACT, false)
+    }
 
     /** The owner lets the computer have an exact place, not just the city: off by default. */
     fun exact(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_EXACT, false)
