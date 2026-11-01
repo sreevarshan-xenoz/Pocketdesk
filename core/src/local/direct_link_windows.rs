@@ -390,3 +390,37 @@ pub fn established_peers(port: u16) -> Vec<Ipv4Addr> {
     }
     Vec::new()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Read-only: the probe asks Windows what it could do and changes
+    /// nothing. Whatever the runner's network is, it answers (a plan or a
+    /// reason) from several threads at once without crashing.
+    #[test]
+    fn the_probe_answers_from_many_threads_without_changing_anything() {
+        let threads: Vec<_> = (0..4).map(|_| std::thread::spawn(probe)).collect();
+        for thread in threads {
+            let answer = thread.join().expect("the probe did not crash");
+            if let Ok(plan) = answer {
+                assert_eq!(plan.mode, Mode::SecondInterface);
+                assert!(!plan.disconnects);
+            }
+        }
+    }
+
+    /// A connection to a port of this computer is found in the TCP table,
+    /// with its peer's address.
+    #[test]
+    fn an_established_connection_to_a_local_port_is_found_with_its_peer() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let _client = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let (_server_side, _) = listener.accept().unwrap();
+        let peers = established_peers(port);
+        assert!(peers.contains(&Ipv4Addr::LOCALHOST), "{peers:?}");
+        // Nothing listens on a port that was never opened.
+        assert!(established_peers(1).is_empty());
+    }
+}
