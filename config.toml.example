@@ -102,6 +102,20 @@ video_quality = "balanced"
 # phone_camera_height = 720
 # phone_camera_fps = 30
 
+# Linux: give this computer's apps the location of a phone, through GeoClue
+# (night light, weather, time zone, maps). This computer serves one NMEA
+# source on its loopback only and tells GeoClue about it over Avahi
+# (`_nmea-0183._tcp`, on this computer's loopback only); when an app wants a
+# place it asks the linked phone for one fix (at most every ten minutes) and
+# hands it on. The phone must have "Give my computer my location" on in its
+# own Settings. Nothing is stored or logged but the accuracy. Off by default.
+# precision: "city" (rounded to about 1 km; the default) or "exact" (which the
+# phone must also allow). phone: a paired phone's device id, or empty for any
+# of your phones that is linked.
+# phone_location = false
+# phone_location_precision = "city"
+# phone_location_phone = ""
+
 # On Linux, the phone's gamepad is a game controller (an Xbox 360 pad's
 # layout, through uinput) that games see. Off, or without uinput rights, it
 # types keys and moves the mouse instead.

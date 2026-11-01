@@ -75,6 +75,8 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.pocketdesk.phone_files.listing` | yes |  | Files | phone_files |
 | `kdeconnect.pocketdesk.phone_files.mkdir` |  | yes |  | phone_files |
 | `kdeconnect.pocketdesk.phone_files.put` |  | yes |  | phone_files |
+| `kdeconnect.pocketdesk.phone_location` | yes |  | none (any paired phone) | phone_location |
+| `kdeconnect.pocketdesk.phone_location.ask` |  | yes |  | phone_location |
 | `kdeconnect.pocketdesk.phone_media` | yes |  | Media | phone_media |
 | `kdeconnect.pocketdesk.phone_media_control` |  | yes |  | phone_media |
 | `kdeconnect.pocketdesk.phone_photos` | yes |  | Files | phone_photos |

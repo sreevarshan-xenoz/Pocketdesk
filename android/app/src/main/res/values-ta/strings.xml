@@ -1019,6 +1019,14 @@
     <string name="settings_webcam_summary">உங்கள் கணினி இந்தத் தொலைபேசியைத் தன் கேமராவாகப் பயன்படுத்தக் கேட்கலாம் (Linux). ஒவ்வொரு முறையும் ஓர் அறிவிப்பில் கேட்கப்படும்; நீங்கள் அதைத் தொட்டால் மட்டுமே கேமரா திறக்கும், பயன்பாட்டில் இருக்கும்வரை அதன் அறிவிப்பு தெரியும்.</string>
     <string name="settings_webcam_needs_camera">கேமரா அனுமதி தேவை: அனுமதிக்க மீண்டும் இயக்கவும்</string>
     <string name="settings_webcam_needs_access">கணினியின் கோரிக்கையைப் பெற அறிவிப்பு அணுகல் தேவை</string>
+    <string name="settings_location">என் இருப்பிடத்தை என் கணினிக்குத் தருக</string>
+    <string name="settings_location_summary">உங்கள் கணினியின் பயன்பாடுகள் (வானிலை, இரவு ஒளி, நேர மண்டலம், வரைபடங்கள்) Linux இல் GeoClue வழியாக இந்தத் தொலைபேசி எங்கே உள்ளது என்று கேட்கலாம். கணினி பத்து நிமிடத்திற்கு ஒருமுறைக்கு மேல் கேட்காது; சுமார் 1 கிமீ வரை சுற்றிய நகரம் மட்டுமே கிடைக்கும். எதுவும் சேமிக்கப்படுவதில்லை, பதிவிலும் எழுதப்படுவதில்லை.</string>
+    <string name="settings_location_needs_permission">இருப்பிட அனுமதி தேவை: அனுமதிக்க மீண்டும் இயக்கவும்</string>
+    <string name="settings_location_needs_access">கணினியின் கோரிக்கையைப் பெற அறிவிப்பு அணுகல் தேவை</string>
+    <string name="settings_location_exact">துல்லியமான இருப்பிடம்</string>
+    <string name="settings_location_exact_summary">கணினியின் அமைப்புகள் துல்லியத்தைக் கேட்கும்போது, நகரம் மட்டுமல்லாமல் இந்தத் தொலைபேசி இருக்கும் இடத்தைத் துல்லியமாகக் கணினி அறியட்டும். துல்லிய இருப்பிடத்தைக் கேட்கும்.</string>
+    <string name="settings_location_background">Pocketdesk மூடியிருக்கும்போதும் பதிலளி</string>
+    <string name="settings_location_background_summary">திரையில் இல்லாத பயன்பாட்டுக்கு Android இருப்பிடத்தைக் காட்டாது. தொலைபேசி பையில் இருக்கும்போதும் பதிலளிக்க, பயன்பாட்டின் இருப்பிட அமைப்புகளைத் திறந்து எப்போதும் அனுமதி என்பதைத் தேர்வுசெய்க.</string>
     <string name="webcam_channel">கேமரா கோரிக்கைகள்</string>
     <string name="webcam_channel_description">உங்கள் கணினி இந்தத் தொலைபேசியைத் தன் கேமராவாகப் பயன்படுத்தக் கேட்கும்போது</string>
     <string name="webcam_ask_title">%1$s உங்கள் கேமராவைப் பயன்படுத்த விரும்புகிறது</string>

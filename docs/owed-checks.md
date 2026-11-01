@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1116 open items.
+1123 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 39 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 43 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 178 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 179 |
 | A phone with a SIM | 39 |
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 153 |
-| A Linux desktop (the Azure VM serves for some) | 198 |
+| A second computer | 154 |
+| A Linux desktop (the Azure VM serves for some) | 199 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
 
@@ -135,6 +135,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **252. The phone's camera as this computer's webcam (Linux)**
 
 - Stop on the phone's "Your camera is in use" notification ends the cast and the node goes. (where: here)
+
+**255. The phone's location for this computer's apps (GeoClue, Linux)**
+
+- The OPPO for real: Settings "Give my computer my location" asks for location and turns on; with a throwaway server and `where-am-i -a 4` (city) the computer logs "fix sent, accuracy 1000 m" or more and `where-am-i` reports a place within about 1 km of the phone's true one (compare by distance only, never print either place); Activity shows "city location, accurate to N m". (where: here)
+- The same with the computer on Exact and the phone's "Exact location" on (accuracy of tens of metres, GPS), and with only one of the two on (the phone still gives the city). (where: here)
+- The phone in the pocket with the screen off: with "Allow all the time" the ask is answered; without it the phone answers `background` and the computer logs "no fix" and tries again a minute later; with Pocketdesk open it is answered. (where: here)
+- The switch off on the phone answers `off` at once (no wait of 30 s); location permission taken away in Android settings answers `permission`; location turned off for the phone answers `unavailable`. (where: here)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -576,6 +583,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The same on a laptop with a real second monitor, and with two windows fitted (two `PD-` screens) while one is resized: the other's place does not move onto the laptop's own monitors (Hyprland's `auto-right` is set again for the resized one). (where: owner)
 - A host with "Phones may add a screen" off, or with Input off for the asking computer, says why on the window and shows the screen asked for. (where: owner)
 - A program started on the fitted screen by its own keys (the window drives the empty desktop: a workspace of it, a launcher) works as on any screen. (where: owner)
+
+**255. The phone's location for this computer's apps (GeoClue, Linux)**
+
+- A real session on the owner's desk (GNOME or KDE): night light or the time zone panel takes the phone's city; the server's log and `events.jsonl` hold no coordinates (search them for the first digits of the phone's true latitude: none). (where: owner)
 
 ## A phone with a SIM
 
@@ -1144,6 +1155,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The "Allow Remote Interaction" off case through the portal on a real GNOME: the server logs "Portal input not taken" once, and another computer's window onto this one (Settings → Other computers → Show its screen) goes view-only without a reconnect; the phone is no longer offered the pen. (where: second computer)
 
+**255. The phone's location for this computer's apps (GeoClue, Linux)**
+
+- Two computers of the owner's, both with the setting on: each asks only its own phone, and a computer the phone is not paired to gets no answer. (where: second computer)
+
 ## A Linux desktop (the Azure VM serves for some)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1664,6 +1679,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - With the switch off, or on KDE or Sway with it on, the capture goes through the portal as before (no mutter call in `busctl --user monitor org.gnome.Mutter.ScreenCast`). (where: linux)
 - An older GNOME whose mutter has the ScreenCast API but no `org.gnome.Mutter.RemoteDesktop` (or refuses it): the same single log line and the portal's dialog. (where: linux)
 - The desktop app's Settings → Connection shows "Unattended on GNOME" on Linux only, off by default, and a session started after turning it on takes the new path with no server restart. (where: linux)
+
+**255. The phone's location for this computer's apps (GeoClue, Linux)**
+
+- The computer's setting turned off while `where-am-i` runs: the source goes within about 5 s, Avahi no longer lists `_nmea-0183._tcp`, and turning it on again announces again; restarting avahi-daemon while on re-announces within about 5 s. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

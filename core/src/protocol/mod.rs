@@ -21,6 +21,7 @@ pub mod permissions;
 pub mod phone_action;
 pub mod phone_camera;
 pub mod phone_files;
+pub mod phone_location;
 pub mod phone_media;
 pub mod phone_photos;
 pub mod phone_screen;
