@@ -898,8 +898,8 @@ pub async fn respond(device: &str, body: &serde_json::Value) -> serde_json::Valu
                 let key = screen_key(&device, own_slot(slot, is_computer(&device)));
                 answer(&key, &action, width, height)
             })
-                .await
-                .unwrap_or_else(|_| serde_json::json!({ "error": "the computer failed to answer" }))
+            .await
+            .unwrap_or_else(|_| serde_json::json!({ "error": "the computer failed to answer" }))
         }
         None => serde_json::json!({ "error": "not a window" }),
     };
