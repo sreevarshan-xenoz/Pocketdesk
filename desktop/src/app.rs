@@ -91,7 +91,7 @@ fn switches_table(
 }
 
 /// The Devices tab's switches, in the order a person thinks of them.
-pub(crate) const PERMISSIONS: [(Capability, &str, &str); 25] = [
+pub(crate) const PERMISSIONS: [(Capability, &str, &str); 26] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -161,6 +161,11 @@ pub(crate) const PERMISSIONS: [(Capability, &str, &str); 25] = [
         Capability::Cast,
         "Show its screen or camera here",
         "The phone can show its own screen, or its camera, in a window here, when its owner starts it on the phone.",
+    ),
+    (
+        Capability::Webcam,
+        "Use its camera as a webcam",
+        "On Linux, with \u{201c}Offer phones as a camera\u{201d} on in Settings (Phones), this computer can ask the phone to be its camera (Use the phone as a camera, on the Overview): apps here then see \u{201c}Pocketdesk camera\u{201d}. The phone asks its owner each time in a notification, and shows its own while the camera is in use, with \u{201c}Let the computer use my camera\u{201d} on there. Off unless you turn it on.",
     ),
     (
         Capability::Dial,
@@ -235,6 +240,7 @@ pub(crate) const PERMISSION_GROUPS: [(&str, &[Capability]); 5] = [
         "Screen, sound and media",
         &[
             Capability::Cast,
+            Capability::Webcam,
             Capability::Audio,
             Capability::Mic,
             Capability::Media,
@@ -376,6 +382,7 @@ fn shown_for(capability: Capability, computer: bool) -> bool {
                 | Capability::Peek
                 | Capability::Ask
                 | Capability::Notes
+                | Capability::Webcam
         ))
 }
 
@@ -1199,7 +1206,17 @@ impl PocketdeskApp {
         };
         let waiting = self.snapshot.approvals.len();
         let mut verdict = None;
-        egui::Window::new("A phone wants to connect")
+        let computer = self
+            .snapshot
+            .devices
+            .iter()
+            .any(|d| d.id == request.device_id && d.computer);
+        let title = if computer {
+            "A computer wants to connect"
+        } else {
+            "A phone wants to connect"
+        };
+        egui::Window::new(title)
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -2032,6 +2049,25 @@ impl PocketdeskApp {
         );
     }
 
+    /// Ask the phone `id` to be this computer's camera (F6 part 2, from the
+    /// Overview), and say how that went.
+    fn start_webcam(&mut self, id: &str) {
+        let who = self.label(id);
+        self.notice = crate::notice::Notice::outcome(
+            match pocketdesk_core::local::phone_photos::request(
+                &self.state_dir,
+                id,
+                pocketdesk_core::local::phone_photos::Ask::Webcam,
+                now_unix(),
+            ) {
+                Ok(_) => Ok(format!(
+                    "Asked {who}: tap its notification to start the camera (\u{201c}Let the computer use my camera\u{201d} on in its Settings); apps here then see \u{201c}Pocketdesk camera\u{201d}. Stop it from the phone's notification."
+                )),
+                Err(e) => Err(format!("Could not ask {who} for its camera: {e}")),
+            },
+        );
+    }
+
     /// Ask the phone `id` for a screenshot or to lock (O2), and say how that went.
     fn phone_action(
         &mut self,
@@ -2094,6 +2130,10 @@ impl PocketdeskApp {
         let mut open_link = None;
         let mut send_clip = None;
         let mut take_photo = None;
+        let mut start_webcam = None;
+        let mut stop_webcam = None;
+        let offers_camera = self.config.as_ref().is_some_and(|c| c.phone_camera);
+        let cameras = model::cameras(&self.snapshot.sessions);
         let mut phone_action = None;
         let mut open_apps = None;
         // P2: the phones listed, for the apps box drawn after them.
@@ -2302,6 +2342,35 @@ impl PocketdeskApp {
                     {
                         take_photo = Some(device.id.clone());
                     }
+                    // F6 part 2: the phone as this computer's camera.
+                    let webcam_reach = model::webcam_reach(
+                        cfg!(target_os = "linux"),
+                        offers_camera,
+                        device.permissions.allows(Capability::Webcam),
+                        device.linked,
+                    );
+                    let webcam_why = webcam_reach.err().unwrap_or(
+                        "The phone shows a notification; a tap there starts its camera, and apps here see \u{201c}Pocketdesk camera\u{201d} until it stops. On the phone it needs \u{201c}Let the computer use my camera\u{201d} on.",
+                    );
+                    if ui
+                        .add_enabled(webcam_reach.is_ok(), egui::Button::new("Use as a camera"))
+                        .on_hover_text(webcam_why)
+                        .on_disabled_hover_text(webcam_why)
+                        .clicked()
+                    {
+                        start_webcam = Some(device.id.clone());
+                    }
+                    // PR #604 review N5: and stopped from here, while it is.
+                    if cameras.contains(&device.id)
+                        && ui
+                            .button("Stop camera")
+                            .on_hover_text(
+                                "Ends the phone's session here, which closes its camera; apps here lose \u{201c}Pocketdesk camera\u{201d}.",
+                            )
+                            .clicked()
+                    {
+                        stop_webcam = Some(device.id.clone());
+                    }
                     // O2: a screenshot of the phone, or its screen locked.
                     let action_reach = model::phone_action_reach(
                         device.linked,
@@ -2423,6 +2492,16 @@ impl PocketdeskApp {
         }
         if let Some(id) = take_photo {
             self.take_photo(&id);
+        }
+        if let Some(id) = start_webcam {
+            self.start_webcam(&id);
+        }
+        if let Some(id) = stop_webcam {
+            self.end_sessions_of(&id);
+            self.notice = crate::notice::Notice::outcome(Ok(format!(
+                "Asked {}'s camera to stop.",
+                self.label(&id)
+            )));
         }
         if let Some((id, action)) = phone_action {
             self.phone_action(&id, action);

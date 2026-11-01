@@ -244,6 +244,18 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "The phone's gamepad as a game controller",
         Section::Phones,
     ),
+    ("phone_camera", "Offer phones as a camera", Section::Phones),
+    ("phone_camera_lens", "The phone's camera", Section::Phones),
+    (
+        "phone_camera_height",
+        "The camera's picture",
+        Section::Phones,
+    ),
+    (
+        "phone_camera_fps",
+        "The camera's frame rate",
+        Section::Phones,
+    ),
     (
         "phone_notifications",
         "Phone notifications",
@@ -608,9 +620,9 @@ pub(crate) fn drawn_here(key: &str) -> bool {
 /// timer is Windows' only (BK10 review M8).
 pub(crate) fn quick_note() -> &'static str {
     if cfg!(windows) {
-        "While the pointer is on another computer, or this one is driven, and keys or moves keep coming: Windows' timer runs finer for Pocketdesk, and this computer sends the other a byte every 50 ms so its Wi-Fi does not doze between keys. A little more battery while it lasts."
+        "While the pointer is on another computer, or this one is driven, and keys or moves keep coming: Windows' timer runs finer for Pocketdesk, and this computer sends the other a byte every 50 ms so its Wi-Fi does not doze between keys. Moves go at most every 2 ms, the newest kept. A little more battery while it lasts."
     } else {
-        "While the pointer is on another computer, or this one is driven, and keys or moves keep coming: this computer sends the other a byte every 50 ms so its Wi-Fi does not doze between keys. A little more battery while it lasts."
+        "While the pointer is on another computer, or this one is driven, and keys or moves keep coming: this computer sends the other a byte every 50 ms so its Wi-Fi does not doze between keys. Moves go at most every 2 ms, the newest kept. A little more battery while it lasts."
     }
 }
 
@@ -764,6 +776,11 @@ pub fn applies_live(key: &str) -> bool {
             | "shared_input_files"
             | "shared_input_sound"
             | "shared_input_low_latency"
+            // F6 part 2: read by the server at each camera ask and cast.
+            | "phone_camera"
+            | "phone_camera_lens"
+            | "phone_camera_height"
+            | "phone_camera_fps"
     )
 }
 
@@ -1762,6 +1779,51 @@ impl SettingsForm {
                         "Only once the phone allows it: \"Let the computer control this phone\" in Pocketdesk's Settings on the phone.",
                     );
                 });
+                // F6 part 2: a PipeWire camera, so Linux only.
+                if cfg!(target_os = "linux") {
+                    row(ui, "phone_camera", |ui| {
+                        ui.checkbox(
+                            &mut e.phone_camera,
+                            "a phone can be this computer's camera, for video calls, OBS and the browser",
+                        );
+                        note(
+                            ui,
+                            "Use as a camera, on the Overview, asks a phone with \u{201c}Use its camera as a webcam\u{201d} on (Devices); the phone asks its owner in a notification, and while its camera is in use apps here see \u{201c}Pocketdesk camera (phone)\u{201d} (PipeWire; apps that only read /dev/video reach it through pw-v4l2). No kernel module. Stopped from the phone's notification.",
+                        );
+                    });
+                    if e.phone_camera {
+                        row(ui, "phone_camera_lens", |ui| {
+                            for (lens, label) in [("back", "Back"), ("front", "Front")] {
+                                let picked = e.phone_camera_lens.eq_ignore_ascii_case(lens);
+                                if ui.radio(picked, label).clicked() {
+                                    e.phone_camera_lens = lens.to_string();
+                                }
+                            }
+                        });
+                        row(ui, "phone_camera_height", |ui| {
+                            for height in pocketdesk_core::protocol::phone_camera::HEIGHTS {
+                                ui.radio_value(
+                                    &mut e.phone_camera_height,
+                                    u32::from(height),
+                                    format!("{height}p"),
+                                );
+                            }
+                        });
+                        row(ui, "phone_camera_fps", |ui| {
+                            for fps in pocketdesk_core::protocol::phone_camera::FRAME_RATES {
+                                ui.radio_value(
+                                    &mut e.phone_camera_fps,
+                                    u32::from(fps),
+                                    format!("{fps} a second"),
+                                );
+                            }
+                            note(
+                                ui,
+                                "What the phone is asked for; it takes the nearest its camera offers.",
+                            );
+                        });
+                    }
+                }
                 // T7: Linux makes the controller; Windows has the keys only.
                 if !cfg!(windows) {
                     row(ui, "gamepad_controller", |ui| {

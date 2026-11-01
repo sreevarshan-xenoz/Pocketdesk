@@ -281,6 +281,10 @@ pub enum Ask {
     Copy(u64),
     /// A new photo, the phone's owner taking it with the camera (F3).
     Take,
+    /// Be this computer's camera (F6 part 2): sent as
+    /// [`crate::protocol::phone_camera::START`] with the computer's camera
+    /// settings, under the Webcam permission, not Files.
+    Webcam,
 }
 
 /// One request for the server to send.
