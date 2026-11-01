@@ -61,9 +61,10 @@ pub async fn run() {
         tracing::warn!("No state directory: the direct link is off");
         return;
     };
-    // Whatever an earlier run left is not this run's: its status says
-    // nothing, and its access point goes.
-    backend::sweep().await;
+    // Whatever an earlier run of this state folder's server left: its
+    // status says nothing, and its access point goes (and the card's own
+    // connection comes back). Only what `direct_link_owned.json` names.
+    backend::sweep(&dir).await;
     dl::clear_status(&dir);
     loop {
         crate::inbox::wait_at_most(DIRECT_LINK_DIR, TICK, Duration::from_secs(2)).await;
@@ -148,7 +149,7 @@ async fn start(dir: &std::path::Path, request: &Request) {
     };
     let _ = dl::write_status(dir, &starting);
     tracing::info!("Direct link: starting ({:?})", plan.mode);
-    match backend::start(&plan, &join, request.band).await {
+    match backend::start(dir, &plan, &join, request.band).await {
         Ok((handle, address)) => {
             let active = Active {
                 started_unix: now,
@@ -174,6 +175,7 @@ async fn stop(dir: &std::path::Path, why: &str) -> bool {
     let was = taken.is_some();
     if let Some(active) = taken {
         backend::stop(active.handle).await;
+        dl::clear_owned(dir);
         tracing::info!("Direct link: off ({why})");
     }
     // A failed status goes with a stop too: the owner dismissed it.
@@ -195,15 +197,12 @@ async fn tick(dir: &std::path::Path) {
     active.idle.tick(now, busy);
     if off || active.idle.expired(now) {
         drop(guard);
-        stop(
-            dir,
-            if off {
-                "turned off in Settings"
-            } else {
-                "idle"
-            },
-        )
-        .await;
+        let why = if off {
+            "turned off in Settings"
+        } else {
+            "idle"
+        };
+        stop(dir, why).await;
         return;
     }
     write_on(dir, active, now, busy);
@@ -353,12 +352,16 @@ mod backend {
     //! NetworkManager over D-Bus, and `iw` for the second interface.
 
     use super::*;
+    use pocketdesk_core::local::direct_link::{Owned, Restore};
     use std::collections::HashMap;
+    use std::path::Path;
     use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
     use zbus::{Connection, Proxy};
 
     const NM: &str = "org.freedesktop.NetworkManager";
     const NM_PATH: &str = "/org/freedesktop/NetworkManager";
+    const ACTIVE_IFACE: &str = "org.freedesktop.NetworkManager.Connection.Active";
+    const SETTINGS_CONNECTION_IFACE: &str = "org.freedesktop.NetworkManager.Settings.Connection";
     /// `NM_ACTIVE_CONNECTION_STATE_ACTIVATED`.
     const ACTIVATED: u32 = 2;
     /// `NM_ACTIVE_CONNECTION_STATE_DEACTIVATED`.
@@ -366,12 +369,14 @@ mod backend {
     /// How long NetworkManager has to bring the network up.
     const UP_WITHIN: Duration = Duration::from_secs(25);
 
-    /// What to take down.
+    /// What to take down, and what to bring back.
     pub struct Handle {
         active: OwnedObjectPath,
         settings: OwnedObjectPath,
         /// The virtual interface this made, to remove.
         interface: Option<String>,
+        /// The connection a takeover took the card from.
+        restore: Option<Restore>,
     }
 
     /// A D-Bus error as a short phrase with no values in it: NetworkManager's
@@ -388,6 +393,7 @@ mod backend {
     }
 
     pub async fn start(
+        dir: &Path,
         plan: &Plan,
         join: &WifiJoin,
         band: Band,
@@ -407,33 +413,96 @@ mod backend {
         if !running {
             return Err(dl::Unavailable::NoNetworkManager.words().to_string());
         }
-        // The second interface, when the plan has one.
-        let mut made: Option<String> = None;
-        let interface = match plan.mode {
-            Mode::TakesOverCard => plan.device.clone(),
-            Mode::SecondInterface => {
-                add_interface(&plan.device, SECOND_INTERFACE).await?;
-                made = Some(SECOND_INTERFACE.to_string());
-                SECOND_INTERFACE.to_string()
-            }
+        // What a takeover takes from the card, to bring back.
+        let previous = match plan.mode {
+            Mode::TakesOverCard => active_connection_of(&conn, &nm, &plan.device).await,
+            Mode::SecondInterface => None,
         };
-        let result = bring_up(&conn, &nm, &interface, plan, join, band).await;
-        match result {
+        let restore = dl::restore_for(plan.mode, &plan.device, previous);
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let made = (plan.mode == Mode::SecondInterface).then(|| SECOND_INTERFACE.to_string());
+        // Written before anything is made, so a crash leaves the record a
+        // start sweeps by: this folder's server removes and restores what it
+        // made, and no other server's.
+        let owned = Owned {
+            uuid: uuid.clone(),
+            interface: made.clone(),
+            restore: restore.clone(),
+        };
+        dl::write_owned(dir, &owned)
+            .map_err(|_| "The state folder is not writable.".to_string())?;
+        let interface = match &made {
+            Some(name) => {
+                if let Err(reason) = add_interface(&plan.device, name).await {
+                    dl::clear_owned(dir);
+                    return Err(reason);
+                }
+                name.clone()
+            }
+            None => plan.device.clone(),
+        };
+        match bring_up(&conn, &nm, &interface, plan, join, band, &uuid).await {
             Ok((active, settings, address)) => Ok((
                 Handle {
                     active,
                     settings,
                     interface: made,
+                    restore,
                 },
                 address,
             )),
             Err(reason) => {
-                if let Some(name) = made {
-                    remove_interface(&name).await;
+                if let Some(name) = &made {
+                    remove_interface(name).await;
                 }
+                // A takeover that failed part way may have dropped the
+                // card's own connection.
+                if let Some(restore) = &restore {
+                    reactivate(&conn, &nm, restore).await;
+                }
+                dl::clear_owned(dir);
                 Err(reason)
             }
         }
+    }
+
+    /// The settings path of the connection active on `device` now, if any.
+    async fn active_connection_of(
+        conn: &Connection,
+        nm: &Proxy<'_>,
+        device: &str,
+    ) -> Option<String> {
+        let path: OwnedObjectPath = nm.call("GetDeviceByIpIface", &(device,)).await.ok()?;
+        let device = Proxy::new(conn, NM, path, "org.freedesktop.NetworkManager.Device")
+            .await
+            .ok()?;
+        let active: OwnedObjectPath = device.get_property("ActiveConnection").await.ok()?;
+        if active.as_str() == "/" {
+            return None;
+        }
+        let active = Proxy::new(conn, NM, active, ACTIVE_IFACE).await.ok()?;
+        let settings: OwnedObjectPath = active.get_property("Connection").await.ok()?;
+        Some(settings.as_str().to_string())
+    }
+
+    /// Bring a connection a takeover took the card from back up.
+    async fn reactivate(conn: &Connection, nm: &Proxy<'_>, restore: &Restore) {
+        let _ = conn;
+        let Ok(device) = nm
+            .call::<_, _, OwnedObjectPath>("GetDeviceByIpIface", &(restore.device.as_str(),))
+            .await
+        else {
+            return;
+        };
+        let (Ok(connection), Ok(root)) = (
+            ObjectPath::try_from(restore.connection.as_str()),
+            ObjectPath::try_from("/"),
+        ) else {
+            return;
+        };
+        let _ = nm
+            .call::<_, _, OwnedObjectPath>("ActivateConnection", &(&connection, &device, &root))
+            .await;
     }
 
     async fn bring_up(
@@ -443,6 +512,7 @@ mod backend {
         plan: &Plan,
         join: &WifiJoin,
         band: Band,
+        uuid: &str,
     ) -> Result<(OwnedObjectPath, OwnedObjectPath, String), String> {
         // A device NetworkManager has only just learned of may take a moment.
         let mut device: Option<OwnedObjectPath> = None;
@@ -457,8 +527,7 @@ mod backend {
             tokio::time::sleep(Duration::from_millis(300)).await;
         }
         let device = device.ok_or("NetworkManager does not list this Wi-Fi card.")?;
-        let uuid = uuid::Uuid::new_v4().to_string();
-        let settings = connection_settings(interface, join, band, plan.channel, &uuid);
+        let settings = connection_settings(interface, join, band, plan.channel, uuid);
         let root = ObjectPath::try_from("/").map_err(|_| "internal".to_string())?;
         // Volatile: kept in memory only, and deleted by NetworkManager when
         // it goes down, so the passphrase never reaches a file of its own.
@@ -476,14 +545,9 @@ mod backend {
             .await
             .map_err(|e| word(&e))?;
         // Up, or not: a connection that did not come up is removed.
-        let active_proxy = Proxy::new(
-            conn,
-            NM,
-            active.clone(),
-            "org.freedesktop.NetworkManager.Connection.Active",
-        )
-        .await
-        .map_err(|e| word(&e))?;
+        let active_proxy = Proxy::new(conn, NM, active.clone(), ACTIVE_IFACE)
+            .await
+            .map_err(|e| word(&e))?;
         let deadline = tokio::time::Instant::now() + UP_WITHIN;
         let failed = loop {
             match active_proxy.get_property::<u32>("State").await {
@@ -549,14 +613,7 @@ mod backend {
             .await;
         // A volatile connection goes with its activation; this is for one
         // that did not.
-        if let Ok(proxy) = Proxy::new(
-            conn,
-            NM,
-            settings.clone(),
-            "org.freedesktop.NetworkManager.Settings.Connection",
-        )
-        .await
-        {
+        if let Ok(proxy) = Proxy::new(conn, NM, settings.clone(), SETTINGS_CONNECTION_IFACE).await {
             let _ = proxy.call::<_, _, ()>("Delete", &()).await;
         }
     }
@@ -566,108 +623,72 @@ mod backend {
             && let Ok(nm) = Proxy::new(&conn, NM, NM_PATH, NM).await
         {
             deactivate(&conn, &nm, &handle.active, &handle.settings).await;
-        }
-        if let Some(name) = handle.interface {
-            remove_interface(&name).await;
+            if let Some(name) = &handle.interface {
+                remove_interface(name).await;
+            }
+            // The card's own connection comes back, as it was.
+            if let Some(restore) = &handle.restore {
+                reactivate(&conn, &nm, restore).await;
+            }
+        } else if let Some(name) = &handle.interface {
+            remove_interface(name).await;
         }
     }
 
-    /// Take down an access point (and its interface) an earlier run left.
-    pub async fn sweep() {
-        let Ok(conn) = Connection::system().await else {
+    /// Take down what an earlier run of this state folder's server made (the
+    /// access point, its interface), and bring back what it took the card
+    /// from. Only what `direct_link_owned.json` names: another server's link
+    /// is none of this one's.
+    pub async fn sweep(dir: &Path) {
+        let Some(owned) = dl::read_owned(dir) else {
             return;
         };
-        let Ok(nm) = Proxy::new(&conn, NM, NM_PATH, NM).await else {
-            return;
-        };
-        let mut swept = false;
-        if let Ok(actives) = nm
-            .get_property::<Vec<OwnedObjectPath>>("ActiveConnections")
+        if let Ok(conn) = Connection::system().await
+            && let Ok(nm) = Proxy::new(&conn, NM, NM_PATH, NM).await
+        {
+            if let Ok(actives) = nm
+                .get_property::<Vec<OwnedObjectPath>>("ActiveConnections")
+                .await
+            {
+                for active in actives {
+                    let Ok(proxy) = Proxy::new(&conn, NM, active.clone(), ACTIVE_IFACE).await
+                    else {
+                        continue;
+                    };
+                    if proxy.get_property::<String>("Uuid").await.ok().as_deref()
+                        == Some(owned.uuid.as_str())
+                    {
+                        let _ = nm
+                            .call::<_, _, ()>("DeactivateConnection", &(&active,))
+                            .await;
+                    }
+                }
+            }
+            if let Ok(settings) = Proxy::new(
+                &conn,
+                NM,
+                "/org/freedesktop/NetworkManager/Settings",
+                "org.freedesktop.NetworkManager.Settings",
+            )
             .await
-        {
-            for active in actives {
-                let Ok(proxy) = Proxy::new(
-                    &conn,
-                    NM,
-                    active.clone(),
-                    "org.freedesktop.NetworkManager.Connection.Active",
-                )
-                .await
-                else {
-                    continue;
-                };
-                if proxy.get_property::<String>("Id").await.ok().as_deref() == Some(CONNECTION_ID) {
-                    let _ = nm
-                        .call::<_, _, ()>("DeactivateConnection", &(&active,))
-                        .await;
-                    swept = true;
-                }
-            }
-        }
-        if let Ok(settings) = Proxy::new(
-            &conn,
-            NM,
-            "/org/freedesktop/NetworkManager/Settings",
-            "org.freedesktop.NetworkManager.Settings",
-        )
-        .await
-            && let Ok(all) = settings
-                .call::<_, _, Vec<OwnedObjectPath>>("ListConnections", &())
-                .await
-        {
-            for path in all {
-                let Ok(proxy) = Proxy::new(
-                    &conn,
-                    NM,
-                    path,
-                    "org.freedesktop.NetworkManager.Settings.Connection",
-                )
-                .await
-                else {
-                    continue;
-                };
-                let Ok(got) = proxy
-                    .call::<_, _, HashMap<String, HashMap<String, OwnedValue>>>("GetSettings", &())
+                && let Ok(path) = settings
+                    .call::<_, _, OwnedObjectPath>("GetConnectionByUuid", &(owned.uuid.as_str(),))
                     .await
-                else {
-                    continue;
-                };
-                let id = got
-                    .get("connection")
-                    .and_then(|c| c.get("id"))
-                    .and_then(|v| v.try_clone().ok())
-                    .and_then(|v| String::try_from(v).ok());
-                if id.as_deref() == Some(CONNECTION_ID) {
-                    let _ = proxy.call::<_, _, ()>("Delete", &()).await;
-                    swept = true;
-                }
+                && let Ok(proxy) = Proxy::new(&conn, NM, path, SETTINGS_CONNECTION_IFACE).await
+            {
+                let _ = proxy.call::<_, _, ()>("Delete", &()).await;
             }
+            if let Some(name) = &owned.interface {
+                remove_interface(name).await;
+            }
+            if let Some(restore) = &owned.restore {
+                reactivate(&conn, &nm, restore).await;
+            }
+        } else if let Some(name) = &owned.interface {
+            remove_interface(name).await;
         }
-        // The virtual interface, if one was left.
-        if interface_exists(SECOND_INTERFACE).await {
-            remove_interface(SECOND_INTERFACE).await;
-            swept = true;
-        }
-        if swept {
-            tracing::info!("Direct link: swept one an earlier run left");
-        }
-    }
-
-    async fn interface_exists(name: &str) -> bool {
-        let Some(iw) = dl::iw_path() else {
-            return false;
-        };
-        let name = name.to_string();
-        tokio::task::spawn_blocking(move || {
-            std::process::Command::new(iw)
-                .arg("dev")
-                .output()
-                .ok()
-                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-                .is_some_and(|text| dl::parse_iw_dev(&text).iter().any(|i| i.name == name))
-        })
-        .await
-        .unwrap_or(false)
+        dl::clear_owned(dir);
+        tracing::info!("Direct link: swept one an earlier run left");
     }
 
     /// `iw dev <card> interface add <name> type __ap`.
@@ -708,10 +729,12 @@ mod backend {
     //! Not on this system yet (Windows is its own change).
 
     use super::*;
+    use std::path::Path;
 
     pub struct Handle;
 
     pub async fn start(
+        _dir: &Path,
         _plan: &Plan,
         _join: &WifiJoin,
         _band: Band,
@@ -721,7 +744,7 @@ mod backend {
 
     pub async fn stop(_handle: Handle) {}
 
-    pub async fn sweep() {}
+    pub async fn sweep(_dir: &Path) {}
 }
 
 #[cfg(test)]

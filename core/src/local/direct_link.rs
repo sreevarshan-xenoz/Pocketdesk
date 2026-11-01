@@ -28,7 +28,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use super::approval::is_valid_id;
-use super::paths::{DIRECT_LINK_DIR, DIRECT_LINK_FILE};
+use super::paths::{DIRECT_LINK_DIR, DIRECT_LINK_FILE, DIRECT_LINK_OWNED_FILE};
 
 /// Every network name this makes starts so: a phone's list shows what made
 /// it.
@@ -82,7 +82,7 @@ pub fn new_ssid() -> String {
     format!("{SSID_PREFIX}{}", random_chars(4, LOWER_DIGITS))
 }
 
-/// A fresh passphrase: 20 characters, about 119 bits, from the OS CSPRNG.
+/// A fresh passphrase: 20 characters of 55 (about 119 bits), from the OS CSPRNG.
 pub fn new_passphrase() -> String {
     random_chars(20, ALPHANUMERIC)
 }
@@ -715,6 +715,63 @@ impl IdleTimer {
     }
 }
 
+// ---- What this state folder's server made ----
+
+/// The connection a takeover took the card from, to bring back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Restore {
+    /// The card's interface (`wlan0`).
+    pub device: String,
+    /// NetworkManager's path of the connection that was active on it.
+    pub connection: String,
+}
+
+/// What a server made, written before it makes it and removed once it is
+/// gone, so a start after a crash removes exactly this and no other
+/// server's (a throwaway server's start must not take down the main one's
+/// link). Nothing secret.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Owned {
+    /// The NetworkManager connection's uuid.
+    pub uuid: String,
+    /// The virtual interface added, when there is one.
+    pub interface: Option<String>,
+    /// The connection to bring back after a takeover.
+    pub restore: Option<Restore>,
+}
+
+/// What to bring back once a link ends: only a takeover took something,
+/// and only a card that had a connection had something taken.
+pub fn restore_for(mode: Mode, device: &str, previous: Option<String>) -> Option<Restore> {
+    match (mode, previous) {
+        (Mode::TakesOverCard, Some(connection)) if connection != "/" && !connection.is_empty() => {
+            Some(Restore {
+                device: device.to_string(),
+                connection,
+            })
+        }
+        _ => None,
+    }
+}
+
+pub fn write_owned(state_dir: &Path, owned: &Owned) -> io::Result<()> {
+    std::fs::create_dir_all(state_dir)?;
+    let json = serde_json::to_string(owned).map_err(io::Error::other)?;
+    let file = state_dir.join(DIRECT_LINK_OWNED_FILE);
+    let tmp = file.with_extension("json.tmp");
+    crate::secure_fs::write_private(&tmp, json.as_bytes())?;
+    crate::atomic_file::replace(&tmp, &file)
+}
+
+pub fn read_owned(state_dir: &Path) -> Option<Owned> {
+    let raw = std::fs::read_to_string(state_dir.join(DIRECT_LINK_OWNED_FILE)).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+pub fn clear_owned(state_dir: &Path) {
+    let _ = std::fs::remove_file(state_dir.join(DIRECT_LINK_OWNED_FILE));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -988,6 +1045,42 @@ mod tests {
         // The limit is held to its range.
         assert_eq!(IdleTimer::new(0, 0).left(0), 60);
         assert_eq!(IdleTimer::new(10_000, 0).left(0), 120 * 60);
+    }
+
+    #[test]
+    fn only_a_takeover_of_a_connected_card_brings_something_back() {
+        let was = "/org/freedesktop/NetworkManager/Settings/7";
+        let restore = restore_for(Mode::TakesOverCard, "wlan0", Some(was.to_string())).unwrap();
+        assert_eq!(restore.device, "wlan0");
+        assert_eq!(restore.connection, was);
+        // A second interface took nothing from the card.
+        assert!(restore_for(Mode::SecondInterface, "wlan0", Some("/x/1".into())).is_none());
+        // A card with no connection had none taken.
+        assert!(restore_for(Mode::TakesOverCard, "wlan0", None).is_none());
+        assert!(restore_for(Mode::TakesOverCard, "wlan0", Some("/".into())).is_none());
+        assert!(restore_for(Mode::TakesOverCard, "wlan0", Some(String::new())).is_none());
+    }
+
+    #[test]
+    fn what_a_server_made_is_kept_per_state_folder_and_cleared() {
+        let dir = state_dir("owned");
+        assert!(read_owned(&dir).is_none());
+        let owned = Owned {
+            uuid: "00000000-0000-4000-8000-000000000000".into(),
+            interface: Some("pdlink0".into()),
+            restore: Some(Restore {
+                device: "wlan0".into(),
+                connection: "/x/1".into(),
+            }),
+        };
+        write_owned(&dir, &owned).unwrap();
+        assert_eq!(read_owned(&dir), Some(owned));
+        // Another state folder knows nothing of it.
+        assert!(read_owned(&state_dir("owned-other")).is_none());
+        clear_owned(&dir);
+        assert!(read_owned(&dir).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(state_dir("owned-other"));
     }
 
     fn state_dir(name: &str) -> PathBuf {
