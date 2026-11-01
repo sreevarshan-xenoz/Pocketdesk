@@ -4,7 +4,7 @@
 //! the computer use my camera" on, offers its owner the camera in a
 //! notification (Android lets no app in the background open it), and the
 //! cast that follows says it is for the camera
-//! ([`crate::streaming::client::CAST_WEBCAM_MARKER`]). Both ends hold the
+//! ([`crate::streaming::client::CAST_WEBCAM_FLAG`]). Both ends hold the
 //! fields to the rules here.
 
 use serde_json::{Value, json};

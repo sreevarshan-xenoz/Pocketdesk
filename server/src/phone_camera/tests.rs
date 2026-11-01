@@ -73,6 +73,14 @@ fn a_camera_is_even_and_within_bounds() {
     assert_eq!(picture_size(1279, 721), Some((1278, 720)));
     assert_eq!(picture_size(8, 720), None);
     assert_eq!(picture_size(8192, 720), None);
+    // PR #604 review N1: 1080p at most, either way round, a little over.
+    assert_eq!(picture_size(1920, 1080), Some((1920, 1080)));
+    assert_eq!(picture_size(1080, 1920), Some((1080, 1920)));
+    assert_eq!(picture_size(1936, 1096), Some((1936, 1096)));
+    assert_eq!(picture_size(1938, 1080), None);
+    assert_eq!(picture_size(1920, 1100), None);
+    assert_eq!(picture_size(2560, 1440), None);
+    assert_eq!(picture_size(4096, 4096), None);
 }
 
 #[test]
@@ -89,19 +97,65 @@ fn a_camera_opens_at_its_size_and_closes_at_a_bad_one() {
     let mut life = Lifecycle::default();
     let now = Instant::now();
     assert_eq!(life.frame(true, 0, now), Step::Drop, "no size yet");
-    assert_eq!(life.config(1280, 720), Step::Open(1280, 720));
+    assert_eq!(life.config(1280, 720, now), Step::Open(1280, 720));
     // A new encoder at the same size: the decoder starts again.
-    assert_eq!(life.config(1280, 720), Step::Open(1280, 720));
-    assert_eq!(life.config(1920, 1080), Step::Open(1920, 1080));
-    assert_eq!(life.config(4, 4), Step::Close);
-    assert_eq!(life.frame(true, 0, now), Step::Drop, "closed");
+    assert_eq!(life.config(1280, 720, now), Step::Open(1280, 720));
+    assert_eq!(life.config(1920, 1080, now), Step::Open(1920, 1080));
+    let later = now + CONFIG_WINDOW;
+    assert_eq!(life.config(4, 4, later), Step::Close);
+    assert_eq!(life.frame(true, 0, later), Step::Drop, "closed");
+}
+
+/// PR #604 review N1: a phone that says sizes over and over ends its
+/// camera, rather than having it opened again each time.
+#[test]
+fn sizes_said_too_often_close_the_camera() {
+    let mut life = Lifecycle::default();
+    let now = Instant::now();
+    for _ in 0..CONFIGS {
+        assert_eq!(life.config(1280, 720, now), Step::Open(1280, 720));
+    }
+    assert_eq!(life.config(1280, 720, now), Step::Close);
+    assert_eq!(life.size(), None);
+    // Spread out, an encoder that restarts now and then keeps its camera.
+    let mut life = Lifecycle::default();
+    for i in 0..10u32 {
+        let at = now + CONFIG_WINDOW * i;
+        assert_eq!(life.config(1280, 720, at), Step::Open(1280, 720), "{i}");
+    }
+}
+
+/// PR #604 review I2: a stopped decoder starts again after its backoff,
+/// twice a minute at most; then the camera ends.
+#[test]
+fn a_stopped_decoder_restarts_twice_after_a_wait_then_gives_up() {
+    let mut restarts = Restarts::default();
+    let died = Instant::now();
+    assert_eq!(restarts.ask(died, died), Restart::Wait);
+    let first = died + RESTART_BACKOFF[0];
+    assert_eq!(restarts.ask(died, first), Restart::Now);
+    let died = first + std::time::Duration::from_millis(100);
+    assert_eq!(restarts.ask(died, died + RESTART_BACKOFF[0]), Restart::Wait);
+    let second = died + RESTART_BACKOFF[1];
+    assert_eq!(restarts.ask(died, second), Restart::Now);
+    let died = second + std::time::Duration::from_millis(100);
+    assert_eq!(
+        restarts.ask(died, died + RESTART_BACKOFF[1]),
+        Restart::GiveUp
+    );
+    // A minute later the count starts again.
+    let mut restarts = Restarts::default();
+    let t = Instant::now();
+    assert_eq!(restarts.ask(t, t + RESTART_BACKOFF[0]), Restart::Now);
+    let late = t + RESTART_WINDOW + RESTART_BACKOFF[1];
+    assert_eq!(restarts.ask(late, late + RESTART_BACKOFF[0]), Restart::Now);
 }
 
 #[test]
 fn a_camera_decodes_from_a_keyframe_and_asks_after_a_gap() {
     let mut life = Lifecycle::default();
     let now = Instant::now();
-    assert_eq!(life.config(1280, 720), Step::Open(1280, 720));
+    assert_eq!(life.config(1280, 720, now), Step::Open(1280, 720));
     assert_eq!(life.frame(false, 0, now), Step::Drop, "before a keyframe");
     assert_eq!(life.frame(true, 1, now), Step::Decode);
     assert_eq!(life.frame(false, 2, now), Step::Decode);
@@ -119,10 +173,78 @@ fn a_camera_decodes_from_a_keyframe_and_asks_after_a_gap() {
 #[test]
 fn a_camera_without_a_size_takes_nothing() {
     let mut camera = PhoneCamera::new("Pocketdesk camera (test)".into(), 30);
-    assert!(!camera.frame(true, 0, &[0, 0, 0, 1]));
+    assert!(!camera.frame(true, 0, &[0, 0, 0, 1]).unwrap());
     assert_eq!(camera.counts(), (0, 0));
     assert_eq!(camera.node_id(), None);
-    assert!(matches!(camera.config(2, 2), Ok(false)), "too small");
+    assert!(camera.config(2, 2).is_err(), "too small: the cast ends");
+    assert!(camera.config(4096, 4096).is_err(), "too large");
+}
+
+/// A stand-in decoder that stops at once, as a crashed `ffmpeg`.
+#[cfg(unix)]
+fn dying_decoder(width: usize, height: usize, latest: Arc<Latest>) -> io::Result<Decoder> {
+    Decoder::spawn(
+        "sh",
+        &["-c".to_string(), "exit 3".to_string()],
+        width,
+        height,
+        latest,
+    )
+}
+
+/// PR #604 review I2: a decoder that stopped is collected (no zombie) and
+/// seen as stopped.
+#[cfg(unix)]
+#[test]
+fn a_stopped_decoder_is_collected_and_seen() {
+    let mut decoder = dying_decoder(64, 48, Arc::default()).expect("sh starts");
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    while !decoder.dead() && Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(decoder.dead(), "seen as stopped");
+    assert_eq!(decoder.feed(&[0, 0, 0, 1]), Fed::Dead);
+    // Collected by `try_wait`: the exit status is ours, not a zombie's.
+    assert!(matches!(decoder.child.try_wait(), Ok(Some(_))));
+    drop(decoder);
+}
+
+/// PR #604 review I2: a camera whose decoder keeps stopping starts it
+/// again after each wait, from a keyframe, and then gives up, the camera
+/// taken away and its decoder collected.
+#[cfg(unix)]
+#[test]
+fn a_camera_whose_decoder_keeps_stopping_restarts_then_ends() {
+    let mut camera = PhoneCamera::new("Pocketdesk camera (test)".into(), 30);
+    camera.start_decoder = dying_decoder;
+    let t0 = Instant::now();
+    assert_eq!(camera.lifecycle.config(64, 48, t0), Step::Open(64, 48));
+    camera.decoder = Some(dying_decoder(64, 48, camera.latest.clone()).unwrap());
+    let settle = |camera: &mut PhoneCamera| {
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        while !camera.decoder.as_mut().is_some_and(Decoder::dead) && Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    };
+    let ms = std::time::Duration::from_millis;
+    settle(&mut camera);
+    // Found stopped: it waits its backoff, the frame dropped.
+    assert!(!camera.frame_at(true, 0, &[0, 0, 0, 1], t0).unwrap());
+    assert!(camera.decoder.is_none(), "collected");
+    // After the wait, a new one, and a keyframe asked for.
+    let t1 = t0 + RESTART_BACKOFF[0];
+    assert!(camera.frame_at(true, 1, &[0, 0, 0, 1], t1).unwrap());
+    assert!(camera.decoder.is_some());
+    settle(&mut camera);
+    let t2 = t1 + ms(100);
+    assert!(!camera.frame_at(true, 2, &[0, 0, 0, 1], t2).unwrap());
+    let t3 = t2 + RESTART_BACKOFF[1];
+    assert!(camera.frame_at(true, 3, &[0, 0, 0, 1], t3).unwrap());
+    settle(&mut camera);
+    // Stopped a third time within the minute: no more restarts.
+    let given_up = camera.frame_at(true, 4, &[0, 0, 0, 1], t3 + ms(100));
+    assert!(given_up.is_err(), "the cast ends");
+    assert!(camera.decoder.is_none());
 }
 
 /// `ffmpeg`'s H.264 of `count` 64 by 48 test pictures, one access unit a
@@ -168,16 +290,14 @@ fn test_stream(count: usize) -> Option<Vec<Vec<u8>>> {
 }
 
 #[test]
+#[ignore = "needs ffmpeg with libx264 (run on the Linux laptop with --ignored)"]
 fn the_decoder_gives_a_picture_for_each_frame() {
-    let Some(units) = test_stream(30) else {
-        eprintln!("skipped: no ffmpeg with libx264 here");
-        return;
-    };
+    let units = test_stream(30).expect("needs ffmpeg with libx264");
     assert_eq!(units.len(), 30);
     let latest = Arc::new(Latest::default());
-    let decoder = Decoder::start(64, 48, latest.clone()).expect("ffmpeg starts");
+    let mut decoder = Decoder::start(64, 48, latest.clone()).expect("ffmpeg starts");
     for unit in &units {
-        while !decoder.feed(unit) {
+        while decoder.feed(unit) != Fed::Queued {
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
     }
@@ -196,7 +316,7 @@ fn the_decoder_gives_a_picture_for_each_frame() {
 mod pipewire_node {
     use super::super::node::{buffers_object, format_object, pod_bytes, taken_format};
     use super::*;
-    use pipewire::spa::param::video::{VideoFormat, VideoInfoRaw};
+    use pipewire::spa::param::video::VideoFormat;
     use pipewire::spa::pod::Pod;
 
     /// The offer reads back as raw video at the camera's size and rate,
@@ -253,7 +373,6 @@ mod pipewire_node {
         assert_eq!(taken_format(VideoFormat::YUY2), Some(PixelFormat::Yuy2));
         assert_eq!(taken_format(VideoFormat::RGBA), None, "not offered");
         assert!(pod_bytes(buffers_object(2560, 1280 * 720 * 2)).is_some());
-        let _ = VideoInfoRaw::default();
     }
 
     /// Live, against a running PipeWire (a private one: see
@@ -316,7 +435,7 @@ mod pipewire_node {
             let keyframe = unit
                 .windows(4)
                 .any(|w| w[..3] == [0, 0, 1] && w[3] & 0x1F == 5);
-            camera.frame(keyframe, seq as u64, unit);
+            camera.frame(keyframe, seq as u64, unit).expect("decodes");
             // As a phone sends them, about 30 a second.
             std::thread::sleep(std::time::Duration::from_millis(33));
         }

@@ -1,5 +1,5 @@
 //! The phone's camera as this computer's camera (F6 part 2). A camera cast
-//! (a cast that said [`pocketdesk_core::streaming::client::CAST_WEBCAM_MARKER`],
+//! (a cast that said [`pocketdesk_core::streaming::client::CAST_WEBCAM_FLAG`],
 //! admitted with the phone's Webcam permission and the owner's
 //! `phone_camera` setting) is decoded here by `ffmpeg`, as the desktop
 //! app's window decodes a cast, and published on Linux as a PipeWire
@@ -16,7 +16,7 @@ use std::io::{self, Read, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use pocketdesk_core::protocol::phone_camera::CameraAsk;
 use pocketdesk_core::streaming::cast::CastChain;
@@ -121,11 +121,17 @@ fn nv12_to_yuy2(nv12: &[u8], width: usize, height: usize, out: &mut [u8]) {
     }
 }
 
+/// The longest and the shortest side a camera may have: 1080p, either way
+/// round, and a little over for an encoder that rounds up (PR #604
+/// review N1: only 720p and 1080p are asked for).
+pub const MAX_SIDES: (usize, usize) = (1920 + 16, 1080 + 16);
+
 /// The picture a camera publishes: the cast's size, made even (both
 /// layouts take pixel pairs), within what a camera may be.
 pub fn picture_size(width: u16, height: u16) -> Option<(usize, usize)> {
     let (w, h) = (usize::from(width) & !1, usize::from(height) & !1);
-    (w >= 16 && h >= 16 && w <= 4096 && h <= 4096).then_some((w, h))
+    let (long, short) = (w.max(h), w.min(h));
+    (short >= 16 && long <= MAX_SIDES.0 && short <= MAX_SIDES.1).then_some((w, h))
 }
 
 /// The newest decoded picture, for the node to send when it next runs.
@@ -221,6 +227,16 @@ pub fn decoder_args(width: usize, height: usize, fps_mode: &str) -> Vec<String> 
     args
 }
 
+/// What became of an access unit handed to the decoder.
+#[derive(Debug, PartialEq, Eq)]
+enum Fed {
+    Queued,
+    /// The queue is full: `ffmpeg` is behind.
+    Full,
+    /// `ffmpeg` has stopped.
+    Dead,
+}
+
 /// A cast's H.264 decoded by `ffmpeg` into [`Latest`].
 struct Decoder {
     child: Child,
@@ -230,12 +246,24 @@ struct Decoder {
 impl Decoder {
     fn start(width: usize, height: usize, latest: Arc<Latest>) -> io::Result<Self> {
         let program = "ffmpeg";
+        let args = decoder_args(
+            width,
+            height,
+            pocketdesk_core::streaming::ffmpeg_flags::fps_mode_flag(program),
+        );
+        Self::spawn(program, &args, width, height, latest)
+    }
+
+    /// `program` with `args` as the decoder: H.264 in, NV12 out.
+    fn spawn(
+        program: &str,
+        args: &[String],
+        width: usize,
+        height: usize,
+        latest: Arc<Latest>,
+    ) -> io::Result<Self> {
         let mut child = Command::new(program)
-            .args(decoder_args(
-                width,
-                height,
-                pocketdesk_core::streaming::ffmpeg_flags::fps_mode_flag(program),
-            ))
+            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -268,19 +296,29 @@ impl Decoder {
         })
     }
 
-    /// Queue an access unit; `false` when it was dropped (the queue full,
-    /// or `ffmpeg` gone).
-    fn feed(&self, unit: &[u8]) -> bool {
-        self.feed
-            .as_ref()
-            .is_some_and(|feed| feed.try_send(unit.to_vec()).is_ok())
+    /// Whether `ffmpeg` has stopped (the exit is collected as it is seen).
+    fn dead(&mut self) -> bool {
+        !matches!(self.child.try_wait(), Ok(None))
+    }
+
+    /// Queue an access unit.
+    fn feed(&mut self, unit: &[u8]) -> Fed {
+        if self.dead() {
+            return Fed::Dead;
+        }
+        match self.feed.as_ref().map(|f| f.try_send(unit.to_vec())) {
+            Some(Ok(())) => Fed::Queued,
+            Some(Err(mpsc::TrySendError::Full(_))) => Fed::Full,
+            _ => Fed::Dead,
+        }
     }
 }
 
 impl Drop for Decoder {
     fn drop(&mut self) {
         // The feeder ends with its channel; ffmpeg is stopped either way,
-        // and its reader then reads the end.
+        // and its reader then reads the end. `wait` reaps it: never a
+        // zombie.
         self.feed = None;
         let _ = self.child.kill();
         let _ = self.child.wait();
@@ -311,6 +349,59 @@ fn read_pictures(mut stdout: impl Read, width: usize, height: usize, latest: &La
     }
 }
 
+/// Restarts of a decoder that stopped, at most, within [`RESTART_WINDOW`]
+/// (PR #604 review I2): past them the camera ends, so a stream that kills
+/// `ffmpeg` cannot have the server start it in a loop.
+pub const RESTARTS: usize = 2;
+
+/// The window [`RESTARTS`] counts in.
+pub const RESTART_WINDOW: Duration = Duration::from_secs(60);
+
+/// How long a stopped decoder waits before each restart.
+pub const RESTART_BACKOFF: [Duration; RESTARTS] =
+    [Duration::from_millis(500), Duration::from_secs(2)];
+
+/// What to do about a decoder that stopped.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Restart {
+    /// Start a new one now.
+    Now,
+    /// Not yet: its backoff runs.
+    Wait,
+    /// It stopped too often: end the camera.
+    GiveUp,
+}
+
+/// The decoder's restarts, kept pure for tests.
+#[derive(Debug, Default)]
+pub struct Restarts {
+    done: Vec<Instant>,
+}
+
+impl Restarts {
+    /// A decoder found stopped at `died`; what to do at `now`.
+    pub fn ask(&mut self, died: Instant, now: Instant) -> Restart {
+        self.done
+            .retain(|t| now.saturating_duration_since(*t) < RESTART_WINDOW);
+        let Some(backoff) = RESTART_BACKOFF.get(self.done.len()) else {
+            return Restart::GiveUp;
+        };
+        if now.saturating_duration_since(died) < *backoff {
+            return Restart::Wait;
+        }
+        self.done.push(now);
+        Restart::Now
+    }
+}
+
+/// Sizes said at most, within [`CONFIG_WINDOW`] (PR #604 review N1): each
+/// opens the camera and the decoder again, so a phone that says more ends
+/// its camera. A camera says one, and once more if its encoder restarts.
+pub const CONFIGS: usize = 3;
+
+/// The window [`CONFIGS`] counts in.
+pub const CONFIG_WINDOW: Duration = Duration::from_secs(5);
+
 /// What a camera does with what its cast sends: the plan, kept pure for
 /// tests.
 #[derive(Debug, Default)]
@@ -320,17 +411,17 @@ pub struct Lifecycle {
     /// was lost on the way.
     waiting: bool,
     chain: CastChain,
+    /// When the last sizes were said, within [`CONFIG_WINDOW`].
+    configs: Vec<Instant>,
 }
 
 /// What [`Lifecycle`] says to do.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Step {
-    /// Nothing changes.
-    Keep,
     /// Publish the camera (again) at this size, a new decoder with it, and
     /// ask the phone for a keyframe.
     Open(usize, usize),
-    /// The size cannot be a camera: take it away.
+    /// The size cannot be a camera, or sizes come too often: end it.
     Close,
     /// Decode this frame.
     Decode,
@@ -341,21 +432,27 @@ pub enum Step {
 }
 
 impl Lifecycle {
-    /// The phone said its encoder's size.
-    pub fn config(&mut self, width: u16, height: u16) -> Step {
-        let Some(size) = picture_size(width, height) else {
+    /// The phone said its encoder's size at `now`.
+    pub fn config(&mut self, width: u16, height: u16, now: Instant) -> Step {
+        self.configs
+            .retain(|t| now.saturating_duration_since(*t) < CONFIG_WINDOW);
+        let size = picture_size(width, height).filter(|_| self.configs.len() < CONFIGS);
+        let Some(size) = size else {
             self.size = None;
             return Step::Close;
         };
+        self.configs.push(now);
         self.chain.restart();
         self.waiting = true;
-        if self.size == Some(size) {
-            // The same size: a new encoder, the same camera; the decoder
-            // starts again from its keyframe.
-            return Step::Open(size.0, size.1);
-        }
+        // The same size too: a new encoder, the same camera; the decoder
+        // starts again from its keyframe.
         self.size = Some(size);
         Step::Open(size.0, size.1)
+    }
+
+    /// The camera's size, while it has one.
+    pub fn size(&self) -> Option<(usize, usize)> {
+        self.size
     }
 
     /// A frame arrived.
@@ -378,13 +475,16 @@ impl Lifecycle {
         Step::Decode
     }
 
-    /// A frame could not be queued for the decoder: wait for a keyframe;
-    /// whether to ask for one now.
+    /// A frame could not be decoded: wait for a keyframe; whether to ask
+    /// for one now.
     pub fn lost(&mut self, now: Instant) -> bool {
         self.waiting = true;
         self.chain.lost(now)
     }
 }
+
+/// How a camera's decoder is started: `ffmpeg`, or a stand-in in tests.
+type StartDecoder = fn(usize, usize, Arc<Latest>) -> io::Result<Decoder>;
 
 /// One phone's camera, published while its camera cast runs.
 pub struct PhoneCamera {
@@ -393,6 +493,10 @@ pub struct PhoneCamera {
     lifecycle: Lifecycle,
     latest: Arc<Latest>,
     decoder: Option<Decoder>,
+    start_decoder: StartDecoder,
+    /// When its decoder was found stopped, while it waits to restart.
+    died: Option<Instant>,
+    restarts: Restarts,
     #[cfg(target_os = "linux")]
     node: Option<node::Node>,
 }
@@ -407,25 +511,32 @@ impl PhoneCamera {
             lifecycle: Lifecycle::default(),
             latest: Arc::default(),
             decoder: None,
+            start_decoder: Decoder::start,
+            died: None,
+            restarts: Restarts::default(),
             #[cfg(target_os = "linux")]
             node: None,
         }
     }
 
     /// The cast's size: the camera published at it (again). `Ok(true)`
-    /// asks the phone for a keyframe; an error takes the camera away.
+    /// asks the phone for a keyframe; an error takes the camera away, and
+    /// the cast should end.
     pub fn config(&mut self, width: u16, height: u16) -> io::Result<bool> {
-        let Step::Open(w, h) = self.lifecycle.config(width, height) else {
+        let Step::Open(w, h) = self.lifecycle.config(width, height, Instant::now()) else {
             self.close();
-            return Ok(false);
+            return Err(io::Error::other(format!(
+                "a camera of {width}x{height}, or sizes said too often"
+            )));
         };
         self.decoder = None;
+        self.died = None;
         self.latest.clear();
         if let Err(e) = self.publish(w, h) {
             self.close();
             return Err(e);
         }
-        match Decoder::start(w, h, self.latest.clone()) {
+        match (self.start_decoder)(w, h, self.latest.clone()) {
             Ok(decoder) => {
                 self.decoder = Some(decoder);
                 Ok(true)
@@ -467,16 +578,73 @@ impl PhoneCamera {
         ))
     }
 
-    /// One of the cast's frames; `true` asks the phone for a keyframe.
-    pub fn frame(&mut self, keyframe: bool, seq: u64, data: &[u8]) -> bool {
-        let now = Instant::now();
+    /// One of the cast's frames; `Ok(true)` asks the phone for a keyframe,
+    /// an error says the decoder kept stopping and the cast should end.
+    pub fn frame(&mut self, keyframe: bool, seq: u64, data: &[u8]) -> io::Result<bool> {
+        self.frame_at(keyframe, seq, data, Instant::now())
+    }
+
+    fn frame_at(
+        &mut self,
+        keyframe: bool,
+        seq: u64,
+        data: &[u8],
+        now: Instant,
+    ) -> io::Result<bool> {
         match self.lifecycle.frame(keyframe, seq, now) {
-            Step::Decode => {
-                let fed = self.decoder.as_ref().is_some_and(|d| d.feed(data));
-                !fed && self.lifecycle.lost(now)
+            Step::Decode => match self.decoder.as_mut().map(|d| d.feed(data)) {
+                Some(Fed::Queued) => Ok(false),
+                Some(Fed::Full) => Ok(self.lifecycle.lost(now)),
+                Some(Fed::Dead) | None => self.revive(now),
+            },
+            Step::DropAndAsk => Ok(true),
+            _ => {
+                // Dropped frames still notice a decoder that stopped.
+                if self.decoder.as_mut().is_some_and(Decoder::dead) {
+                    return self.revive(now);
+                }
+                Ok(false)
             }
-            Step::DropAndAsk => true,
-            _ => false,
+        }
+    }
+
+    /// The decoder stopped: collect it, and start another after its
+    /// backoff, from the next keyframe; past [`RESTARTS`], end.
+    fn revive(&mut self, now: Instant) -> io::Result<bool> {
+        let Some((width, height)) = self.lifecycle.size() else {
+            return Ok(false);
+        };
+        if self.decoder.take().is_some() {
+            tracing::warn!("The phone's camera decoder stopped");
+        }
+        let died = *self.died.get_or_insert(now);
+        match self.restarts.ask(died, now) {
+            Restart::Wait => {
+                self.lifecycle.lost(now);
+                Ok(false)
+            }
+            Restart::GiveUp => {
+                self.close();
+                Err(io::Error::other(
+                    "the camera's decoder (ffmpeg) kept stopping",
+                ))
+            }
+            Restart::Now => {
+                self.died = None;
+                let decoder = (self.start_decoder)(width, height, self.latest.clone());
+                match decoder {
+                    Ok(decoder) => {
+                        tracing::info!("The phone's camera decoder started again");
+                        self.decoder = Some(decoder);
+                        self.lifecycle.lost(now);
+                        Ok(true)
+                    }
+                    Err(e) => {
+                        self.close();
+                        Err(e)
+                    }
+                }
+            }
         }
     }
 
@@ -529,6 +697,9 @@ pub enum Feed {
 /// dropped, and the chain's gap asks for a keyframe.
 const WORKER_QUEUE: usize = 16;
 
+/// What a camera cast is closed with when its camera fails here.
+pub const CAMERA_FAILED: &[u8] = b"phone camera failed";
+
 /// A camera cast's camera, on a thread of its own (opening PipeWire and
 /// `ffmpeg` blocks): fed while the cast runs, and taken away, node and
 /// all, once this is dropped.
@@ -537,9 +708,11 @@ pub struct Worker {
 }
 
 impl Worker {
-    /// The camera for the phone `device_id`'s camera cast; `want` asks the
-    /// phone for a keyframe.
+    /// The camera for the phone `device_id`'s camera cast, the live session
+    /// `session_id`; `want` asks the phone for a keyframe. A camera that
+    /// fails ends its session, and says so.
     pub fn start(
+        session_id: u64,
         device_id: Option<String>,
         want: tokio::sync::mpsc::Sender<()>,
     ) -> io::Result<Self> {
@@ -551,22 +724,24 @@ impl Worker {
                 let fps = ask_now().unwrap_or_default().fps;
                 let mut camera = PhoneCamera::new(name, u32::from(fps));
                 for item in fed {
-                    let ask = match item {
-                        Feed::Config { width, height } => match camera.config(width, height) {
-                            Ok(ask) => ask,
-                            Err(e) => {
-                                tracing::warn!(error = %e, "The phone's camera could not be published");
-                                false
-                            }
-                        },
+                    let done = match item {
+                        Feed::Config { width, height } => camera.config(width, height),
                         Feed::Frame {
                             keyframe,
                             seq,
                             data,
                         } => camera.frame(keyframe, seq, &data),
                     };
-                    if ask {
-                        let _ = want.try_send(());
+                    match done {
+                        Ok(true) => {
+                            let _ = want.try_send(());
+                        }
+                        Ok(false) => {}
+                        Err(e) => {
+                            tracing::warn!(error = %e, "The phone's camera stopped");
+                            fail(session_id, &e);
+                            break;
+                        }
                     }
                 }
                 let (decoded, sent) = camera.counts();
@@ -578,6 +753,20 @@ impl Worker {
     /// Hand the camera what the cast sent; `false` when it was dropped.
     pub fn send(&self, item: Feed) -> bool {
         self.feed.try_send(item).is_ok()
+    }
+}
+
+/// The camera of session `session_id` failed: its session ends, telling
+/// the phone (which closes its camera), and the owner is told here.
+fn fail(session_id: u64, why: &io::Error) {
+    let _ = pocketdesk_core::streaming::sessions::end_session(session_id, CAMERA_FAILED);
+    let body = format!("The phone's camera was taken away: {why}.");
+    if !crate::platform::notify(
+        "Pocketdesk: the phone's camera stopped",
+        &body,
+        Duration::from_secs(10),
+    ) {
+        tracing::info!("{body}");
     }
 }
 

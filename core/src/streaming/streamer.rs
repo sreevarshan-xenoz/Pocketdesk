@@ -87,7 +87,7 @@ struct ClientClaim {
     /// either way, and no window.
     phone_sound: bool,
     /// A cast for this computer's camera (F6 part 2): its picture goes to a
-    /// camera device, not a window. Said with [`super::client::CAST_WEBCAM_MARKER`].
+    /// camera device, not a window. Said with [`super::client::CAST_WEBCAM_FLAG`].
     webcam: bool,
 }
 
@@ -878,6 +878,7 @@ impl StreamingServer {
                 video: !no_picture,
                 cast,
                 phone_sound: allow_phone_sound,
+                webcam,
             },
         );
         // Where this session's absolute moves land (PC11 on Linux): read
@@ -2273,14 +2274,12 @@ async fn read_client_config(
     hevc_allowed: bool,
 ) -> ClientClaim {
     use super::client::{
-        CAST_WEBCAM_MARKER, CODEC_CAPS_MARKER, DEVICE_ID_MARKER, IROH_KEY_MARKER,
+        CAST_WEBCAM_FLAG, CODEC_CAPS_MARKER, DEVICE_ID_MARKER, IROH_KEY_MARKER,
         MONITOR_CONFIG_MARKER, SESSION_MODE_CAST, SESSION_MODE_INPUT_ONLY, SESSION_MODE_MARKER,
         SESSION_MODE_PHONE_SOUND, SESSION_MODE_SOUND,
     };
 
     let mut claim = ClientClaim::default();
-    // At most four: a camera cast (F6 part 2) says its id, WAN key, mode
-    // and camera marker, and no codec caps or screen.
     for _ in 0..4 {
         let stream = tokio::select! {
             biased;
@@ -2365,11 +2364,15 @@ async fn read_client_config(
             claim.sound = mode[0] == SESSION_MODE_SOUND;
             claim.phone_sound = mode[0] == SESSION_MODE_PHONE_SOUND;
             info!(mode = mode[0], "Client session mode");
-        } else if marker == CAST_WEBCAM_MARKER {
-            // No payload: an older server reads the marker, skips it, and
-            // shows the camera in a window as before.
-            claim.webcam = true;
-            info!("Client cast is for this computer's camera");
+            // F6 part 2: a camera cast's flag follows its mode; a mode
+            // stream that ends there (any other session) says nothing more.
+            if claim.cast {
+                let mut flag = [0u8; 1];
+                if read_with_timeout(&mut *stream, &mut flag).await && flag[0] == CAST_WEBCAM_FLAG {
+                    claim.webcam = true;
+                    info!("Client cast is for this computer's camera");
+                }
+            }
         } else {
             debug!("Unknown config marker: {:02X?}", &marker);
         }

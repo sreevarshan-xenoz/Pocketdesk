@@ -68,6 +68,7 @@ pub fn render_json(
                 && !s.streamed.input
                 && !s.streamed.phone_sound,
             phone_sound_only: !s.streamed.video && !s.streamed.cast && s.streamed.phone_sound,
+            webcam: s.streamed.webcam,
         })
         .collect();
     shared::render_mirror(&sessions, crate::driving::is_shared(), linked, now_unix)
@@ -108,7 +109,23 @@ pub fn narrowed_sessions(
                 || (s.streamed.mic && !now.allows(Capability::Mic))
                 // A cast's sound (K5) ends with its permission, as the mic.
                 || (s.streamed.phone_sound && !now.allows(Capability::PhoneSound))
+                // The phone as this computer's camera (F6 part 2, PR #604
+                // review I1) ends with its permission.
+                || (s.streamed.webcam && !now.allows(Capability::Webcam))
         })
+        .map(|s| s.id)
+        .collect()
+}
+
+/// The live camera casts (F6 part 2) while this computer no longer offers
+/// phones as a camera (`offered` false: the owner's setting turned off),
+/// by session id: they end as the setting goes (PR #604 review I1).
+pub fn unoffered_camera_sessions(live: &[LiveSession], offered: bool) -> Vec<u64> {
+    if offered {
+        return Vec::new();
+    }
+    live.iter()
+        .filter(|s| s.streamed.webcam)
         .map(|s| s.id)
         .collect()
 }
@@ -158,7 +175,9 @@ async fn tell_phones(sessions: &[(u64, String)], driver: Option<u64>) {
 
 /// What a new session is, for its notification.
 fn session_summary(streamed: &pocketdesk_core::streaming::sessions::Streamed) -> &'static str {
-    if streamed.cast {
+    if streamed.webcam {
+        "Pocketdesk: a phone is this computer's camera"
+    } else if streamed.cast {
         "Pocketdesk: a phone is showing its screen here"
     } else if streamed.phone_sound {
         // The phone's sound alone (M7).
@@ -319,6 +338,21 @@ pub async fn run_watcher() {
                             "Ended a streaming session: its permissions were narrowed"
                         );
                     }
+                }
+            }
+            // F6 part 2: a camera cast ends as the owner's offer goes,
+            // read again at each tick (PR #604 review I1).
+            let offered = crate::phone_camera::offered();
+            for id in unoffered_camera_sessions(&live, offered) {
+                if pocketdesk_core::streaming::sessions::end_session(
+                    id,
+                    b"phone camera not offered here",
+                )
+                .is_some()
+                {
+                    tracing::warn!(
+                        "Ended a phone's camera: phones are no longer offered as a camera"
+                    );
                 }
             }
             let unpaired = if may_judge_pairing(store.is_some(), &mut unread_ticks) {
@@ -702,6 +736,7 @@ mod tests {
             video: true,
             cast: false,
             phone_sound: false,
+            webcam: false,
         };
         assert!(session_summary(&screen).contains("streaming this desktop"));
         let remote = Streamed {
@@ -717,6 +752,11 @@ mod tests {
             ..remote
         };
         assert!(session_summary(&cast).contains("showing its screen"));
+        let camera = Streamed {
+            webcam: true,
+            ..cast
+        };
+        assert!(session_summary(&camera).contains("this computer's camera"));
         // A sound session (N5): no picture and no input.
         let sound = Streamed {
             input: false,
@@ -798,6 +838,7 @@ mod tests {
             video: true,
             cast: false,
             phone_sound: false,
+            webcam: false,
         };
         let view_only = Streamed {
             input: false,
@@ -865,6 +906,36 @@ mod tests {
             narrowed_sessions(&[session], |_| DevicePermissions::default()),
             vec![7]
         );
+    }
+
+    /// PR #604 review I1: the phone's camera ends when its Webcam
+    /// permission goes, and when this computer stops offering phones as a
+    /// camera; a screen cast is left to its own permissions.
+    #[test]
+    fn a_camera_ends_with_its_permission_and_the_offer() {
+        use pocketdesk_core::protocol::permissions::{Capability, DevicePermissions};
+        use pocketdesk_core::streaming::sessions::Streamed;
+        let mut camera = session(Some("phone"), true);
+        camera.streamed = Streamed {
+            cast: true,
+            webcam: true,
+            ..Streamed::default()
+        };
+        let mut screen = session(Some("phone"), true);
+        screen.id = 8;
+        screen.streamed = Streamed {
+            cast: true,
+            ..Streamed::default()
+        };
+        let mut on = DevicePermissions::default();
+        on.set(Capability::Webcam, true);
+        let both = [camera.clone(), screen.clone()];
+        assert!(narrowed_sessions(&both, |_| on.clone()).is_empty());
+        let mut off = on.clone();
+        off.set(Capability::Webcam, false);
+        assert_eq!(narrowed_sessions(&both, |_| off.clone()), vec![7]);
+        assert!(unoffered_camera_sessions(&both, true).is_empty());
+        assert_eq!(unoffered_camera_sessions(&both, false), vec![7]);
     }
 
     /// M7: the phone's sound alone is its own kind, not sound only.

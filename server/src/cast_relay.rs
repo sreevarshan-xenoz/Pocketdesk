@@ -54,6 +54,10 @@ struct Cast {
     asks: CastChain,
 }
 
+/// What an older camera cast is closed with when another phone's camera
+/// replaces it (F6 part 2).
+pub const REPLACED_CAMERA: &[u8] = b"another phone is the camera now";
+
 /// A camera cast (F6 part 2) and the camera it feeds.
 struct Webcam {
     session_id: u64,
@@ -101,9 +105,17 @@ pub async fn run(mut events: mpsc::Receiver<CastEvent>, listener: TcpListener, s
                 let Some(event) = event else { break };
                 match event {
                     CastEvent::Start { session_id, device_id, want_keyframe, control: _, webcam: true } => {
-                        // The newest camera cast replaces an older one.
-                        webcam = None;
-                        match crate::phone_camera::Worker::start(device_id, want_keyframe.clone()) {
+                        // The newest camera cast replaces an older one, and
+                        // the older ends, its phone told why, so its camera
+                        // does not stay open for nothing (PR #604 review N2).
+                        if let Some(old) = webcam.take() {
+                            let _ = pocketdesk_core::streaming::sessions::end_session(
+                                old.session_id,
+                                REPLACED_CAMERA,
+                            );
+                            tracing::info!(session_id = old.session_id, "A phone's camera was replaced by another's");
+                        }
+                        match crate::phone_camera::Worker::start(session_id, device_id, want_keyframe.clone()) {
                             Ok(worker) => {
                                 tracing::info!(session_id, "A phone's camera can be this computer's");
                                 webcam = Some(Webcam { session_id, want: want_keyframe, worker });
