@@ -51,6 +51,8 @@
     <string name="settings_retry_transfers_summary">பாதியில் நின்ற கோப்பு நின்ற இடத்திலிருந்து 3 முறை வரை மீண்டும் அனுப்பப்படும்; நெட்வொர்க் இல்லையெனில் முதலில் 3 நிமிடம் வரை காத்திருக்கும்</string>
     <string name="settings_internet_files">இணையம் வழியே கோப்புகள்</string>
     <string name="settings_internet_files_summary">வெளியிலிருந்து அணுகும் கணினியுடன் அதே இணைப்பில் கோப்புகளை அனுப்பி பெறுக. கணினியும் இதை அணைக்கலாம்</string>
+    <string name="settings_direct_links">கணினிகளின் நேரடி இணைப்புகளில் சேர்</string>
+    <string name="settings_direct_links_summary">கணினியின் “நேரடி இணைப்பை உருவாக்கு” குறியீட்டை ஸ்கேன் செய்யும்போது, அந்தக் கணினியின் சொந்த Wi-Fi-இல் Pocketdesk-க்காக மட்டும் சேரும். மற்ற அனைத்திற்கும் மொபைல் தரவு தொடரும்</string>
     <string name="reconnecting_in">%1$d வினாடிகளில் மீண்டும் இணைகிறது…</string>
     <string name="reconnect_gave_up">10 நிமிடங்களுக்குப் பிறகு முயற்சி நிறுத்தப்பட்டது.</string>
     <string name="settings_reveal_pin">PIN-ஐ இயல்பாகக் காட்டு</string>
@@ -357,6 +359,16 @@
     <string name="pair_link_confirm">இணை</string>
     <string name="pair_link_calls_itself">அது தன்னை “%1$s” என்று அழைக்கிறது.</string>
     <string name="pair_link_not_scanned">இந்தக் குறியீட்டை நீங்கள் ஸ்கேன் செய்யவில்லை; வேறு செயலி அல்லது இணையப் பக்கம் திறந்தது.</string>
+    <string name="pair_link_direct_note">இது நேரடி இணைப்பு. இந்தக் கணினியின் சொந்த Wi-Fi வலையத்தில் தொலைபேசி Pocketdesk-க்காக மட்டும் சேரும்; மற்ற அனைத்திற்கும் மொபைல் தரவு தொடரும். Android அனுமதி கேட்கும்.</string>
+    <string name="pair_link_direct_network">வலையம்: %1$s</string>
+    <string name="pair_link_wifi_extra_title">இந்த இணைப்பு Wi-Fi வலையம் %1$s இல் சேரத் தொலைபேசியைக் கேட்கிறது</string>
+    <string name="pair_link_wifi_extra_body">இதை நீங்கள் ஸ்கேன் செய்யவில்லை; வேறு செயலி அல்லது இணையப் பக்கம் திறந்தது. உங்கள் சொந்தக் கணினியில் நேரடி இணைப்பைத் தொடங்கி, இதுவே அதன் வலையம் என்றால் மட்டும் தொடருங்கள்.</string>
+    <string name="pair_link_wifi_extra_confirm">வலையத்தில் சேர்ந்து இணை</string>
+    <string name="pair_link_joining">கணினியின் Wi-Fi-இல் சேர்கிறது…</string>
+    <string name="pair_link_joining_hint">Android கேட்கும்போது அனுமதியுங்கள்.</string>
+    <string name="pair_link_join_failed">தொலைபேசி கணினியின் Wi-Fi-இல் சேரவில்லை. Android கேட்கும்போது அனுமதியுங்கள், கணினிக்கு அருகில் இருந்து குறியீட்டை மீண்டும் ஸ்கேன் செய்யுங்கள்.</string>
+    <string name="pair_link_direct_disabled">இது நேரடி இணைப்பு; அவற்றில் சேர்வது அணைக்கப்பட்டுள்ளது. அமைப்புகளில் “கணினிகளின் நேரடி இணைப்புகளில் சேர்” ஐ இயக்கி மீண்டும் ஸ்கேன் செய்யுங்கள்.</string>
+    <string name="pair_link_direct_too_old">கணினியின் சொந்த Wi-Fi-இல் சேர Android 10 அல்லது புதியது தேவை.</string>
     <string name="phone_notifications_service">Pocketdesk: கணினியில் காட்டு</string>
     <string name="phone_notifications_share">இந்தத் தொலைபேசியின் அறிவிப்புகள் என் கணினியில்</string>
     <string name="phone_notifications_share_summary">இந்தத் தொலைபேசியின் அறிவிப்புகள் நீங்கள் கடைசியாகப் பயன்படுத்திய கணினியில் தோன்றும்</string>

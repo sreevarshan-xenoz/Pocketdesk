@@ -23,6 +23,7 @@ pub mod deck;
 pub mod device_keys;
 pub mod diagnostics;
 pub mod dials;
+pub mod direct_link;
 pub mod drive;
 pub mod events;
 pub mod hold_words;

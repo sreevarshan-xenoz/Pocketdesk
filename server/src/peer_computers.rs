@@ -3306,6 +3306,7 @@ mod tests {
             fingerprint: Some("ab".repeat(32)),
             endpoint: Some(endpoint.to_string()),
             mine: true,
+            wifi: None,
         };
         assert!(asks_both_ways(&link, true));
         assert!(!asks_both_ways(&link, false), "the link alone");

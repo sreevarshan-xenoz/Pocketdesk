@@ -43,6 +43,17 @@ video_quality = "balanced"
 # If mutter's D-Bus is missing or refuses, the portal is used.
 # gnome_unattended = false
 
+# Offer a direct link: the Pair page's "Make a direct link" makes this
+# computer's own Wi-Fi for one phone, for a train, a cafe with client
+# isolation or a guest network where phones cannot reach this computer. You
+# start each one, it turns itself off, and the phone joins it for Pocketdesk
+# only. Linux, through NetworkManager. Off, the button is not shown.
+# direct_link = true
+# The band: "auto" (2.4 GHz, which every phone can join), "2.4" or "5".
+# direct_link_band = "auto"
+# Minutes with no phone using it before it turns itself off (1 to 120).
+# direct_link_idle_minutes = 10
+
 # Reachable from the internet: phones away from home and your other computers
 # reach this computer, directly or through a relay, and the DHT keeps a record
 # of it. Off, no relay or DHT is contacted and no router port is mapped: phones

@@ -314,6 +314,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                     },
                 )
                 SettingSwitch(
+                    stringResource(R.string.settings_direct_links),
+                    stringResource(R.string.settings_direct_links_summary),
+                    Prefs.directLinks(context),
+                    { Prefs.setDirectLinks(context, it) },
+                )
+                SettingSwitch(
                     stringResource(R.string.settings_links_from_computer),
                     stringResource(R.string.settings_links_from_computer_summary),
                     Prefs.linksFromComputer(context),

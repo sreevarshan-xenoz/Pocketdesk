@@ -373,6 +373,16 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
+                    // A direct link's network (a computer's own Wi-Fi, joined
+                    // for Pocketdesk only) is let go once nothing needs it:
+                    // no pairing under way and no session. Nothing joined,
+                    // nothing happens.
+                    LaunchedEffect(sessionKey, pairLink.value) {
+                        if (sessionKey == null && pairLink.value == null) {
+                            dev.pocketdesk.android.pair.DirectLinkNetwork.release(this@MainActivity)
+                        }
+                    }
+
                     val pairing = pairLink.value
                     if (pairing != null) {
                         Box(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
@@ -576,7 +586,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.putString(STATE_PAIR_LINK, pairLink.value)
+        // Never the Wi-Fi passphrase of a direct link: saved instance state
+        // can reach a backup or a crash report.
+        outState.putString(
+            STATE_PAIR_LINK,
+            pairLink.value?.let { dev.pocketdesk.android.pair.PairLink.withoutWifi(it) },
+        )
         outState.putBoolean(STATE_PAIR_SCANNED, pairLinkScanned.value)
     }
 

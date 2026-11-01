@@ -173,6 +173,8 @@ pub async fn run(config: Config) -> Result<()> {
     tokio::spawn(crate::plugins::links::run_watcher());
     // N1: rings the desktop app or `pocketdesk ring` queues for a phone.
     tokio::spawn(crate::ring_phone::run_watcher());
+    // The Pair page's direct link: this computer's own Wi-Fi for a phone.
+    tokio::spawn(crate::direct_link::run());
     // D2: mutes for phones, and what the phones said before this run.
     crate::quiet_phone::load();
     tokio::spawn(crate::quiet_phone::run_watcher());
@@ -909,6 +911,9 @@ pub async fn run(config: Config) -> Result<()> {
             }
         }
     }
+    // A direct link's access point goes with the server, so it never
+    // outlives it (a kill leaves it for the next start to sweep).
+    crate::direct_link::stop_at_exit().await;
     // The screen sessions first, so a window showing this screen hears the
     // stop at once (PC9a).
     close_screen_sessions(&quic_endpoint, wan_endpoint.as_ref()).await;

@@ -177,6 +177,10 @@ From `core/src/local/pair_link.rs`. Values are percent-encoded.
 | `pin` | The 6-digit PIN | yes |
 | `fp` | Hex SHA-256 of the desktop's certificate | absent before the server has made one |
 | `ep` | The iroh endpoint JSON (`endpointId`, `relayUrls`, `directAddrs`, `dht`), base64url | absent until the server has recorded it |
+| `mine` | `1` on a link for another of the owner's computers (PC1) | — |
+| `ws`, `wp` | A direct link's access point: its Wi-Fi name (1 to 32 bytes, no control characters) and WPA2 passphrase (8 to 63 printable ASCII characters). Both or neither; a link with one, or with ones an access point cannot use, is refused | only on a direct link |
+
+**A direct link (no shared network).** A link with `ws` and `wp` tells a phone to join that Wi-Fi network first, for Pocketdesk only (Android: a `WifiNetworkSpecifier` request, app-bound, then the process bound to the network it returns), and then to pair at the address in `a`, which is the computer's own address on that network (NetworkManager's shared mode: a 10.42.x.1). A phone from before this change reads the link and ignores the two keys, so it pairs only if it happens to reach that address. The `WIFI:T:WPA;S:<name>;P:<passphrase>;;` text (`core/src/local/direct_link.rs`, `wifi_uri`) is the standard one a camera app reads; the pairing link above is what Pocketdesk's own scanner reads. The desktop asks the server for the network through `<state>/direct_link_out/<id>.json` (`{id, action: "start"|"stop", band, idle_minutes, accept_takeover, created_unix}`, taken once, dropped after 60 s; `accept_takeover` says the owner saw that this computer's Wi-Fi goes down, and the server starts a link that takes over the card only with it), and the server answers in `<state>/direct_link.json` (owner-only, `{state: "starting"|"on"|"failed", mode, wifi, address, started_unix, updated_unix, idle_minutes, idle_left_secs, in_use, error}`), rewritten every 5 s while the link is on and removed when it is off; a status not rewritten for 30 s was left by a server that is gone.
 
 A link is at most 8 KiB; of its addresses, the first 32 (the best) are kept (§6).
 

@@ -83,6 +83,22 @@ pub struct Config {
     /// D-Bus is missing or refuses, the portal is used. Read at each session.
     #[serde(default)]
     pub gnome_unattended: bool,
+    /// Offer a direct link: the Pair page's "Make a direct link" makes this
+    /// computer's own Wi-Fi for one phone, for where no shared network
+    /// works (a train, a café with client isolation). On by default; the
+    /// owner starts each link, and it turns itself off. Off, the button is
+    /// not shown and the server refuses to make one. Read at each ask.
+    #[serde(default = "default_true")]
+    pub direct_link: bool,
+    /// The band a direct link uses: `"auto"` (2.4 GHz, which every phone
+    /// can join), `"2.4"` or `"5"`. A card that keeps one channel for both
+    /// connections follows its own connection's band instead.
+    #[serde(default = "default_direct_link_band")]
+    pub direct_link_band: String,
+    /// Minutes with no phone using a direct link before it turns itself off,
+    /// 1 to 120.
+    #[serde(default = "default_direct_link_idle_minutes")]
+    pub direct_link_idle_minutes: u32,
     /// Reachable from the internet (the WAN endpoint): phones away from home
     /// and your other computers connect through a relay, and this computer
     /// keeps a record on the Mainline DHT (`dht_publish`). Off, no relay or
@@ -601,6 +617,14 @@ fn default_quiet_days() -> Vec<String> {
         .collect()
 }
 
+fn default_direct_link_band() -> String {
+    "auto".to_string()
+}
+
+fn default_direct_link_idle_minutes() -> u32 {
+    super::direct_link::DEFAULT_IDLE_MINUTES
+}
+
 fn default_away_lock_minutes() -> u32 {
     5
 }
@@ -711,6 +735,9 @@ impl Default for Config {
             lan_discovery: true,
             remember_screen_grant: false,
             gnome_unattended: false,
+            direct_link: true,
+            direct_link_band: default_direct_link_band(),
+            direct_link_idle_minutes: default_direct_link_idle_minutes(),
             internet_path: true,
             relay_urls: Vec::new(),
             dht_publish: DhtPublish::Relay,
@@ -995,6 +1022,9 @@ impl Config {
         "lan_discovery",
         "remember_screen_grant",
         "gnome_unattended",
+        "direct_link",
+        "direct_link_band",
+        "direct_link_idle_minutes",
         "internet_path",
         "relay_urls",
         "dht_publish",

@@ -460,6 +460,8 @@ pub struct PocketdeskApp {
     /// When this window started: a tray's Quit from before it is not for it (E2 review).
     started_unix: u64,
     pair: PairView,
+    /// The Pair page's direct link (a hotspot for one phone).
+    direct_link: crate::direct_link_view::DirectLinkCard,
     /// Loaded when the Settings tab opens; an unreadable file is shown, not
     /// overwritten.
     settings: Option<Result<SettingsForm, String>>,
@@ -586,6 +588,7 @@ impl PocketdeskApp {
             quitting: false,
             started_unix: now_unix(),
             pair: PairView::default(),
+            direct_link: Default::default(),
             settings: None,
             settings_query: String::new(),
             job: None,
@@ -852,6 +855,7 @@ impl PocketdeskApp {
         }
         if self.tab == Tab::Pair && tab != Tab::Pair {
             self.pair.reset(&self.state_dir);
+            self.direct_link.leave(&self.state_dir);
             self.nearby.stop();
         }
         if tab == Tab::Activity && self.tab != Tab::Activity {
@@ -1503,6 +1507,15 @@ impl PocketdeskApp {
                 );
                 if self.pair.mode != crate::pair_view::PairFor::Computer {
                     self.nearby.stop();
+                    // A phone's way in when no shared network works.
+                    self.direct_link.show(
+                        ui,
+                        &self.state_dir,
+                        self.config.as_ref(),
+                        &self.snapshot.devices,
+                        self.snapshot.running,
+                        now_unix(),
+                    );
                 }
                 // UX 2: the other computer's link is pasted here too.
                 if self.pair.mode == crate::pair_view::PairFor::Computer {

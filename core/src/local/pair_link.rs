@@ -6,7 +6,10 @@
 //! `fp` (SHA-256 of the desktop's TLS certificate, hex), `ep` (the iroh
 //! endpoint JSON, base64url), and `mine=1` on a link for another of the
 //! owner's computers that may see and control this one without asking
-//! (PC1). Values are percent-encoded.
+//! (PC1), and, on a direct link (no shared network), `ws`/`wp` (the Wi-Fi
+//! name and passphrase of the access point this computer made for it, which
+//! the phone joins for Pocketdesk only before it pairs). Values are
+//! percent-encoded.
 //!
 //! The link itself is not signed: anyone holding it can change it. So
 //! `mine` is only a request. The computer that made the link pairs both
@@ -20,6 +23,8 @@ use std::net::Ipv4Addr;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+pub use super::direct_link::WifiJoin;
 
 const PREFIX: &str = "pocketdesk://pair?";
 const VERSION: &str = "1";
@@ -50,6 +55,9 @@ pub struct PairLink {
     /// control this one without asking, and this one it (PC1). A request
     /// only: see the module's note.
     pub mine: bool,
+    /// A direct link's access point: the phone joins it first. The link is
+    /// as private as its PIN: a link on screen is the key to both.
+    pub wifi: Option<WifiJoin>,
 }
 
 /// Why a link could not be read.
@@ -127,6 +135,10 @@ impl PairLink {
         if self.mine {
             parts.push("mine=1".to_string());
         }
+        if let Some(wifi) = &self.wifi {
+            parts.push(format!("ws={}", encode(&wifi.ssid)));
+            parts.push(format!("wp={}", encode(&wifi.passphrase)));
+        }
         format!("{PREFIX}{}", parts.join("&"))
     }
 
@@ -180,6 +192,18 @@ impl PairLink {
                     .ok_or_else(|| invalid("bad endpoint"))?,
             ),
         };
+        // Both or neither, and ones an access point can use.
+        let wifi = match (fields.remove("ws"), fields.remove("wp")) {
+            (None, None) => None,
+            (Some(ssid), Some(passphrase)) => {
+                let join = WifiJoin { ssid, passphrase };
+                if !join.is_valid() {
+                    return Err(invalid("bad Wi-Fi details"));
+                }
+                Some(join)
+            }
+            _ => return Err(invalid("the link names a Wi-Fi network without its key")),
+        };
         Ok(Self {
             name: fields.remove("name").unwrap_or_default(),
             device_id: fields.remove("id").unwrap_or_default(),
@@ -191,6 +215,7 @@ impl PairLink {
             endpoint,
             // Only `1` asks; anything else, or none, is a plain pairing.
             mine: fields.get("mine").map(String::as_str) == Some("1"),
+            wifi,
         })
     }
 }
@@ -293,6 +318,7 @@ mod tests {
             fingerprint: Some("ab".repeat(32)),
             endpoint: Some(r#"{"endpointId":"x","relayUrls":[],"directAddrs":[]}"#.into()),
             mine: false,
+            wifi: None,
         }
     }
 
@@ -339,6 +365,64 @@ mod tests {
         assert!(!sample().to_uri().contains("mine"), "said only when asked");
         let other = format!("{FIXTURE}&mine=yes");
         assert!(!PairLink::from_uri(&other).unwrap().mine);
+    }
+
+    /// A direct link carries its Wi-Fi after everything else, so a phone
+    /// before it read the rest and ignored the two keys it did not know;
+    /// the phone's parser (android PairLinkTest) reads this exact string.
+    pub(crate) const WIFI_FIXTURE: &str = "pocketdesk://pair?v=1&name=Desk%20%26%20Co&id=d-1&a=192.0.2.1&cp=1716&sp=4716&pin=012345&fp=abababababababababababababababababababababababababababababababab&ws=pocketdesk-ab12&wp=Abc%3Bdef%3A12,34%22x";
+
+    #[test]
+    fn a_direct_link_carries_its_wifi_and_reads_back() {
+        let link = PairLink {
+            addresses: vec!["192.0.2.1".into()],
+            endpoint: None,
+            wifi: Some(WifiJoin {
+                ssid: "pocketdesk-ab12".into(),
+                passphrase: "Abc;def:12,34\"x".into(),
+            }),
+            ..sample()
+        };
+        let uri = link.to_uri();
+        assert_eq!(uri, WIFI_FIXTURE);
+        assert_eq!(PairLink::from_uri(&uri).unwrap(), link);
+        assert!(
+            !sample().to_uri().contains("ws="),
+            "said only on a direct link"
+        );
+        assert!(
+            PairLink::from_uri(FIXTURE).unwrap().wifi.is_none(),
+            "an old link"
+        );
+    }
+
+    #[test]
+    fn a_link_with_half_its_wifi_or_unusable_wifi_is_refused() {
+        let base = "pocketdesk://pair?v=1&a=192.0.2.1&pin=123456";
+        for tail in [
+            "&ws=pocketdesk-ab12",
+            "&wp=Abcdef123456",
+            "&ws=&wp=Abcdef123456",
+            "&ws=pocketdesk-ab12&wp=short",
+            "&ws=pocketdesk-ab12&wp=Abcdef%0A123456",
+            "&ws=x%0Ay&wp=Abcdef123456",
+        ] {
+            assert!(
+                PairLink::from_uri(&format!("{base}{tail}")).is_err(),
+                "{tail}"
+            );
+        }
+        assert!(PairLink::from_uri(&format!("{base}&ws=n&wp=Abcdef123456")).is_ok());
+    }
+
+    #[test]
+    fn a_link_never_debug_prints_its_wifi() {
+        let link = PairLink::from_uri(WIFI_FIXTURE).unwrap();
+        let shown = format!("{link:?}");
+        assert!(
+            !shown.contains("ab12") && !shown.contains("Abc;def"),
+            "{shown}"
+        );
     }
 
     #[test]

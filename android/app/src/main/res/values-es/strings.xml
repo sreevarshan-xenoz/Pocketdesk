@@ -51,6 +51,8 @@
     <string name="settings_retry_transfers_summary">Un archivo que se corta a mitad se vuelve a enviar hasta 3 veces, desde donde se detuvo; sin red, antes espera hasta 3 minutos a que vuelva</string>
     <string name="settings_internet_files">Archivos por internet</string>
     <string name="settings_internet_files_summary">Envía y recibe archivos con un equipo al que llegas desde fuera, por el mismo enlace. El equipo también puede desactivarlo</string>
+    <string name="settings_direct_links">Unirse a los enlaces directos de los equipos</string>
+    <string name="settings_direct_links_summary">Al escanear un código de «Crear un enlace directo» de un equipo, te unes al Wi-Fi propio de ese equipo solo para Pocketdesk. Tus datos móviles siguen activos para todo lo demás</string>
     <string name="reconnecting_in">Reconectando en %1$d s…</string>
     <string name="reconnect_gave_up">Se dejó de intentar tras 10 minutos.</string>
     <string name="settings_reveal_pin">Mostrar PIN por defecto</string>
@@ -362,6 +364,16 @@
     <string name="pair_link_confirm">Emparejar</string>
     <string name="pair_link_calls_itself">Se hace llamar «%1$s».</string>
     <string name="pair_link_not_scanned">Este código lo abrió otra app o una página web, no lo escaneaste tú.</string>
+    <string name="pair_link_direct_note">Este es un enlace directo. El teléfono se unirá a la red Wi-Fi propia de este equipo solo para Pocketdesk y mantiene sus datos móviles para todo lo demás. Android te pedirá permiso.</string>
+    <string name="pair_link_direct_network">Red: %1$s</string>
+    <string name="pair_link_wifi_extra_title">Este enlace pide al teléfono unirse a la red Wi-Fi %1$s</string>
+    <string name="pair_link_wifi_extra_body">Lo abrió otra app o una página web, no lo escaneaste tú. Continúa solo si iniciaste un enlace directo en tu propio equipo y esta es su red.</string>
+    <string name="pair_link_wifi_extra_confirm">Unirse a la red y emparejar</string>
+    <string name="pair_link_joining">Uniéndose al Wi-Fi del equipo…</string>
+    <string name="pair_link_joining_hint">Permítelo en el aviso de Android.</string>
+    <string name="pair_link_join_failed">El teléfono no se unió al Wi-Fi del equipo. Permítelo cuando Android pregunte, quédate cerca del equipo y vuelve a escanear el código.</string>
+    <string name="pair_link_direct_disabled">Este es un enlace directo y unirse a ellos está desactivado. Activa «Unirse a los enlaces directos de los equipos» en Ajustes y vuelve a escanear.</string>
+    <string name="pair_link_direct_too_old">Unirse al Wi-Fi propio de un equipo requiere Android 10 o posterior.</string>
     <string name="phone_notifications_service">Pocketdesk: mostrar en el equipo</string>
     <string name="phone_notifications_share">Notificaciones de este teléfono en mi equipo</string>
     <string name="phone_notifications_share_summary">Las notificaciones de este teléfono aparecen en el último equipo que usaste</string>

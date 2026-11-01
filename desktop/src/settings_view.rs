@@ -112,6 +112,17 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "Unattended on GNOME",
         Section::Connection,
     ),
+    ("direct_link", "Offer a direct link", Section::Connection),
+    (
+        "direct_link_band",
+        "Direct link's band",
+        Section::Connection,
+    ),
+    (
+        "direct_link_idle_minutes",
+        "Turn the direct link off after",
+        Section::Connection,
+    ),
     (
         "internet_files",
         "Files over the internet",
@@ -593,6 +604,10 @@ pub fn computer_quality_label(name: &str) -> &'static str {
 pub(crate) fn drawn_here(key: &str) -> bool {
     match key {
         "remember_screen_grant" | "gnome_unattended" => cfg!(target_os = "linux"),
+        // The direct link is made on Linux (Windows is its own change).
+        "direct_link" | "direct_link_band" | "direct_link_idle_minutes" => {
+            cfg!(target_os = "linux")
+        }
         // P3: Windows says when it is presenting; Linux does not.
         // Q4: GNOME's and KDE's Do Not Disturb on Linux.
         "quiet_presenting" => cfg!(any(windows, target_os = "linux")),
@@ -760,6 +775,10 @@ pub fn applies_live(key: &str) -> bool {
             | "downloads_folder"
             | "remember_screen_grant"
             | "gnome_unattended"
+            // Read as each link is asked for, and each tick of one that is on.
+            | "direct_link"
+            | "direct_link_band"
+            | "direct_link_idle_minutes"
             | "clipboard_history"
             | "clipboard_never_from"
             | "clipboard_never_like"
@@ -1268,6 +1287,52 @@ impl SettingsForm {
                         note(
                             ui,
                             "GNOME only, off by default. Sessions start through GNOME's own screen-casting and remote-desktop service, as gnome-remote-desktop's headless mode does, so no one has to allow anything at this computer. Any program running as you can make the same calls. If GNOME's service is missing or refuses, the screen-sharing dialog is used instead. Every session still needs a paired phone and its permissions.",
+                        );
+                    });
+                }
+                // Linux: this computer's own Wi-Fi for one phone.
+                if drawn_here("direct_link") {
+                    row(ui, "direct_link", |ui| {
+                        ui.checkbox(
+                            &mut e.direct_link,
+                            "show \"Make a direct link\" on the Pair page",
+                        );
+                        note(
+                            ui,
+                            "For a train, a café with client isolation or a guest Wi-Fi, where a phone cannot reach this computer. You start each link, the phone joins this computer's own Wi-Fi for Pocketdesk only, and it turns itself off. If this computer's Wi-Fi card cannot host its own network beside its connection, this computer's Wi-Fi disconnects while the link is on, and the Pair page says so first. Needs NetworkManager (and dnsmasq for sharing).",
+                        );
+                    });
+                    row(ui, "direct_link_band", |ui| {
+                        let label = |setting: &str| match setting {
+                            "2.4" => "2.4 GHz",
+                            "5" => "5 GHz",
+                            _ => "Automatic (2.4 GHz)",
+                        };
+                        egui::ComboBox::from_id_salt("direct-link-band")
+                            .selected_text(label(&e.direct_link_band))
+                            .show_ui(ui, |ui| {
+                                for setting in ["auto", "2.4", "5"] {
+                                    ui.selectable_value(
+                                        &mut e.direct_link_band,
+                                        setting.to_string(),
+                                        label(setting),
+                                    );
+                                }
+                            });
+                        note(
+                            ui,
+                            "2.4 GHz is joined by every phone; 5 GHz is faster where the card allows a hotspot on it. A card that keeps one channel for both connections uses its connection's band.",
+                        );
+                    });
+                    row(ui, "direct_link_idle_minutes", |ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut e.direct_link_idle_minutes)
+                                .range(1..=120)
+                                .suffix(" min"),
+                        );
+                        note(
+                            ui,
+                            "A direct link turns itself off after this long with no phone using it (a phone has this long to scan and join).",
                         );
                     });
                 }

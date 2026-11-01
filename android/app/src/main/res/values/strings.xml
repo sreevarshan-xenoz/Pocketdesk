@@ -60,6 +60,8 @@
     <string name="settings_retry_transfers_summary">A file that stops part way is sent again up to 3 times, continuing where it stopped; with no network it first waits up to 3 minutes for one</string>
     <string name="settings_internet_files">Files over the internet</string>
     <string name="settings_internet_files_summary">Send and receive files with a computer reached from away, on the same link. The computer may turn this off too</string>
+    <string name="settings_direct_links">Join computers\' direct links</string>
+    <string name="settings_direct_links_summary">When you scan a code from a computer\'s Make a direct link, join that computer\'s own Wi-Fi for Pocketdesk only. Your mobile data stays on for everything else</string>
     <string name="reconnecting_in">Reconnecting in %1$d s…</string>
     <string name="reconnect_gave_up">Stopped trying after 10 minutes.</string>
     <string name="settings_reveal_pin">Show PIN by default</string>
@@ -366,6 +368,16 @@
     <string name="pair_link_confirm">Pair</string>
     <string name="pair_link_calls_itself">It calls itself “%1$s”.</string>
     <string name="pair_link_not_scanned">This code was opened by another app or a web page, not scanned by you.</string>
+    <string name="pair_link_direct_note">This is a direct link. Your phone will join this computer\'s own Wi-Fi network for Pocketdesk only, and keeps its mobile data for everything else. Android asks you to allow it.</string>
+    <string name="pair_link_direct_network">Network: %1$s</string>
+    <string name="pair_link_wifi_extra_title">This link asks the phone to join the Wi-Fi network %1$s</string>
+    <string name="pair_link_wifi_extra_body">It was opened by another app or a web page, not scanned by you. Only continue if you started a direct link on your own computer and this is its network.</string>
+    <string name="pair_link_wifi_extra_confirm">Join the network and pair</string>
+    <string name="pair_link_joining">Joining the computer\'s Wi-Fi…</string>
+    <string name="pair_link_joining_hint">Allow it in the Android prompt.</string>
+    <string name="pair_link_join_failed">The phone did not join the computer\'s Wi-Fi. Allow it when Android asks, stay near the computer, and scan the code again.</string>
+    <string name="pair_link_direct_disabled">This is a direct link, and joining them is turned off. Turn on \"Join computers\' direct links\" in Settings, then scan again.</string>
+    <string name="pair_link_direct_too_old">Joining a computer\'s own Wi-Fi needs Android 10 or newer.</string>
     <string name="phone_notifications_service">Pocketdesk: show on computer</string>
     <string name="phone_notifications_share">This phone\'s notifications on my computer</string>
     <string name="phone_notifications_share_summary">Notifications from this phone appear on the computer you used last</string>

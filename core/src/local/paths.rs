@@ -92,6 +92,16 @@ pub const SHARED_INPUT_STATUS_FILE: &str = "shared_input_status.json";
 /// The desktop app's requests for the shared keyboard and mouse
 /// (Identify), one file each.
 pub const SHARED_INPUT_DIR: &str = "shared_input_out";
+/// The desktop app's asks to make or remove a direct link (a hotspot for one
+/// phone), one file each, taken by the server.
+pub const DIRECT_LINK_DIR: &str = "direct_link_out";
+/// The server's word on the direct link (owner-only: it holds the passphrase).
+pub const DIRECT_LINK_FILE: &str = "direct_link.json";
+/// What this state folder's server made for the direct link (its
+/// connection's id, the interface it added, the connection it took the card
+/// from), so a restart removes and restores exactly that and no other
+/// server's.
+pub const DIRECT_LINK_OWNED_FILE: &str = "direct_link_owned.json";
 /// `share-test`'s last measurement of the shared keyboard and mouse's
 /// latency, written by the server.
 pub const SHARED_INPUT_LATENCY_FILE: &str = "shared_input_latency.json";
