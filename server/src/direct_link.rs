@@ -195,10 +195,15 @@ async fn tick(dir: &std::path::Path) {
     let off = !crate::events::current_config().direct_link;
     let busy = in_use(dir, &active.address);
     active.idle.tick(now, busy);
-    if off || active.idle.expired(now) {
+    // A connection from the network can hold the idle timer off for good, so
+    // a link also has a longest life.
+    let old = dl::lifetime_over(active.started_unix, now);
+    if off || old || active.idle.expired(now) {
         drop(guard);
         let why = if off {
             "turned off in Settings"
+        } else if old {
+            "it reached its longest time"
         } else {
             "idle"
         };

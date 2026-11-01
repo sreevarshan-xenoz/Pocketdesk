@@ -42,6 +42,10 @@ pub const SSID_MAX: usize = 32;
 pub const DEFAULT_IDLE_MINUTES: u32 = 10;
 pub const MIN_IDLE_MINUTES: u32 = 1;
 pub const MAX_IDLE_MINUTES: u32 = 120;
+/// The most a link lives, whatever is using it: a connection from the
+/// network held the idle timer off for good, and a hotspot nobody asked for
+/// again should not outlast a day's use.
+pub const MAX_LIFETIME_SECS: u64 = 8 * 60 * 60;
 /// How long a request waits for the server before it is dropped: a link
 /// started a minute later than asked would surprise.
 pub const REQUEST_TTL_SECS: u64 = 60;
@@ -82,7 +86,7 @@ pub fn new_ssid() -> String {
     format!("{SSID_PREFIX}{}", random_chars(4, LOWER_DIGITS))
 }
 
-/// A fresh passphrase: 20 characters of 55 (about 119 bits), from the OS CSPRNG.
+/// A fresh passphrase: 20 characters of 55 (about 115 bits), from the OS CSPRNG.
 pub fn new_passphrase() -> String {
     random_chars(20, ALPHANUMERIC)
 }
@@ -715,6 +719,11 @@ impl IdleTimer {
     }
 }
 
+/// Whether a link started at `started_unix` has lived its longest.
+pub fn lifetime_over(started_unix: u64, now_unix: u64) -> bool {
+    now_unix.saturating_sub(started_unix) >= MAX_LIFETIME_SECS
+}
+
 // ---- What this state folder's server made ----
 
 /// The connection a takeover took the card from, to bring back.
@@ -803,7 +812,7 @@ mod tests {
         assert_eq!(key.len(), 20);
         assert!(key.bytes().all(|b| ALPHANUMERIC.contains(&b)), "{key}");
         assert!(join(&ssid, &key).is_valid(), "an access point can use them");
-        // 119 bits: two in a row are never the same.
+        // 115 bits: two in a row are never the same.
         assert_ne!(key, new_passphrase());
         // Only letters and digits: nothing for the QR text to escape.
         assert_eq!(
@@ -1081,6 +1090,16 @@ mod tests {
         assert!(read_owned(&dir).is_none());
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(state_dir("owned-other"));
+    }
+
+    #[test]
+    fn a_link_lives_at_most_eight_hours_whatever_uses_it() {
+        assert!(!lifetime_over(1_000, 1_000 + MAX_LIFETIME_SECS - 1));
+        assert!(lifetime_over(1_000, 1_000 + MAX_LIFETIME_SECS));
+        assert!(
+            !lifetime_over(1_000, 0),
+            "a clock that went back does not end it"
+        );
     }
 
     fn state_dir(name: &str) -> PathBuf {
