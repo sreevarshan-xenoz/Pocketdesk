@@ -65,6 +65,25 @@ pub async fn start_capture(
         "Starting screen capture: {}x{}@{}fps",
         config.width, config.height, config.fps
     );
+    // "Unattended on GNOME" (off by default): mutter's own D-Bus API, which
+    // asks no one. If it is missing or refuses, the portal below is used, and
+    // the log says so once.
+    if super::gnome_unattended::session_route() == super::gnome_unattended::Route::Mutter {
+        match super::capture_mutter::start_capture(
+            config.clone(),
+            frame_tx.clone(),
+            cancel.clone(),
+            crate::streaming::portal_input::wanted(),
+        )
+        .await
+        {
+            Ok(session) => return Ok(session),
+            Err(e) if super::gnome_unattended::first_fallback() => warn!(
+                "Unattended GNOME capture through mutter did not start ({e:#}): using the screen-sharing portal"
+            ),
+            Err(e) => debug!("Mutter capture did not start ({e:#}): using the portal"),
+        }
+    }
     // N8: input goes through the portal here, so the screen and the input
     // come from one RemoteDesktop session, under one grant.
     // A desktop without RemoteDesktop, or one that refused it, still gets
@@ -226,7 +245,7 @@ pub async fn start_capture(
 }
 
 /// The PipeWire capture thread for the stream `node_id`.
-fn spawn_pipewire_capture(
+pub(super) fn spawn_pipewire_capture(
     node_id: u32,
     config: StreamingConfig,
     frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,

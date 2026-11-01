@@ -12,6 +12,7 @@ default = ["server", "inproc"]
 server = ["capture", "encode", "injection", "opus"]
 capture = [
     "dep:ashpd",
+    "dep:futures-lite",
     "dep:pipewire",
     "dep:libspa",
     "dep:x11rb",
@@ -139,6 +140,8 @@ dirs.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 # Screen capture
 ashpd = { workspace = true, optional = true }
+# Mutter's D-Bus signals (streaming/capture_mutter.rs).
+futures-lite = { version = "2", optional = true }
 pipewire = { workspace = true, optional = true }
 libspa = { workspace = true, optional = true }
 x11rb = { version = "0.13", features = ["shm"], optional = true }
