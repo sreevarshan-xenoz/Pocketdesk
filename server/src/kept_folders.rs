@@ -565,7 +565,14 @@ mod tests {
         );
         // A phone that names its folder like a path gets a safe name.
         let odd = new_entry(&[], root, "phone-c", &file(&"4".repeat(32), "../../etc"));
-        assert!(!odd.folder_dir.contains('/') && !odd.folder_dir.contains(".."));
+        assert_eq!(
+            pocketdesk_core::protocol::relpath::component_problem(&odd.folder_dir),
+            None,
+            "one safe name: {}",
+            odd.folder_dir
+        );
+        assert!(!odd.folder_dir.contains('/'));
+        assert!(!odd.folder_dir.contains(r"\"));
         assert!(Path::new(&odd.path).starts_with(root));
     }
 
