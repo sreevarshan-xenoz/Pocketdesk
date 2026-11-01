@@ -125,6 +125,19 @@ PD_PORTAL_PROBE_DIR="$XDG_RUNTIME_DIR/pd-grant" PD_PORTAL_PROBE_INPUT=1 \
 The file lists its other knobs: naming itself as the server does, a list of
 clicks and keys, and snapshots of the screen.
 
+### 3b. The wake helper's packet, live (Linux)
+
+`core/src/streaming/wake_helper_net.rs` has an ignored test that starts a wake
+helper on loopback, asks it over iroh as an introduced phone and lets the real
+sender send the magic packet to the loopback address of its duty (a broadcast
+would meet the firewall's input rules). Run a listener on UDP port 9 first,
+as root, that compares the payload with the expected magic packet for the
+documentation MAC `02:00:5e:00:53:01` and says only whether it matched, then:
+
+```bash
+cargo test -p pocketdesk-core --features wan live_a_real_magic_packet -- --ignored
+```
+
 ## 4. Windows server (the Windows host)
 
 The server builds and runs on Windows 10 1903+ / 11 with the **GNU** toolchain
@@ -243,6 +256,13 @@ Notes:
   `-Ppocketdesk.abis=arm64-v8a,x86_64` to Gradle.
 - `./gradlew connectedDebugAndroidTest` uninstalls the app when it ends, which wipes
   the phone's pairings. Add `-Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true`.
+- The Wear OS app (`android/wear`: a tile, a complication and a short list) is its own
+  APK, installed on a watch over adb, never inside the phone's. `./gradlew assembleDebug`
+  builds it too; alone, `./gradlew :wear:assembleRelease` (about 1 MB). It needs no
+  bridge and no Rust. Its wire with the phone is the `watchlink` module, and
+  `./gradlew testDebugUnitTest` runs the tests of every module (CI does too). No Wear
+  OS emulator image is installed on this box: the real-watch checks are checklist
+  section 264.
 
 ### 5b. Device checks by script (N1)
 

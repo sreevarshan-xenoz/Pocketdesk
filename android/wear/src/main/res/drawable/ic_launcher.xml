@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A monitor with a stand: the computer, in the app's accent. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#FF4F8EF7"
+        android:pathData="M8,10h32a2,2 0 0 1 2,2v20a2,2 0 0 1 -2,2h-12v4h6v4h-20v-4h6v-4h-12a2,2 0 0 1 -2,-2v-20a2,2 0 0 1 2,-2z" />
+    <path
+        android:fillColor="#FF101820"
+        android:pathData="M10,14h28v16h-28z" />
+</vector>

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">Pocketdesk</string>
+    <string name="tile_label" translatable="false">Pocketdesk</string>
+    <string name="complication_text" translatable="false">PD</string>
+
+    <!-- The tile\'s buttons -->
+    <string name="tile_wake">Wake</string>
+    <string name="tile_ring">Ring phone</string>
+    <string name="tile_play">Play / pause</string>
+    <string name="tile_next">Next</string>
+    <string name="tile_deck">Deck</string>
+    <string name="tile_deny">No: %1$s</string>
+    <string name="tile_nothing_on">Nothing is on in the phone\'s Watch controls</string>
+
+    <!-- What a press or a look came to -->
+    <string name="said_sent">Sent</string>
+    <string name="said_off">That button is off on the phone</string>
+    <string name="said_busy">Too soon, wait a moment</string>
+    <string name="said_unreachable">The phone is not reachable</string>
+    <string name="said_not_paired">Pair with the phone first</string>
+    <string name="said_set_lock">Set a watch lock to use this</string>
+    <string name="said_locked">Unlock the watch first</string>
+    <string name="said_failed">Did not work</string>
+    <string name="said_no_bluetooth">Allow nearby devices first</string>
+    <string name="said_answered">Said No</string>
+
+    <!-- The short list -->
+    <string name="main_title">Pocketdesk</string>
+    <string name="main_need_permission">Allow nearby devices so this watch can reach your phone</string>
+    <string name="main_allow">Allow</string>
+    <string name="main_pair_title">Pair with your phone</string>
+    <string name="main_pair_steps">On the phone: Settings, Watch controls, Pair a watch. Then choose the phone here.</string>
+    <string name="main_no_phone">No phone is paired with this watch. Pair it in the Wear OS app first.</string>
+    <string name="main_code">Type %1$s on the phone</string>
+    <string name="main_waiting">Waiting for the phone…</string>
+    <string name="main_pair_failed">Not paired: %1$s</string>
+    <string name="main_refresh">Refresh</string>
+    <string name="main_forget">Forget the phone</string>
+    <string name="main_wake">Wake my computer</string>
+    <string name="main_ring">Ring my phone</string>
+    <string name="main_play">Play / pause</string>
+    <string name="main_next">Next</string>
+    <string name="main_previous">Previous</string>
+    <string name="main_deck_title">Deck</string>
+    <string name="main_asks_title">Questions</string>
+    <string name="main_ask_no">No</string>
+    <string name="main_ask_on_phone">Yes needs your phone\'s fingerprint: answer it on the phone.</string>
+    <string name="main_loading">Asking the phone…</string>
+</resources>

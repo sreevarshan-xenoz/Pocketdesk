@@ -38,7 +38,7 @@ Tailscale is not required. It carries everything, adds a second encrypted layer 
 
 ## What works where
 
-The desktop end runs on Linux and Windows; the phone end is the Android app. It describes 0.8.3 and what has merged to `main` since (PRs #592 to #598, among them: the portable Linux tarball, the Linux firewall row, shared input's receiving end, and the OpenH264 fallback), which ships with the next release. The last row says what a person has run on real hardware (dates and details in [the checklist](device-verification-checklist.md)); everything else is unit- or integration-tested only.
+The desktop end runs on Linux and Windows; the phone end is the Android app. It describes 0.8.3 and what has merged to `main` since (PRs #592 onward, among them: the portable Linux tarball, the Linux firewall row, shared input, the OpenH264 fallback, the phone's camera as a webcam, approving sudo with the phone, the phone's location, the direct link, phone apps on the computer, kept folders and the wake helper), which ships with the next release. The last row says what a person has run on real hardware (dates and details in [the checklist](device-verification-checklist.md)); everything else is unit- or integration-tested only.
 
 | | Linux host | Windows host |
 |---|---|---|
@@ -305,7 +305,7 @@ The package installs:
 
 - **Android, kept up to date with Obtainium:** add `https://github.com/sreevarshan-xenoz/Pocketdesk`; each release since 0.4.0 has one APK (`pocketdesk-vX.Y.Z-android-arm64.apk`), signed with the release key, whose certificate's SHA-256 is `3a2452b38b4be5ac8493b330a91ed5a43e8490e6c74b8a7934599bc5e8ac3a0f` (for AppVerifier or `apksigner verify --print-certs`). Or download the APK from the release page.
 - **Windows with winget:** the manifests are in `packaging/winget/`, one folder per release (0.8.3's the newest, written by `scripts/winget_manifest.py` as each release's is; 0.7.0's was validated with `winget validate`; not yet in winget's own catalogue, and not yet installed from on a clean machine). `winget install --manifest packaging/winget/manifests/s/SreevarshanXenoz/Pocketdesk/0.8.3` should install `pocketdesk` and `pocketdesk-app` as commands, with FFmpeg as a dependency (it needs `winget settings --enable LocalManifestFiles` from an administrator). Then run `pocketdesk install`, and again after every upgrade, with `pocketdesk stop` before it: the logon task names the version's folder.
-- **F-Droid:** the metadata is ready in `packaging/fdroid/`, not yet submitted. [packaging/README.md](../packaging/README.md) has the steps.
+- **F-Droid:** submitted (fdroiddata merge request !54623), its build reproduces the release APK byte for byte, and it waits in F-Droid's review queue; not yet published. The metadata is in `packaging/fdroid/`, and [packaging/README.md](../packaging/README.md) has the steps.
 
 ### Install Script Options
 
@@ -741,6 +741,23 @@ Know before you rely on it:
 - `pkexec` uses polkit-1, so a broken `/etc/pam.d/polkit-1` does not stop `sudo` from fixing it, and the other way round.
 - To stop the phone approving without touching PAM: turn off "Approve with my phone" in Settings, or `sudo /usr/lib/pocketdesk/pocketdesk-pam-ask --unpin $USER`; the line then fails at once and the password prompt comes as before.
 
+### Watch Controls: A Wear OS Tile
+
+A Wear OS watch can press a few of the phone's own buttons: wake the computer, ring the phone, play or pause and skip the computer's music, press its deck buttons and say No to a question it asks. It is a small second app (a tile, a complication that opens a short list, and the list), and **nothing in it uses Google Play services or the Data Layer**: the watch talks to the phone app over Bluetooth, through the Bluetooth pairing the two already have, so it can go to F-Droid beside the phone app. It is off until you turn it on, and it is new and **not yet tried on a real watch** (see `docs/device-verification-checklist.md`, the Wear OS section).
+
+1. **Install the watch app.** Build it (`cd android && ./gradlew :wear:assembleRelease`, or take the debug build) and install it on the watch over adb (`adb connect <watch>:<port>` after turning on Wi-Fi debugging on the watch, then `adb install`). It is a separate APK from the phone's.
+2. **On the phone:** Settings → "Watch controls" → on. Android asks once for the "nearby devices" permission (Android 12 and later), which lets the app connect to a device already paired; there is no scan and no location. Choose which buttons the watch has. Wake, Ring, Music and Questions are on; Deck is off until you choose it, since a deck button can run keys or a task on the computer. The phone needs notification access, as its other background features do.
+3. **Pair the watch with the phone:** Settings → Watch controls → "Pair a watch" opens a two-minute window. On the watch, open Pocketdesk, choose the phone from the short list of devices the watch is already paired with, and type the six digits the watch shows on the phone. Three wrong codes from one Bluetooth address shut that address out (ten in all close the window), so a stranger's device cannot use up your tries.
+4. **Add the tile** (hold the watch face, swipe to the end, add Pocketdesk), and the complication ("PD") if you want a shortcut to the list.
+
+**What the buttons do.** Each is the call the phone's own tiles and widgets make for you, so the computer sees your phone and nothing else, and each is held to what the computer already lets that phone do: Wake follows the phone's wake settings, the music needs Audio for the phone, a deck button needs Deck and follows its own rules. Ring plays the alarm sound on the phone for 30 seconds, with Stop on the phone, at most once a minute. The tile shows the buttons that are on; a question that is waiting adds "No: …" to it. Deck opens the list, which also shows the deck's buttons (at most eight) and the questions.
+
+**A watch can say No but never Yes.** A question that needs your fingerprint (any "Approve with my phone" request, and a plain question's Yes) is answered on the phone, as before: its key signs only after the phone's own fingerprint, which a watch's lock cannot stand in for. The list says so beside the question. A deck button and a No also ask the **watch's own lock**: a watch with no lock set, or locked, refuses them ("Set a watch lock to use this").
+
+**With no phone near.** The watch has no mode of its own, since every button goes through the phone's link to the computer. The tile says "The phone is not reachable" within about twelve seconds and keeps nothing to send later: a wake pressed out of range never goes out when you come back. Turning "Watch controls" off on the phone stops its Bluetooth service at once; "Forget" there (or on the watch) makes the key stop working.
+
+**What it costs.** The watch APK is about 1 MB (release, minified), and the phone app gains a few kilobytes and one permission. The phone keeps a Bluetooth service open while the setting is on (idle, no wake lock). Know before you rely on it: a watch that is paired, unlocked and on someone's wrist can wake the computer, ring the phone, control the music and say No to questions, and, with Deck on, press deck buttons (SECURITY.md, limit 84).
+
 ### Your Phone's Location for This Computer (GeoClue)
 
 Mozilla's location service shut down in 2024, so on Linux GeoClue (what night light, weather, the time zone and maps ask) often has no way to know where the computer is. Pocketdesk can give it your phone's place instead. It is off on both sides until you turn it on.
@@ -749,6 +766,16 @@ Mozilla's location service shut down in 2024, so on Linux GeoClue (what night li
 2. **On the phone:** Settings → "Give my computer my location" (allow location when asked). "Exact location" under it is off; the computer gets the city unless you turn it on and the computer asks for exact. Android shows no location to an app that is not on screen, so for asks while the phone is in your pocket choose "Allow all the time" for Pocketdesk in the app's location settings (the row under the switch opens them); without it the phone answers while Pocketdesk is open.
 
 How it works: this computer serves one location source to itself only (its own loopback; nothing on the network can connect) and tells GeoClue about it over Avahi on the loopback. When an app asks GeoClue for a place, GeoClue connects, and the computer asks the phone for one fix, at most every ten minutes, and passes it on. Each fix shows in Activity by its accuracy. Nothing is stored and nothing is logged but "fix sent, accuracy N m". Linux only: Windows would need a sensor driver. `docs/privacy.md` and limit 76 in `SECURITY.md` say what it exposes; the packets are in `docs/protocol.md`.
+
+### A Spare Phone at Home as the Wake Helper
+
+Waking a sleeping computer from outside the house needs something at home to send the magic packet: a forwarded router port, or a second computer left on. An old Android phone on a charger can be that something, with no router setting and nothing else left on. Everything here is off until you turn it on.
+
+1. **On the spare phone** (paired with the computer using its own pairing code, so it is one of your own phones, not a guest's): Settings, Wake, "Wake helper for this home". Leave it on a charger on your home Wi-Fi. Its notification says "Waiting for a charger and Wi-Fi" or "Waking your computers for your other phones". Connect it to the computer once while the computer is awake: the computer tells it what to do (its own hardware address and your other phones' keys) and lists the phone as its helper.
+2. **On this computer:** Settings, Wake, "Wake helper phone" shows which phone it is and has Remove. A removed phone stays removed until its owner turns the switch off and on again on the phone.
+3. **On each of your other phones:** open the computer's card, Wake settings, "Wake through my helper" (it appears once the computer has told the phone about its helper, which happens when the phone connects while the computer is awake). Away from home, the Wake button then asks the helper; at home it sends the packet itself, as before.
+
+The helper serves one thing: "send the magic packet for this computer". It answers only your own phones' keys that the computer named, at most once every 30 seconds each (two at once), only for the computer that named them, only while charging on Wi-Fi, and it sends only the computer's own hardware address to your own network. A phone that is not yours, or a stranger who finds the helper, is closed unread. If you lose one of your phones, remove it from the computer's Devices page; the helper hears of it in under a minute while it is linked to the computer, and a helper that is switched off, out of reach or off the home network keeps its last list until it hears the computer again (and drops a list a week old). Removing a phone as helper in Settings is not a security control (its owner can switch it on again): to take a phone's access away, unpair it. The helper's own phone is a thing to keep safe too: turning off "Wake helper for this home" ends all of it. `docs/protocol.md` §2.9 has the packets and limit 82 in `SECURITY.md` says what it opens. One helper phone serves the computer it is linked with (its own computer, the one it most recently used).
 
 ### CLI Commands
 

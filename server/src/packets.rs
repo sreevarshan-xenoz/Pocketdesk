@@ -85,6 +85,11 @@ fn permission(packet_type: &str) -> String {
     if packet_type == pocketdesk_core::protocol::introductions::INTRODUCE_PHONE_ANSWER {
         return "none (only the computer asked, for the introduction waiting)".to_string();
     }
+    // A spare phone as the wake helper: taken only from an owner phone, held
+    // by the plugin.
+    if packet_type == pocketdesk_core::protocol::wake_helper::OFFER {
+        return "none (an owner phone only)".to_string();
+    }
     match capability_for(packet_type) {
         Some(capability) => format!("{capability:?}"),
         None => "none (any paired phone)".to_string(),

@@ -145,6 +145,7 @@ class MainActivity : ComponentActivity() {
         // M1: the app in front may start what Android refused from the background.
         val app = applicationContext
         Thread { runCatching { dev.pocketdesk.android.service.LinkKeeperService.sync(app) } }.start()
+        Thread { runCatching { dev.pocketdesk.android.service.WakeHelperService.sync(app) } }.start()
         // A run of the kept folders that was due while Android would not start it.
         Thread {
             runCatching {

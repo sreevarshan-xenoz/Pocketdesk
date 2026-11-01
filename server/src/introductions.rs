@@ -81,7 +81,7 @@ const MOST_ADDRESSES: usize = 16;
 
 /// Whether `device_id` is an owner phone here: paired for good with this
 /// computer's own code, never a guest's grant nor a computer.
-fn is_owner_phone(store: &TrustStore, file: &ComputersFile, device_id: &str) -> bool {
+pub(crate) fn is_owner_phone(store: &TrustStore, file: &ComputersFile, device_id: &str) -> bool {
     !store.is_computer(device_id) && crate::remote_devices::is_owner_device(store, file, device_id)
 }
 
@@ -108,7 +108,7 @@ fn introducer_said(store: &TrustStore, file: &ComputersFile, device_id: &str) ->
 
 /// The name this computer shows `device_id` by: the owner's rename, else
 /// a listed computer's name, else its own word, else the start of its id.
-fn shown(store: &TrustStore, file: &ComputersFile, device_id: &str) -> String {
+pub(crate) fn shown(store: &TrustStore, file: &ComputersFile, device_id: &str) -> String {
     store
         .chosen_name(device_id)
         .map(str::to_string)

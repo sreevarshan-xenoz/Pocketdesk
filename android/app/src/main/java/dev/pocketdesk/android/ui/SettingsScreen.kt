@@ -369,6 +369,8 @@ fun SettingsScreen(onBack: () -> Unit) {
                 )
                 // Approve with my phone: sudo, polkit, the lock screen.
                 ApproveSetting()
+                // Item 9: a Wear OS watch's buttons, over Bluetooth.
+                WatchSetting()
                 // L4: the dialer opens with a number the computer sends.
                 SettingSwitch(
                     stringResource(R.string.settings_calls_from_computer),
@@ -590,6 +592,18 @@ fun SettingsScreen(onBack: () -> Unit) {
                     stringResource(R.string.settings_offer_wake_summary),
                     Prefs.offerWake(context),
                     { Prefs.setOfferWake(context, it) },
+                )
+                // A spare phone at home sends the wake for the owner's other phones.
+                SettingSwitch(
+                    stringResource(R.string.settings_wake_helper),
+                    stringResource(R.string.settings_wake_helper_summary),
+                    Prefs.wakeHelper(context),
+                    {
+                        Prefs.setWakeHelper(context, it)
+                        val app = context.applicationContext
+                        if (!it) dev.pocketdesk.android.service.WakeHelperService.turnedOff(app)
+                        Thread { runCatching { dev.pocketdesk.android.service.WakeHelperService.sync(app) } }.start()
+                    },
                 )
             }
 

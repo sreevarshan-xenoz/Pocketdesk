@@ -8,6 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.edit
+import dev.pocketdesk.watchlink.WatchButton
 
 /**
  * App-level UI preferences (theme mode, dynamic color, screen behavior,
@@ -42,6 +43,8 @@ object Prefs {
     private const val KEY_QUESTIONS = "questions_from_computer"
     private const val KEY_APPROVE = "approve_requests"
     private const val KEY_APPROVE_BIOMETRIC_ONLY = "approve_biometric_only"
+    private const val KEY_WATCH_CONTROLS = "watch_controls"
+    private const val KEY_WATCH_BUTTONS = "watch_buttons"
     private const val KEY_SHARE_BATTERY = "share_battery"
     private const val KEY_STATE_WIDGET_AUTO = "state_widget_auto"
     private const val KEY_PHONE_MEDIA = "phone_media_on_computer"
@@ -70,6 +73,8 @@ object Prefs {
     private const val KEY_CONNECTION_DETAILS = "connection_details"
     private const val KEY_CONNECT_AFTER_WAKE = "connect_after_wake"
     private const val KEY_OFFER_WAKE = "offer_wake"
+    private const val KEY_WAKE_HELPER = "wake_helper"
+    private const val KEY_WAKE_HELPER_FRESH = "wake_helper_fresh"
     private const val KEY_VERSION_HINTS = "version_hints"
     private const val KEY_PHONE_NAME = "phone_name"
     private const val KEY_SHOW_DRIVING = "show_driving"
@@ -352,6 +357,25 @@ object Prefs {
 
     fun setApproveRequests(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_APPROVE, enabled) }
+        bump()
+    }
+
+    /** Watch controls (item 9): a paired Wear OS watch may ask this phone for things; off until chosen. */
+    fun watchControls(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_WATCH_CONTROLS, false)
+
+    fun setWatchControls(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_WATCH_CONTROLS, enabled) }
+        bump()
+    }
+
+    /** Which buttons a watch has, as the watch link's bit mask; [WatchButton.DEFAULT] until chosen. */
+    fun watchButtons(ctx: Context): Set<WatchButton> {
+        val p = prefs(ctx)
+        return if (p.contains(KEY_WATCH_BUTTONS)) WatchButton.fromMask(p.getInt(KEY_WATCH_BUTTONS, 0)) else WatchButton.DEFAULT
+    }
+
+    fun setWatchButtons(ctx: Context, buttons: Set<WatchButton>) {
+        prefs(ctx).edit { putInt(KEY_WATCH_BUTTONS, WatchButton.mask(buttons)) }
         bump()
     }
 
@@ -813,6 +837,31 @@ object Prefs {
     fun setOfferWake(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_OFFER_WAKE, enabled) }
         bump()
+    }
+
+    /**
+     * "Wake helper for this home" (off by default): while on, on a charger and on
+     * Wi-Fi, this phone sends the magic packet for the owner's other phones that ask
+     * through it, and nothing else.
+     */
+    fun wakeHelper(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_WAKE_HELPER, false)
+
+    /** Turning it on is a fresh offer: only that undoes a removal at the computer. */
+    fun setWakeHelper(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit {
+            putBoolean(KEY_WAKE_HELPER, enabled)
+            putBoolean(KEY_WAKE_HELPER_FRESH, enabled)
+        }
+        bump()
+    }
+
+    /** The next offer to the computer says the owner just turned the switch on. */
+    fun wakeHelperFresh(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_WAKE_HELPER_FRESH, false)
+
+    fun setWakeHelperFresh(ctx: Context, fresh: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_WAKE_HELPER_FRESH, fresh) }
     }
 
     fun setHaptics(ctx: Context, enabled: Boolean) {
