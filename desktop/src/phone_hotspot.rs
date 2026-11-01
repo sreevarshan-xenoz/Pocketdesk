@@ -50,13 +50,13 @@ pub fn join(name: &str) -> Result<String, String> {
     let listing = run(&hotspot::list_argv()).map_err(|e| {
         format!("Could not look at the saved networks (is NetworkManager's nmcli installed?): {e}")
     })?;
-    if !hotspot::is_saved_wifi(&listing.1, name) {
+    let Some(uuid) = hotspot::saved_wifi_uuid(&listing.1, name) else {
         return Err(format!(
-            "\u{201c}{name}\u{201d} is not a Wi-Fi network saved on this computer, so it was not joined. Connect to your phone's network once yourself, then it can be joined from here."
+            "\u{201c}{name}\u{201d} is not one Wi-Fi network saved on this computer (none, or two with that name), so it was not joined. Connect to your phone's network once yourself, then it can be joined from here."
         ));
-    }
-    let Some(argv) = hotspot::join_argv(name) else {
-        return Err("That is not a Wi-Fi network name.".to_string());
+    };
+    let Some(argv) = hotspot::join_argv(&uuid) else {
+        return Err("That saved network could not be named safely.".to_string());
     };
     for attempt in 1..=ATTEMPTS {
         if let Ok((true, _)) = run(&argv) {

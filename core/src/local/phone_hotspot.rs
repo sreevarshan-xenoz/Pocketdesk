@@ -52,21 +52,35 @@ pub fn offered(said: Option<&Switch>) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// The command that lists this computer's saved connections, name and type,
-/// in NetworkManager's terse form. No shell.
+/// The command that lists this computer's saved connections, name, UUID and
+/// type, in NetworkManager's terse form. No shell.
 pub fn list_argv() -> Vec<String> {
-    ["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"]
+    ["nmcli", "-t", "-f", "NAME,UUID,TYPE", "connection", "show"]
         .iter()
         .map(|s| s.to_string())
         .collect()
 }
 
-/// The command that brings up the saved connection `name`, waiting at most
-/// [`JOIN_WAIT_SECS`]; `None` for a name that is not a valid one. Only a
-/// saved connection is ever named (`connection up id`, never
-/// `device wifi connect`, which would take a password), so no password passes.
-pub fn join_argv(name: &str) -> Option<Vec<String>> {
-    if !valid_network_name(name) {
+/// Whether `s` is a UUID as NetworkManager writes one: 36 characters of hex
+/// in groups of 8, 4, 4, 4 and 12 joined by dashes.
+pub fn valid_uuid(s: &str) -> bool {
+    let groups: Vec<&str> = s.split('-').collect();
+    s.len() == 36
+        && groups.len() == 5
+        && groups
+            .iter()
+            .zip([8, 4, 4, 4, 12])
+            .all(|(g, n)| g.len() == n && g.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// The command that brings up the saved connection with this `uuid`, waiting
+/// at most [`JOIN_WAIT_SECS`]; `None` for anything that is not a UUID. Only a
+/// saved connection is ever named, by its UUID (`connection up uuid`, never
+/// `device wifi connect`, which would take a password, and never a name that
+/// two connections could share), so no password passes and the exact
+/// connection is the one brought up.
+pub fn join_argv(uuid: &str) -> Option<Vec<String>> {
+    if !valid_uuid(uuid) {
         return None;
     }
     Some(vec![
@@ -75,45 +89,50 @@ pub fn join_argv(name: &str) -> Option<Vec<String>> {
         JOIN_WAIT_SECS.to_string(),
         "connection".to_string(),
         "up".to_string(),
-        "id".to_string(),
-        name.to_string(),
+        "uuid".to_string(),
+        uuid.to_string(),
     ])
 }
 
-/// Whether `listing` (the output of [`list_argv`]) holds a saved Wi-Fi
-/// connection called `name`. In the terse form a colon inside a name is
-/// escaped as `\:` and a backslash as `\\`; the type is the field after the
-/// last unescaped colon.
-pub fn is_saved_wifi(listing: &str, name: &str) -> bool {
-    listing.lines().any(|line| {
-        let Some((entry, kind)) = split_terse(line) else {
-            return false;
-        };
-        entry == name && (kind == "802-11-wireless" || kind == "wifi")
-    })
+/// The UUID of the one saved Wi-Fi connection called `name` in `listing` (the
+/// output of [`list_argv`]). `None` when there is none, or when more than one
+/// has that name (which one is meant is not for Pocketdesk to guess). In the
+/// terse form a colon inside a name is escaped as `\:` and a backslash as
+/// `\\`; the type is the last field and the UUID the one before it.
+pub fn saved_wifi_uuid(listing: &str, name: &str) -> Option<String> {
+    let mut found: Vec<String> = listing
+        .lines()
+        .filter_map(|line| {
+            let (entry, uuid, kind) = split_terse(line)?;
+            (entry == name && (kind == "802-11-wireless" || kind == "wifi") && valid_uuid(&uuid))
+                .then_some(uuid)
+        })
+        .collect();
+    (found.len() == 1).then(|| found.remove(0))
 }
 
-/// Split a terse `NAME:TYPE` line at its last unescaped colon, undoing the
+/// Split a terse `NAME:UUID:TYPE` line at its unescaped colons, undoing the
 /// escapes in the name.
-fn split_terse(line: &str) -> Option<(String, String)> {
-    let mut name = String::new();
+fn split_terse(line: &str) -> Option<(String, String, String)> {
+    let mut field = String::new();
     let mut fields: Vec<String> = Vec::new();
     let mut chars = line.chars();
     while let Some(c) = chars.next() {
         match c {
             '\\' => {
                 if let Some(next) = chars.next() {
-                    name.push(next);
+                    field.push(next);
                 }
             }
-            ':' => fields.push(std::mem::take(&mut name)),
-            c => name.push(c),
+            ':' => fields.push(std::mem::take(&mut field)),
+            c => field.push(c),
         }
     }
-    fields.push(name);
+    fields.push(field);
     let kind = fields.pop()?;
-    // Whatever came before the last colon is the name, colons restored.
-    (!fields.is_empty()).then(|| (fields.join(":"), kind))
+    let uuid = fields.pop()?;
+    // Whatever came before is the name, colons restored.
+    (!fields.is_empty()).then(|| (fields.join(":"), uuid, kind))
 }
 
 #[cfg(test)]
@@ -153,51 +172,64 @@ mod tests {
         assert!(!valid_network_name(&"x".repeat(MAX_NETWORK_BYTES + 1)));
     }
 
-    /// The commands are fixed words around the one name, with no shell and no
-    /// password: the name is a single argument, however odd.
+    const U1: &str = "0b1c2d3e-4f50-4a61-8b72-93a4b5c6d7e8";
+    const U2: &str = "11111111-2222-3333-4444-555555555555";
+    const U3: &str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+
+    /// The commands are fixed words around the one UUID, with no shell and no
+    /// password; nothing but a UUID is ever named.
     #[test]
-    fn the_join_command_is_fixed_and_names_a_saved_connection_only() {
+    fn the_join_command_is_fixed_and_names_a_saved_connection_by_uuid_only() {
         assert_eq!(
-            join_argv("Home phone").unwrap(),
-            [
-                "nmcli",
-                "--wait",
-                "15",
-                "connection",
-                "up",
-                "id",
-                "Home phone"
-            ]
+            join_argv(U1).unwrap(),
+            ["nmcli", "--wait", "15", "connection", "up", "uuid", U1]
         );
-        let odd = join_argv("a; rm -rf x $(y) `z`").unwrap();
-        assert_eq!(odd.len(), 7);
-        assert_eq!(odd[6], "a; rm -rf x $(y) `z`");
-        assert!(join_argv("--version").is_none());
-        let all: Vec<String> = join_argv("n")
-            .unwrap()
-            .into_iter()
-            .chain(list_argv())
-            .collect();
-        for word in ["password", "wifi", "device", "connect", "secrets", "--ask"] {
+        for bad in [
+            "",
+            "Home phone",
+            "--version",
+            "a; rm -rf x $(y) `z`",
+            "0b1c2d3e-4f50-4a61-8b72-93a4b5c6d7e",
+            "0b1c2d3e-4f50-4a61-8b72-93a4b5c6d7e8x",
+            "0b1c2d3e4f504a618b7293a4b5c6d7e8aaaa",
+            "zb1c2d3e-4f50-4a61-8b72-93a4b5c6d7e8",
+        ] {
+            assert!(join_argv(bad).is_none(), "{bad:?}");
+        }
+        let all: Vec<String> = join_argv(U1).unwrap().into_iter().chain(list_argv()).collect();
+        for word in ["password", "device", "connect", "secrets", "--ask", "id"] {
             assert!(!all.iter().any(|a| a == word), "{word}");
         }
         assert_eq!(list_argv()[0], "nmcli");
+        assert!(list_argv().contains(&"NAME,UUID,TYPE".to_string()));
     }
 
-    /// A name counts only if it is a saved Wi-Fi connection, colons and all.
+    /// Only one saved Wi-Fi connection of that name is joined, by its UUID,
+    /// colons in the name and all.
     #[test]
-    fn only_a_saved_wifi_connection_is_joined() {
-        let listing = "Wired connection 1:802-3-ethernet\nMy phone:802-11-wireless\nA\\:B:802-11-wireless\nvpn one:vpn\nSame:wifi\n";
-        assert!(is_saved_wifi(listing, "My phone"));
-        assert!(is_saved_wifi(listing, "A:B"));
-        assert!(is_saved_wifi(listing, "Same"));
-        assert!(!is_saved_wifi(listing, "Wired connection 1"), "not Wi-Fi");
-        assert!(!is_saved_wifi(listing, "vpn one"));
-        assert!(
-            !is_saved_wifi(listing, "Unknown"),
-            "not saved: never joined"
+    fn only_one_saved_wifi_connection_is_joined_by_its_uuid() {
+        let listing = format!(
+            "Wired connection 1:{U3}:802-3-ethernet\nMy phone:{U1}:802-11-wireless\nA\:B:{U2}:802-11-wireless\nvpn one:{U3}:vpn\nSame:{U3}:wifi\n"
         );
-        assert!(!is_saved_wifi(listing, "My"), "a whole name only");
-        assert!(!is_saved_wifi("", "My phone"));
+        assert_eq!(saved_wifi_uuid(&listing, "My phone").as_deref(), Some(U1));
+        assert_eq!(saved_wifi_uuid(&listing, "A:B").as_deref(), Some(U2));
+        assert_eq!(saved_wifi_uuid(&listing, "Same").as_deref(), Some(U3));
+        assert_eq!(saved_wifi_uuid(&listing, "Wired connection 1"), None, "not Wi-Fi");
+        assert_eq!(saved_wifi_uuid(&listing, "vpn one"), None);
+        assert_eq!(saved_wifi_uuid(&listing, "Unknown"), None, "not saved: never joined");
+        assert_eq!(saved_wifi_uuid(&listing, "My"), None, "a whole name only");
+        assert_eq!(saved_wifi_uuid("", "My phone"), None);
+    }
+
+    /// Two saved connections with one name are not guessed between; a line
+    /// with a bad UUID is not trusted.
+    #[test]
+    fn two_connections_of_one_name_or_a_bad_uuid_join_nothing() {
+        let twice = format!("Dup:{U1}:802-11-wireless\nDup:{U2}:802-11-wireless\n");
+        assert_eq!(saved_wifi_uuid(&twice, "Dup"), None);
+        let one_wifi_one_vpn = format!("Dup:{U1}:802-11-wireless\nDup:{U2}:vpn\n");
+        assert_eq!(saved_wifi_uuid(&one_wifi_one_vpn, "Dup").as_deref(), Some(U1));
+        assert_eq!(saved_wifi_uuid("Odd:not-a-uuid:802-11-wireless\n", "Odd"), None);
+        assert_eq!(saved_wifi_uuid("Odd:802-11-wireless\n", "Odd"), None, "no uuid field");
     }
 }
