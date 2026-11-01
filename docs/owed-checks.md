@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1245 open items.
+1241 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 76 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 74 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 197 |
 | A phone with a SIM | 40 |
 | A second phone | 20 |
 | Away from home: another network, or through a router | 43 |
-| A second computer | 160 |
-| A Linux desktop (the Azure VM serves for some) | 214 |
+| A second computer | 161 |
+| A Linux desktop (the Azure VM serves for some) | 212 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 78 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 398 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 397 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -134,19 +134,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **252. The phone's camera as this computer's webcam (Linux)**
 
-- Stop on the phone's "Your camera is in use" notification ends the cast and the node goes. (where: here)
+- Stop on the phone's "Your camera is in use" notification ends the cast and the node goes. (where: here) Partly checked 2026-11-01: the Stop action could not be reached by the script: ColorOS's shade shows the notification as a one-line row inside Pocketdesk's group, without its buttons (also with only two Pocketdesk notifications left), and `CastService` is not exported, so adb cannot fire the action's own intent. Nothing else was learned; Stop by hand on the phone is still owed.
 
 **255. The phone's location for this computer's apps (GeoClue, Linux)**
 
-- The OPPO for real: Settings "Give my computer my location" asks for location and turns on; with a throwaway server and `where-am-i -a 4` (city) the computer logs "fix sent, accuracy 1000 m" or more and `where-am-i` reports a place within about 1 km of the phone's true one (compare by distance only, never print either place); Activity shows "city location, accurate to N m". (where: here)
-- The same with the computer on Exact and the phone's "Exact location" on (accuracy of tens of metres, GPS), and with only one of the two on (the phone still gives the city). (where: here)
-- The phone in the pocket with the screen off: with "Allow all the time" the ask is answered; without it the phone answers `background` and the computer logs "no fix" and tries again a minute later; with Pocketdesk open it is answered. (where: here)
-- The switch off on the phone answers `off` at once (no wait of 30 s); location permission taken away in Android settings answers `permission`; location turned off for the phone answers `unavailable`. (where: here)
-
-**258. Open any phone app from the computer (Phone apps page, Apps part 1)**
-
-- The page lists the apps with their icons within a few seconds of opening, Pocketdesk itself left out; opening it again sends no icons (the phone's log says "0 of 0 app icons" or none), and after one app is updated (or its icon file deleted from the throwaway state folder) only that one comes. (where: OPPO)
-- "Let the computer open my apps" off on the phone: the page says the phone keeps its apps to itself and names the setting; turned on, "Ask again" lists them. A computer that is not the phone's own gets no word from it at all. (where: OPPO)
+- The OPPO for real: Settings "Give my computer my location" asks for location and turns on; with a throwaway server and `where-am-i -a 4` (city) the computer logs "fix sent, accuracy 1000 m" or more and `where-am-i` reports a place within about 1 km of the phone's true one (compare by distance only, never print either place); Activity shows "city location, accurate to N m". (where: here) Found, not fixed (2026-11-01, the OPPO, a throwaway on the laptop with avahi-daemon started for the run and a client run as the `geoclue` user standing in for GeoClue, which is not installed there; print nothing of any place): (1) The phone's answer never reaches the computer: `RustCore.sendPhonePacket(..., FIX, ...)` ends in the bridge's `send_phone_packet`, which refuses any type not in `PHONE_PACKETS` (`android/bridge/src/api.rs`), and `kdeconnect.pocketdesk.phone_location` (`phone_location::FIX`) is not in that list. So every answer, a fix or a refusal (`off`, `permission`, `background`, `unavailable`), fails on the phone (log "could not answer the computer's location ask") and the computer logs "no fix (the phone did not answer)" after the full 30 s. Fix: add `phone_location::FIX` to `PHONE_PACKETS` (the array's length changes to 18) and a test that every packet type the app sends is in the list. (2) Probably: a fix that does not come hangs the phone's answers for good. `fetch` cancels `getCurrentLocation` after 20 s, and cancelling a `LocationManagerCompat.getCurrentLocation` does not call its consumer, so `done` never runs and `inFlight` stays true: from then on `answer` returns silently at `if (!inFlight.compareAndSet(false, true)) return` (seen: after one ask with location services on and no fix to be had, three later asks over six minutes left no line in the phone's log, and the computer logged "no fix (the phone did not answer)" each time). Fix: finish with `done(null)` on the timeout path itself (and reset `inFlight` there), not through the consumer. Not run past these: no fix could be had (the phone has no SIM and was indoors), so "fix sent, accuracy N m" and "Activity shows city location" were not seen.
+- The same with the computer on Exact and the phone's "Exact location" on (accuracy of tens of metres, GPS), and with only one of the two on (the phone still gives the city). (where: here) Not run 2026-11-01: blocked by the two bugs above (no answer reaches the computer, and no fix was to be had).
+- The phone in the pocket with the screen off: with "Allow all the time" the ask is answered; without it the phone answers `background` and the computer logs "no fix" and tries again a minute later; with Pocketdesk open it is answered. (where: here) Partly checked 2026-11-01 (the phone's own decisions, from its log; the answers themselves did not arrive, see the first item): with "Give my computer my location" on, only the approximate-location permission (no "Allow all the time") and location services off, an ask with Pocketdesk not on screen was decided `background`; with Pocketdesk open the same ask was decided `unavailable`. A real fix with the screen off, and with "Allow all the time", was not seen.
+- The switch off on the phone answers `off` at once (no wait of 30 s); location permission taken away in Android settings answers `permission`; location turned off for the phone answers `unavailable`. (where: here) Partly checked 2026-11-01: the switch off was decided `off` within 1.0 s of the computer's ask (the phone's log), and location services off was decided `unavailable` (Pocketdesk open); but neither answer reached the computer (the first item's bug 1), so the computer waited the full 30 s. `permission` was not tried: revoking a runtime permission by adb ends the app's process, and Pocketdesk's control service must not be cut off.
 
 **259. Hands-free apps: a paused share, the screen-sharing question accepted, a lock swiped away**
 
@@ -1273,6 +1268,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Two computers of the owner's, both with the setting on: each asks only its own phone, and a computer the phone is not paired to gets no answer. (where: second computer)
 
+**258. Open any phone app from the computer (Phone apps page, Apps part 1)**
+
+- "Let the computer open my apps" off on the phone: the page says the phone keeps its apps to itself and names the setting; turned on, "Ask again" lists them. A computer that is not the phone's own gets no word from it at all. (where: OPPO) Partly checked 2026-11-01 (the OPPO): with the switch off an ask for the list and an open were each answered `off`; turned on, the next ask for the list gave the 77 apps again. "A computer that is not the phone's own gets no word" needs a second computer and was not tried; the page's words are desktop UI.
+
 **261. Phone apps on the computer's Start menu, from notifications, and dropped files shared into the app in front**
 
 - The guards: "Let the computer open my apps" off, then the control service off, then a secure lock, then the screen shown to another computer only: each drop leaves the file in Downloads and the line names the reason; the foreground package is read once per drop (the phone's log names no package of any other window), and Pocketdesk's own screen in front is refused. Whether a share started from the service with another app in front appears on ColorOS 14 and Android 15 or 16, and whether Android's chooser fallback shows when the direct share is refused. (where: OPPO)
@@ -1794,11 +1793,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **252. The phone's camera as this computer's webcam (Linux)**
 
-- "Offer phones as a camera" turned off and "Stop camera" on the Overview each end a running camera, and the "in use" notification shows plainly (default importance, silent) on the phone. (where: linux)
+- "Offer phones as a camera" turned off and "Stop camera" on the Overview each end a running camera, and the "in use" notification shows plainly (default importance, silent) on the phone. (where: linux) Partly checked 2026-11-01 (the OPPO, a laptop throwaway on a private PipeWire, counts only): with the setting turned off the running camera ended and the node was gone in 0.7 s, the phone's "in use" notification with it; the Overview's Stop camera, as its seam (a device kick, what `end_sessions_of` writes), took the node away in 0.6 s and the notification too; the notification's channel is of default importance (3) with no sound and no vibration. The desktop button itself was not clicked.
 - A real video call on the owner's desk: Firefox (and Zoom or Meet in the browser) picks "Pocketdesk camera (<phone>)" in its camera list, the other side sees the phone's picture, and it stops when the phone's notification's Stop is pressed. (where: linux)
-- OBS 30+ and GNOME Snapshot list and show the camera; `pw-v4l2` lets a V4L2-only app (e.g. `pw-v4l2 ffplay /dev/video0` or Cheese) open it. (where: linux)
-- Front camera and 1080p at 24 fps from Settings: the phone's notification says so and the app's picture is 1920x1080. (where: linux)
-- The ask refused: Webcam off in Devices (the button is greyed and says why), the phone's switch off (no notification), and the setting off (a camera cast from an older ask is closed with "does not offer phones as a camera"). (where: linux)
+- OBS 30+ and GNOME Snapshot list and show the camera; `pw-v4l2` lets a V4L2-only app (e.g. `pw-v4l2 ffplay /dev/video0` or Cheese) open it. (where: linux) 2026-11-01: `pw-v4l2` is not installed on the laptop (and nothing was installed for it); not run.
+- The ask refused: Webcam off in Devices (the button is greyed and says why), the phone's switch off (no notification), and the setting off (a camera cast from an older ask is closed with "does not offer phones as a camera"). (where: linux) Partly checked 2026-11-01 (the OPPO): the phone's switch off left no notification on the phone; the setting off dropped the ask ("does not offer phones as a camera", no notification) and ended a running camera ("phones are no longer offered as a camera", 0.7 s); Webcam off for the phone dropped the ask ("its permission is off", no notification). The Devices button's greying and its reason are desktop UI, not looked at.
 
 **254. Unattended on GNOME (mutter's own D-Bus, no dialog)**
 
@@ -1808,10 +1806,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - With the switch off, or on KDE or Sway with it on, the capture goes through the portal as before (no mutter call in `busctl --user monitor org.gnome.Mutter.ScreenCast`). (where: linux)
 - An older GNOME whose mutter has the ScreenCast API but no `org.gnome.Mutter.RemoteDesktop` (or refuses it): the same single log line and the portal's dialog. (where: linux)
 - The desktop app's Settings → Connection shows "Unattended on GNOME" on Linux only, off by default, and a session started after turning it on takes the new path with no server restart. (where: linux)
-
-**255. The phone's location for this computer's apps (GeoClue, Linux)**
-
-- The computer's setting turned off while `where-am-i` runs: the source goes within about 5 s, Avahi no longer lists `_nmea-0183._tcp`, and turning it on again announces again; restarting avahi-daemon while on re-announces within about 5 s. (where: linux)
 
 **256. A direct link (no shared network): this computer's own Wi-Fi, joined by the phone for Pocketdesk only**
 
@@ -2045,7 +2039,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **258. Open any phone app from the computer (Phone apps page, Apps part 1)**
 
-- Whether a background start by the control service itself works on the OPPO (ColorOS 14) and, if it can, on a phone with Android 15 or 16: the app starts from the service's own context with the phone's screen on another app. If it only appears behind, the fallback (N3's opt-in) is the next thing to try. (where: other hardware)
+- Whether a background start by the control service itself works on the OPPO (ColorOS 14) and, if it can, on a phone with Android 15 or 16: the app starts from the service's own context with the phone's screen on another app. If it only appears behind, the fallback (N3's opt-in) is the next thing to try. (where: other hardware) Partly checked 2026-11-01 on the OPPO (ColorOS 14, Android 14): yes — with Calculator in front and the cast shown, an open of Settings from the control service's own context brought Settings to the front (`opened`). Android 15 or 16 hardware was not available.
 
 **261. Phone apps on the computer's Start menu, from notifications, and dropped files shared into the app in front**
 
@@ -2927,10 +2921,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **258. Open any phone app from the computer (Phone apps page, Apps part 1)**
 
-- A click on an app with the control service on and a screen already shown (Show the screen from the phone's Cast first): the app is in front on the phone within a second or two, the screen window here comes up in front, and Android showed no consent question. (where: OPPO)
-- A click with no screen shown yet: the page says to tap the notification; the phone shows "Tap to show your screen and open …", its tap brings Android's one screen-capture question, and after Start the app opens and the window here shows it. A second app then opens with no question and no notification (the one consent serves the connection). With Android 14's "single app" choice picked in the question: what the window shows (the app chosen, not what is opened after) is noted, nothing depends on it. (where: OPPO)
-- The control service off: a click is answered `control_off`, the page says to turn on Pocketdesk control in Android's Accessibility settings, and nothing is asked of the phone's owner by itself. (where: OPPO)
-- The phone locked (a secure lock) and asleep: "locked" and "unlock the phone once", then the same click works after the unlock. A swipe-only lock is dismissed by Hands-free (see section 259), not answered "locked". (where: OPPO)
+- A click with no screen shown yet: the page says to tap the notification; the phone shows "Tap to show your screen and open …", its tap brings Android's one screen-capture question, and after Start the app opens and the window here shows it. A second app then opens with no question and no notification (the one consent serves the connection). With Android 14's "single app" choice picked in the question: what the window shows (the app chosen, not what is opened after) is noted, nothing depends on it. (where: OPPO) Partly checked 2026-11-01 (the OPPO): with no screen shown, the open was answered `needs_screen` and the phone posted "Tap to show your screen and open Settings"; its tap brought Android's one screen-capture question ("Start recording or casting with Pocketdesk?", Cancel and "Start now" only: ColorOS 14's question has no single-app choice, so that part has nothing to note), and after "Start now" Settings opened (`opened`); a second open (Calculator) then opened with no question and no notification. The window here was not looked at.
+- The control service off: a click is answered `control_off`, the page says to turn on Pocketdesk control in Android's Accessibility settings, and nothing is asked of the phone's owner by itself. (where: OPPO) Partly checked 2026-11-01 (the OPPO, Pocketdesk control found off in Accessibility settings): an open asked of the phone was answered `control_off` at once. Found: beside it the phone also posted a "Tap to open: Settings" notification (the P2 fallback, `PhoneActions.open` for the plain, no-screen ask, for ten minutes) — by design in the code, but the item's "nothing is asked of the phone's owner by itself" is true only of dialogs, not of that notification; decide which the item means. The page's wording is desktop UI, not looked at.
+- The phone locked (a secure lock) and asleep: "locked" and "unlock the phone once", then the same click works after the unlock. A swipe-only lock is dismissed by Hands-free (see section 259), not answered "locked". (where: OPPO) Partly checked 2026-11-01 (the OPPO has a swipe-only lock, no secure lock to try): asleep with the lock screen up, awake with the lock screen up, an open was answered `locked` both times (the swipe lock was not dismissed); after swiping it away the same open was `opened`. A secure lock and its "unlock the phone once" wording were not tried.
 - The page by hand on Windows and on Linux: the search narrows as it is typed, "Opened from here" shows the last apps in the order opened, the phone's name picker with two phones, the layout in a narrow window, and Settings' "Show the Phone apps page" off takes the page out of the list. (where: by hand)
 
 **259. Hands-free apps: a paused share, the screen-sharing question accepted, a lock swiped away**
