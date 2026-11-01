@@ -185,6 +185,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 KeyboardMouseSetting()
                 PhoneActionsSetting()
                 AppsSetting()
+                AutoAcceptSetting()
                 CopiesSetting()
                 CastSoundSetting()
                 WebcamSetting()

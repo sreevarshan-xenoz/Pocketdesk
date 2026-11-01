@@ -210,6 +210,15 @@ pub enum AppResult {
     ControlOff,
     /// The phone is locked.
     Locked,
+    /// Hands-free: the phone has a secure lock (PIN, pattern, password or
+    /// biometric) that is on now. It is never bypassed from here: unlock the
+    /// phone, or let Android keep it unlocked near this computer.
+    LockedSecure,
+    /// Hands-free: the phone could not accept its own screen-sharing
+    /// question (the option is off, Android hid the button from the control
+    /// service, or the screen names it differently), so one notification on
+    /// the phone waits for one tap, and the app opens after it.
+    NeedsTap,
     /// The phone's screen is off.
     Asleep,
     /// "Let the computer open my apps" is off.
@@ -226,11 +235,13 @@ pub enum AppResult {
 
 impl AppResult {
     /// Every result.
-    pub const ALL: [AppResult; 10] = [
+    pub const ALL: [AppResult; 12] = [
         AppResult::Opened,
         AppResult::NeedsScreen,
         AppResult::ControlOff,
         AppResult::Locked,
+        AppResult::LockedSecure,
+        AppResult::NeedsTap,
         AppResult::Asleep,
         AppResult::Off,
         AppResult::NotListed,
@@ -246,6 +257,8 @@ impl AppResult {
             AppResult::NeedsScreen => "needs_screen",
             AppResult::ControlOff => "control_off",
             AppResult::Locked => "locked",
+            AppResult::LockedSecure => "locked_secure",
+            AppResult::NeedsTap => "needs_tap",
             AppResult::Asleep => "asleep",
             AppResult::Off => "off",
             AppResult::NotListed => "not_listed",
@@ -447,6 +460,26 @@ mod tests {
         let word = json!({"about": "open", "app": "org.example.app", "result": "yes"});
         assert!(AppReport::from_body(&word).is_none());
         assert!(AppReport::from_body(&json!({"about": "lock", "result": "off"})).is_none());
+    }
+
+    /// Hands-free: the two new words are in the packet's vocabulary under
+    /// the names the phone sends, and an older word is read as before.
+    #[test]
+    fn the_hands_free_results_have_their_words() {
+        for (word, result) in [
+            ("locked_secure", AppResult::LockedSecure),
+            ("needs_tap", AppResult::NeedsTap),
+            ("locked", AppResult::Locked),
+        ] {
+            assert_eq!(AppResult::parse(word), Some(result));
+            let body = json!({"about": "open", "app": "org.example.app", "result": word});
+            assert_eq!(AppReport::from_body(&body).unwrap().result, result);
+        }
+        // Every word is unique, so none can be read as another.
+        let mut words: Vec<_> = AppResult::ALL.iter().map(|r| r.as_str()).collect();
+        words.sort_unstable();
+        words.dedup();
+        assert_eq!(words.len(), AppResult::ALL.len());
     }
 
     /// P10: contacts with a name and a callable number, each number once.

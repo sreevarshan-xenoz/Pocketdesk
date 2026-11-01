@@ -282,6 +282,19 @@
             android:taskAffinity=""
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
+        <!-- Hands-free: started only by the control service for an open the computer asked for;
+             wakes the phone and asks Android to swipe away a lock screen that guards nothing
+             (a secure lock is never touched), then closes. Shows nothing. It shows over the
+             lock screen and turns the screen on only from code, after it has looked at the
+             lock again, never by a manifest flag. -->
+        <activity
+            android:name=".control.DismissKeyguardActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <!-- M10: reads a copy just made, once in focus, and closes. -->
         <activity
             android:name=".clip.CopyReadActivity"

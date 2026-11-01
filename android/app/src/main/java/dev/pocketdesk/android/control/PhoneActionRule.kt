@@ -57,6 +57,12 @@ object PhoneActionRule {
         LOCKED,
 
         /**
+         * Hands-free: a secure lock (PIN, pattern, password or biometric) is on:
+         * an app is never opened behind it, and no lock screen is swiped away.
+         */
+        LOCKED_SECURE,
+
+        /**
          * A screenshot with the screen off would be of nothing: Android
          * takes none, though the service says it did (found on the OPPO).
          */
@@ -82,7 +88,8 @@ object PhoneActionRule {
      * phone is locked, [awake] whether its screen is on, [screenshots]
      * whether T10h sends new screenshots, [appsOn] whether the computer
      * may list and open apps (P2), and [withinBudget] whether the minute
-     * allows another.
+     * allows another. [secureLock] (Hands-free): the lock, when [locked], is
+     * a secure one that is on ([LockRule.Kind.SECURE]); true when unknown.
      */
     fun decide(
         action: Action,
@@ -98,6 +105,7 @@ object PhoneActionRule {
         listed: Boolean = false,
         contactsOn: Boolean = false,
         contactsPermitted: Boolean = false,
+        secureLock: Boolean = true,
     ): Decision = when {
         // P10: the contacts, with their own switch and Android's leave; no
         // service, and shown on nothing.
@@ -120,12 +128,16 @@ object PhoneActionRule {
             else -> Decision.DO
         }
         // An open needs no service: without it, "Tap to open" (P2 review).
+        // Hands-free: a lock that guards nothing, or a screen that is off, is
+        // passed through the service (it wakes the phone and swipes the lock
+        // screen away); a secure lock never is.
         action == Action.OPEN -> when {
             !appsOn -> Decision.OFF
             !own -> Decision.NOT_OWN
             !listed -> Decision.NOT_LISTED
-            locked -> Decision.LOCKED
-            !awake -> Decision.ASLEEP
+            locked && secureLock -> Decision.LOCKED_SECURE
+            locked && !service -> Decision.LOCKED
+            !awake && !service -> Decision.ASLEEP
             !withinBudget -> Decision.TOO_MANY
             else -> Decision.DO
         }
