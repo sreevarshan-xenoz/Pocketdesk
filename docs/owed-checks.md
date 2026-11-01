@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1134 open items.
+1138 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
 | A second computer | 154 |
-| A Linux desktop (the Azure VM serves for some) | 210 |
+| A Linux desktop (the Azure VM serves for some) | 214 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
 
@@ -1697,6 +1697,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The server stopped (`pocketdesk stop`) with a link on: the hotspot is gone at once; the server killed with `kill -9` and started again: the first start's log says it swept one, and no "Pocketdesk direct link" is left. (where: linux)
 - A firewall on the computer (firewalld, then ufw with its default deny): the phone reaches 1716 and 4716 on the hotspot's address under firewalld's `nm-shared` zone, and what ufw needs is what the guide says. (where: linux)
 - The Settings rows: "Offer a direct link" off hides the card and a running link goes off within 5 s; the band row's 5 GHz on a card that allows it makes a 5 GHz network, and on one that does not says why the link failed. (where: linux)
+- The takeover's restore, on the USB adapter only: with the adapter joined to a network, make a link (taking over), then turn it off: the adapter's own connection is active again within seconds (`nmcli -t -f NAME,DEVICE connection show --active`, names not pasted), and the same after the server is stopped with a link on, and after a link that fails to come up (for example `dnsmasq` missing). (where: linux)
+- The sweep is this folder's: with the main server's link on and a second throwaway server (its own state folder) started, the main link stays up and the throwaway sweeps nothing; with the main server killed and started again, its first start removes its own left-over link (and `pdlink0` if it made one) and restores the card's connection. (where: linux)
+- The longest life: with a phone connected (so never idle), the link goes off at eight hours (a test build with the constant cut to a minute is enough). (where: linux)
+- The OPPO opening a direct link from another app (an `adb shell am start -d "pocketdesk://pair?..."` link, not scanned): Pair first, then a second screen naming the Wi-Fi network and asking again; "Join the network and pair" is the only way on, and Cancel and back both leave with nothing joined. After `adb shell am kill` or a rotation mid-pairing, the restored link has no Wi-Fi keys. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

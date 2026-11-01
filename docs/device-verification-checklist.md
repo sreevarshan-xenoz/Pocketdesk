@@ -3483,6 +3483,11 @@ Built 2026-11-01 (Linux and Android; Windows is its own change). The Pair page's
 - [ ] A firewall on the computer (firewalld, then ufw with its default deny): the phone reaches 1716 and 4716 on the hotspot's address under firewalld's `nm-shared` zone, and what ufw needs is what the guide says. (where: linux)
 - [ ] The Settings rows: "Offer a direct link" off hides the card and a running link goes off within 5 s; the band row's 5 GHz on a card that allows it makes a 5 GHz network, and on one that does not says why the link failed. (where: linux)
 
+- [ ] The takeover's restore, on the USB adapter only: with the adapter joined to a network, make a link (taking over), then turn it off: the adapter's own connection is active again within seconds (`nmcli -t -f NAME,DEVICE connection show --active`, names not pasted), and the same after the server is stopped with a link on, and after a link that fails to come up (for example `dnsmasq` missing). (where: linux)
+- [ ] The sweep is this folder's: with the main server's link on and a second throwaway server (its own state folder) started, the main link stays up and the throwaway sweeps nothing; with the main server killed and started again, its first start removes its own left-over link (and `pdlink0` if it made one) and restores the card's connection. (where: linux)
+- [ ] The longest life: with a phone connected (so never idle), the link goes off at eight hours (a test build with the constant cut to a minute is enough). (where: linux)
+- [ ] The OPPO opening a direct link from another app (an `adb shell am start -d "pocketdesk://pair?..."` link, not scanned): Pair first, then a second screen naming the Wi-Fi network and asking again; "Join the network and pair" is the only way on, and Cancel and back both leave with nothing joined. After `adb shell am kill` or a rotation mid-pairing, the restored link has no Wi-Fi keys. (where: linux)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
