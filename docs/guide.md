@@ -750,6 +750,16 @@ Mozilla's location service shut down in 2024, so on Linux GeoClue (what night li
 
 How it works: this computer serves one location source to itself only (its own loopback; nothing on the network can connect) and tells GeoClue about it over Avahi on the loopback. When an app asks GeoClue for a place, GeoClue connects, and the computer asks the phone for one fix, at most every ten minutes, and passes it on. Each fix shows in Activity by its accuracy. Nothing is stored and nothing is logged but "fix sent, accuracy N m". Linux only: Windows would need a sensor driver. `docs/privacy.md` and limit 76 in `SECURITY.md` say what it exposes; the packets are in `docs/protocol.md`.
 
+### A Spare Phone at Home as the Wake Helper
+
+Waking a sleeping computer from outside the house needs something at home to send the magic packet: a forwarded router port, or a second computer left on. An old Android phone on a charger can be that something, with no router setting and nothing else left on. Everything here is off until you turn it on.
+
+1. **On the spare phone** (paired with the computer using its own pairing code, so it is one of your own phones, not a guest's): Settings, Wake, "Wake helper for this home". Leave it on a charger on your home Wi-Fi. Its notification says "Waiting for a charger and Wi-Fi" or "Waking your computers for your other phones". Connect it to the computer once while the computer is awake: the computer tells it what to do (its own hardware address and your other phones' keys) and lists the phone as its helper.
+2. **On this computer:** Settings, Wake, "Wake helper phone" shows which phone it is and has Remove. A removed phone stays removed until its owner turns the switch off and on again on the phone.
+3. **On each of your other phones:** open the computer's card, Wake settings, "Wake through my helper" (it appears once the computer has told the phone about its helper, which happens when the phone connects while the computer is awake). Away from home, the Wake button then asks the helper; at home it sends the packet itself, as before.
+
+The helper serves one thing: "send the magic packet for this computer". It answers only your own phones' keys that the computer named, at most once every 30 seconds each (two at once), only for the computer that named them, only while charging on Wi-Fi, and it sends only the computer's own hardware address to your own network. A phone that is not yours, or a stranger who finds the helper, is closed unread. If you lose one of your phones, remove it from the computer's Devices page; the helper hears of it within about 15 seconds while it is linked to the computer, and a helper that is switched off or out of reach keeps its last list until it hears the computer again. The helper's own phone is a thing to keep safe too: turning off "Wake helper for this home" ends all of it. `docs/protocol.md` §2.9 has the packets and limit 82 in `SECURITY.md` says what it opens. One helper phone serves the computer it is linked with (its own computer, the one it most recently used).
+
 ### CLI Commands
 
 | Command | Description |
