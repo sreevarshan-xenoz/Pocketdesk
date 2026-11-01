@@ -953,7 +953,9 @@ pub fn last_sessions(lines: &str) -> std::collections::HashMap<String, u64> {
 
 /// What a live session is, as its chip says (J3).
 pub fn session_kind(session: &pocketdesk_core::local::sessions::MirrorSession) -> &'static str {
-    if session.cast {
+    if session.webcam {
+        "its camera as this computer's camera"
+    } else if session.cast {
         "its screen or camera here"
     } else if session.phone_sound_only {
         "its sound here"
@@ -964,6 +966,16 @@ pub fn session_kind(session: &pocketdesk_core::local::sessions::MirrorSession) -
     } else {
         "screen"
     }
+}
+
+/// The phones whose camera is this computer's camera now (F6 part 2), by
+/// device id: what the Overview's Stop camera ends.
+pub fn cameras(sessions: &[pocketdesk_core::local::sessions::MirrorSession]) -> Vec<String> {
+    sessions
+        .iter()
+        .filter(|s| s.webcam)
+        .filter_map(|s| s.device_id.clone())
+        .collect()
 }
 
 /// A session from the log, as the Sessions page lists it (J3).
@@ -1974,6 +1986,7 @@ mod tests {
                 control_only,
                 sound_only,
                 phone_sound_only: false,
+                webcam: false,
                 id: 1,
                 device_id: None,
                 peer: String::new(),
@@ -1993,6 +2006,28 @@ mod tests {
             ..session(false, false, false)
         };
         assert_eq!(session_kind(&alone), "its sound here");
+        let camera = pocketdesk_core::local::sessions::MirrorSession {
+            webcam: true,
+            ..session(true, false, false)
+        };
+        assert_eq!(
+            session_kind(&camera),
+            "its camera as this computer's camera"
+        );
+        assert_eq!(
+            cameras(std::slice::from_ref(&camera)),
+            Vec::<String>::new(),
+            "no device said"
+        );
+        let named = pocketdesk_core::local::sessions::MirrorSession {
+            device_id: Some("phone".into()),
+            ..camera
+        };
+        let screen = pocketdesk_core::local::sessions::MirrorSession {
+            device_id: Some("other".into()),
+            ..session(true, false, false)
+        };
+        assert_eq!(cameras(&[named, screen]), vec!["phone".to_string()]);
     }
 
     /// J3: the Sessions page's recent sessions, newest first, in words.
@@ -2826,6 +2861,7 @@ mod tests {
             control_only: false,
             sound_only: false,
             phone_sound_only: false,
+            webcam: false,
             cast: false,
         }
     }

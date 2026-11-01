@@ -2119,7 +2119,9 @@ impl PocketdeskApp {
         let mut send_clip = None;
         let mut take_photo = None;
         let mut start_webcam = None;
+        let mut stop_webcam = None;
         let offers_camera = self.config.as_ref().is_some_and(|c| c.phone_camera);
+        let cameras = model::cameras(&self.snapshot.sessions);
         let mut phone_action = None;
         let mut open_apps = None;
         // P2: the phones listed, for the apps box drawn after them.
@@ -2346,6 +2348,17 @@ impl PocketdeskApp {
                     {
                         start_webcam = Some(device.id.clone());
                     }
+                    // PR #604 review N5: and stopped from here, while it is.
+                    if cameras.contains(&device.id)
+                        && ui
+                            .button("Stop camera")
+                            .on_hover_text(
+                                "Ends the phone's session here, which closes its camera; apps here lose \u{201c}Pocketdesk camera\u{201d}.",
+                            )
+                            .clicked()
+                    {
+                        stop_webcam = Some(device.id.clone());
+                    }
                     // O2: a screenshot of the phone, or its screen locked.
                     let action_reach = model::phone_action_reach(
                         device.linked,
@@ -2470,6 +2483,13 @@ impl PocketdeskApp {
         }
         if let Some(id) = start_webcam {
             self.start_webcam(&id);
+        }
+        if let Some(id) = stop_webcam {
+            self.end_sessions_of(&id);
+            self.notice = crate::notice::Notice::outcome(Ok(format!(
+                "Asked {}'s camera to stop.",
+                self.label(&id)
+            )));
         }
         if let Some((id, action)) = phone_action {
             self.phone_action(&id, action);
