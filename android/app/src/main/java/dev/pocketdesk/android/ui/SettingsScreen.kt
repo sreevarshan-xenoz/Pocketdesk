@@ -358,6 +358,8 @@ fun SettingsScreen(onBack: () -> Unit) {
                     Prefs.questionsFromComputer(context),
                     { Prefs.setQuestionsFromComputer(context, it) },
                 )
+                // Approve with my phone: sudo, polkit, the lock screen.
+                ApproveSetting()
                 // L4: the dialer opens with a number the computer sends.
                 SettingSwitch(
                     stringResource(R.string.settings_calls_from_computer),

@@ -2,13 +2,13 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1093 open items.
+1099 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 38 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 168 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 174 |
 | A phone with a SIM | 39 |
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
@@ -556,6 +556,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **240. Keys by position in a computer's screen window**
 
 - An input method here (Windows' Japanese IME, or Linux fcitx): note that it does not compose in the window in either mode (the picture asks for no input method), and that with Keys by position on, its keys go by place with nothing typed twice. (where: owner)
+
+**250. Approve with my phone: sudo, polkit and the lock screen**
+
+- A real fingerprint on the owner's phone approves `sudo true` on the owner's desk, and the phone shows sudo's command; No, no answer and a phone out of reach each give the password prompt (at once with no phone linked, after the wait otherwise). (where: owner)
+- polkit on the owner's desk: a `pkexec true` (or a GUI admin prompt) with the line in `/etc/pam.d/polkit-1` is approved on the phone. (where: owner)
+- The lock screen on the owner's desk (hyprlock): with "The lock screen too" on and the line in `/etc/pam.d/hyprlock`, the phone unlocks it; with the switch off, only the password does. (where: owner)
+- Pinning on a real phone with Key Attestation: `sudo pocketdesk-pam-ask --pin <user>` asks the phone, the fingerprint makes an attested key, the phone says it replaces the current key and shows a code, root asks for that code and pins only when it is typed right, reports the key attested (TEE or StrongBox), and the old key keeps approving until a request names the new one. (where: owner)
+- "Fingerprint only, not the PIN" on the phone: the prompt offers no PIN, and a fingerprint enrolled afterwards makes the phone say its key no longer works until it is made and pinned again. (where: owner)
+- `sudo` over ssh to the owner's desk with "Only from this desk" on asks for the password at once, and the phone is not asked. (where: owner)
 
 ## A phone with a SIM
 
@@ -1111,7 +1120,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Windows host: a slow two-finger scroll from the phone or another computer's window scrolls a browser page a little at a time (`SendInput` wheel data below 120). (where: second computer)
 - Shared input between two computers on this build: a touchpad's slow scroll on the driving one scrolls finely on the other; with one on an older build, by notches. (where: second computer)
 
-**250. Shared input B: the driver loop, batched and kept light**
+**251. Shared input B: the driver loop, batched and kept light**
 
 - Windows driving the Linux laptop for real with this build (its hook loop has the same changes and builds on CI only): a 1 kHz mouse keeps up and feels smooth, clicks and drags land where the pointer is, keys typed during a fast move arrive in order, and the gaming lock still takes the hooks out within about half a second of a game coming to the front. (where: second computer)
 - The Linux portal driver for real (the owner's Hyprland driving another computer): the same feel check, and the edge still crosses after a screen is plugged in or rescaled. (where: second computer)
@@ -1617,7 +1626,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - uinput on a Linux computer where `/dev/uinput` is writable: `libinput debug-events` shows `v120` values below 120 for a slow scroll, and a mouse wheel's notch from an older phone app still scrolls one notch. (where: linux)
 - The phone's trackpad: a slow two-finger scroll moves the page smoothly; with Settings' Smooth scrolling off it moves a notch at a time as before. (where: linux)
 
-**250. Shared input B: the driver loop, batched and kept light**
+**251. Shared input B: the driver loop, batched and kept light**
 
 - A running server at rest with driving on: the `pd-shared*` threads wake about 7 times a second at home (`/proc/<pid>/task/*/status`), and its receive loop about once a second while nobody drives this computer. (where: linux)
 

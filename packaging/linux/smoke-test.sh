@@ -15,6 +15,8 @@ check() {
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$deb" >/dev/null
 installed=$?
 check '[ "$installed" -eq 0 ]' "apt installed it"
+check '[ -x /usr/lib/pocketdesk/pocketdesk-pam-ask ] && [ "$(stat -c %U /usr/lib/pocketdesk/pocketdesk-pam-ask)" = root ]' "installed the PAM helper, root's"
+check '! grep -rqs pocketdesk-pam-ask /etc/pam.d' "left /etc/pam.d alone"
 for bin in pocketdesk pocketdesk-app pocketdesk-tray; do
   check "[ -x /usr/bin/$bin ]" "installed /usr/bin/$bin"
 done
@@ -32,7 +34,7 @@ check '[ -f /usr/share/doc/pocketdesk/copyright ]' "the copyright file"
 sudo DEBIAN_FRONTEND=noninteractive apt-get remove -y pocketdesk >/dev/null
 removed=$?
 check '[ "$removed" -eq 0 ]' "apt removed it"
-check '[ ! -e /usr/bin/pocketdesk ] && [ ! -e /usr/bin/pocketdesk-app ]' "removed the programs"
+check '[ ! -e /usr/bin/pocketdesk ] && [ ! -e /usr/bin/pocketdesk-app ] && [ ! -e /usr/lib/pocketdesk/pocketdesk-pam-ask ]' "removed the programs"
 check '[ ! -e /usr/lib/systemd/user/pocketdesk.service ]' "removed the user unit"
 check '[ ! -e /etc/systemd/user/graphical-session.target.wants/pocketdesk.service ]' "no enable link left behind"
 check '[ ! -e /usr/share/applications/dev.pocketdesk.Pocketdesk.desktop ]' "removed the menu entry"
