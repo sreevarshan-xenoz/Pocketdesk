@@ -1324,7 +1324,7 @@ pub fn take_sms_requests() -> String {
 /// and the results of the replies it sent (N5b), its battery (T8b), and
 /// what it plays (T8d), its folders' listings (T10g), its recent photos
 /// (C7), which of its features are on (L7), and the runs of its kept folders.
-const PHONE_PACKETS: [&str; 18] = [
+const PHONE_PACKETS: [&str; 19] = [
     // P2: its apps that open, answering the computer's ask; P10: its contacts.
     pocketdesk_core::protocol::phone_action::PHONE_APPS,
     // Apps part 1: those apps' icons, and how an ask for them or an open went.
@@ -1354,6 +1354,9 @@ const PHONE_PACKETS: [&str; 18] = [
     // A run of a folder this phone keeps on the computer: its start, its
     // deletions and its end.
     pocketdesk_core::protocol::kept::KEEP_RUN,
+    // Phone location: its answer to the computer's ask, a place or why not
+    // (it was missing, so no answer ever went: device batch 2026-11-01).
+    pocketdesk_core::protocol::phone_location::FIX,
 ];
 
 /// Send one of [`PHONE_PACKETS`] with `body` (a JSON object) to the desktop.
@@ -1554,6 +1557,21 @@ async fn request_answer(
 
 #[cfg(test)]
 mod reply_tests {
+    /// Every answer the phone gives to a computer's ask is a packet it may
+    /// send: the location's was missing, so none ever went (device batch
+    /// 2026-11-01).
+    #[test]
+    fn the_phones_answers_are_packets_it_may_send() {
+        for answer in [
+            pocketdesk_core::protocol::phone_location::FIX,
+            pocketdesk_core::protocol::phone_action::PHONE_APPS,
+            pocketdesk_core::protocol::phone_action::PHONE_APP_OPENED,
+            pocketdesk_core::protocol::ask::ASK_ANSWER,
+        ] {
+            assert!(super::PHONE_PACKETS.contains(&answer), "{answer}");
+        }
+    }
+
     /// U3: the phone's name is the app's, cleaned, and a placeholder until
     /// it says.
     #[test]
