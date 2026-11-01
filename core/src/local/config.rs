@@ -76,6 +76,13 @@ pub struct Config {
     /// Off, the portal asks at every session.
     #[serde(default)]
     pub remember_screen_grant: bool,
+    /// GNOME only ("Unattended on GNOME"): start the screen and input
+    /// through mutter's own D-Bus API, which asks no one at the desk, instead
+    /// of the screen-sharing portal's dialog. Off by default: any program
+    /// running as you can make the same calls (SECURITY.md). If mutter's
+    /// D-Bus is missing or refuses, the portal is used. Read at each session.
+    #[serde(default)]
+    pub gnome_unattended: bool,
     /// Reachable from the internet (the WAN endpoint): phones away from home
     /// and your other computers connect through a relay, and this computer
     /// keeps a record on the Mainline DHT (`dht_publish`). Off, no relay or
@@ -677,6 +684,7 @@ impl Default for Config {
             mic_relay_device: None,
             lan_discovery: true,
             remember_screen_grant: false,
+            gnome_unattended: false,
             internet_path: true,
             relay_urls: Vec::new(),
             dht_publish: DhtPublish::Relay,
@@ -956,6 +964,7 @@ impl Config {
         "mic_relay_device",
         "lan_discovery",
         "remember_screen_grant",
+        "gnome_unattended",
         "internet_path",
         "relay_urls",
         "dht_publish",

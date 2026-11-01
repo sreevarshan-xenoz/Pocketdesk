@@ -108,6 +108,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Connection,
     ),
     (
+        "gnome_unattended",
+        "Unattended on GNOME",
+        Section::Connection,
+    ),
+    (
         "internet_files",
         "Files over the internet",
         Section::Connection,
@@ -571,7 +576,7 @@ pub fn computer_quality_label(name: &str) -> &'static str {
 /// system only (J2 review: on Windows "grant" opened an empty Connection).
 pub(crate) fn drawn_here(key: &str) -> bool {
     match key {
-        "remember_screen_grant" => cfg!(target_os = "linux"),
+        "remember_screen_grant" | "gnome_unattended" => cfg!(target_os = "linux"),
         // P3: Windows says when it is presenting; Linux does not.
         // Q4: GNOME's and KDE's Do Not Disturb on Linux.
         "quiet_presenting" => cfg!(any(windows, target_os = "linux")),
@@ -732,6 +737,7 @@ pub fn applies_live(key: &str) -> bool {
             | "gamepad_controller"
             | "downloads_folder"
             | "remember_screen_grant"
+            | "gnome_unattended"
             | "clipboard_history"
             | "clipboard_never_from"
             | "clipboard_never_like"
@@ -1210,6 +1216,19 @@ impl SettingsForm {
                         {
                             let _ = pocketdesk_core::portal_grant::forget(&dir);
                         }
+                    });
+                }
+                // GNOME only: mutter's own D-Bus API, with no dialog.
+                if drawn_here("gnome_unattended") {
+                    row(ui, "gnome_unattended", |ui| {
+                        ui.checkbox(
+                            &mut e.gnome_unattended,
+                            "start the screen and input with no dialog at this computer",
+                        );
+                        note(
+                            ui,
+                            "GNOME only, off by default. Sessions start through GNOME's own screen-casting and remote-desktop service, as gnome-remote-desktop's headless mode does, so no one has to allow anything at this computer. Any program running as you can make the same calls. If GNOME's service is missing or refuses, the screen-sharing dialog is used instead. Every session still needs a paired phone and its permissions.",
+                        );
                     });
                 }
                 row(ui, "internet_files", |ui| {

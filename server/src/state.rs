@@ -155,6 +155,15 @@ pub fn screen_grant() -> Option<PathBuf> {
     }
 }
 
+/// Give the capture the owner's "Unattended on GNOME" switch as the config
+/// holds it now (off by default; only a GNOME session acts on it), as each
+/// session starts.
+pub fn apply_gnome_unattended() {
+    pocketdesk_core::streaming::gnome_unattended::set_enabled(
+        crate::events::current_config().gnome_unattended,
+    );
+}
+
 /// Path to the server PID file.
 pub fn pid_file_path() -> Result<PathBuf> {
     Ok(state_dir()?.join("server.pid"))
