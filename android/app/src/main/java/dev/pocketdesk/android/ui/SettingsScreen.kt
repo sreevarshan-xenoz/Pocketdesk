@@ -188,6 +188,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 CopiesSetting()
                 CastSoundSetting()
                 WebcamSetting()
+                PhoneLocationSetting()
             }
 
             SettingsGroup(stringResource(R.string.settings_session)) {

@@ -895,6 +895,19 @@ pub async fn connect_to_peer(
                                         from_peer.1,
                                     );
                                 }
+                                // The computer's asks for this phone's
+                                // location (GeoClue); the place is never
+                                // kept here, only the ask.
+                                if trimmed.contains("phone_location.ask")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                {
+                                    crate::location_requests::receive(
+                                        &pkt.packet_type,
+                                        &pkt.body,
+                                        &from_peer.0,
+                                        from_peer.1,
+                                    );
+                                }
                                 // The computer's mutes for this phone (D2).
                                 if trimmed.contains("pocketdesk.quiet")
                                     && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
@@ -1092,6 +1105,7 @@ async fn forget_link(from: &(String, u16)) {
     crate::notification_answers::forget_from(&from.0, from.1);
     crate::phone_file_requests::forget();
     crate::photo_requests::forget();
+    crate::location_requests::forget();
     crate::quiet_requests::forget();
 }
 

@@ -190,6 +190,8 @@ pub async fn run(config: Config) -> Result<()> {
     tokio::spawn(crate::drive::live::run());
     tokio::spawn(crate::away_lock::run());
     tokio::spawn(crate::plugins::phone_photos::run_watcher());
+    // The phone's location for GeoClue, while the setting is on.
+    tokio::spawn(crate::phone_location::run());
     // A phone's own screen (T10j): those a stopped server left go before
     // any phone can ask for one (waited for at most 5 s; adds wait behind it
     // either way), and each goes once its phone has no session.

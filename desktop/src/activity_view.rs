@@ -336,6 +336,16 @@ pub fn describe(event: &Event) -> String {
             if flag("charging") { ", charging" } else { "" }
         ),
         "phone_battery_low" => format!("Battery low: {} %", number(event, "charge").unwrap_or(0)),
+        // Where it is is never in the event: only how close it was given.
+        "phone_location" => format!(
+            "Gave this computer's apps its {} location, accurate to {} m",
+            if text(event, "precision") == Some("exact") {
+                "exact"
+            } else {
+                "city"
+            },
+            number(event, "accuracy").unwrap_or(0)
+        ),
         "away_locked" => if flag("failed") {
             "Left, but locking this computer failed"
         } else {
@@ -494,6 +504,27 @@ mod tests {
         assert_eq!(
             describe(&event("session_started", json!({"mode": "phone_sound"}))),
             "Playing its sound here"
+        );
+    }
+
+    /// The phone's location for GeoClue: how close and how accurate, under
+    /// Phones, and never where.
+    #[test]
+    fn a_location_fix_reads_by_its_accuracy_alone() {
+        assert!(Filter::Phones.admits("phone_location"));
+        assert_eq!(
+            describe(&event(
+                "phone_location",
+                json!({"accuracy": 1000, "precision": "city"})
+            )),
+            "Gave this computer's apps its city location, accurate to 1000 m"
+        );
+        assert!(
+            describe(&event(
+                "phone_location",
+                json!({"accuracy": 8, "precision": "exact"})
+            ))
+            .contains("exact location, accurate to 8 m")
         );
     }
 

@@ -21,6 +21,7 @@ mod introductions;
 mod link;
 mod link_quiet;
 mod links;
+mod location_requests;
 mod logcat;
 mod media_presses;
 mod notes;
@@ -1824,6 +1825,17 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakePho
     _class: JClass<'_>,
 ) -> jstring {
     let json = envelope(Ok(photo_requests::take_json()));
+    to_jstring(&mut env, json)
+}
+
+/// The computer's asks for this phone's location since the last call
+/// (GeoClue): `{"ok": "[{host, port, precision}]"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeLocationRequests(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(location_requests::take_json()));
     to_jstring(&mut env, json)
 }
 

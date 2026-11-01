@@ -60,6 +60,8 @@ pub mod mic_relay;
 #[path = "mic_relay_windows.rs"]
 pub mod mic_relay;
 pub(crate) mod nearby;
+pub mod nmea;
+pub mod nmea_announce;
 #[cfg(windows)]
 mod notification_listener_windows;
 pub mod notification_monitor;
@@ -73,6 +75,7 @@ pub mod peer_computers;
 pub mod pen;
 pub mod phone_approves;
 pub mod phone_camera;
+pub mod phone_location;
 pub mod phone_sound;
 pub mod platform;
 pub mod plugins;

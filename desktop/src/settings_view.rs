@@ -272,6 +272,17 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "The camera's frame rate",
         Section::Phones,
     ),
+    ("phone_location", "Location from my phone", Section::Phones),
+    (
+        "phone_location_precision",
+        "How close the location is",
+        Section::Phones,
+    ),
+    (
+        "phone_location_phone",
+        "The phone that gives it",
+        Section::Phones,
+    ),
     (
         "phone_notifications",
         "Phone notifications",
@@ -613,6 +624,10 @@ pub(crate) fn drawn_here(key: &str) -> bool {
         | "phone_approves_local_only"
         | "phone_approves_timeout_secs"
         | "phone_approves_phones" => cfg!(target_os = "linux"),
+        // The phone's location for GeoClue: Linux's.
+        "phone_location" | "phone_location_precision" | "phone_location_phone" => {
+            cfg!(target_os = "linux")
+        }
         "mic_relay_device" => cfg!(windows),
         // PC10: the window reads the microphone on Windows and Linux.
         "computer_view_mic_device" => cfg!(any(windows, target_os = "linux")),
@@ -806,6 +821,10 @@ pub fn applies_live(key: &str) -> bool {
             | "phone_camera_lens"
             | "phone_camera_height"
             | "phone_camera_fps"
+            // Read by the server every few seconds and at each ask.
+            | "phone_location"
+            | "phone_location_precision"
+            | "phone_location_phone"
     )
 }
 
@@ -1905,6 +1924,47 @@ impl SettingsForm {
                                 ui,
                                 "What the phone is asked for; it takes the nearest its camera offers.",
                             );
+                        });
+                    }
+                }
+                // The phone's location for GeoClue (Linux): off by default.
+                if drawn_here("phone_location") {
+                    let phones = &self.phones;
+                    row(ui, "phone_location", |ui| {
+                        ui.checkbox(
+                            &mut e.phone_location,
+                            "give this computer's apps my phone's location, through GeoClue (weather, night light, time zone, maps)",
+                        );
+                        note(
+                            ui,
+                            "This computer serves one location source to itself only and tells GeoClue about it over Avahi (needs avahi-daemon running); when an app wants a place, the phone is asked for one fix, at most every ten minutes, and only with \u{201c}Give my computer my location\u{201d} on in Pocketdesk's Settings on the phone. Nothing is stored or logged but the accuracy; each fix shows in Activity. Off by default.",
+                        );
+                    });
+                    if e.phone_location {
+                        row(ui, "phone_location_precision", |ui| {
+                            for (name, label) in [("city", "City (about 1 km)"), ("exact", "Exact")]
+                            {
+                                let picked = e.phone_location_precision.eq_ignore_ascii_case(name);
+                                if ui.radio(picked, label).clicked() {
+                                    e.phone_location_precision = name.to_string();
+                                }
+                            }
+                            note(
+                                ui,
+                                "City rounds the place to about a kilometre before it leaves the phone. Exact needs the phone's \u{201c}Exact location\u{201d} on as well; without it the phone still gives the city.",
+                            );
+                        });
+                        row(ui, "phone_location_phone", |ui| {
+                            let any = e.phone_location_phone.is_empty();
+                            if ui.radio(any, "Any of my phones that is linked").clicked() {
+                                e.phone_location_phone.clear();
+                            }
+                            for (id, name) in phones {
+                                let picked = e.phone_location_phone == *id;
+                                if ui.radio(picked, name).clicked() {
+                                    e.phone_location_phone = id.clone();
+                                }
+                            }
                         });
                     }
                 }

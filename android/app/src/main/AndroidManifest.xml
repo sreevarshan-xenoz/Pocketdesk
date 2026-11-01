@@ -76,6 +76,20 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- GeoClue: "Give my computer my location", off by default. The coarse
+         permission gives the city (about 1 km) and is asked at opt-in; the fine
+         one only when its owner also allows "Exact location". The background
+         one is optional and only for an ask while the app is not on screen:
+         Android shows no location to a background app without it. It is never
+         requested by the app itself, only chosen by its owner in the app's
+         location settings; Google Play wants a declaration for it, GitHub,
+         Obtainium and F-Droid builds do not. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <uses-feature android:name="android.hardware.location.network" android:required="false" />
     <!-- BF3: Yes to the computer's question takes the fingerprint or screen lock. -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 

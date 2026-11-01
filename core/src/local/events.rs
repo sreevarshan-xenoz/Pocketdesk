@@ -22,6 +22,7 @@ pub const KINDS: &[&str] = &[
     "phone_unlinked",
     "phone_battery",
     "phone_battery_low",
+    "phone_location",
     "phone_quiet",
     "away_locked",
     "notification",

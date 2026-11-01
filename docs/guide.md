@@ -653,7 +653,7 @@ What it needs: NetworkManager (it makes the hotspot over D-Bus, as a volatile co
 
 Settings (Connection): **Offer a direct link** (`direct_link`, on), **Direct link's band** (`direct_link_band`: `auto`, which is 2.4 GHz and joined by every phone, `2.4` or `5`; a card that keeps one channel for both connections follows its connection's band) and **Turn the direct link off after** (`direct_link_idle_minutes`, 1 to 120, default 10).
 
-The phone binds Pocketdesk's own sockets to that network by binding its process (`ConnectivityManager.bindProcessToNetwork`), and lets it go when the session ends or the pairing is left. Other apps on the phone are untouched. The QR is the usual pairing link with the network's name and passphrase on the end ([protocol §2.6](protocol.md)). It is as private as the PIN it carries: anyone who sees it while the link is on can join the network and pair, so show it only to the phone you mean. [SECURITY.md](../SECURITY.md) limit 76 says what joining the network reaches.
+The phone binds Pocketdesk's own sockets to that network by binding its process (`ConnectivityManager.bindProcessToNetwork`), and lets it go when the session ends or the pairing is left. Other apps on the phone are untouched. The QR is the usual pairing link with the network's name and passphrase on the end ([protocol §2.6](protocol.md)). It is as private as the PIN it carries: anyone who sees it while the link is on can join the network and pair, so show it only to the phone you mean. [SECURITY.md](../SECURITY.md) limit 77 says what joining the network reaches.
 
 ### Away From Home: Your Own Relay
 
@@ -735,6 +735,15 @@ Know before you rely on it:
 - With no root password: boot with `systemd.unit=rescue.target` (or `init=/bin/bash`) added to the kernel line, remount `/` read-write (`mount -o remount,rw /`), and remove the line.
 - `pkexec` uses polkit-1, so a broken `/etc/pam.d/polkit-1` does not stop `sudo` from fixing it, and the other way round.
 - To stop the phone approving without touching PAM: turn off "Approve with my phone" in Settings, or `sudo /usr/lib/pocketdesk/pocketdesk-pam-ask --unpin $USER`; the line then fails at once and the password prompt comes as before.
+
+### Your Phone's Location for This Computer (GeoClue)
+
+Mozilla's location service shut down in 2024, so on Linux GeoClue (what night light, weather, the time zone and maps ask) often has no way to know where the computer is. Pocketdesk can give it your phone's place instead. It is off on both sides until you turn it on.
+
+1. **On this computer:** Settings → Phones → "Location from my phone". Pick City (the default: the place rounded to about 1 km) or Exact, and which phone (any of yours that is linked, or one by name). You need `geoclue` and `avahi-daemon` running; GeoClue's network-NMEA source is on by default (`[network-nmea]` in `/etc/geoclue/geoclue.conf`), and on a desktop without a GeoClue agent (GNOME and KDE have one) the demo agent must run for apps to be allowed.
+2. **On the phone:** Settings → "Give my computer my location" (allow location when asked). "Exact location" under it is off; the computer gets the city unless you turn it on and the computer asks for exact. Android shows no location to an app that is not on screen, so for asks while the phone is in your pocket choose "Allow all the time" for Pocketdesk in the app's location settings (the row under the switch opens them); without it the phone answers while Pocketdesk is open.
+
+How it works: this computer serves one location source to itself only (its own loopback; nothing on the network can connect) and tells GeoClue about it over Avahi on the loopback. When an app asks GeoClue for a place, GeoClue connects, and the computer asks the phone for one fix, at most every ten minutes, and passes it on. Each fix shows in Activity by its accuracy. Nothing is stored and nothing is logged but "fix sent, accuracy N m". Linux only: Windows would need a sensor driver. `docs/privacy.md` and limit 76 in `SECURITY.md` say what it exposes; the packets are in `docs/protocol.md`.
 
 ### CLI Commands
 

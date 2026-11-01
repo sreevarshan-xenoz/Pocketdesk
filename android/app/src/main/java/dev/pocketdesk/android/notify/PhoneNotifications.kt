@@ -274,6 +274,9 @@ class PhoneNotificationListener : NotificationListenerService() {
     private val recentPhotosTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
     private val phoneFilesTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
 
+    /** The computer asking where this phone is (GeoClue), on the photos' tick: it answers from its own thread. */
+    private val phoneLocation by lazy { dev.pocketdesk.android.location.PhoneLocation(applicationContext) }
+
     /** The computer ringing this phone (N1), on a 2 s tick of its own: its connect can take seconds. */
     private val ring by lazy { dev.pocketdesk.android.ring.BackgroundRing(applicationContext) }
     private val ringTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
@@ -344,7 +347,10 @@ class PhoneNotificationListener : NotificationListenerService() {
             TimeUnit.SECONDS,
         )
         recentPhotosTicker.scheduleWithFixedDelay(
-            { runCatching { recentPhotos.tick() }.onFailure { Log.w("PhoneNotifications", "recent photos failed", it) } },
+            {
+                runCatching { recentPhotos.tick() }.onFailure { Log.w("PhoneNotifications", "recent photos failed", it) }
+                runCatching { phoneLocation.tick() }.onFailure { Log.w("PhoneNotifications", "phone location failed", it) }
+            },
             2,
             2,
             TimeUnit.SECONDS,
@@ -412,6 +418,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         runCatching { dev.pocketdesk.android.service.LinkKeeperService.sync(this) }
         phoneFilesTicker.shutdownNow()
         recentPhotosTicker.shutdownNow()
+        runCatching { phoneLocation.close() }
         ringTicker.shutdownNow()
         screenshotsTicker.shutdownNow()
         screenshots.close()
