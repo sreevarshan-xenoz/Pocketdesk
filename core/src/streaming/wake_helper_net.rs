@@ -218,6 +218,13 @@ impl Helper {
         self.endpoint.bound_sockets()
     }
 
+    /// The phone's network changed (Android gives iroh no such event): the
+    /// endpoint checks its interfaces, and on a real change finds its relay
+    /// again. Harmless when nothing changed.
+    pub async fn network_changed(&self) {
+        self.endpoint.network_change().await;
+    }
+
     pub fn state(&self) -> &Arc<HelperState> {
         &self.state
     }

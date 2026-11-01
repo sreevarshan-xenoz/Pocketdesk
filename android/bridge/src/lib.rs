@@ -1114,6 +1114,8 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeNetwork
     _class: JClass<'_>,
 ) {
     RUNTIME.spawn(pocketdesk_core::streaming::network_changed());
+    // The wake helper's own endpoint, if it listens.
+    RUNTIME.spawn(wake_helper::network_changed());
     // A new network may reach a computer the old one could not (BB5).
     api::INTERNET_PAUSE.clear();
 }

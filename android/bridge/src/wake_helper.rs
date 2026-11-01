@@ -133,6 +133,13 @@ pub(crate) async fn stop() {
     }
 }
 
+/// The phone's network changed: the listener, if it runs, looks again.
+pub(crate) async fn network_changed() {
+    if let Some(helper) = HELPER.lock().await.as_ref() {
+        helper.network_changed().await;
+    }
+}
+
 /// `{running, id, relays, sent, refused, dropped}`: counts, never a key
 /// beyond the helper's own, which the computer is told.
 pub(crate) async fn status() -> String {
