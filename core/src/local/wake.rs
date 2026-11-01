@@ -53,6 +53,23 @@ pub fn facts_for(adapters: &[Adapter], local: Option<Ipv4Addr>) -> Option<WakeFa
     })
 }
 
+/// The facts for the physical adapter whose own subnet holds `peer`: how a
+/// computer wakes itself for a phone on its network (the wake helper), by
+/// where the phone is rather than by the address the phone reached. `None`
+/// when the peer is on none of its networks (the internet, a tunnel) or the
+/// adapter has no usable MAC.
+pub fn facts_for_peer(adapters: &[Adapter], peer: Ipv4Addr) -> Option<WakeFacts> {
+    adapters.iter().filter(|a| a.physical).find_map(|a| {
+        let (addr, _) = a.ipv4.iter().find(|&&(addr, prefix)| {
+            (1..=30).contains(&prefix) && !addr.is_loopback() && {
+                let mask = u32::MAX << (32 - u32::from(prefix));
+                u32::from(addr) & mask == u32::from(peer) & mask
+            }
+        })?;
+        facts_of(a, Some(*addr))
+    })
+}
+
 fn facts_of(adapter: &Adapter, local: Option<Ipv4Addr>) -> Option<WakeFacts> {
     let mac = adapter.mac.filter(usable_mac)?;
     let (addr, prefix) = match local {
@@ -234,6 +251,24 @@ mod tests {
             facts_for(&[ethernet(), wifi()], None).unwrap().adapter,
             "Wi-Fi"
         );
+    }
+
+    #[test]
+    fn a_phone_on_the_computers_network_is_woken_on_that_adapter() {
+        let adapters = [wifi(), ethernet(), tunnel()];
+        let facts = facts_for_peer(&adapters, Ipv4Addr::new(192, 168, 1, 77)).unwrap();
+        assert_eq!(facts.adapter, "Ethernet");
+        assert_eq!(facts.broadcast, Ipv4Addr::new(192, 168, 1, 255));
+        // The internet, a tunnel's own network and a stranger's are none.
+        assert_eq!(
+            facts_for_peer(&adapters, Ipv4Addr::new(203, 0, 113, 5)),
+            None
+        );
+        assert_eq!(
+            facts_for_peer(&adapters, Ipv4Addr::new(100, 64, 0, 3)),
+            None
+        );
+        assert_eq!(facts_for_peer(&adapters, Ipv4Addr::LOCALHOST), None);
     }
 
     #[test]
