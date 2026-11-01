@@ -91,8 +91,19 @@ object RustCore {
     private external fun nativeConnectSound(address: String, port: Int): String
     private external fun nativeConnectSoundWan(address: String, identityJson: String): String
     private external fun nativeRemoteState(): String
-    private external fun nativeConnectCast(address: String, port: Int, soundAlone: Boolean, webcam: Boolean): String
-    private external fun nativeConnectCastWan(address: String, identityJson: String, soundAlone: Boolean, webcam: Boolean): String
+    private external fun nativeConnectCast(address: String, port: Int, soundAlone: Boolean, webcam: Boolean, windows: Boolean): String
+    private external fun nativeConnectCastWan(address: String, identityJson: String, soundAlone: Boolean, webcam: Boolean, windows: Boolean): String
+    private external fun nativeCastWindowConfig(window: Int, width: Int, height: Int, input: Boolean): Int
+    private external fun nativeCastWindowFrame(
+        window: Int,
+        buffer: java.nio.ByteBuffer,
+        offset: Int,
+        size: Int,
+        keyframe: Boolean,
+        seq: Long,
+    ): Int
+    private external fun nativeCastWindowClosed(window: Int): Int
+    private external fun nativeCastWindowKeyframeWanted(window: Int): Boolean
     private external fun nativeCastConfig(width: Int, height: Int): Int
     private external fun nativeCastFrame(
         buffer: java.nio.ByteBuffer,
@@ -645,14 +656,44 @@ object RustCore {
     /**
      * Show this phone's screen on the computer at [address] (T10k): a cast
      * session on the LAN; with [soundAlone], its sound and nothing else (M7);
-     * with [webcam], the camera's picture as the computer's camera (F6 part 2).
+     * with [webcam], the camera's picture as the computer's camera (F6 part 2);
+     * with [windows], app windows only and no screen of the phone's (Phone
+     * apps tier 2).
      */
-    fun connectCast(address: String, port: Int, soundAlone: Boolean = false, webcam: Boolean = false): Result<Unit> =
-        envelope(nativeConnectCast(address, port, soundAlone, webcam)).map { }
+    fun connectCast(
+        address: String,
+        port: Int,
+        soundAlone: Boolean = false,
+        webcam: Boolean = false,
+        windows: Boolean = false,
+    ): Result<Unit> = envelope(nativeConnectCast(address, port, soundAlone, webcam, windows)).map { }
 
     /** [connectCast] over the iroh WAN path, with the desktop's cached endpoint identity. */
-    fun connectCastWan(address: String, identityJson: String, soundAlone: Boolean = false, webcam: Boolean = false): Result<Unit> =
-        envelope(nativeConnectCastWan(address, identityJson, soundAlone, webcam)).map { }
+    fun connectCastWan(
+        address: String,
+        identityJson: String,
+        soundAlone: Boolean = false,
+        webcam: Boolean = false,
+        windows: Boolean = false,
+    ): Result<Unit> = envelope(nativeConnectCastWan(address, identityJson, soundAlone, webcam, windows)).map { }
+
+    /**
+     * App window [window]'s encoder (re)started at [width]×[height] (Phone
+     * apps tier 2); [input]: the phone takes the computer's touch and typing
+     * there. QUEUED, FULL or NO_CAST, as [castConfig].
+     */
+    fun castWindowConfig(window: Int, width: Int, height: Int, input: Boolean): Int =
+        nativeCastWindowConfig(window, width, height, input)
+
+    /** One access unit of app window [window], as [castFrame] takes one of the screen's. */
+    fun castWindowFrame(window: Int, buffer: java.nio.ByteBuffer, offset: Int, size: Int, keyframe: Boolean, seq: Long): Int =
+        nativeCastWindowFrame(window, buffer, offset, size, keyframe, seq)
+
+    /** App window [window] ended on the phone. */
+    fun castWindowClosed(window: Int): Int = nativeCastWindowClosed(window)
+
+    /** Whether the computer asked for a keyframe of app window [window] since the last look. */
+    fun castWindowKeyframeWanted(window: Int): Boolean = nativeCastWindowKeyframeWanted(window)
 
     /**
      * The cast's encoder (re)started at [width]×[height]; waits up to 2 s for
@@ -1233,6 +1274,8 @@ object RustCore {
         /** Apps part 2: for a share, the file the computer is sending: its name and size. */
         val name: String = "",
         val size: Long = -1,
+        /** Phone apps tier 2: for an open, the app is wanted in a window of its own (and no screen of the phone's). */
+        val window: dev.pocketdesk.android.windows.WindowRule.Ask? = null,
     )
 
     /** The screenshots and locks waiting (O2), taken. */
@@ -1253,6 +1296,7 @@ object RustCore {
                     a.optBoolean("screen", false),
                     a.optString("name"),
                     a.optLong("size", -1),
+                    dev.pocketdesk.android.windows.WindowRule.parseAsk(a.optJSONObject("window")),
                 )
             }
         }.getOrDefault(emptyList())

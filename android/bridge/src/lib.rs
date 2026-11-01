@@ -650,6 +650,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
     port: jint,
     sound_alone: jboolean,
     webcam: jboolean,
+    windows: jboolean,
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let json = envelope_unit(RUNTIME.block_on(api::connect_streaming(
@@ -657,7 +658,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
         port as u16,
         None,
         0,
-        cast_mode(sound_alone, webcam),
+        cast_mode(sound_alone, webcam, windows),
     )));
     to_jstring(&mut env, json)
 }
@@ -672,6 +673,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
     identity_json: JString<'_>,
     sound_alone: jboolean,
     webcam: jboolean,
+    windows: jboolean,
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let identity = jstring_to_string(&mut env, &identity_json);
@@ -680,18 +682,25 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
         identity,
         None,
         0,
-        cast_mode(sound_alone, webcam),
+        cast_mode(sound_alone, webcam, windows),
     )));
     to_jstring(&mut env, json)
 }
 
-/// A cast's mode: its screen, its sound alone (M7), or its camera as the
-/// computer's camera (F6 part 2).
-fn cast_mode(sound_alone: jboolean, webcam: jboolean) -> pocketdesk_core::streaming::SessionMode {
+/// A cast's mode: its screen, its sound alone (M7), its camera as the
+/// computer's camera (F6 part 2), or app windows with no screen of the
+/// phone's (Phone apps tier 2).
+fn cast_mode(
+    sound_alone: jboolean,
+    webcam: jboolean,
+    windows: jboolean,
+) -> pocketdesk_core::streaming::SessionMode {
     if sound_alone != 0 {
         pocketdesk_core::streaming::SessionMode::PhoneSound
     } else if webcam != 0 {
         pocketdesk_core::streaming::SessionMode::Webcam
+    } else if windows != 0 {
+        pocketdesk_core::streaming::SessionMode::Windows
     } else {
         pocketdesk_core::streaming::SessionMode::Cast
     }
@@ -755,6 +764,90 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastFra
     // and the caller keeps it alive and unchanged until this returns.
     let access_unit = unsafe { std::slice::from_raw_parts(address.add(offset), size) };
     cast::frame(keyframe != 0, seq as u64, access_unit)
+}
+
+/// App window `window`'s encoder (re)started at `width`×`height` (Phone
+/// apps tier 2); `input`: the phone takes the computer's touch and typing in
+/// it. 0 queued, 1 the link is behind (try again), 2 no cast session.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastWindowConfig(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    window: jint,
+    width: jint,
+    height: jint,
+    input: jboolean,
+) -> jint {
+    let (Ok(window), Ok(width), Ok(height)) = (
+        u8::try_from(window),
+        u16::try_from(width),
+        u16::try_from(height),
+    ) else {
+        return cast::NO_CAST;
+    };
+    RUNTIME.block_on(cast::window_config(window, width, height, input != 0))
+}
+
+/// One access unit of app window `window` (Phone apps tier 2), as
+/// `nativeCastFrame` takes one of the screen's.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastWindowFrame(
+    env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    window: jint,
+    buffer: jni::objects::JByteBuffer<'_>,
+    offset: jint,
+    size: jint,
+    keyframe: jboolean,
+    seq: jlong,
+) -> jint {
+    let (Ok(window), Ok(offset), Ok(size)) = (
+        u8::try_from(window),
+        usize::try_from(offset),
+        usize::try_from(size),
+    ) else {
+        return cast::NO_CAST;
+    };
+    let (Ok(address), Ok(capacity)) = (
+        env.get_direct_buffer_address(&buffer),
+        env.get_direct_buffer_capacity(&buffer),
+    ) else {
+        return cast::NO_CAST;
+    };
+    if address.is_null() || offset.checked_add(size).is_none_or(|end| end > capacity) {
+        return cast::NO_CAST;
+    }
+    // SAFETY: the buffer is direct, `offset + size` is within its capacity,
+    // and the caller keeps it alive and unchanged until this returns.
+    let access_unit = unsafe { std::slice::from_raw_parts(address.add(offset), size) };
+    cast::window_frame(window, keyframe != 0, seq as u64, access_unit)
+}
+
+/// App window `window` ended on the phone (Phone apps tier 2).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastWindowClosed(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    window: jint,
+) -> jint {
+    let Ok(window) = u8::try_from(window) else {
+        return cast::NO_CAST;
+    };
+    RUNTIME.block_on(cast::window_closed(window))
+}
+
+/// Whether the computer asked for a keyframe of app window `window` since the
+/// last look (Phone apps tier 2).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastWindowKeyframeWanted(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    window: jint,
+) -> jboolean {
+    let Ok(window) = u8::try_from(window) else {
+        return 0;
+    };
+    jboolean::from(cast::window_keyframe_wanted(window))
 }
 
 /// The cast session's state (T10k), as `nativeRemoteState`'s, but `none`
