@@ -414,6 +414,7 @@ class PhoneNotificationListener : NotificationListenerService() {
 
     override fun onDestroy() {
         calls.stop()
+        dev.pocketdesk.android.watch.WatchLinkServer.stop()
         answerTicker.shutdownNow()
         inUseAsker.shutdownNow()
         keeperTicker.shutdownNow()
@@ -1048,6 +1049,8 @@ class PhoneNotificationListener : NotificationListenerService() {
         }
         // BF3: questions from `pocketdesk ask`, offered with no session open.
         dev.pocketdesk.android.ask.Asks.take(this, own)
+        // Item 9: the watch's Bluetooth service, while Watch controls is on.
+        dev.pocketdesk.android.watch.WatchLinkServer.sync(this)
         // BF1: alerts from `pocketdesk done`, shown with no session open.
         own?.let { dev.pocketdesk.android.notify.ComputerAlerts.take(this, it.address, it.controlPort) }
         // O2: screenshots and locks the computer asks for, taken whatever
