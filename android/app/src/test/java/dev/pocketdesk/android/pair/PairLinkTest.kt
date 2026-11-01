@@ -42,6 +42,23 @@ class PairLinkTest {
     }
 
     @Test
+    fun theSavedLinkLosesItsWifiKeysAndNothingElse() {
+        val saved = PairLink.withoutWifi(wifiFixture)
+        assertFalse(saved, saved.contains("ws=") || saved.contains("wp=") || saved.contains("Abc"))
+        val back = PairLink.parse(saved).getOrThrow()
+        assertNull(back.wifi)
+        assertEquals(PairLink.parse(wifiFixture).getOrThrow().copy(wifi = null), back)
+        // An ordinary link, and text with no query, come back as they were.
+        assertEquals(fixture, PairLink.withoutWifi(fixture))
+        assertEquals("nothing", PairLink.withoutWifi("nothing"))
+        // Only the keys named ws and wp go, not ones that merely contain them.
+        assertEquals(
+            "pocketdesk://pair?v=1&aws=1&pin=123456",
+            PairLink.withoutWifi("pocketdesk://pair?v=1&ws=n&aws=1&wp=k&pin=123456"),
+        )
+    }
+
+    @Test
     fun theWifiKeyIsNeverPrinted() {
         val link = PairLink.parse(wifiFixture).getOrThrow()
         val shown = link.wifi.toString() + link.wifi?.let { "$it" }

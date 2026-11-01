@@ -72,16 +72,21 @@ fun PairLinkScreen(
     var joining by remember(uri) { mutableStateOf(false) }
     var joinFailed by remember(uri) { mutableStateOf(false) }
     val blocked = decision == DirectLinkDecision.Disabled || decision == DirectLinkDecision.TooOld
+    // A link another app or a web page opened never joins a network on its
+    // own: after "Pair" it names the network and asks once more.
+    val needsExtra = decision == DirectLinkDecision.Join && !scanned
+    var extraOk by remember(uri) { mutableStateOf(false) }
+    val extraPending = confirmed && needsExtra && !extraOk
     // Back cancels as Cancel does (U2: it left the app), and only when
     // Cancel shows: a pairing under way runs to its end, or the computer
     // could keep this phone paired while the phone saved nothing. Joining a
     // direct link is not yet a pairing: back leaves it, and the join with it.
     androidx.activity.compose.BackHandler {
-        if (link == null || outcome != null || !confirmed || joining || joinFailed || blocked) onBack()
+        if (link == null || outcome != null || !confirmed || joining || joinFailed || blocked || extraPending) onBack()
     }
 
-    LaunchedEffect(uri, confirmed) {
-        if (link == null || !confirmed || blocked) return@LaunchedEffect
+    LaunchedEffect(uri, confirmed, extraOk) {
+        if (link == null || !confirmed || blocked || (needsExtra && !extraOk)) return@LaunchedEffect
         val wifi = link.wifi
         if (decision == DirectLinkDecision.Join && wifi != null) {
             joining = true
@@ -122,6 +127,23 @@ fun PairLinkScreen(
                 stringResource(R.string.pair_link_join_failed),
                 textAlign = TextAlign.Center,
             )
+            extraPending -> {
+                Text(
+                    stringResource(
+                        R.string.pair_link_wifi_extra_title,
+                        PairLink.displayName(link.wifi?.ssid.orEmpty()),
+                    ),
+                    style = MaterialTheme.typography.titleMedium,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(stringResource(R.string.pair_link_wifi_extra_body), textAlign = TextAlign.Center)
+                Spacer(Modifier.height(16.dp))
+                Button(onClick = { extraOk = true }) {
+                    Text(stringResource(R.string.pair_link_wifi_extra_confirm))
+                }
+            }
             joining -> {
                 CircularProgressIndicator()
                 Spacer(Modifier.height(16.dp))
@@ -157,6 +179,14 @@ fun PairLinkScreen(
                 if (decision == DirectLinkDecision.Join) {
                     Spacer(Modifier.height(8.dp))
                     Text(stringResource(R.string.pair_link_direct_note), textAlign = TextAlign.Center)
+                    Text(
+                        stringResource(
+                            R.string.pair_link_direct_network,
+                            PairLink.displayName(link.wifi?.ssid.orEmpty()),
+                        ),
+                        style = MaterialTheme.typography.titleSmall,
+                        textAlign = TextAlign.Center,
+                    )
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(stringResource(R.string.pair_link_confirm_body), textAlign = TextAlign.Center)
@@ -192,7 +222,7 @@ fun PairLinkScreen(
                 textAlign = TextAlign.Center,
             )
         }
-        if (link == null || outcome != null || !confirmed || joining || joinFailed || blocked) {
+        if (link == null || outcome != null || !confirmed || joining || joinFailed || blocked || extraPending) {
             Spacer(Modifier.height(16.dp))
             TextButton(onClick = onBack) { Text(stringResource(R.string.cancel)) }
         }

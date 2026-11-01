@@ -586,7 +586,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.putString(STATE_PAIR_LINK, pairLink.value)
+        // Never the Wi-Fi passphrase of a direct link: saved instance state
+        // can reach a backup or a crash report.
+        outState.putString(
+            STATE_PAIR_LINK,
+            pairLink.value?.let { dev.pocketdesk.android.pair.PairLink.withoutWifi(it) },
+        )
         outState.putBoolean(STATE_PAIR_SCANNED, pairLinkScanned.value)
     }
 

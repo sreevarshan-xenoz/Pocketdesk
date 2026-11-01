@@ -365,6 +365,10 @@
     <string name="pair_link_calls_itself">Se hace llamar «%1$s».</string>
     <string name="pair_link_not_scanned">Este código lo abrió otra app o una página web, no lo escaneaste tú.</string>
     <string name="pair_link_direct_note">Este es un enlace directo. El teléfono se unirá a la red Wi-Fi propia de este equipo solo para Pocketdesk y mantiene sus datos móviles para todo lo demás. Android te pedirá permiso.</string>
+    <string name="pair_link_direct_network">Red: %1$s</string>
+    <string name="pair_link_wifi_extra_title">Este enlace pide al teléfono unirse a la red Wi-Fi %1$s</string>
+    <string name="pair_link_wifi_extra_body">Lo abrió otra app o una página web, no lo escaneaste tú. Continúa solo si iniciaste un enlace directo en tu propio equipo y esta es su red.</string>
+    <string name="pair_link_wifi_extra_confirm">Unirse a la red y emparejar</string>
     <string name="pair_link_joining">Uniéndose al Wi-Fi del equipo…</string>
     <string name="pair_link_joining_hint">Permítelo en el aviso de Android.</string>
     <string name="pair_link_join_failed">El teléfono no se unió al Wi-Fi del equipo. Permítelo cuando Android pregunte, quédate cerca del equipo y vuelve a escanear el código.</string>

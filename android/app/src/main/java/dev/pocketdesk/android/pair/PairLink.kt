@@ -67,6 +67,21 @@ data class PairLink(
             return join
         }
 
+        /**
+         * [uri] without its Wi-Fi keys (`ws`, `wp`): for what is saved across
+         * a restart of the app, where the passphrase must never land. The
+         * link then pairs without joining the network.
+         */
+        fun withoutWifi(uri: String): String {
+            val at = uri.indexOf('?')
+            if (at < 0) return uri
+            val kept = uri.substring(at + 1).split('&').filter { part ->
+                val key = part.substringBefore('=')
+                key != "ws" && key != "wp"
+            }
+            return uri.substring(0, at + 1) + kept.joinToString("&")
+        }
+
         fun parse(uri: String): Result<PairLink> = runCatching {
             val cleaned = clean(uri)
             val query = cleaned.removePrefix(PREFIX)

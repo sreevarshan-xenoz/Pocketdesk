@@ -369,6 +369,10 @@
     <string name="pair_link_calls_itself">It calls itself “%1$s”.</string>
     <string name="pair_link_not_scanned">This code was opened by another app or a web page, not scanned by you.</string>
     <string name="pair_link_direct_note">This is a direct link. Your phone will join this computer\'s own Wi-Fi network for Pocketdesk only, and keeps its mobile data for everything else. Android asks you to allow it.</string>
+    <string name="pair_link_direct_network">Network: %1$s</string>
+    <string name="pair_link_wifi_extra_title">This link asks the phone to join the Wi-Fi network %1$s</string>
+    <string name="pair_link_wifi_extra_body">It was opened by another app or a web page, not scanned by you. Only continue if you started a direct link on your own computer and this is its network.</string>
+    <string name="pair_link_wifi_extra_confirm">Join the network and pair</string>
     <string name="pair_link_joining">Joining the computer\'s Wi-Fi…</string>
     <string name="pair_link_joining_hint">Allow it in the Android prompt.</string>
     <string name="pair_link_join_failed">The phone did not join the computer\'s Wi-Fi. Allow it when Android asks, stay near the computer, and scan the code again.</string>
