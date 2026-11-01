@@ -632,21 +632,35 @@ The id is in the pairing QR code, on each paired phone and on every relay the de
 
 ### Approve With My Phone: sudo, polkit and the Lock Screen
 
-On Linux, sudo, administrator prompts (polkit) and, if you want, the lock screen can be approved on your phone with its fingerprint or screen lock. It is off on both sides until you turn it on, and the password always keeps working: the phone is tried first, and when it does not approve (no phone linked, No, no answer within the wait, anything unexpected) the password prompt comes as before. With no phone linked it comes at once.
+On Linux, sudo, and with their own switches administrator prompts (polkit) and the lock screen, can be approved on your phone with its fingerprint or screen lock. It is off on both sides until you turn it on, and the password always keeps working: the phone is tried first, and when it does not approve (no phone linked, No, no answer within the wait, anything unexpected) the password prompt comes as before. With no phone linked it comes at once.
 
 1. **On this computer:** Settings → Phones → "Approve with my phone". Turn on "Answer my questions" for your phone on the Devices page.
-2. **On the phone:** Settings → "Approve my computer's requests" (Android 11 or later, with a screen lock). It makes a key in the Android Keystore that signs only after your fingerprint, or your screen lock unless "Fingerprint only, not the PIN" is on, and gives the computer its public key. Settings shows the key's fingerprint.
-3. **Pin the key as root:** `sudo /usr/lib/pocketdesk/pocketdesk-pam-ask --pin $USER`. It copies the phones' keys and this computer's certificate hash to `/etc/pocketdesk/pam/$USER.json`, which only root can change, and prints each key's fingerprint: check it matches the phone's. Pin again whenever the phone makes a new key (a new fingerprint enrolled, or "Fingerprint only" switched).
+2. **On the phone:** Settings → "Approve my computer's requests" (Android 11 or later, with a screen lock), and "Fingerprint only, not the PIN" if others know your PIN.
+3. **Pin the phone's key as root:** `sudo /usr/lib/pocketdesk/pocketdesk-pam-ask --pin $USER`. The phone asks "Allow this phone to approve sudo on this computer?" and takes your fingerprint; it then makes its key in its secure hardware with the pin's challenge, and root checks the key's Android attestation up to Google's roots (in the TEE or StrongBox, made there, signs only after your fingerprint or lock for each use, the Pocketdesk app's) before pinning it to `/etc/pocketdesk/pam/$USER.json`, which only root can change. It prints the key's whole fingerprint: check every digit against the phone's Settings. Pin again whenever the phone makes a new key (a new fingerprint enrolled, or "Fingerprint only" switched). A phone without Key Attestation can be pinned with `--pin-without-attestation`, which warns that nothing then proves where the key lives (SECURITY.md limit 73).
 4. **Test:** the Test button in Settings asks the phone a dry request as you, with no PAM involved.
-5. **Add the line to PAM yourself.** Pocketdesk never edits `/etc/pam.d`. As root, put this first among the `auth` lines of each service you want:
+5. **Add the line to PAM yourself.** Pocketdesk never edits `/etc/pam.d`. As root, add this line to each service you want, after `pam_faillock.so preauth` where your distribution uses faillock and before `pam_unix`:
 
    ```
    auth    sufficient    pam_exec.so quiet stdout /usr/lib/pocketdesk/pocketdesk-pam-ask
    ```
 
-   The services: `/etc/pam.d/sudo` and `/etc/pam.d/polkit-1` (administrator rights), and for the lock screen, with "The lock screen too" on, `hyprlock`, `swaylock`, `kde` (Plasma), `gtklock` or `gdm-password` (GNOME). Use `sufficient`, never `required` or `requisite`. `pocketdesk-pam-ask --lines` prints them.
+   - **Arch and Fedora:** `/etc/pam.d/sudo` has `auth include system-auth`, which holds the faillock and `pam_unix` lines. Put `auth required pam_faillock.so preauth` and then the line above that include, so a locked account stays locked.
+   - **Debian and Ubuntu:** `/etc/pam.d/sudo` has `@include common-auth`. Put the line above it (and `auth required pam_faillock.so preauth` before it if you enabled faillock).
+   - **Lock screens,** with "The lock screen too" on: `hyprlock`, `swaylock`, `kde` (Plasma) or `gtklock`, the same way. GNOME's `gdm-password` is not offered: the login screen uses it too.
+   - **polkit,** with "polkit too" on: `/etc/pam.d/polkit-1`.
 
-Settings also has: the wait (20 s, 5 to 60), "Only from this desk, not ssh" (on: sudo typed over ssh asks for the password), "The lock screen too" (off) and which phones may approve. The phone shows what it approves: the service, the user and sudo's command (polkit does not say its action through PAM). The packages install the helper to `/usr/lib/pocketdesk/`; from source, `sudo install -Dm755 target/release/pocketdesk-pam-ask /usr/lib/pocketdesk/pocketdesk-pam-ask` (it must be root's, outside any folder you can write to). How the request is signed and checked: SECURITY.md limit 73.
+   Use `sufficient`, never `required` or `requisite`. `pocketdesk-pam-ask --lines` prints the lines. Under PAM the helper only ever fails unless the phone approved: a mistyped line (an extra argument, say) cannot let anyone in.
+
+Settings also has: the wait (20 s, 5 to 60), "Only from this desk, not ssh", "The lock screen too" (off), "polkit too" (off) and which pinned phones may approve. At most three requests a minute go to the phone per service and user (three in five minutes at the lock screen); past that, the password prompt comes at once. The packages install the helper to `/usr/lib/pocketdesk/`; from source, `sudo install -Dm755 target/release/pocketdesk-pam-ask /usr/lib/pocketdesk/pocketdesk-pam-ask` (it must be root's, outside any folder you can write to). How the request is signed and checked: SECURITY.md limit 73.
+
+What the phone shows, all of it signed: the service and user, the command (the program's real executable and every argument, never cut, any hidden or non-ASCII character written as `⟨U+XXXX⟩`), the terminal, and the programs that asked (`sudo(812) < bash(700) < kitty(650)`), so a request that is not yours stands out. Answer No to any request you did not make.
+
+Know before you rely on it:
+- **"Only from this desk" is a best-effort guard, not a boundary.** It refuses sudo typed in an ssh session, but sudo run over ssh inside a tmux or screen session started at the desk, or through `systemd-run` or a timer, is not seen as remote; such a request still needs your phone.
+- **polkit:** PAM is not told polkit's action, so the phone cannot show what is asked; a polkit request from another user is refused; and the newer socket-started polkit helper has no parent processes, so "Only from this desk" cannot judge it. That is why polkit has its own switch, off.
+- **sudo's timestamp:** after a Yes, sudo does not ask again on that terminal for its timeout (5 to 15 minutes), for any command. To keep the phone's view of each command, set `Defaults timestamp_timeout=0` with `visudo`.
+- **Over the internet road** the phone drops approval requests (it checks the computer by the certificate it pinned for its address), so the password is asked.
+- **A Yes does not unlock your keyring** (GNOME Keyring, KWallet), which the password would have.
 
 **Do not lock yourself out.** Keep a root shell open (`sudo -i` in another terminal) while you edit a PAM file, and try `sudo -k; sudo true` from a new terminal before you close it. A `sufficient` line cannot stop the password from working, but a typo in a PAM file can break the whole service.
 
