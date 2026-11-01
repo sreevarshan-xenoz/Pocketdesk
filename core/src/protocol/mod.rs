@@ -32,6 +32,7 @@ pub mod remote_devices;
 pub mod transfer;
 pub mod typing;
 pub mod v2;
+pub mod wake_helper;
 
 #[cfg(test)]
 mod connection_test;

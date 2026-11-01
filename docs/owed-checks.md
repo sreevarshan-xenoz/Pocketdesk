@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1187 open items.
+1202 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 65 |
-| Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 17 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 67 |
+| Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 188 |
 | A phone with a SIM | 40 |
-| A second phone | 16 |
-| Away from home: another network, or through a router | 39 |
+| A second phone | 20 |
+| Away from home: another network, or through a router | 42 |
 | A second computer | 155 |
 | A Linux desktop (the Azure VM serves for some) | 214 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 65 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 388 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 66 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 392 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -177,6 +177,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Names: a file named with a colon, a Windows device name (`NUL.txt`), a hidden file and a trailing-dot name on the phone are left out (the phone's log counts them) and the run goes on. A folder renamed on the phone keeps its place on the computer. (where: OPPO)
 - Remove a folder in Settings: its row goes, the computer's copy stays, and Android no longer lists the folder in its granted folders for the app (`adb shell dumpsys package` shows no persisted grant for it) unless Folders the computer may open still shares it. (where: OPPO)
 
+**262. A spare phone at home as the wake helper (Settings, Wake helper for this home)**
+
+- Removing: Remove on the desktop's Settings, Wake: the helper phone's switch goes off at its next link with the computer (within a minute) and a wake through it fails. It does not come back by itself: after 20 minutes it is still off. Turning the switch on again on the phone makes it the helper again. (where: OPPO)
+- Unpairing the helper phone from the computer: it is no longer the computer's helper at the next check (the desktop's row says none) and its duty is gone. (where: OPPO)
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -225,6 +230,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **257. A direct link on Windows: the Mobile Hotspot**
 
 - The server killed with a link on (`taskkill /F` on the server only, and only when the owner says so) and started again: its first start's log says it swept one, the hotspot is off, and the owner's settings are back. A record that could not be put back (the internet unplugged during the kill) stays and the next start retries it. (where: power)
+
+**262. A spare phone at home as the wake helper (Settings, Wake helper for this home)**
+
+- Survives: reboot the helper with the switch on and on the charger: the service starts after boot (Android may refuse a start from the background: it starts the next time the app is opened, and the notification says why it waits); on ColorOS 14 the helper keeps answering with the screen off for an hour on the charger. (where: OPPO)
 
 ## Needs the owner's OK on this box: input reaching Windows, or its display settings
 
@@ -812,6 +821,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Pair a second device (a guest grant, `pocketdesk pair --grant 15m`, from a scripted client or a second phone) and Remove it from the OPPO: the dialog names it, Remove takes it off at once (`pocketdesk devices --json` no longer lists it), its open session and control connection end within a second, and the throwaway computer shows "<OPPO's name> removed <device> from this computer" once; `pocketdesk events` shows `device_removed` with `by` the OPPO's id. Partly checked 2026-10-31 with seeded trust-store entries (no scripted client): the dialog named the guest, it went at once, `device_removed` with `by` the OPPO's id, and A logged "A phone (<id>) removed <guest> from this computer" (the asker is named by this computer's rename only, as N3 rules). Not seen: an open session or control connection of the removed device ending (none existed), and the Windows toast.
 
+**262. A spare phone at home as the wake helper (Settings, Wake helper for this home)**
+
+- Introduction: with the helper phone paired with the throwaway computer's own code and connected once while the computer is awake, the desktop's Settings, Wake shows "<phone> is this computer's wake helper" and the computer showed one notification "<phone> is now this computer's wake helper". A phone paired as a guest (a time-limited grant, or another owner's code) that sends the offer is not listed (the server's log says an offer from a phone that is not an owner phone was dropped). (where: second phone)
+- Owner phones learn of it: another owner phone, connected once while the computer is awake, shows "Wake through my helper" in the computer's Wake settings with the helper's name (off by default); a guest phone shows "No wake helper yet". (where: second phone)
+- The limit: two Wakes in a row work; a third within 30 seconds says "the helper was asked a moment ago: try again in half a minute", and one half a minute later works. (where: second phone)
+- Revoking: remove an owner phone from the computer's Devices page: within a minute the helper's list drops it and that phone's Wake now fails ("the helper could not send it" or "could not be reached"); the packet capture shows nothing for it. (where: second phone)
+
 ## Away from home: another network, or through a router
 
 **8. Notifications + find-my-device (R3#11c, Tier-2 #11)**
@@ -924,6 +940,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The phone on the internet road (mobile data) after this build: its control channel and its screen session connect and play as before. (where: away)
 - Files between computers on Cubic: a large file (1 GB or more) sent from one computer to the other with 0.8.2 on both, then with this build on both, over a lossy or internet path (another network, or Wi-Fi far from the router), timed both ways; this build is not much slower. If it is, the transfers could ride a connection of their own on BBR. (where: away)
+
+**262. A spare phone at home as the wake helper (Settings, Wake helper for this home)**
+
+- The wake: the computer asleep (suspend it by hand on the throwaway machine), the owner phone on mobile data with "Wake through my helper" on: Wake sends the request, the computer wakes, and the helper's capture shows the magic packet matched the computer's own MAC (matched or not only). With the same phone at home on the same Wi-Fi, Wake sends the packet from the phone itself, as before. (where: away)
+- Another network: take the helper to a different Wi-Fi network (the computer elsewhere) and ask for a wake: the answer is that the helper could not send it, and the packet capture there shows nothing. A helper on a VPN-only network is told its duty is withdrawn: an owner phone revoked meanwhile can no longer ask once the helper hears it (within a minute). (where: away)
+- A helper whose relay changed (move the helper to another Wi-Fi network, with the computer awake): it offers again and the owner phone's next connection gets the new relay; an owner phone that has not connected since asks the old one and is told it could not be reached. (where: away)
 
 ## A second computer
 
@@ -1980,6 +2002,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A computer that is too old (a throwaway built from before this change): the phone says the computer cannot keep folders yet and sends nothing; no copies appear in that computer's Downloads. (where: other hardware)
 
+**262. A spare phone at home as the wake helper (Settings, Wake helper for this home)**
+
+- A stranger: a phone paired with nothing, or another owner's phone, dialing the helper by its key is closed (the helper's counts show a dropped request, no packet sent). A request line with a MAC in it sends nothing (the packet capture shows none). (where: other hardware)
+
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -2849,3 +2875,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Linux (KDE, GNOME, Hyprland with a launcher): Pin to the applications menu: the entry "<App> (phone)" shows in the launcher (after a moment on some desktops) with the icon; running it opens the app and the screen window. An app whose name has quotes, `$`, `%`, a backslash or a path separator pins and runs with the name as given and nothing else started (check the `.desktop` file by eye). Unpin removes `pocketdesk-phone-*.desktop` and the icon. (where: by hand)
 - Settings on both: "Offer to pin phone apps to Start or the applications menu" off removes the right-click menu and keeps made shortcuts working; "Share a dropped file into the phone's app in front" off sends dropped files as before. (where: by hand)
 - The Files page's Kept folders section and the three Settings rows on the desktop (the folder box with Choose folder, the cap, the deletion switch) by hand on Windows and on Linux, light and dark, and in a narrow window; the Show in folder button opens the folder. (where: by hand)
+
+**262. A spare phone at home as the wake helper (Settings, Wake helper for this home)**
+
+- The switch: with "Wake helper for this home" off (the default) nothing listens (`adb shell dumpsys activity services dev.pocketdesk.android` lists no `WakeHelperService`, and the phone's iroh endpoint is not bound). Turn it on: a quiet notification "Waiting for a charger and Wi-Fi", or "Waking your computers for your other phones" when plugged in on Wi-Fi. (where: OPPO)
+- Charger and Wi-Fi gate: unplug the helper: within a few seconds the notification says it is waiting and the log says "not listening" (the endpoint is closed: a wake asked now says the helper could not be reached); plug it in: it listens again. Turn Wi-Fi off with the charger on: same. On the battery for 30 minutes with the switch on, the app uses no measurable battery (no timer, no wake lock). (where: OPPO)
+- A refused helper stops listening at once: remove it on the desktop while it is serving: within a minute the notification goes and the endpoint is closed (the log says "not listening"), and it sends no offer again. (where: OPPO)
+- The words in Spanish and Tamil (Settings, the Wake settings dialog, the notification), and the desktop's Settings, Wake row, light and dark, in a narrow window, by hand on Windows and on Linux. (where: by hand)

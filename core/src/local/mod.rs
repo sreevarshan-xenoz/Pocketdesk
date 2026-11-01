@@ -80,3 +80,4 @@ pub mod transfers;
 pub mod typing;
 pub mod view;
 pub mod wake;
+pub mod wake_helper;

@@ -429,6 +429,17 @@
     <string name="connect_anyway">Connect anyway</string>
     <string name="settings_offer_wake">Offer to wake a computer that does not answer</string>
     <string name="settings_offer_wake_summary">Connect checks first, and offers Wake and connect</string>
+    <string name="settings_wake_helper">Wake helper for this home</string>
+    <string name="settings_wake_helper_summary">Off by default. On a spare phone that stays on a charger on your home Wi-Fi, it sends your computer\'s wake packet when your other phones ask from anywhere. It serves only that, only for phones your computer introduced, at most once every 30 seconds each, and only while charging on Wi-Fi.</string>
+    <string name="wake_helper_via">Wake through my helper</string>
+    <string name="wake_helper_via_summary">When this phone is away from home, ask %1$s to send the wake</string>
+    <string name="wake_helper_unnamed">the spare phone</string>
+    <string name="wake_helper_via_none">No wake helper yet. On a spare phone paired with this computer, turn on \"Wake helper for this home\" in Settings; this phone learns of it the next time it connects while the computer is awake.</string>
+    <string name="channel_wake_helper">Wake helper</string>
+    <string name="channel_wake_helper_desc">Shows while this phone is set up as a wake helper for your home.</string>
+    <string name="wake_helper_title">Wake helper</string>
+    <string name="wake_helper_serving">Waking your computers for your other phones</string>
+    <string name="wake_helper_waiting">Waiting for a charger and Wi-Fi</string>
     <string name="version_runs">runs %1$s</string>
     <string name="version_runs_older">runs %1$s, older than this app: update it</string>
     <string name="version_runs_newer">runs %1$s, newer than this app: update this app</string>
