@@ -312,30 +312,52 @@ pub async fn start_capture(
     } else {
         None
     };
-    let remote_id = match &remote {
-        Some(path) => {
-            let id = property(
-                &conn,
-                REMOTE_DESKTOP,
-                path,
-                REMOTE_DESKTOP_SESSION,
-                "SessionId",
-            )
-            .await?;
-            Some(String::try_from(id).context("the session id is not a string")?)
+    // The ScreenCast session, linked to the RemoteDesktop one when there is
+    // one; that one is stopped if this fails, not left to mutter (review).
+    let made = async {
+        let remote_id = match &remote {
+            Some(path) => {
+                let id = property(
+                    &conn,
+                    REMOTE_DESKTOP,
+                    path,
+                    REMOTE_DESKTOP_SESSION,
+                    "SessionId",
+                )
+                .await?;
+                Some(String::try_from(id).context("the session id is not a string")?)
+            }
+            None => None,
+        };
+        let reply = call(
+            &conn,
+            SCREENCAST,
+            SCREENCAST_PATH,
+            SCREENCAST,
+            "CreateSession",
+            &(session_options(remote_id.as_deref()),),
+        )
+        .await?;
+        object_path(&reply)
+    }
+    .await;
+    let cast = match made {
+        Ok(cast) => cast,
+        Err(e) => {
+            if let Some(path) = &remote {
+                let _ = call(
+                    &conn,
+                    REMOTE_DESKTOP,
+                    path,
+                    REMOTE_DESKTOP_SESSION,
+                    "Stop",
+                    &(),
+                )
+                .await;
+            }
+            return Err(e);
         }
-        None => None,
     };
-    let reply = call(
-        &conn,
-        SCREENCAST,
-        SCREENCAST_PATH,
-        SCREENCAST,
-        "CreateSession",
-        &(session_options(remote_id.as_deref()),),
-    )
-    .await?;
-    let cast = object_path(&reply)?;
     // Closed when anything after this fails, so no session outlives it.
     let stop = |conn: Connection, remote: Option<String>, cast: String| async move {
         let (path, iface) = match &remote {
@@ -425,8 +447,11 @@ pub async fn start_capture(
         }
     );
 
-    // The session ends with the capture.
-    let closer = cancel.clone();
+    // The session ends with the capture, or at once if the capture below
+    // does not start: the portal then takes over under the same `cancel`,
+    // and this session must not stay up beside it (review).
+    let closer = cancel.child_token();
+    let abandon = closer.clone();
     let closing = (conn.clone(), remote.clone(), cast.clone());
     let worker_input = remote.clone().map(|session| Input {
         conn: conn.clone(),
@@ -472,12 +497,15 @@ pub async fn start_capture(
         stop(closing.0, closing.1, closing.2).await;
     });
 
-    super::capture_linux::spawn_pipewire_capture(
+    if let Err(e) = super::capture_linux::spawn_pipewire_capture(
         node_id,
         config.clone(),
         frame_tx,
         cancel.clone(),
-    )?;
+    ) {
+        abandon.cancel();
+        return Err(e);
+    }
     let session = CaptureSession::new(config, cancel);
     Ok(if remote.is_some() {
         session.with_input_refused(refused_rx)
