@@ -7,7 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WakePlanTest {
-    private val info = WakeInfo(mac = "02:11:22:33:44:55", broadcast = "192.168.1.255", wired = true, port = 40009)
+    private val info = WakeInfo(mac = "02:11:22:33:44:55", broadcast = "192.0.2.255", wired = true, port = 40009)
     private val identity = listOf("192.168.1.20:54762", "100.70.1.2:1", "203.0.113.7:54762", "[2001:db8::1]:5")
 
     private fun plan(
@@ -22,7 +22,7 @@ class WakePlanTest {
         assertEquals(
             WakePlan.Plan.Direct(
                 "02:11:22:33:44:55",
-                listOf("192.168.1.255:9", "255.255.255.255:9", "203.0.113.7:40009"),
+                listOf("192.0.2.255:9", "255.255.255.255:9", "203.0.113.7:40009"),
             ),
             plan(),
         )
@@ -31,7 +31,7 @@ class WakePlanTest {
     @Test
     fun thisNetworkOnlySendsNoOutsidePacket() {
         assertEquals(
-            WakePlan.Plan.Direct("02:11:22:33:44:55", listOf("192.168.1.255:9", "255.255.255.255:9")),
+            WakePlan.Plan.Direct("02:11:22:33:44:55", listOf("192.0.2.255:9", "255.255.255.255:9")),
             plan(WakeSettings(method = WakeMethod.LAN)),
         )
     }
@@ -39,7 +39,7 @@ class WakePlanTest {
     @Test
     fun noOutsidePortMeansNoOutsidePacket() {
         val direct = plan(learned = info.copy(port = 0)) as WakePlan.Plan.Direct
-        assertEquals(listOf("192.168.1.255:9", "255.255.255.255:9"), direct.targets)
+        assertEquals(listOf("192.0.2.255:9", "255.255.255.255:9"), direct.targets)
     }
 
     @Test
@@ -68,7 +68,7 @@ class WakePlanTest {
     fun offAndRelayAreTheUsersChoice() {
         assertEquals(WakePlan.Plan.Off, plan(WakeSettings(method = WakeMethod.OFF)))
         assertEquals(
-            WakePlan.Plan.Relay("192.168.1.5", "02:11:22:33:44:55", "192.168.1.255"),
+            WakePlan.Plan.Relay("192.168.1.5", "02:11:22:33:44:55", "192.0.2.255"),
             plan(WakeSettings(method = WakeMethod.RELAY, relay = "192.168.1.5")),
         )
         assertEquals(WakePlan.Plan.NoRelay, plan(WakeSettings(method = WakeMethod.RELAY)))
@@ -83,9 +83,9 @@ class WakePlanTest {
 
     @Test
     fun atHomeIsSharingTheComputersBroadcast() {
-        assertTrue(WakePlan.atHome(info, setOf("192.168.1.255")))
+        assertTrue(WakePlan.atHome(info, setOf("192.0.2.255")))
         assertFalse(WakePlan.atHome(info, setOf("10.0.255.255")))
-        assertFalse(WakePlan.atHome(null, setOf("192.168.1.255")))
+        assertFalse(WakePlan.atHome(null, setOf("192.0.2.255")))
     }
 
     @Test
@@ -192,7 +192,7 @@ class WakePlanTest {
         assertEquals(
             WakePlan.Plan.Direct(
                 "02:11:22:33:44:55",
-                listOf("192.168.1.255:9", "255.255.255.255:9", "203.0.113.7:40009"),
+                listOf("192.0.2.255:9", "255.255.255.255:9", "203.0.113.7:40009"),
             ),
             WakePlan.plan(through, info, identity, atHome = true, helperKnown = true),
         )
