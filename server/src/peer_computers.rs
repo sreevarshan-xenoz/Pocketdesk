@@ -209,6 +209,7 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     monitor,
                     hevc,
                     window,
+                    fit,
                 } => {
                     // PC6: viewed now, for the recents, off the runtime.
                     let (at, id) = (dir.clone(), device_id.clone());
@@ -221,6 +222,8 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                         monitor,
                         hevc,
                         window,
+                        // A size of nothing is no ask for a fit.
+                        fit: fit.filter(|f| f.width > 0 && f.height > 0),
                     };
                     if views.send(start).await.is_err() {
                         tracing::warn!(
@@ -2499,6 +2502,18 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
         }
         return;
     }
+    // A screen to fit a window (item 8): its answer to this one's window's
+    // ask, or its window asking this one for a screen, held to its Input
+    // switch here as on any connection.
+    if packet.packet_type == crate::virtual_screen::PACKET {
+        if crate::fit_screen::is_answer(packet) {
+            crate::fit_screen::heard(device_id, &packet.body);
+        } else {
+            let (to, body) = (device_id.to_string(), packet.body.clone());
+            tokio::spawn(async move { screen_on_link(&to, &body).await });
+        }
+        return;
+    }
     // Privacy (PC8): its answer to this one's window, or its window asking
     // this one's privacy mode, held to its Power switch here as on any
     // connection.
@@ -2526,7 +2541,20 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
         if !always && !crate::clipboard_push::takes_follow(device_id, &packet.body) {
             return;
         }
-        if let Some(content) = packet.body.get("content").and_then(|v| v.as_str()) {
+        // No computer pushes more than `MAX_PUSH`: longer is dropped, and
+        // the owner told.
+        let text = match crate::clipboard_push::pushed_text(&packet.body) {
+            Ok(text) => text,
+            Err(len) => {
+                crate::clipboard_push::too_big(
+                    Some(device_id),
+                    len,
+                    crate::clipboard_push::TooBig::In,
+                );
+                return;
+            }
+        };
+        if let Some(content) = text {
             crate::clipboard_push::follow_arrived(&packet.body);
             // Not sent back to the computer it came from.
             crate::clipboard_push::note_from_phone(device_id, content);
@@ -2570,6 +2598,30 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
                 }
             }
         });
+    }
+}
+
+/// Answer the request `body` for a screen that the computer `device_id` made
+/// on the link this one keeps to it (item 8), as the plugin answers one on a
+/// connection here: its Input switch here decides (a computer this one
+/// trusts only, as for privacy), and the computer is told why when it is off.
+async fn screen_on_link(device_id: &str, body: &serde_json::Value) {
+    use crate::virtual_screen;
+    let id = device_id.to_string();
+    let permitted = tokio::task::spawn_blocking(move || {
+        crate::plugins::pair::link_permits(&id, virtual_screen::PACKET)
+    })
+    .await
+    .unwrap_or(false);
+    let response = if permitted {
+        virtual_screen::respond(device_id, body).await
+    } else {
+        virtual_screen::said_with(body, virtual_screen::denied())
+    };
+    if let Some(outgoing) = live(device_id) {
+        let _ = outgoing
+            .send(NetworkPacket::new(virtual_screen::PACKET).with_body(response))
+            .await;
     }
 }
 
@@ -3254,6 +3306,7 @@ mod tests {
             fingerprint: Some("ab".repeat(32)),
             endpoint: Some(endpoint.to_string()),
             mine: true,
+            wifi: None,
         };
         assert!(asks_both_ways(&link, true));
         assert!(!asks_both_ways(&link, false), "the link alone");

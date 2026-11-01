@@ -27,6 +27,7 @@ pub const GROUPS: &[Group] = &[
             Tab::Messages,
             Tab::Notifications,
             Tab::Phone,
+            Tab::Apps,
             Tab::Clipboard,
         ],
     },
@@ -42,7 +43,7 @@ pub const GROUPS: &[Group] = &[
 
 impl Tab {
     /// Every page.
-    pub const ALL: [Tab; 14] = [
+    pub const ALL: [Tab; 15] = [
         Tab::Status,
         Tab::Pair,
         Tab::Devices,
@@ -52,6 +53,7 @@ impl Tab {
         Tab::Messages,
         Tab::Notifications,
         Tab::Phone,
+        Tab::Apps,
         Tab::Clipboard,
         Tab::Activity,
         Tab::Settings,
@@ -71,6 +73,7 @@ impl Tab {
             Tab::Messages => "Messages",
             Tab::Notifications => "Notifications",
             Tab::Phone => "Phone files",
+            Tab::Apps => "Phone apps",
             Tab::Clipboard => "Clipboard",
             Tab::Activity => "Activity",
             Tab::Settings => "Settings",
@@ -93,6 +96,7 @@ impl Tab {
             Tab::Messages => "Texts from the phone, and replies to them.",
             Tab::Notifications => "The phone's notifications, and answers to them.",
             Tab::Phone => "Folders the phone shares with this computer.",
+            Tab::Apps => "The phone's apps: open one there, with its screen in a window here.",
             Tab::Clipboard => {
                 "Texts that crossed between this computer and its phones, to copy or send again."
             }
@@ -130,6 +134,7 @@ impl Tab {
             Tab::Messages => "messages",
             Tab::Notifications => "notifications",
             Tab::Phone => "phone-files",
+            Tab::Apps => "phone-apps",
             Tab::Clipboard => "clipboard",
             Tab::Activity => "activity",
             Tab::Settings => "settings",

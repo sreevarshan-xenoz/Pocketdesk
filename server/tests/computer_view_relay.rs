@@ -312,6 +312,7 @@ async fn a_computers_screen_reaches_the_window_and_its_input_the_computer() {
             monitor: 0,
             hevc: false,
             window: 0,
+            fit: None,
         })
         .await
         .unwrap();
@@ -518,6 +519,7 @@ async fn a_dropped_view_reconnects_by_itself_until_stopped() {
             monitor: 0,
             hevc: false,
             window: 0,
+            fit: None,
         })
         .await
         .unwrap();
@@ -633,6 +635,7 @@ async fn shown_view(
             monitor: 0,
             hevc: false,
             window: 0,
+            fit: None,
         })
         .await
         .unwrap();
@@ -787,6 +790,7 @@ async fn frames_too_large_for_the_window_are_said() {
             monitor: 0,
             hevc: false,
             window: 0,
+            fit: None,
         })
         .await
         .unwrap();
@@ -830,6 +834,7 @@ async fn a_computer_not_paired_here_ends_the_view_with_why() {
             monitor: 0,
             hevc: false,
             window: 0,
+            fit: None,
         })
         .await
         .unwrap();
@@ -891,6 +896,7 @@ async fn a_window_that_comes_late_still_hears_why_the_view_ended() {
             monitor: 0,
             hevc: false,
             window: 0,
+            fit: None,
         })
         .await
         .unwrap();
@@ -937,6 +943,7 @@ async fn a_window_without_the_token_sees_nothing() {
             monitor: 0,
             hevc: false,
             window: 0,
+            fit: None,
         })
         .await
         .unwrap();
@@ -1020,6 +1027,7 @@ async fn the_windows_privacy_is_asked_of_the_computer_and_let_go_as_it_closes() 
             monitor: 0,
             hevc: false,
             window: 0,
+            fit: None,
         })
         .await
         .unwrap();
@@ -1180,6 +1188,7 @@ async fn privacy_held_is_let_go_as_the_view_ends() {
             monitor: 0,
             hevc: false,
             window: 0,
+            fit: None,
         })
         .await
         .unwrap();
@@ -1534,6 +1543,7 @@ async fn controlled_view(
             monitor: 0,
             hevc: false,
             window: 0,
+            fit: None,
         })
         .await
         .unwrap();
@@ -1802,6 +1812,7 @@ async fn two_windows_show_one_computers_two_screens_side_by_side() {
                 monitor,
                 hevc: false,
                 window,
+                fit: None,
             })
             .await
             .unwrap();
@@ -1891,6 +1902,7 @@ async fn two_windows_show_one_computers_two_screens_side_by_side() {
             monitor: 0,
             hevc: false,
             window: wire::MAX_VIEWS,
+            fit: None,
         })
         .await
         .unwrap();
@@ -2000,6 +2012,7 @@ async fn privacy_stays_as_the_window_switches_screens() {
             monitor: 1,
             hevc: false,
             window: 0,
+            fit: None,
         })
         .await
         .unwrap();
@@ -2100,6 +2113,7 @@ async fn privacy_is_let_go_as_the_window_turns_to_another_computer() {
             monitor: 0,
             hevc: false,
             window: 0,
+            fit: None,
         })
         .await
         .unwrap();
@@ -2122,6 +2136,78 @@ async fn privacy_is_let_go_as_the_window_turns_to_another_computer() {
     );
     let next = window_file(&dir, 0, first.session_id).await;
     assert_eq!(next.device_id, "lap");
+    drop(commands);
+    relay.await.unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Item 8: a window that asks for a screen to fit it, of a computer that
+/// cannot be asked (no link or connection to it here), is told so and still
+/// shows the screen it asked for: the view never waits on, or fails with, a
+/// fit that was not made. The fitted screen's own road (Hyprland or Sway on
+/// the other computer) is `fit_screen_live`, ignored.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_fit_that_cannot_be_asked_still_shows_the_screen_asked_for() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let dir = temp_dir("fit-failed");
+    paired(&dir);
+    let cert = Arc::new(CertManager::new().expect("cert manager"));
+    let (input_tx, _input_rx) = mpsc::unbounded_channel();
+    let (_hang_up_tx, hang_up_rx) = tokio::sync::oneshot::channel();
+    let addr = other_computer(cert.clone(), input_tx, hang_up_rx).await;
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let (commands, rx) = mpsc::channel(4);
+    let relay = tokio::spawn(run(
+        rx,
+        listener,
+        dir.clone(),
+        Dialer::Direct {
+            addr,
+            certs: cert,
+            id: "viewer".into(),
+        },
+    ));
+    commands
+        .send(Command::Start {
+            device_id: "desk".into(),
+            monitor: 0,
+            hevc: false,
+            window: 0,
+            fit: Some(pocketdesk_core::local::computers::FitSize {
+                width: 1280,
+                height: 720,
+            }),
+        })
+        .await
+        .unwrap();
+    let file = view_file(&dir).await;
+    let mut window = join(&file).await;
+    let (mut asked, mut failed, mut showing) = (false, None, false);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while !showing {
+        assert!(tokio::time::Instant::now() < deadline, "shown within 30 s");
+        if let Message::Status(status) =
+            tokio::time::timeout(Duration::from_secs(15), read_message(&mut window))
+                .await
+                .expect("a message")
+        {
+            match &*status.fit {
+                wire::ViewFit::Asking => asked = true,
+                wire::ViewFit::Failed(why) => failed = Some(why.clone()),
+                other => assert!(
+                    failed.is_none() || *other != wire::ViewFit::Off,
+                    "a failed fit is kept: {other:?}"
+                ),
+            }
+            if status.phase == Phase::Showing {
+                assert_eq!(status.monitor, 0, "the screen asked for");
+                showing = true;
+            }
+        }
+    }
+    let why = failed.expect("the window is told the fit was not made");
+    assert!(asked || !why.is_empty());
+    assert!(why.starts_with("Desk: "), "{why}");
     drop(commands);
     relay.await.unwrap();
     let _ = std::fs::remove_dir_all(&dir);

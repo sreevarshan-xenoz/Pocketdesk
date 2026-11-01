@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1075 open items.
+1254 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 38 |
-| Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 168 |
-| A phone with a SIM | 39 |
-| A second phone | 15 |
-| Away from home: another network, or through a router | 39 |
-| A second computer | 143 |
-| A Linux desktop (the Azure VM serves for some) | 180 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 374 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 88 |
+| Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 197 |
+| A phone with a SIM | 40 |
+| A second phone | 19 |
+| Away from home: another network, or through a router | 43 |
+| A second computer | 159 |
+| A Linux desktop (the Azure VM serves for some) | 213 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 80 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -132,6 +132,83 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The OPPO on this build with a throwaway server on this build: after a connection, the computer's card on Home says "runs <this release>" in the muted colour, and the server's `pocketdesk devices --json` lists the phone's `version` as the app's. Then the phone on 0.8.2 from F-Droid or a release APK: the card says nothing (the server on 0.8.2 sends no release), and a 0.8.2 phone against this build's server leaves the phone's `version` null. (where: here) Half checked 2026-10-31: A's card says "runs 0.8.2" in the muted colour and A's `devices --json` lists the phone's `version` 0.8.2. Not run: a 0.8.2 phone from F-Droid or a release APK (a differently signed APK needs an uninstall, which wipes the phone's pairings). 2026-10-31 second batch: this build's phone against a 0.8.2 throwaway (built from the tag on the laptop): the card shows no release line, and "runs 0.8.3" for the 0.8.3 throwaway. Still not run: a 0.8.2 phone.
 - A throwaway server whose `pocketdeskVersion` differs from the phone's (a build from a commit with the workspace version raised, say 0.9.0): the card says "runs 0.9.0, newer than this app: update this app" in the tertiary colour; with Settings → Pairing's switch off it says "runs 0.9.0" only. Its Devices page lists the phone with "older than this one: update it" in the warning colour, and plainly with Settings → Phones' switch off. (where: here) Phone half checked 2026-10-31 against B built at 0.9.0: "runs 0.9.0, newer than this app: update this app" in the tertiary colour, "runs 0.9.0" alone with Settings → Pairing's switch off. B's `devices --json` lists the phone at 0.8.2; its desktop Devices page was not opened.
 
+**252. The phone's camera as this computer's webcam (Linux)**
+
+- Stop on the phone's "Your camera is in use" notification ends the cast and the node goes. (where: here) Partly checked 2026-11-01: the Stop action could not be reached by the script: ColorOS's shade shows the notification as a one-line row inside Pocketdesk's group, without its buttons (also with only two Pocketdesk notifications left), and `CastService` is not exported, so adb cannot fire the action's own intent. Nothing else was learned; Stop by hand on the phone is still owed.
+
+**255. The phone's location for this computer's apps (GeoClue, Linux)**
+
+- The OPPO for real: Settings "Give my computer my location" asks for location and turns on; with a throwaway server and `where-am-i -a 4` (city) the computer logs "fix sent, accuracy 1000 m" or more and `where-am-i` reports a place within about 1 km of the phone's true one (compare by distance only, never print either place); Activity shows "city location, accurate to N m". (where: here) Found, not fixed (2026-11-01, the OPPO, a throwaway on the laptop with avahi-daemon started for the run and a client run as the `geoclue` user standing in for GeoClue, which is not installed there; print nothing of any place): (1) The phone's answer never reaches the computer: `RustCore.sendPhonePacket(..., FIX, ...)` ends in the bridge's `send_phone_packet`, which refuses any type not in `PHONE_PACKETS` (`android/bridge/src/api.rs`), and `kdeconnect.pocketdesk.phone_location` (`phone_location::FIX`) is not in that list. So every answer, a fix or a refusal (`off`, `permission`, `background`, `unavailable`), fails on the phone (log "could not answer the computer's location ask") and the computer logs "no fix (the phone did not answer)" after the full 30 s. Fix: add `phone_location::FIX` to `PHONE_PACKETS` (the array's length changes to 18) and a test that every packet type the app sends is in the list. (2) Probably: a fix that does not come hangs the phone's answers for good. `fetch` cancels `getCurrentLocation` after 20 s, and cancelling a `LocationManagerCompat.getCurrentLocation` does not call its consumer, so `done` never runs and `inFlight` stays true: from then on `answer` returns silently at `if (!inFlight.compareAndSet(false, true)) return` (seen: after one ask with location services on and no fix to be had, three later asks over six minutes left no line in the phone's log, and the computer logged "no fix (the phone did not answer)" each time). Fix: finish with `done(null)` on the timeout path itself (and reset `inFlight` there), not through the consumer. Not run past these: no fix could be had (the phone has no SIM and was indoors), so "fix sent, accuracy N m" and "Activity shows city location" were not seen.
+- The same with the computer on Exact and the phone's "Exact location" on (accuracy of tens of metres, GPS), and with only one of the two on (the phone still gives the city). (where: here) Not run 2026-11-01: blocked by the two bugs above (no answer reaches the computer, and no fix was to be had).
+- The phone in the pocket with the screen off: with "Allow all the time" the ask is answered; without it the phone answers `background` and the computer logs "no fix" and tries again a minute later; with Pocketdesk open it is answered. (where: here) Partly checked 2026-11-01 (the phone's own decisions, from its log; the answers themselves did not arrive, see the first item): with "Give my computer my location" on, only the approximate-location permission (no "Allow all the time") and location services off, an ask with Pocketdesk not on screen was decided `background`; with Pocketdesk open the same ask was decided `unavailable`. A real fix with the screen off, and with "Allow all the time", was not seen.
+- The switch off on the phone answers `off` at once (no wait of 30 s); location permission taken away in Android settings answers `permission`; location turned off for the phone answers `unavailable`. (where: here) Partly checked 2026-11-01: the switch off was decided `off` within 1.0 s of the computer's ask (the phone's log), and location services off was decided `unavailable` (Pocketdesk open); but neither answer reached the computer (the first item's bug 1), so the computer waited the full 30 s. `permission` was not tried: revoking a runtime permission by adb ends the app's process, and Pocketdesk's control service must not be cut off.
+
+**259. Hands-free apps: a paused share, the screen-sharing question accepted, a lock swiped away**
+
+- The window-state event of the question names the activity Pocketdesk's intent names (`ConsentPress` presses nothing before it): the log shows "pressed" only after it; a second system dialog raised by another app at the same time is not pressed; a button whose words are not a known confirm word (set the phone to a language not in the list) is not pressed and the page says a tap is needed. (where: OPPO)
+- The question was raised for the entire screen on Android 14 and later, with no one-app choice (the question has no chooser); and if the OEM's question has a chooser, entire screen was picked before Start, and a chooser reading as one app was never confirmed. (where: OPPO)
+- Nothing else is ever pressed: with the opt-in on, open a second system dialog (a permission question) during the five seconds, and with no open asked at all, raise Android's screen-sharing question from another app; neither is touched, and with the opt-in off nothing is pressed even for an open. (where: OPPO)
+- The pause is kept only with the apps switch and the opt-in on and for the phone's own computer: turn either off while paused and the notification goes and the projection is given back within about two seconds (the status bar's sharing indicator goes); unpairing the computer does the same. Whether the OPPO also ends a paused projection when the phone locks (the guide and SECURITY do not rely on it). (where: OPPO)
+- A swipe-only lock (set the lock to "Swipe" in Android's settings), screen off: an open from the Phone apps page wakes the screen, swipes the lock away and opens the app; the log (`KeyguardDismiss`) says "the lock screen was dismissed". With the lock set to a PIN: the page says the phone has a lock Pocketdesk never bypasses and names Extend Unlock / Smart Lock / Trusted devices, the phone stays locked, and the screen is not woken by the ask; a lock set to a PIN a moment after an open is asked is given up on within about 2.5 seconds. (where: OPPO)
+- Extend Unlock: with a trusted device or place keeping the phone unlocked behind a lock screen that still shows, an open swipes it away and opens the app; with the trust gone (PIN needed), it is refused as above. (where: OPPO)
+
+**260. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
+
+- Add a folder: "Add a folder" opens Android's folder picker; no permission dialog about all files or storage appears, and the app lists the folder with "Not run yet". Adding the same folder twice makes one row. (where: OPPO)
+- "Run now": the files land under `<root>/<phone>/<folder>/` with the same paths; the Files page's Kept folders row shows the same count and total bytes as the test folder, and a hash of each file there equals the phone's (generate the files from a seed so both sides can be recomputed). (where: OPPO)
+- Run again with nothing changed: nothing is sent (no transfer notification stays in the shade, the phone's log says 0 sent). Change one file, add one, run: only those two go, the changed one replacing its older copy (no `(1)` copy), and its date is the phone's. (where: OPPO)
+- Kill mid-file: with the 200 MB file part way (turn Wi-Fi off, or force-stop the app), then run again: the transfer continues from where it stopped (the server's log says "Continued ... from N of M bytes") and the final file's hash is the phone's. (where: OPPO)
+- Mirror deletions off (the default): delete a file on the phone, run: it stays on the computer. With the phone's switch on and the computer's `kept_folders_allow_delete` off: it stays, and the Files page says one file was kept although deleted. With both on: it is deleted on the computer, and the folder it leaves empty goes too. (where: OPPO)
+- The guards: with both switches on, hide the phone's storage from the app (revoke the folder's access in Android's settings) and run: nothing is deleted on the computer, and the row says the access is gone; remove 30 of 40 files at once, or empty the whole folder, and run: the deletions are held and the row says so; with the phone's guard bypassed by hand (a computer-side check: a run that names 5 of 6 files, sent by a stub), the computer refuses it and the Files page says so. (where: OPPO)
+- An emptied file: empty one file on the phone (keep its name) and run: the computer's copy is emptied (size 0), not left with its old content, and a file that is empty on the phone from the start is made empty there. (where: OPPO)
+- The size cap: set "Size cap for kept folders" to 1 GB and keep more than that: the run stops with the notice on the phone ("the computer's kept folders are full"), the Files page row shows the problem, and one desktop notification came, not one per file. Raising the cap and running again finishes it. (where: OPPO)
+- A phone that is not one of this computer's owner phones (a guest's pairing) is refused ("Kept folders take only the owner's own phones") and nothing is made on the computer. With "Phones may keep folders here" off, every run is refused with its reason on the phone. (where: OPPO)
+
+**261. Phone apps on the computer's Start menu, from notifications, and dropped files shared into the app in front**
+
+- The pin with the phone away or the phone's switch off: the shortcut says why on the main window's notice line, never opening anything; with the apps list never fetched it says to open the Phone apps page once. After the phone app is restarted (its list is forgotten), the pinned shortcut still opens the app: the list is asked for again and the open follows once. (where: OPPO)
+- A notification with a reply or button (a chat) on the Notifications page: "Open app on the phone" opens that chat app and brings up the screen window; with the phone off or unlinked the button is grey and says why; a notification of an app the phone does not list has no such button. (where: OPPO)
+- Drop a PNG on the phone's screen window with a notes or messaging app in front: the file arrives, Android's share screen for that app opens (never sent by itself), and the window's line says "Shared ... into <App>". With an app in front that takes no images (a calculator): nothing opens, the file is in Downloads/Pocketdesk, and the line says so. With the launcher in front: "could not tell" and Downloads. Two files dropped at once: both go to Downloads, none is shared. (where: OPPO)
+- Names: a file named with a colon, a Windows device name (`NUL.txt`), a hidden file and a trailing-dot name on the phone are left out (the phone's log counts them) and the run goes on. A folder renamed on the phone keeps its place on the computer. (where: OPPO)
+- Remove a folder in Settings: its row goes, the computer's copy stays, and Android no longer lists the folder in its granted folders for the app (`adb shell dumpsys package` shows no persisted grant for it) unless Folders the computer may open still shares it. (where: OPPO)
+
+**262. A spare phone at home as the wake helper (Settings, Wake helper for this home)**
+
+- Removing: Remove on the desktop's Settings, Wake: the helper phone's switch goes off at its next link with the computer (within a minute) and a wake through it fails. It does not come back by itself: after 20 minutes it is still off. Turning the switch on again on the phone makes it the helper again. (where: OPPO)
+- Unpairing the helper phone from the computer: it is no longer the computer's helper at the next check (the desktop's row says none) and its duty is gone. (where: OPPO)
+
+**263. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
+
+- Shizuku not running: the phone's Settings has no "Separate windows" row at all, and the computer's Phone apps page says apps open on the phone's screen; the Phone apps page opens an app as before. (where: OPPO)
+- Shizuku running, switch off: the row is shown and off; the page still opens apps on the phone's screen. Turn it on: Shizuku's own permission dialog appears once and nothing else; after Allow the row says on; after Deny the switch stays off and nothing is asked again at once. (where: OPPO)
+- Open a second, third and fourth app: four windows at once, each its own app and stream; a fifth says the phone already shows four and opens nowhere; closing one lets it open. The page says "N of 4 open". (where: OPPO)
+- Close a window on the computer: the app's display goes (the phone's `dumpsys display` no longer lists it) and the encoder stops within a second or two; the last window closing ends the phone's notification after a moment. Quit the desktop app with windows open: the phone closes them about 30 seconds later. (where: OPPO)
+- Turn the switch off with windows open, then separately stop Shizuku, then turn off "Let the computer open my apps", then unpair: each gives every window back within a second and the computer's windows close. (where: OPPO)
+- A foreground service start from the background: with Pocketdesk not in front and the screen off or on another app, a window ask starts the cast service; if Android refuses, the page falls back to opening the app on the phone's screen (`windows_unavailable`) and the log says why. The notification says "Showing app windows on <computer>". (where: OPPO)
+- The deny-list: Settings, the package installer, the permission screens, Play Store, the Shizuku manager and Pocketdesk, asked for in a window from the Phone apps page, are not opened in a window (the page opens them on the phone's screen under the usual rules, or says so); in a session of windows alone a screen-control batch from the computer does nothing to the phone's screen. (where: OPPO)
+
+**265. Keys to taps: a phone game played from the keyboard and mouse (Settings, Keymaps for phone apps)**
+
+- A stick: the Stick tool, WASD: W puts a finger down in the stick's middle and moves it up by its reach, W with D moves it on a diagonal of the same reach, letting go lifts it from where it was; opposite keys together leave the finger in the middle; the reach slider changes how far it goes. The stick is round on a tall phone window. (where: OPPO)
+- Without Shizuku nothing changes: with the phone's "Separate windows" off or Shizuku stopped, apps open on the phone's screen, its window shows no keys, and the bar says keys to taps works in an app window only; stopping Shizuku with keys held gives the windows back within a second and nothing stays down. (where: OPPO)
+
+**266. The computer turns on the phone's hotspot (Settings, Let my computers turn on my hotspot; Overview, Use my phone's hotspot)**
+
+- Off by default and quiet: with the switch off (or on a phone without Shizuku running) the phone's Settings shows no hotspot row (or the row off), the Overview shows no hotspot buttons for it, and an `hotspot_on` ask written by hand into `phone_actions_out/` is logged by the phone as "not done: OFF" and starts nothing. A phone on Android 10 or older shows no row. (where: here)
+- Turning the switch on asks Shizuku's own dialog once; with Shizuku running and Pocketdesk allowed, notification access on, the row says "On" and, within a minute, the Overview shows both buttons for the phone (the phone's switches report says `hotspot` on with android true). Stopping Shizuku greys the buttons with the reason in a minute. (where: here)
+- The computer connects: another device or this computer joins the phone's network with its own saved password and has internet through the phone's mobile data (open a page, or `ping` an address by number). (where: here)
+- Turning it off: "Turn its hotspot off" stops it within about 10 seconds and the indicator goes; the same with the switch off (an `off` ask is taken with the switch off); stopping the tethering manager's call by making it fail (the fallback) runs `/system/bin/cmd wifi stop-softap` only (see the helper's log), and nothing else. (where: here)
+- The phone's own switch turned off while the computer's hotspot is on turns that hotspot off at once; a hotspot the owner turned on themselves is not turned off by the timer or by the switch. (where: here)
+- The auto-off: with 15 minutes chosen (tap the row to change it; the values go round 15, 30, 60, 120, never), a hotspot the computer turned on is turned off by the phone about 15 minutes after the last ask to turn it on, a second ask meanwhile renews the time, and "never" leaves it on until asked, turned off, or the 4-hour cap. The phone's process killed in between (swipe the app away) still turns it off at the next tick after it restarts. (where: here)
+- A locked phone with a PIN or fingerprint lock still turns the hotspot on and off when asked, with the screen off; nothing appears on the phone's screen but Android's own indicator. (where: here)
+- The rate limit: nine asks (on and off together) in ten minutes: the first eight go, the ninth is logged "TOO_MANY" and does nothing; ten minutes later it goes again. (where: here)
+- No other command: while turning it on and off, `ps` and logcat on the phone show no `cmd wifi start-softap`, no shell and no hotspot name or password anywhere in the helper's command lines; the computer's Activity and the phone's log never show the hotspot's name or password. (where: here)
+- A stop that fails is never forgotten: with the computer's hotspot on, stop Shizuku and press "Turn its hotspot off" (or turn the phone's switch off): the hotspot stays on, nothing is cleared, the log says the stop did not go through and tries again about every 15 seconds; start Shizuku again and allow Pocketdesk: it goes off within about 15 seconds. (where: here)
+- The hard cap: with "never" chosen for the auto-off, a hotspot the computer turned on goes off 4 hours after the first ask of that run, and asking again at 3 hours does not move it. (where: here)
+- The owner's own hotspot: turn the hotspot on yourself in Android, then press "Use my phone's hotspot": nothing is started, and neither the timer, the cap nor the switch ever turns it off; only "Turn its hotspot off" from the computer ends it. A USB tether you started does not stop the hotspot from being started. (where: here)
+- A helper that hangs: with Shizuku stopped half way (or its service unresponsive) an ask ends within about 45 seconds and the next ask works (nothing stays "busy"). (where: here)
+- The Settings rows by hand: the phone's switch, summary and auto-off row (light, dark, narrow, Spanish and Tamil), and the desktop's Phones row on Linux (the field limits at 32 characters; the row is not drawn on Windows). (where: here)
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -176,6 +253,18 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **166. Linked with the screen off (M1)**
 
 - After a reboot, the "Keeps the link" notification is back without opening the app.
+
+**257. A direct link on Windows: the Mobile Hotspot**
+
+- The server killed with a link on (`taskkill /F` on the server only, and only when the owner says so) and started again: its first start's log says it swept one, the hotspot is off, and the owner's settings are back. A record that could not be put back (the internet unplugged during the kill) stays and the next start retries it. (where: power)
+
+**262. A spare phone at home as the wake helper (Settings, Wake helper for this home)**
+
+- Survives: reboot the helper with the switch on and on the charger: the service starts after boot (Android may refuse a start from the background: it starts the next time the app is opened, and the notification says why it waits); on ColorOS 14 the helper keeps answering with the screen off for an hour on the charger. (where: OPPO)
+
+**263. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
+
+- Lock rules: with a PIN lock on, an open for a window is refused like any open (the page says locked and to unlock or use Extend Unlock) and no display is made; after unlocking and opening a window, lock the phone: the window goes on. (where: OPPO)
 
 ## Needs the owner's OK on this box: input reaching Windows, or its display settings
 
@@ -557,6 +646,53 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - An input method here (Windows' Japanese IME, or Linux fcitx): note that it does not compose in the window in either mode (the picture asks for no input method), and that with Keys by position on, its keys go by place with nothing typed twice. (where: owner)
 
+**250. Approve with my phone: sudo, polkit and the lock screen**
+
+- A real fingerprint on the owner's phone approves `sudo true` on the owner's desk, and the phone shows sudo's command; No, no answer and a phone out of reach each give the password prompt (at once with no phone linked, after the wait otherwise). (where: owner)
+- polkit on the owner's desk: a `pkexec true` (or a GUI admin prompt) with the line in `/etc/pam.d/polkit-1` is approved on the phone. (where: owner)
+- The lock screen on the owner's desk (hyprlock): with "The lock screen too" on and the line in `/etc/pam.d/hyprlock`, the phone unlocks it; with the switch off, only the password does. (where: owner)
+- Pinning on a real phone with Key Attestation: `sudo pocketdesk-pam-ask --pin <user>` asks the phone, the fingerprint makes an attested key, the phone says it replaces the current key and shows a code, root asks for that code and pins only when it is typed right, reports the key attested (TEE or StrongBox), and the old key keeps approving until a request names the new one. (where: owner)
+- "Fingerprint only, not the PIN" on the phone: the prompt offers no PIN, and a fingerprint enrolled afterwards makes the phone say its key no longer works until it is made and pinned again. (where: owner)
+- `sudo` over ssh to the owner's desk with "Only from this desk" on asks for the password at once, and the phone is not asked. (where: owner)
+
+**253. Fit the screen to this window, on a Linux computer**
+
+- The desktop app on Windows with a window onto the laptop's real Hyprland session (the laptop paired from it, Input on): the bar's switch turns on, a new screen of the window's size appears in the laptop's `hyprctl monitors`, the picture follows a drag of the window's edge about half a second after it stops, and closing the window removes the screen (`hyprctl monitors` as before). (where: owner)
+- The same on a laptop with a real second monitor, and with two windows fitted (two `PD-` screens) while one is resized: the other's place does not move onto the laptop's own monitors (Hyprland's `auto-right` is set again for the resized one). (where: owner)
+- A host with "Phones may add a screen" off, or with Input off for the asking computer, says why on the window and shows the screen asked for. (where: owner)
+- A program started on the fitted screen by its own keys (the window drives the empty desktop: a workspace of it, a launcher) works as on any screen. (where: owner)
+
+**255. The phone's location for this computer's apps (GeoClue, Linux)**
+
+- A real session on the owner's desk (GNOME or KDE): night light or the time zone panel takes the phone's city; the server's log and `events.jsonl` hold no coordinates (search them for the first digits of the phone's true latitude: none). (where: owner)
+
+**257. A direct link on Windows: the Mobile Hotspot**
+
+- Read-only, on a Windows computer (`cargo test -p pocketdesk-core --features local direct_link::tests::this_computer -- --ignored --nocapture`): "PLAN mode=SecondInterface" with an internet connection; with the network cable and Wi-Fi off, "NO PLAN: NoConnectionProfile" and the Pair page says Mobile Hotspot needs an internet connection; with the owner's own hotspot on, "NO PLAN: HotspotInUse". Print nothing but the plan or the reason. (where: owner)
+- The Pair page's "Make a direct link" on a Windows computer with an internet connection and its own hotspot off: the status says `on` with an address in 192.168.137.0/24, Windows' Settings (Network & internet, Mobile hotspot) shows a name starting `pocketdesk-` and the hotspot on, and the Pair page shows the code. (where: owner)
+- The owner's settings come back: note the hotspot's name, passphrase and band in Windows' Settings first (outside the repo, never pasted anywhere); after "Turn off" the hotspot is off and its name, passphrase and band are as they were; with the hotspot on first, a link is refused (HotspotInUse), and after turning it off in Settings, made, ended, and turned back on by hand, the settings are the owner's own. (where: owner)
+- The OPPO scanning the Windows computer's code (a screenshot pushed by adb): Android asks once to join `pocketdesk-…`, the phone joins (WPA2: if Windows' hotspot is set to WPA3 only the phone cannot join, which the first run should report), pairs, and starts the session over it; `direct_link.json` says in use while the phone's session runs. (where: owner)
+- The idle timer and the longest life on a real Windows link (a 1-minute idle setting is enough): with no phone it ends after the setting, the hotspot off and the owner's settings back; with a phone's session it stays on; and turning the hotspot off in Windows' Settings while a link is on is not noticed (a known gap: the page keeps showing the code until the idle time ends the link, and the owner's settings then go back). (where: owner)
+- The band row: 5 GHz on a card that allows a hotspot on it makes a 5 GHz network; on one that does not, the link comes up on the card's own band and does not fail. A card that cannot host beside its own Wi-Fi connection (Windows drops the Wi-Fi uplink) is reported in the first run's words. (where: owner)
+- A put-back that fails is retried: with a link on, unplug the internet and turn the link off (the owner's settings may not go back at once); the log says the hotspot was not fully put back, the record stays, and within a minute of the internet returning the settings are back and the record is gone. The hotspot does not come up with the link's name in the meantime. (where: owner)
+- A hotspot still named `pocketdesk-…` (left by a killed server whose record was lost): "Make a direct link" says to give it a name of your own and starts nothing. (where: owner)
+- The Pair page's card follows the server's plan, not the desktop's own look: with the internet unplugged the card says Mobile Hotspot needs a connection within about 30 s, and after plugging it in the button comes back within about 30 s; the desktop app itself never calls WinRT. (where: owner)
+
+**263. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
+
+- Touch, scroll, Back and typing in a window (a notes app, a browser with a made-up page): each reaches only that window's app, even with two windows open; Home and Recents are not offered; a letter outside the keyboard's map is skipped, not typed wrong. Watch only (the window's bar) stops input. (where: OPPO)
+
+**265. Keys to taps: a phone game played from the keyboard and mouse (Settings, Keymaps for phone apps)**
+
+- Off by default: with the setting off an app window's bar has no "Keys to taps" and typing, touch and scroll work as in section 263; the phone's own screen window says nothing about keys. Turn the setting on: each app window's bar shows "Keys to taps" and the warning that some online games flag injected input; the phone's own screen window says keys to taps works in an app window only. (where: OPPO)
+- A tap: Edit keys, Tap, click a point on the picture, press a key, Done, turn the keys on: holding the key shows one touch at that point in "Pointer location" and the app reacts as to a finger; letting go lifts it. The mark was drawn over the picture while editing and not afterwards. (where: OPPO)
+- Several fingers at once: hold W (stick), a tap key and the aim together: "Pointer location" shows three pointers at once, each moving on its own, and a drawing app or a map pinch (two taps either side of a point moving apart) responds as to a real multi-touch; releasing them in any order leaves nothing stuck. (where: OPPO)
+- Nothing stuck: with a key, the stick and the aim held, switch to another window (Alt+Tab), turn "Keys to taps" off, open the editor, turn control off, close the window, kill the desktop app: each lifts every finger within a moment (no touch stays in "Pointer location"); the helper's display going with the window ends them anyway. (where: OPPO)
+- The injection stays on the window: with keys held in a window, the phone's own screen shows no touch of them (its own touches in "Show taps" are none), on every Android at hand (14 first; 10 to 13 owed as for section 263); two windows with two different keymaps play only their own app. (where: OPPO)
+- Held fingers survive nothing: hold a mapped key, then pull the desktop's network cable or kill the desktop app, stop the control stream (stop the relay), turn the phone's "Separate windows" off, stop Shizuku, and just stay still with a key held for longer than two seconds (it stays down, kept by the half-second keep-alive in "Pointer location"): after a dropped stream, the switch off or two seconds of silence the touch is gone; with a helper killed (`kill` its process) the next open window works without a phantom touch. (where: OPPO)
+- The limits: a desktop test loop sending 1000 finger downs a second to one window lets about 100 through a second (the rest are not seen in "Pointer location"), finger lifts of fingers that were down always arrive, no finger stays down afterwards, and ordinary aiming at 144 Hz is not cut. (where: OPPO)
+- The typing rule: with keys on, letters typed in the window go nowhere (not to the phone's text fields), Backspace and Enter and Escape (Back) still work when not mapped, and Ctrl+key shortcuts are not taken as keys. (where: OPPO)
+
 ## A phone with a SIM
 
 **11. WAN over iroh (R1)**
@@ -673,6 +809,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Texts turned off on Devices and the phone unpaired: the list forgotten.
 
+**260. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
+
+- The schedule: the job is queued with its constraints (`adb shell dumpsys jobscheduler` lists the app's WorkManager job needing an unmetered network and charging; with "Every few hours" the charging need goes); on mobile data with Wi-Fi off, nothing runs; plugged in on Wi-Fi it runs within the period, and on ColorOS 14 the transfer service's notification shows during the run and goes when it ends (or the run waits for the app to be opened or the notification listener's next look, which the log says). (where: OPPO)
+
 ## A second phone
 
 **1. Connect + pairing gate (Tier 1 #5, Tier-2 #11b)**
@@ -722,6 +862,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **198. Files to several phones or computers at once (P6)**
 
 - Two real targets (the OPPO and a second computer, or two phones): both offered, each its own row in the sent list.
+
+**262. A spare phone at home as the wake helper (Settings, Wake helper for this home)**
+
+- Introduction: with the helper phone paired with the throwaway computer's own code and connected once while the computer is awake, the desktop's Settings, Wake shows "<phone> is this computer's wake helper" and the computer showed one notification "<phone> is now this computer's wake helper". A phone paired as a guest (a time-limited grant, or another owner's code) that sends the offer is not listed (the server's log says an offer from a phone that is not an owner phone was dropped). (where: second phone)
+- Owner phones learn of it: another owner phone, connected once while the computer is awake, shows "Wake through my helper" in the computer's Wake settings with the helper's name (off by default); a guest phone shows "No wake helper yet". (where: second phone)
+- The limit: two Wakes in a row work; a third within 30 seconds says "the helper was asked a moment ago: try again in half a minute", and one half a minute later works. (where: second phone)
+- Revoking: remove an owner phone from the computer's Devices page: within a minute the helper's list drops it and that phone's Wake now fails ("the helper could not send it" or "could not be reached"); the packet capture shows nothing for it. (where: second phone)
 
 ## Away from home: another network, or through a router
 
@@ -835,6 +982,16 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The phone on the internet road (mobile data) after this build: its control channel and its screen session connect and play as before. (where: away)
 - Files between computers on Cubic: a large file (1 GB or more) sent from one computer to the other with 0.8.2 on both, then with this build on both, over a lossy or internet path (another network, or Wi-Fi far from the router), timed both ways; this build is not much slower. If it is, the transfers could ride a connection of their own on BBR. (where: away)
+
+**262. A spare phone at home as the wake helper (Settings, Wake helper for this home)**
+
+- The wake: the computer asleep (suspend it by hand on the throwaway machine), the owner phone on mobile data with "Wake through my helper" on: Wake sends the request, the computer wakes, and the helper's capture shows the magic packet matched the computer's own MAC (matched or not only). With the same phone at home on the same Wi-Fi, Wake sends the packet from the phone itself, as before. (where: away)
+- Another network: take the helper to a different Wi-Fi network (the computer elsewhere) and ask for a wake: the answer is that the helper could not send it, and the packet capture there shows nothing. A helper on a VPN-only network is told its duty is withdrawn: an owner phone revoked meanwhile can no longer ask once the helper hears it (within a minute). (where: away)
+- A helper whose relay changed (move the helper to another Wi-Fi network, with the computer awake): it offers again and the owner phone's next connection gets the new relay; an owner phone that has not connected since asks the old one and is told it could not be reached. (where: away)
+
+**263. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
+
+- The display flags: the display is neither public nor a presentation, so check on each Android at hand that `am start --display <id>` from the helper still launches another app on it (Android 14 first; on 10 to 12, where it may refuse a private display, the page then opens the app on the phone's screen and the log says the launch failed), and that the helper's touch, scroll, Back, Enter and Delete reach that app and no key outside those three is ever pressed. (where: OPPO)
 
 ## A second computer
 
@@ -1095,6 +1252,52 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Windows driving the Linux laptop for real (the owner's mouse and keyboard, not the script): `share-test --keys 500 --moves 2000` from Windows to the laptop, before and after this build, and a feel check that the pointer keeps up and clicks land where it is. (where: second computer)
 
+**249. Fine scrolling end to end**
+
+- Windows host: a slow two-finger scroll from the phone or another computer's window scrolls a browser page a little at a time (`SendInput` wheel data below 120). (where: second computer)
+- Shared input between two computers on this build: a touchpad's slow scroll on the driving one scrolls finely on the other; with one on an older build, by notches. (where: second computer)
+
+**251. Shared input B: the driver loop, batched and kept light**
+
+- Windows driving the Linux laptop for real with this build (its hook loop has the same changes and builds on CI only): a 1 kHz mouse keeps up and feels smooth, clicks and drags land where the pointer is, keys typed during a fast move arrive in order, and the gaming lock still takes the hooks out within about half a second of a game coming to the front. (where: second computer)
+- The Linux portal driver for real (the owner's Hyprland driving another computer): the same feel check, and the edge still crosses after a screen is plugged in or rescaled. (where: second computer)
+
+**253. Fit the screen to this window, on a Linux computer**
+
+- A Windows computer as the other end: the window's switch is greyed with the reason once it says it runs Windows, and the switch turned on before that (Settings) is answered "only Sway and Hyprland" and shows the screen asked for. (where: second computer)
+
+**254. Unattended on GNOME (mutter's own D-Bus, no dialog)**
+
+- The "Allow Remote Interaction" off case through the portal on a real GNOME: the server logs "Portal input not taken" once, and another computer's window onto this one (Settings → Other computers → Show its screen) goes view-only without a reconnect; the phone is no longer offered the pen. (where: second computer)
+
+**255. The phone's location for this computer's apps (GeoClue, Linux)**
+
+- Two computers of the owner's, both with the setting on: each asks only its own phone, and a computer the phone is not paired to gets no answer. (where: second computer)
+
+**258. Open any phone app from the computer (Phone apps page, Apps part 1)**
+
+- "Let the computer open my apps" off on the phone: the page says the phone keeps its apps to itself and names the setting; turned on, "Ask again" lists them. A computer that is not the phone's own gets no word from it at all. (where: OPPO) Partly checked 2026-11-01 (the OPPO): with the switch off an ask for the list and an open were each answered `off`; turned on, the next ask for the list gave the 77 apps again. "A computer that is not the phone's own gets no word" needs a second computer and was not tried; the page's words are desktop UI.
+
+**261. Phone apps on the computer's Start menu, from notifications, and dropped files shared into the app in front**
+
+- The guards: "Let the computer open my apps" off, then the control service off, then a secure lock, then the screen shown to another computer only: each drop leaves the file in Downloads and the line names the reason; the foreground package is read once per drop (the phone's log names no package of any other window), and Pocketdesk's own screen in front is refused. Whether a share started from the service with another app in front appears on ColorOS 14 and Android 15 or 16, and whether Android's chooser fallback shows when the direct share is refused. (where: OPPO)
+
+**263. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
+
+- A screen cast running at the same time (the phone's screen shown to the same computer): a window opens beside it and each has its own window here; stopping the screen cast keeps no window open unless the session is still up. With the screen shown to another computer, a window ask is answered `windows_unavailable`. (where: OPPO)
+
+**264. Wear OS tile, complication and list (Settings, Watch controls; `android/wear`)**
+
+- Wake: with the laptop asleep by hand (never by Pocketdesk's tests), the tile's Wake wakes it as the phone's Wake tile does, and says "Sent"; with wake off for that computer it says why. (where: second computer)
+- Music: play/pause and next on the tile change the computer's player as the phone's music tile does; with Audio off for the phone on the computer the tile says the computer refused. (where: second computer)
+- A question: with a `pocketdesk ask` waiting, the tile shows "No: ..." and the list shows its words; No on the watch answers No on the computer and takes the phone's notification away; with the watch's lock set it works unlocked and says "Unlock the watch first" when locked; with no watch lock it says "Set a watch lock to use this". (where: second computer)
+- Deck: with Deck switched on the list shows the computer's buttons (at most eight) and a press runs it (a button the computer's own rules refuse says so); with it off the list shows none. Two presses within 1.5 s: the second says "Too soon". (where: second computer)
+
+**266. The computer turns on the phone's hotspot (Settings, Let my computers turn on my hotspot; Overview, Use my phone's hotspot)**
+
+- Only its own computer: another paired computer's `hotspot_on` (sent by hand) is logged "NOT_OWN" and does nothing, and a paired computer with "Screenshot, lock and open its apps" turned off in Devices on the computer cannot ask at all. (where: second computer)
+- The asking computer gone: with the hotspot on, turn off the computer's Wi-Fi or stop its server for over 2 minutes: the phone turns the hotspot off (and not before 2 minutes); unpair the phone on the computer, or remove the computer on the phone: it goes off at once. (where: second computer)
+
 ## A Linux desktop (the Azure VM serves for some)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1352,11 +1555,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **100. GNOME and KDE hosts that work unattended (N8)**
 
-- "Remember the screen-sharing grant" on: a session from the phone asks once at the desk; a second session and a reconnect start with no dialog. (KDE headless above; a phone session and GNOME owed.)
-- Without uinput access: the phone's taps, typing (accents, emoji), keys and the wheel (its direction, one click a notch) reach GNOME through the RemoteDesktop portal; a remote without the screen is told it gets no input there.
+- "Remember the screen-sharing grant" on: a session from the phone asks once at the desk; a second session and a reconnect start with no dialog. (KDE and GNOME headless above, by the probe; a phone session at a real desk owed.)
+- Without uinput access: the phone's taps, typing (accents, emoji), keys and the wheel (its direction, one click a notch) reach GNOME through the RemoteDesktop portal; a remote without the screen is told it gets no input there. (Headless 2026-11-01: taps, keys, ASCII typing and the wheel arrived, accents not on a US layout, and a grant with "Allow Remote Interaction" off gave no input and no word to the phone; owed: a phone, a layout with accents, emoji.)
 - Revoking in GNOME's settings brings the dialog back; Forget the grant and turning the setting off make the next session ask.
 - No RemoteDesktop portal (or refused): the screen alone.
-- The server started as a systemd user service: does the portal keep its restore data with no desktop app id? (Unnamed, KDE kept and restored both tokens under the empty id; the server now names itself `dev.pocketdesk.Pocketdesk` where the package's desktop file is installed. The unit itself is still owed.)
+- The server started as a systemd user service: does the portal keep its restore data with no desktop app id? (Unnamed, KDE kept and restored both tokens under the empty id; the server now names itself `dev.pocketdesk.Pocketdesk` where the package's desktop file is installed. The unit itself is still owed on a live desk. Answered 2026-11-01 from the unit and systemd's rules: a user unit gets only the user manager's environment, never the session's, and Plasma's `startplasma-wayland` sets `XDG_CURRENT_DESKTOP`, `KDE_FULL_SESSION` and `KDE_SESSION_VERSION` itself and carries KDE's `KUpdateLaunchEnvironmentJob`, the job that pushes them to the user manager and D-Bus activation (read from the 6.8.2 binary's strings, not run), while `plasma-workspace.target` is `Before=graphical-session.target`, which the unit starts after; the same rig showed the converse on GNOME, where the manager had no `XDG_CURRENT_DESKTOP` until the session set it, and the portal then offered no ScreenCast. Still to see on a real Plasma desk: `systemctl --user show-environment | grep -E 'XDG_CURRENT_DESKTOP|KDE_FULL_SESSION'`.)
 
 **101. KDE Connect, next steps (N9)**
 
@@ -1586,6 +1789,57 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A phone session against the tarball's server on a real stock Fedora machine with no working hardware encoder and `ffmpeg-free` plus `openh264`: the picture appears and stays, Diagnostics' last session names `ffmpeg-sidecar-openh264`, and the picture quality at the default bitrate is acceptable. (where: linux)
 - install.sh on a fresh stock Fedora: it lists `ffmpeg-free` and `openh264` and, once they are installed, `pocketdesk capabilities` names libopenh264; with `fedora-cisco-openh264` disabled it says how to enable it and enables nothing. (where: linux)
 
+**249. Fine scrolling end to end**
+
+- Firefox and a GTK app under Sway or Hyprland without uinput: a slow two-finger scroll moves the page about as far as the same scroll on a laptop's own touchpad, with no jump at notch boundaries. (where: linux)
+- X11 (an Xorg session without uinput, through XTEST): the wheel scrolls up and down the right way, a click a notch. (where: linux)
+- KDE Plasma through the portal: a slow touchpad scroll from the window or the phone moves a few pixels at a time (`NotifyPointerAxis` pixels, 3.75 a quarter notch), the right way. (where: linux)
+- uinput on a Linux computer where `/dev/uinput` is writable: `libinput debug-events` shows `v120` values below 120 for a slow scroll, and a mouse wheel's notch from an older phone app still scrolls one notch. (where: linux)
+- The phone's trackpad: a slow two-finger scroll moves the page smoothly; with Settings' Smooth scrolling off it moves a notch at a time as before. (where: linux)
+
+**251. Shared input B: the driver loop, batched and kept light**
+
+- A running server at rest with driving on: the `pd-shared*` threads wake about 7 times a second at home (`/proc/<pid>/task/*/status`), and its receive loop about once a second while nobody drives this computer. (where: linux)
+
+**252. The phone's camera as this computer's webcam (Linux)**
+
+- "Offer phones as a camera" turned off and "Stop camera" on the Overview each end a running camera, and the "in use" notification shows plainly (default importance, silent) on the phone. (where: linux) Partly checked 2026-11-01 (the OPPO, a laptop throwaway on a private PipeWire, counts only): with the setting turned off the running camera ended and the node was gone in 0.7 s, the phone's "in use" notification with it; the Overview's Stop camera, as its seam (a device kick, what `end_sessions_of` writes), took the node away in 0.6 s and the notification too; the notification's channel is of default importance (3) with no sound and no vibration. The desktop button itself was not clicked.
+- A real video call on the owner's desk: Firefox (and Zoom or Meet in the browser) picks "Pocketdesk camera (<phone>)" in its camera list, the other side sees the phone's picture, and it stops when the phone's notification's Stop is pressed. (where: linux)
+- OBS 30+ and GNOME Snapshot list and show the camera; `pw-v4l2` lets a V4L2-only app (e.g. `pw-v4l2 ffplay /dev/video0` or Cheese) open it. (where: linux) 2026-11-01: `pw-v4l2` is not installed on the laptop (and nothing was installed for it); not run.
+- The ask refused: Webcam off in Devices (the button is greyed and says why), the phone's switch off (no notification), and the setting off (a camera cast from an older ask is closed with "does not offer phones as a camera"). (where: linux) Partly checked 2026-11-01 (the OPPO): the phone's switch off left no notification on the phone; the setting off dropped the ask ("does not offer phones as a camera", no notification) and ended a running camera ("phones are no longer offered as a camera", 0.7 s); Webcam off for the phone dropped the ask ("its permission is off", no notification). The Devices button's greying and its reason are desktop UI, not looked at.
+
+**254. Unattended on GNOME (mutter's own D-Bus, no dialog)**
+
+- The first-input race on a real session: a pointer move sent before an app has bound the seat's pointer is lost to that app until the next time the pointer enters it (seen with `wev` started before the session); check a click right after a session starts lands in a window the pointer was already over. (where: linux)
+- A real GNOME desk (Ubuntu 24.04 or newer, Fedora 41 or newer) with the switch on and no one at the desk: a paired phone starts a session with no dialog, the picture and a tap and a typed word arrive, the screen-sharing indicator shows while it runs and goes when the phone leaves, and nothing is left in `~/.local/state/pocketdesk` for it (no restore token). (where: linux)
+- The same with two monitors: `monitor_index` 1 records the second one (the logical monitor at its corner), and an absolute click lands on it. (where: linux)
+- With the switch off, or on KDE or Sway with it on, the capture goes through the portal as before (no mutter call in `busctl --user monitor org.gnome.Mutter.ScreenCast`). (where: linux)
+- An older GNOME whose mutter has the ScreenCast API but no `org.gnome.Mutter.RemoteDesktop` (or refuses it): the same single log line and the portal's dialog. (where: linux)
+- The desktop app's Settings → Connection shows "Unattended on GNOME" on Linux only, off by default, and a session started after turning it on takes the new path with no server restart. (where: linux)
+
+**256. A direct link (no shared network): this computer's own Wi-Fi, joined by the phone for Pocketdesk only**
+
+- A throwaway server (not the laptop's own ssh Wi-Fi: a USB Wi-Fi adapter as the card, the built-in one keeping ssh) with a request left in `direct_link_out/` (or the Pair page's button): the hotspot comes up (`nmcli -t -f NAME,TYPE connection show --active` names "Pocketdesk direct link"; print nothing else), `direct_link.json` says `on` with an address, mode 0600, and `nmcli connection show` lists no saved "Pocketdesk direct link" (volatile). (where: linux)
+- The second-interface road: the server run with `AmbientCapabilities=CAP_NET_ADMIN` on a card whose `iw list` allows AP and managed together: the plan is "second interface", `iw dev` shows `pdlink0` of type AP beside the card's managed interface on the same channel, the laptop's own connection never drops, and `iw dev pdlink0 del` has run when the link ends. (where: linux)
+- The takes-over road, on the USB adapter only: the Pair page says "This computer's Wi-Fi will disconnect while the direct link is on" before the first click, and asks once more ("Disconnect Wi-Fi and make the link"); a request without `accept_takeover` is refused with a status of `failed` and nothing changes. (where: linux)
+- The OPPO, in range, scanning the Pair page's code from a screenshot pushed by adb: Pocketdesk asks "Pair with the computer at 10.42.x.1?" with the direct-link note, Android's own prompt to join `pocketdesk-…` comes up once, the phone joins, pairs, and a session starts; a file moves both ways (counts and a checksum only), and a 30 s session counts frames. `dumpsys connectivity` meanwhile shows the phone's mobile data still the default network. (where: linux)
+- The OPPO refusing Android's prompt (or the code scanned out of range): "The phone did not join the computer's Wi-Fi", nothing paired, nothing left bound, Cancel and back both leave. (where: linux)
+- After the session ends, and after Cancel, the phone is back on its own Wi-Fi (`dumpsys connectivity | grep -c WifiNetworkSpecifier` is 0) and Pocketdesk's sockets are no longer bound. (where: linux)
+- "Join computers' direct links" off on the phone: scanning a direct link says joining is turned off, joins nothing. (where: linux)
+- The idle timer on a real link: with no phone it turns off after the setting (a 1-minute setting is enough), the Pair page counting down; with a phone connected it does not, and starts counting again once the phone leaves. (where: linux)
+- The server stopped (`pocketdesk stop`) with a link on: the hotspot is gone at once; the server killed with `kill -9` and started again: the first start's log says it swept one, and no "Pocketdesk direct link" is left. (where: linux)
+- A firewall on the computer (firewalld, then ufw with its default deny): the phone reaches 1716 and 4716 on the hotspot's address under firewalld's `nm-shared` zone, and what ufw needs is what the guide says. (where: linux)
+- The Settings rows: "Offer a direct link" off hides the card and a running link goes off within 5 s; the band row's 5 GHz on a card that allows it makes a 5 GHz network, and on one that does not says why the link failed. (where: linux)
+- The takeover's restore, on the USB adapter only: with the adapter joined to a network, make a link (taking over), then turn it off: the adapter's own connection is active again within seconds (`nmcli -t -f NAME,DEVICE connection show --active`, names not pasted), and the same after the server is stopped with a link on, and after a link that fails to come up (for example `dnsmasq` missing). (where: linux)
+- The sweep is this folder's: with the main server's link on and a second throwaway server (its own state folder) started, the main link stays up and the throwaway sweeps nothing; with the main server killed and started again, its first start removes its own left-over link (and `pdlink0` if it made one) and restores the card's connection. (where: linux)
+- The longest life: with a phone connected (so never idle), the link goes off at eight hours (a test build with the constant cut to a minute is enough). (where: linux)
+- The OPPO opening a direct link from another app (an `adb shell am start -d "pocketdesk://pair?..."` link, not scanned): Pair first, then a second screen naming the Wi-Fi network and asking again; "Join the network and pair" is the only way on, and Cancel and back both leave with nothing joined. After `adb shell am kill` or a rotation mid-pairing, the restored link has no Wi-Fi keys. (where: linux)
+
+**266. The computer turns on the phone's hotspot (Settings, Let my computers turn on my hotspot; Overview, Use my phone's hotspot)**
+
+- Joining on Linux with NetworkManager: with "Join my phone's hotspot network" set to the phone's saved Wi-Fi name, "Use my phone's hotspot" says "Joining ..." and the computer joins it once it appears (the notice says "Joined"); with a name that is not saved here it says so and joins nothing and asks for no password; with the setting empty it only tells you to connect. No password prompt appears and none is stored by Pocketdesk. (where: linux)
+- Two saved networks of one name on Linux: with the phone's name saved twice in NetworkManager, nothing is joined and the notice says so; with one, it is joined by UUID (`ps` while it joins shows `nmcli ... connection up uuid ...`, no name or password). (where: linux)
+
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
 **13. PiP + multitask (Tier-3 #14, DeX)**
@@ -1797,6 +2051,44 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **205. The phone's O and P rows after their design pass (Q3)**
 
 - "Let the computer take screenshots and lock this phone" warning while Send new screenshots carries nothing, and gone once it does; hidden on Android 8.
+
+**258. Open any phone app from the computer (Phone apps page, Apps part 1)**
+
+- Whether a background start by the control service itself works on the OPPO (ColorOS 14) and, if it can, on a phone with Android 15 or 16: the app starts from the service's own context with the phone's screen on another app. If it only appears behind, the fallback (N3's opt-in) is the next thing to try. (where: other hardware) Partly checked 2026-11-01 on the OPPO (ColorOS 14, Android 14): yes — with Calculator in front and the cast shown, an open of Settings from the control service's own context brought Settings to the front (`opened`). Android 15 or 16 hardware was not available.
+
+**261. Phone apps on the computer's Start menu, from notifications, and dropped files shared into the app in front**
+
+- A computer that is too old (a throwaway built from before this change): the phone says the computer cannot keep folders yet and sends nothing; no copies appear in that computer's Downloads. (where: other hardware)
+
+**262. A spare phone at home as the wake helper (Settings, Wake helper for this home)**
+
+- A stranger: a phone paired with nothing, or another owner's phone, dialing the helper by its key is closed (the helper's counts show a dropped request, no packet sent). A request line with a MAC in it sends nothing (the packet capture shows none). (where: other hardware)
+
+**263. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
+
+- An older computer (a throwaway built before this change) answers no such ask; a computer without the setting (`phone_app_windows` off in the desktop's Settings) opens apps on the phone's screen as before. (where: other hardware)
+
+**264. Wear OS tile, complication and list (Settings, Watch controls; `android/wear`)**
+
+- **The one assumption the design rests on:** a secure RFCOMM socket from the watch to the phone's Pocketdesk service connects on a real Wear OS 3, 4 and 5 watch (a Pixel Watch and a Galaxy Watch, if both can be had). On the phone, Settings → Watch controls on, then on the watch Pair: the connect succeeds and the phone logs "a watch was paired" (no address). If `connect()` fails on a model ("read failed", "service discovery failed") note the model and Wear OS version: the fallback is an L2CAP channel (Android 10 and later) or a BLE GATT service behind the same `watchlink` frames, which only changes the socket in `PhoneLink` and `WatchLinkServer`. (where: other hardware)
+- Pairing: Settings → Watch controls → Pair a watch, then on the watch Pocketdesk → the phone → six digits; typing them on the phone pairs ("Paired with ..."). A wrong code: the watch says "Not paired: the phone refused"; three wrong codes from the watch shut it out until the window is opened again. A second bonded device (earbuds, a car) that connects during the window and fails does not use up the watch's tries. Closing the dialog, or two minutes, closes it: a later watch connect gets nothing. With the window closed, a bonded device that connects is dropped at once. (where: other hardware)
+- The permission: turning "Watch controls" on the first time shows Android's nearby-devices question once; declining leaves the switch off; the phone's Settings never asks for location. On the watch, Pocketdesk asks for the same once. (where: other hardware)
+- The tile: add it on the watch; it shows the buttons the phone has on (and no Deck chip by default), the computer's name, and "Nothing is on in the phone's Watch controls" when every switch is off. Turning a switch off on the phone removes its chip the next time the tile is shown. (where: other hardware)
+- An "Approve with my phone" request (sudo): the list shows its command and "Yes needs your phone's fingerprint"; there is no Yes on the watch; No on the watch denies it; Yes on the phone still takes the fingerprint and signs. (where: other hardware)
+- The phone not near: switch the phone's Bluetooth off, or walk out of range: the tile says "The phone is not reachable" within about twelve seconds, and a wake pressed then does not go out when the phone comes back. Phone's Pocketdesk "Watch controls" off: the watch says the buttons are off or the phone is not reachable; "Forget" on the phone: the tile says "Pair with the phone first". (where: other hardware)
+- The complication ("PD") opens the list from a watch face that offers it; it shows no live data and never refreshes. (where: other hardware)
+- Battery and idle: with the setting on and the phone idle overnight, the tile still works in the morning and the phone's battery stats show no wake lock for Pocketdesk's Bluetooth service; the tile's own connect ends within the timeout and leaves no open socket on the phone (`adb shell dumpsys bluetooth_manager` shows none after a press). (where: other hardware)
+- The size: the release watch APK is about 1 MB; note the installed size on a watch. (where: other hardware)
+
+**265. Keys to taps: a phone game played from the keyboard and mouse (Settings, Keymaps for phone apps)**
+
+- Aiming: with an Aim area, "Aim with the mouse" (and Ctrl+Alt+Shift+M) hides and locks the pointer to the window; moving the mouse drags one finger around the area (a camera in a 3D game or a map pans); still for a moment lifts it, moving again puts it down in the middle; running to the area's edge lifts and puts it down in the middle again; a mouse button mapped as a key taps; Ctrl+Alt+Shift+M again or Ctrl+Alt+Shift alone frees the pointer. Try a 1000 Hz mouse and a 144 Hz screen: no lag builds up and the phone logs no flood. (where: other hardware)
+- An older phone (a build before this change) with a keymap played: it ignores the finger batches and still takes touch and typing; the desktop does not break. (where: other hardware)
+
+**266. The computer turns on the phone's hotspot (Settings, Let my computers turn on my hotspot; Overview, Use my phone's hotspot)**
+
+- The first check, per Android: "Use my phone's hotspot" starts the phone's Wi-Fi hotspot within about 15 seconds with no tap and no screen on the phone, under its own saved name and password (the computer sent neither), Android shows its usual hotspot indicator, and the helper's log line says it started. Record the Android version and maker for each phone tried; if the helper logs "no tethering manager" or "did not start", record the exact line (the call may need another route on that Android). Android 11, 12, 13, 14 and 15 are each owed. (where: other hardware)
+- An older phone (a build before this) or an older computer: the computer shows no buttons for a phone that never reported `hotspot`; an older phone drops an `hotspot_on` ask it does not know and nothing breaks. (where: other hardware)
 
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 
@@ -2641,3 +2933,49 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The same for "Play this phone's sound there" (it makes sound, so never in a script run). (where: by hand)
 - TalkBack on the card menu: the two headings are read as headings, Manage as collapsed and then expanded; on a window chip, the whole title and the "Show the full title" action. (where: by hand)
+
+**257. A direct link on Windows: the Mobile Hotspot**
+
+- The Settings rows on Windows: "Offer a direct link" off hides the card and a running link goes off within 5 s; the note names the Mobile Hotspot, not NetworkManager. (where: by hand)
+
+**258. Open any phone app from the computer (Phone apps page, Apps part 1)**
+
+- A click with no screen shown yet: the page says to tap the notification; the phone shows "Tap to show your screen and open …", its tap brings Android's one screen-capture question, and after Start the app opens and the window here shows it. A second app then opens with no question and no notification (the one consent serves the connection). With Android 14's "single app" choice picked in the question: what the window shows (the app chosen, not what is opened after) is noted, nothing depends on it. (where: OPPO) Partly checked 2026-11-01 (the OPPO): with no screen shown, the open was answered `needs_screen` and the phone posted "Tap to show your screen and open Settings"; its tap brought Android's one screen-capture question ("Start recording or casting with Pocketdesk?", Cancel and "Start now" only: ColorOS 14's question has no single-app choice, so that part has nothing to note), and after "Start now" Settings opened (`opened`); a second open (Calculator) then opened with no question and no notification. The window here was not looked at.
+- The control service off: a click is answered `control_off`, the page says to turn on Pocketdesk control in Android's Accessibility settings, and nothing is asked of the phone's owner by itself. (where: OPPO) Partly checked 2026-11-01 (the OPPO, Pocketdesk control found off in Accessibility settings): an open asked of the phone was answered `control_off` at once. Found: beside it the phone also posted a "Tap to open: Settings" notification (the P2 fallback, `PhoneActions.open` for the plain, no-screen ask, for ten minutes) — by design in the code, but the item's "nothing is asked of the phone's owner by itself" is true only of dialogs, not of that notification; decide which the item means. The page's wording is desktop UI, not looked at.
+- The phone locked (a secure lock) and asleep: "locked" and "unlock the phone once", then the same click works after the unlock. A swipe-only lock is dismissed by Hands-free (see section 259), not answered "locked". (where: OPPO) Partly checked 2026-11-01 (the OPPO has a swipe-only lock, no secure lock to try): asleep with the lock screen up, awake with the lock screen up, an open was answered `locked` both times (the swipe lock was not dismissed); after swiping it away the same open was `opened`. A secure lock and its "unlock the phone once" wording were not tried.
+- The page by hand on Windows and on Linux: the search narrows as it is typed, "Opened from here" shows the last apps in the order opened, the phone's name picker with two phones, the layout in a narrow window, and Settings' "Show the Phone apps page" off takes the page out of the list. (where: by hand)
+
+**259. Hands-free apps: a paused share, the screen-sharing question accepted, a lock swiped away**
+
+- Whether ColorOS 14 on the OPPO exposes the screen-sharing question's confirm button to the control service: with "Accept screen sharing for my computers" and "Let the computer open my apps" on and no cast running, a click on an app on the Phone apps page opens the app with no tap; the phone's log (`ConsentPress`) says "pressed after N looks" and nothing of the screen's words. If the question is hidden from accessibility or worded differently, the log says "not_found" and the page says "Tap needed on the phone": that is the expected fallback, and what the OPPO does goes in the results. (where: OPPO)
+- Pause and resume: show an app's screen, close the window on the computer, and the phone's notification says "Paused" with Stop and minutes left; the status bar still shows Android's own sharing indicator. Click an app again within ten minutes: the window comes back and the app opens with no question and no tap, and the encoder started again (the picture is live). A different computer's open (or a second pairing) gets a new question, and the old pause is gone. Stop ends it; after ten minutes it ends by itself; locking the phone ends it (Android stops the projection), and the next open then asks as before. (where: OPPO)
+- The desktop pages by hand: "Tap needed on the phone" appears in the accent colour with the message, and "locked_secure" shows the Extend Unlock sentence, on Windows and on Linux. (where: by hand)
+
+**261. Phone apps on the computer's Start menu, from notifications, and dropped files shared into the app in front**
+
+- Windows: right-click an app, Pin to Start: "<App> (phone)" is in Start's All apps with the app's own icon (not Pocketdesk's), and its right-click offers Pin to taskbar. Click it with Pocketdesk running: the app opens on the phone and the phone's screen window comes up, and the Pocketdesk main window does not move; click it with Pocketdesk closed: Pocketdesk starts, then the same. Unpin on the page removes the shortcut and the icon file. A second pin of an app with the same name keeps the first. (where: by hand)
+- Linux (KDE, GNOME, Hyprland with a launcher): Pin to the applications menu: the entry "<App> (phone)" shows in the launcher (after a moment on some desktops) with the icon; running it opens the app and the screen window. An app whose name has quotes, `$`, `%`, a backslash or a path separator pins and runs with the name as given and nothing else started (check the `.desktop` file by eye). Unpin removes `pocketdesk-phone-*.desktop` and the icon. (where: by hand)
+- Settings on both: "Offer to pin phone apps to Start or the applications menu" off removes the right-click menu and keeps made shortcuts working; "Share a dropped file into the phone's app in front" off sends dropped files as before. (where: by hand)
+- The Files page's Kept folders section and the three Settings rows on the desktop (the folder box with Choose folder, the cap, the deletion switch) by hand on Windows and on Linux, light and dark, and in a narrow window; the Show in folder button opens the folder. (where: by hand)
+
+**262. A spare phone at home as the wake helper (Settings, Wake helper for this home)**
+
+- The switch: with "Wake helper for this home" off (the default) nothing listens (`adb shell dumpsys activity services dev.pocketdesk.android` lists no `WakeHelperService`, and the phone's iroh endpoint is not bound). Turn it on: a quiet notification "Waiting for a charger and Wi-Fi", or "Waking your computers for your other phones" when plugged in on Wi-Fi. (where: OPPO)
+- Charger and Wi-Fi gate: unplug the helper: within a few seconds the notification says it is waiting and the log says "not listening" (the endpoint is closed: a wake asked now says the helper could not be reached); plug it in: it listens again. Turn Wi-Fi off with the charger on: same. On the battery for 30 minutes with the switch on, the app uses no measurable battery (no timer, no wake lock). (where: OPPO)
+- A refused helper stops listening at once: remove it on the desktop while it is serving: within a minute the notification goes and the endpoint is closed (the log says "not listening"), and it sends no offer again. (where: OPPO)
+- The words in Spanish and Tamil (Settings, the Wake settings dialog, the notification), and the desktop's Settings, Wake row, light and dark, in a narrow window, by hand on Windows and on Linux. (where: by hand)
+
+**263. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
+
+- Switch on, "Let the computer open my apps" on, phone unlocked: click an app on the Phone apps page: a window with the app's name opens on the computer, the app's picture in it, and the phone's own screen stays as it was (try with it off, and with another app in front); the log (`WindowCast`, `WindowHost`) names the display. Try Android 14 first, then a phone on 10 to 13 if one is at hand. (where: OPPO)
+- The Phone apps page's line about how apps open, and Settings, "Open phone apps in windows of their own", by hand on Windows and on Linux, light and dark, and in a narrow window; the window's title, its Back-only bar and its control hint; the viewer windows in a Wayland session. (where: by hand)
+
+**264. Wear OS tile, complication and list (Settings, Watch controls; `android/wear`)**
+
+- Ring: the tile's "Ring phone" makes the phone sound the alarm for 30 s with Stop on the phone; the notification says "Your watch is ringing this phone"; a second press within a minute says "Too soon, wait a moment". (where: by hand)
+
+**265. Keys to taps: a phone game played from the keyboard and mouse (Settings, Keymaps for phone apps)**
+
+- A swipe: the Swipe tool, drag from a start to an end, a key: pressing it draws a swipe from the start to the end over the set time (a list scrolls by the right amount) and lifts at the end; pressing again meanwhile does nothing; the time slider changes its speed. (where: OPPO)
+- The keymap file: one per app in the state folder under `keymaps/`, named `app.<package>.json` (a package such as `con.example` is `app.con.example.json`, a file from before the prefix is renamed as it is read); a second window of the same app opens with it; another app has its own; a file edited into something unsound (a key twice, Escape, a radius out of range, a name with a slash) or past 64 KiB is ignored and the editor starts empty; removing every binding removes the file. No keymap is in any log or sent to the phone. (where: by hand)
+- The Settings row and the bar by hand on Windows and on Linux, light and dark, in a narrow window; the editor's list beside the picture, the markers' labels and the warning; the pointer lock on Windows (confined and recentred) and on a Wayland session (locked). The Settings page's snapshot (`settings_*.png`) shows only the top of the page: confirm by eye the Phones section row, as the snapshot test cannot run without a GPU here. (where: by hand)

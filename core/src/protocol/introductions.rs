@@ -62,6 +62,17 @@ pub const PINS_WAITING: usize = 4;
 /// The longest request id taken: an id is the asker's own, echoed back.
 const MAX_REQUEST: usize = 64;
 
+/// The most computers a list answer may offer a phone; more is refused
+/// whole, before any is read.
+pub const MAX_OFFERS: usize = 64;
+
+/// The longest name an offer, or an id an answer, may carry, in bytes.
+const MAX_FIELD: usize = 256;
+
+// The longest pairing link an answer may carry, in bytes: the pairing
+// link's own limit.
+use super::MAX_PAIR_LINK_BYTES as MAX_LINK;
+
 /// Whether `request` is a request id this protocol takes: 1 to 64
 /// printable ASCII characters.
 fn request_reads(request: &str) -> bool {
@@ -227,17 +238,56 @@ pub enum PhoneAnswer {
 }
 
 /// The request id an answer to a phone names and what it says.
+///
+/// Held to the sizes the computer ever sends: a request id that reads,
+/// at most [`MAX_OFFERS`] computers of short ids and names, and a link of
+/// at most [`MAX_LINK`] bytes; anything longer is `None`, measured before
+/// any of it is copied.
 pub fn read_phone_answer(body: &Value) -> Option<(String, PhoneAnswer)> {
-    let request = body.get("request")?.as_str()?.to_string();
+    let request = body.get("request")?.as_str()?;
+    if !request_reads(request) {
+        return None;
+    }
+    let request = request.to_string();
     if let Some(code) = body.get("refused").and_then(Value::as_str) {
         return Some((request, PhoneAnswer::Refused(Refusal::from_code(code))));
     }
     let answer = match body.get("ask")?.as_str()? {
-        "list" => PhoneAnswer::Listed(serde_json::from_value(body.get("computers")?.clone()).ok()?),
-        "pair" => PhoneAnswer::Link {
-            device_id: body.get("deviceId")?.as_str()?.to_string(),
-            link: body.get("link")?.as_str()?.to_string(),
-        },
+        "list" => {
+            let computers = body.get("computers")?.as_array()?;
+            if computers.len() > MAX_OFFERS {
+                return None;
+            }
+            // Each id and name measured where it lies, then each offer
+            // read from it: nothing over the limits is copied.
+            let fits = |item: &Value| {
+                ["id", "name"].iter().all(|key| {
+                    item.get(key)
+                        .and_then(Value::as_str)
+                        .is_none_or(|v| v.len() <= MAX_FIELD)
+                })
+            };
+            if !computers.iter().all(fits) {
+                return None;
+            }
+            let offers = computers
+                .iter()
+                .map(Offer::deserialize)
+                .collect::<Result<Vec<_>, _>>()
+                .ok()?;
+            PhoneAnswer::Listed(offers)
+        }
+        "pair" => {
+            let device_id = body.get("deviceId")?.as_str()?;
+            let link = body.get("link")?.as_str()?;
+            if device_id.len() > MAX_FIELD || link.len() > MAX_LINK {
+                return None;
+            }
+            PhoneAnswer::Link {
+                device_id: device_id.to_string(),
+                link: link.to_string(),
+            }
+        }
         _ => return None,
     };
     Some((request, answer))
@@ -362,9 +412,19 @@ pub enum ComputerAnswer {
 }
 
 /// The request id B's answer names and what it says.
+///
+/// A request id that does not read, or a paired id over 256 bytes, is
+/// `None`.
 pub fn read_computer_answer(body: &Value) -> Option<(String, ComputerAnswer)> {
-    let request = body.get("request")?.as_str()?.to_string();
+    let request = body.get("request")?.as_str()?;
+    if !request_reads(request) {
+        return None;
+    }
+    let request = request.to_string();
     if let Some(device_id) = body.get("paired").and_then(Value::as_str) {
+        if device_id.len() > MAX_FIELD {
+            return None;
+        }
         return Some((
             request,
             ComputerAnswer::Paired {
@@ -432,6 +492,43 @@ mod tests {
         ] {
             assert_eq!(PhoneRequest::parse(&body), None, "{body}");
         }
+    }
+
+    /// An answer longer than a computer ever sends is refused whole: too
+    /// many computers, a long id, name or link, a request id that does not
+    /// read.
+    #[test]
+    fn an_answer_over_the_limits_is_none() {
+        let offer = |id: &str, name: &str| json!({ "id": id, "name": name });
+        let list =
+            |offers: Vec<Value>| json!({ "request": "r", "ask": "list", "computers": offers });
+        let most = vec![offer("b", "Arch"); MAX_OFFERS];
+        assert!(
+            matches!(read_phone_answer(&list(most)), Some((_, PhoneAnswer::Listed(o))) if o.len() == MAX_OFFERS)
+        );
+        assert_eq!(
+            read_phone_answer(&list(vec![offer("b", "Arch"); MAX_OFFERS + 1])),
+            None
+        );
+        let long = "x".repeat(MAX_FIELD + 1);
+        assert_eq!(read_phone_answer(&list(vec![offer(&long, "Arch")])), None);
+        assert_eq!(read_phone_answer(&list(vec![offer("b", &long)])), None);
+        let link = "x".repeat(MAX_LINK + 1);
+        assert_eq!(read_phone_answer(&pair_answer("r", "b", &link)), None);
+        assert_eq!(
+            read_phone_answer(&pair_answer("r", &long, "pocketdesk://pair?v=1")),
+            None
+        );
+        assert_eq!(
+            read_phone_answer(&refused_answer("", &PhoneAsk::List, Refusal::Off)),
+            None
+        );
+        assert_eq!(read_computer_answer(&confirmed_answer("r", &long)), None);
+        assert_eq!(read_computer_answer(&confirmed_answer("a b", "p")), None);
+        assert_eq!(
+            read_computer_answer(&declined_answer(&"x".repeat(65), Refusal::Off)),
+            None
+        );
     }
 
     #[test]

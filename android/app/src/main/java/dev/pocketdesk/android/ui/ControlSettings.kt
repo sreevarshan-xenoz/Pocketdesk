@@ -13,6 +13,9 @@ import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.control.ControlRunner
 import dev.pocketdesk.android.notify.PhoneNotificationPrefs
+import dev.pocketdesk.android.windows.HotspotRule
+import dev.pocketdesk.android.windows.ShizukuBridge
+import dev.pocketdesk.android.windows.WindowRule
 
 /**
  * Which of the switches that need "Pocketdesk control" shows the row that
@@ -257,6 +260,163 @@ fun PhoneActionsSetting() {
         }
     } else if (on && !listening) {
         AllowNotificationAccess()
+    }
+}
+
+/**
+ * Hands-free: Pocketdesk presses Android's own screen-sharing question for the
+ * phone's own computer, so an app the computer opens needs no tap. Off by
+ * default; it needs "Let the computer open my apps" and the control service,
+ * and presses only that one question, just after Pocketdesk raises it.
+ */
+@Composable
+fun AutoAcceptSetting() {
+    val context = LocalContext.current
+    val resumes = rememberResumes()
+    var on by remember { mutableStateOf(Prefs.autoAcceptScreen(context)) }
+    val serviceOn = remember(resumes, on) { ControlRunner.serviceEnabled(context) }
+    val appsOn = remember(resumes, on) { Prefs.appsFromComputer(context) }
+    val openAccessibility = {
+        runCatching {
+            context.startActivity(
+                Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
+    SettingSwitch(
+        title = stringResource(R.string.settings_auto_accept),
+        summary = stringResource(
+            when {
+                !on -> R.string.settings_auto_accept_summary_off
+                !appsOn -> R.string.settings_auto_accept_summary_needs_apps
+                !serviceOn -> R.string.settings_control_summary_needs_service
+                else -> R.string.settings_auto_accept_summary_on
+            },
+        ),
+        checked = on,
+        warning = on && (!serviceOn || !appsOn),
+        onChange = { want ->
+            on = want
+            Prefs.setAutoAcceptScreen(context, want)
+            if (want && !ControlRunner.serviceEnabled(context)) openAccessibility()
+        },
+    )
+    if (on && appsOn && !serviceOn) {
+        SettingLink(stringResource(R.string.settings_control_open_accessibility), null) { openAccessibility() }
+    }
+}
+
+/**
+ * Phone apps tier 2: the computer may open an app in a window of its own,
+ * several at once, while this phone's screen stays as it is. Optional and
+ * off by default; the row is shown only while Shizuku is installed and
+ * running (or while it is on, so it can be turned off), and nobody is told
+ * to install or start Shizuku or to turn on wireless debugging. Turning it
+ * on asks Shizuku's own dialog once, which is the owner's grant.
+ */
+@Composable
+fun WindowsSetting() {
+    val context = LocalContext.current
+    val resumes = rememberResumes()
+    var on by remember { mutableStateOf(Prefs.separateWindows(context)) }
+    val running = remember(resumes, on) { ShizukuBridge.running() }
+    val permitted = remember(resumes, on) { ShizukuBridge.permitted() }
+    val appsOn = remember(resumes, on) { Prefs.appsFromComputer(context) }
+    if (!WindowRule.rowShown(android.os.Build.VERSION.SDK_INT, running, on)) return
+    val mode = WindowRule.mode(android.os.Build.VERSION.SDK_INT, running, permitted, on)
+    SettingSwitch(
+        title = stringResource(R.string.settings_windows),
+        summary = stringResource(
+            when {
+                !on -> R.string.settings_windows_summary_off
+                mode == WindowRule.Mode.NO_SHIZUKU -> R.string.settings_windows_summary_needs_shizuku
+                mode == WindowRule.Mode.NEEDS_PERMISSION -> R.string.settings_windows_summary_needs_permission
+                !appsOn -> R.string.settings_windows_summary_needs_apps
+                else -> R.string.settings_windows_summary_on
+            },
+        ),
+        checked = on,
+        warning = on && (mode != WindowRule.Mode.ON || !appsOn),
+        onChange = { want ->
+            if (!want) {
+                on = false
+                Prefs.setSeparateWindows(context, false)
+            } else {
+                // Shizuku's own question is the grant: asked now, and only now.
+                ShizukuBridge.request { granted ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        Prefs.setSeparateWindows(context, granted)
+                        on = granted
+                    }
+                }
+            }
+        },
+    )
+}
+
+/**
+ * Let my computers turn on my hotspot: the phone's own computer may turn this
+ * phone's Wi-Fi hotspot on and off, with the settings already saved in Android,
+ * so it can get internet through the phone. Optional and off by default, shown
+ * only while Shizuku is installed and running (or while it is on, so it can be
+ * turned off), with no new Android permission. Turning it on asks Shizuku's own
+ * dialog once; turning it off turns off a hotspot it started.
+ */
+@Composable
+fun HotspotSetting() {
+    val context = LocalContext.current
+    val resumes = rememberResumes()
+    var on by remember { mutableStateOf(Prefs.hotspotFromComputer(context)) }
+    var minutes by remember { mutableStateOf(Prefs.hotspotOffMinutes(context)) }
+    val running = remember(resumes, on) { ShizukuBridge.running() }
+    val permitted = remember(resumes, on) { ShizukuBridge.permitted() }
+    val listening = remember(resumes, on) { PhoneNotificationPrefs.accessGranted(context) }
+    val sdk = android.os.Build.VERSION.SDK_INT
+    if (!HotspotRule.rowShown(sdk, running, on)) return
+    val mode = HotspotRule.mode(sdk, running, permitted, on)
+    SettingSwitch(
+        title = stringResource(R.string.settings_hotspot),
+        summary = stringResource(
+            when {
+                !on -> R.string.settings_hotspot_summary_off
+                mode == HotspotRule.Mode.NO_SHIZUKU -> R.string.settings_hotspot_summary_needs_shizuku
+                mode == HotspotRule.Mode.NEEDS_PERMISSION -> R.string.settings_hotspot_summary_needs_permission
+                !listening -> R.string.settings_hotspot_summary_needs_access
+                else -> R.string.settings_hotspot_summary_on
+            },
+        ),
+        checked = on,
+        warning = on && (mode != HotspotRule.Mode.ON || !listening),
+        onChange = { want ->
+            if (!want) {
+                // A hotspot this switch let the computer start goes off with it.
+                dev.pocketdesk.android.windows.PhoneHotspot.stopIfOurs(context)
+                on = false
+                Prefs.setHotspotFromComputer(context, false)
+            } else {
+                // Shizuku's own question is the grant: asked now, and only now.
+                ShizukuBridge.request { granted ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        Prefs.setHotspotFromComputer(context, granted)
+                        on = granted
+                    }
+                }
+            }
+        },
+    )
+    if (on) {
+        SettingLink(
+            title = stringResource(R.string.settings_hotspot_off_title),
+            summary = if (minutes > 0) {
+                stringResource(R.string.settings_hotspot_off_after, minutes)
+            } else {
+                stringResource(R.string.settings_hotspot_off_never)
+            },
+            onClick = {
+                minutes = HotspotRule.nextChoice(minutes)
+                Prefs.setHotspotOffMinutes(context, minutes)
+            },
+        )
     }
 }
 

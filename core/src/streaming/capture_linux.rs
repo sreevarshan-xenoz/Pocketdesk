@@ -65,6 +65,25 @@ pub async fn start_capture(
         "Starting screen capture: {}x{}@{}fps",
         config.width, config.height, config.fps
     );
+    // "Unattended on GNOME" (off by default): mutter's own D-Bus API, which
+    // asks no one. If it is missing or refuses, the portal below is used, and
+    // the log says so once.
+    if super::gnome_unattended::session_route() == super::gnome_unattended::Route::Mutter {
+        match super::capture_mutter::start_capture(
+            config.clone(),
+            frame_tx.clone(),
+            cancel.clone(),
+            crate::streaming::portal_input::wanted(),
+        )
+        .await
+        {
+            Ok(session) => return Ok(session),
+            Err(e) if super::gnome_unattended::first_fallback() => warn!(
+                "Unattended GNOME capture through mutter did not start ({e:#}): using the screen-sharing portal"
+            ),
+            Err(e) => debug!("Mutter capture did not start ({e:#}): using the portal"),
+        }
+    }
     // N8: input goes through the portal here, so the screen and the input
     // come from one RemoteDesktop session, under one grant.
     // A desktop without RemoteDesktop, or one that refused it, still gets
@@ -226,7 +245,7 @@ pub async fn start_capture(
 }
 
 /// The PipeWire capture thread for the stream `node_id`.
-fn spawn_pipewire_capture(
+pub(super) fn spawn_pipewire_capture(
     node_id: u32,
     config: StreamingConfig,
     frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
@@ -430,22 +449,30 @@ async fn start_remote_desktop_capture(
     // The worker: the injector's events, in order, until the capture ends.
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let registered = crate::streaming::portal_input::register(tx);
+    let (refused_tx, refused_rx) = tokio::sync::watch::channel(false);
     let worker_cancel = cancel.clone();
     tokio::spawn(async move {
         let _registered = registered;
         let mut said = false;
         let wheel = crate::streaming::portal_input::session_wheel_style();
         info!(?wheel, "Portal wheel notches");
+        // Fine turns not yet a whole step, where the portal takes steps.
+        let mut rest = crate::streaming::wheel::Notches::default();
         loop {
             tokio::select! {
                 _ = worker_cancel.cancelled() => break,
                 event = rx.recv() => match event {
                     Some(event) => {
-                        if let Err(e) = apply_portal_event(&remote, &session, node_id, size, wheel, event).await {
+                        if let Err(e) = apply_portal_event(&remote, &session, node_id, size, wheel, &mut rest, event).await {
                             // Said once a session: input dead and silent
                             // is worse than one line (N8 review).
                             if !std::mem::replace(&mut said, true) {
                                 warn!(error = %e, "Portal input not taken");
+                            }
+                            // A session closed to input (GNOME's "Allow
+                            // Remote Interaction" off): the phone is told.
+                            if crate::streaming::portal_input::input_refused_text(&e.to_string()) {
+                                let _ = refused_tx.send(true);
                             }
                         }
                     }
@@ -461,7 +488,41 @@ async fn start_remote_desktop_capture(
     });
 
     spawn_pipewire_capture(node_id, config.clone(), frame_tx, cancel.clone())?;
-    Ok(CaptureSession::new(config, cancel))
+    Ok(CaptureSession::new(config, cancel).with_input_refused(refused_rx))
+}
+
+/// Make the portal call that turns the wheel, if any. A smooth call says
+/// `finish` (the end of a series, no kinetic scroll after it) for a whole
+/// notch, which is a series of its own; a fine turn is one of many, so it
+/// does not. xdg-desktop-portal-kde, the only backend told smooth calls
+/// (`WheelStyle::Smooth`), reads no options at all (its
+/// `NotifyPointerAxis` passes `dx`, `dy` to KWin's fake input and nothing
+/// else), so there is no series to end there.
+async fn turn_portal_wheel(
+    remote: &ashpd::desktop::remote_desktop::RemoteDesktop,
+    session: &ashpd::desktop::Session<ashpd::desktop::remote_desktop::RemoteDesktop>,
+    call: Option<crate::streaming::portal_input::WheelCall>,
+    finish: bool,
+) -> ashpd::Result<()> {
+    use crate::streaming::portal_input::WheelCall;
+    use ashpd::desktop::remote_desktop::{Axis, NotifyPointerAxisOptions};
+    match call {
+        None => Ok(()),
+        Some(WheelCall::Discrete { axis, steps }) => {
+            let axis = if axis == 0 {
+                Axis::Vertical
+            } else {
+                Axis::Horizontal
+            };
+            remote
+                .notify_pointer_axis_discrete(session, axis, steps, Default::default())
+                .await
+        }
+        Some(WheelCall::Smooth { dx, dy }) => {
+            let options = NotifyPointerAxisOptions::default().set_finish(finish);
+            remote.notify_pointer_axis(session, dx, dy, options).await
+        }
+    }
 }
 
 /// Tell the portal one input event (N8).
@@ -471,10 +532,13 @@ async fn apply_portal_event(
     stream: u32,
     size: (u32, u32),
     wheel: crate::streaming::portal_input::WheelStyle,
+    rest: &mut crate::streaming::wheel::Notches,
     event: crate::streaming::portal_input::PortalEvent,
 ) -> ashpd::Result<()> {
-    use crate::streaming::portal_input::{PortalEvent, WheelCall, absolute_position, wheel_call};
-    use ashpd::desktop::remote_desktop::{Axis, KeyState, NotifyPointerAxisOptions};
+    use crate::streaming::portal_input::{
+        PortalEvent, absolute_position, fine_wheel_call, wheel_call,
+    };
+    use ashpd::desktop::remote_desktop::KeyState;
     let state = |pressed: bool| {
         if pressed {
             KeyState::Pressed
@@ -499,23 +563,18 @@ async fn apply_portal_event(
                 .notify_pointer_button(session, code, state(pressed), Default::default())
                 .await
         }
-        PortalEvent::Scroll { axis, steps } => match wheel_call(wheel, axis, steps) {
-            None => Ok(()),
-            Some(WheelCall::Discrete { axis, steps }) => {
-                let axis = if axis == 0 {
-                    Axis::Vertical
-                } else {
-                    Axis::Horizontal
-                };
-                remote
-                    .notify_pointer_axis_discrete(session, axis, steps, Default::default())
-                    .await
-            }
-            Some(WheelCall::Smooth { dx, dy }) => {
-                let options = NotifyPointerAxisOptions::default().set_finish(true);
-                remote.notify_pointer_axis(session, dx, dy, options).await
-            }
-        },
+        PortalEvent::Scroll { axis, steps } => {
+            turn_portal_wheel(remote, session, wheel_call(wheel, axis, steps), true).await
+        }
+        PortalEvent::FineScroll { axis, v120 } => {
+            turn_portal_wheel(
+                remote,
+                session,
+                fine_wheel_call(wheel, axis, v120, rest),
+                false,
+            )
+            .await
+        }
         PortalEvent::Key { code, pressed } => {
             remote
                 .notify_keyboard_keycode(session, code, state(pressed), Default::default())

@@ -364,6 +364,7 @@ fn the_decoder_on_a_running_pairs_view() {
             monitor: 0,
             hevc: false,
             window: 0,
+            fit: None,
         },
         pin::now_unix(),
     )
@@ -430,6 +431,7 @@ fn the_windows_decoder_on_a_real_view() {
         )),
         endpoint: identity::read_endpoint(&b_state).map(|e| e.to_string()),
         mine: false,
+        wifi: None,
     };
     let asked = computers::request(
         &a_state,
@@ -462,6 +464,7 @@ fn the_windows_decoder_on_a_real_view() {
             // The app's own probe, as the window asks (PR #562 review I3).
             hevc: hevc && crate::video::probe_hevc("ffmpeg"),
             window: 0,
+            fit: None,
         },
         pin::now_unix(),
     )

@@ -9,6 +9,8 @@
 # binaries: the package's Depends are the libraries they were linked to.
 #
 # The package installs the server, the desktop app and the tray to /usr/bin,
+# the PAM helper for "Approve with my phone" to /usr/lib/pocketdesk (unused
+# until the owner adds its line to /etc/pam.d themselves; nothing here does),
 # the systemd user unit (enabled for every user, so the server starts at
 # each sign-in, as the Windows installer's logon task does; `systemctl
 # --user disable pocketdesk` turns it off for one user), the app's menu
@@ -18,7 +20,7 @@
 set -eu
 
 name=${1:?release name, e.g. v0.7.0}
-bins=${2:?folder with pocketdesk, pocketdesk-app and pocketdesk-tray}
+bins=${2:?folder with pocketdesk, pocketdesk-app, pocketdesk-tray and pocketdesk-pam-ask}
 out=${3:?output folder}
 root=$(cd "$(dirname "$0")/../.." && pwd)
 
@@ -34,6 +36,8 @@ pkg="$stage/pkg"
 for bin in pocketdesk pocketdesk-app pocketdesk-tray; do
   install -Dm755 "$bins/$bin" "$pkg/usr/bin/$bin"
 done
+# Root's, as PAM runs it as root: never in a folder a user can write to.
+install -Dm755 "$bins/pocketdesk-pam-ask" "$pkg/usr/lib/pocketdesk/pocketdesk-pam-ask"
 # The user unit, pointed at /usr/bin rather than ~/.local/bin.
 mkdir -p "$pkg/usr/lib/systemd/user"
 sed 's|^ExecStart=.*|ExecStart=/usr/bin/pocketdesk start|' "$root/pocketdesk.service" \
@@ -66,6 +70,7 @@ mkdir -p "$stage/debian"
 printf 'Source: pocketdesk\n\nPackage: pocketdesk\nArchitecture: any\n' > "$stage/debian/control"
 depends=$(cd "$stage" && dpkg-shlibdeps -O \
   -epkg/usr/bin/pocketdesk -epkg/usr/bin/pocketdesk-app -epkg/usr/bin/pocketdesk-tray \
+  -epkg/usr/lib/pocketdesk/pocketdesk-pam-ask \
   | sed -n 's/^shlibs:Depends=//p')
 rm -rf "$stage/debian"
 

@@ -8,6 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.edit
+import dev.pocketdesk.watchlink.WatchButton
 
 /**
  * App-level UI preferences (theme mode, dynamic color, screen behavior,
@@ -29,6 +30,7 @@ object Prefs {
     private const val KEY_CONTROL_FROM_COMPUTER = "control_from_computer"
     private const val KEY_PHONE_ACTIONS_FROM_COMPUTER = "phone_actions_from_computer"
     private const val KEY_INTERNET_FILES = "internet_files"
+    private const val KEY_DIRECT_LINKS = "direct_links"
     private const val KEY_OTHERS_CHOOSE_COMPUTER = "others_choose_computer"
     private const val KEY_TELL_OTHER_APPS = "tell_other_apps"
     private const val KEY_OTHERS_RUN_TASKS = "others_run_tasks"
@@ -39,6 +41,10 @@ object Prefs {
     private const val KEY_INTRODUCE_PENDING = "introduce_pending"
     private const val KEY_INTRODUCE_LAST = "introduce_last"
     private const val KEY_QUESTIONS = "questions_from_computer"
+    private const val KEY_APPROVE = "approve_requests"
+    private const val KEY_APPROVE_BIOMETRIC_ONLY = "approve_biometric_only"
+    private const val KEY_WATCH_CONTROLS = "watch_controls"
+    private const val KEY_WATCH_BUTTONS = "watch_buttons"
     private const val KEY_SHARE_BATTERY = "share_battery"
     private const val KEY_STATE_WIDGET_AUTO = "state_widget_auto"
     private const val KEY_PHONE_MEDIA = "phone_media_on_computer"
@@ -53,6 +59,7 @@ object Prefs {
     private const val KEY_FILES_BACKGROUND = "files_in_background"
     private const val KEY_RING_FROM_COMPUTER = "ring_from_computer"
     private const val KEY_CAPTURE_MOUSE = "capture_mouse"
+    private const val KEY_SMOOTH_SCROLLING = "smooth_scrolling"
     private const val KEY_BACKGROUND_REMINDER = "background_reminder"
     private const val KEY_HEALTH_ALERTS = "health_alerts"
     private const val KEY_STAY_LINKED = "stay_linked"
@@ -66,6 +73,8 @@ object Prefs {
     private const val KEY_CONNECTION_DETAILS = "connection_details"
     private const val KEY_CONNECT_AFTER_WAKE = "connect_after_wake"
     private const val KEY_OFFER_WAKE = "offer_wake"
+    private const val KEY_WAKE_HELPER = "wake_helper"
+    private const val KEY_WAKE_HELPER_FRESH = "wake_helper_fresh"
     private const val KEY_VERSION_HINTS = "version_hints"
     private const val KEY_PHONE_NAME = "phone_name"
     private const val KEY_SHOW_DRIVING = "show_driving"
@@ -82,6 +91,7 @@ object Prefs {
     private const val KEY_GAMEPAD_CONTROLLER = "gamepad_controller"
     private const val KEY_DECK_COLUMNS = "deck_columns"
     private const val KEY_CAMERA_ASKS = "camera_asks"
+    private const val KEY_WEBCAM = "webcam"
     private const val KEY_CAMERA_CLIPBOARD = "camera_clipboard"
 
     /** The trackpad speed slider's range and default (F3). */
@@ -342,6 +352,41 @@ object Prefs {
         bump()
     }
 
+    /** Approve my computer's requests (sudo, polkit, the lock screen): off until chosen. */
+    fun approveRequests(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_APPROVE, false)
+
+    fun setApproveRequests(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_APPROVE, enabled) }
+        bump()
+    }
+
+    /** Watch controls (item 9): a paired Wear OS watch may ask this phone for things; off until chosen. */
+    fun watchControls(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_WATCH_CONTROLS, false)
+
+    fun setWatchControls(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_WATCH_CONTROLS, enabled) }
+        bump()
+    }
+
+    /** Which buttons a watch has, as the watch link's bit mask; [WatchButton.DEFAULT] until chosen. */
+    fun watchButtons(ctx: Context): Set<WatchButton> {
+        val p = prefs(ctx)
+        return if (p.contains(KEY_WATCH_BUTTONS)) WatchButton.fromMask(p.getInt(KEY_WATCH_BUTTONS, 0)) else WatchButton.DEFAULT
+    }
+
+    fun setWatchButtons(ctx: Context, buttons: Set<WatchButton>) {
+        prefs(ctx).edit { putInt(KEY_WATCH_BUTTONS, WatchButton.mask(buttons)) }
+        bump()
+    }
+
+    /** Approvals take the fingerprint only, not the PIN: off. */
+    fun approveBiometricOnly(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_APPROVE_BIOMETRIC_ONLY, false)
+
+    fun setApproveBiometricOnly(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_APPROVE_BIOMETRIC_ONLY, enabled) }
+        bump()
+    }
+
     /**
      * Whether the phone tells the computer its battery (T8b): in a session,
      * and outside one over a link a background feature keeps. On by default.
@@ -567,6 +612,19 @@ object Prefs {
         bump()
     }
 
+    /**
+     * Smooth scrolling: the trackpad's two-finger scroll goes in 120ths of a
+     * notch as well as whole notches, so the computer scrolls as finely as
+     * the fingers move. On by default.
+     */
+    fun smoothScrolling(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_SMOOTH_SCROLLING, true)
+
+    fun setSmoothScrolling(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_SMOOTH_SCROLLING, enabled) }
+        bump()
+    }
+
     /** K5: "Show screen" also sends what the phone's apps play (off by default). */
     fun castSound(ctx: Context): Boolean = prefs(ctx).getBoolean("cast_sound", false)
 
@@ -590,6 +648,88 @@ object Prefs {
 
     fun setAppsFromComputer(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean("apps_from_computer", enabled) }
+        bump()
+    }
+
+    /**
+     * Phone apps tier 2: the computer may open an app in a window of its own, through
+     * Shizuku (off by default, and shown only while Shizuku runs). It also lets
+     * the computer touch and type in those windows.
+     */
+    fun separateWindows(ctx: Context): Boolean =
+        prefs(ctx).getBoolean("separate_windows", false)
+
+    fun setSeparateWindows(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean("separate_windows", enabled) }
+        bump()
+    }
+
+    /**
+     * Let my computers turn on my hotspot: the phone's own computer may ask it to turn its
+     * Wi-Fi hotspot on and off, through Shizuku (off by default, shown only while Shizuku
+     * runs). The computer sends no name or password; the hotspot starts as Android has it set.
+     */
+    fun hotspotFromComputer(ctx: Context): Boolean =
+        prefs(ctx).getBoolean("hotspot_from_computer", false)
+
+    fun setHotspotFromComputer(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean("hotspot_from_computer", enabled) }
+        bump()
+    }
+
+    /** Minutes after the last ask to turn on that the hotspot is turned off by itself (0 = never). */
+    fun hotspotOffMinutes(ctx: Context): Int =
+        prefs(ctx).getInt("hotspot_off_minutes", dev.pocketdesk.android.windows.HotspotRule.DEFAULT_OFF_MINUTES)
+
+    fun setHotspotOffMinutes(ctx: Context, minutes: Int) {
+        prefs(ctx).edit { putInt("hotspot_off_minutes", minutes) }
+    }
+
+    /**
+     * The hotspot Pocketdesk turned on and has not yet seen go off, or null when none is ours: when its
+     * run began, when it was last asked for (wall clock, ms), and the address of the computer that asked.
+     * Kept until a stop has gone through, so a hotspot that could not be turned off is never forgotten.
+     */
+    fun hotspotRun(ctx: Context): dev.pocketdesk.android.windows.HotspotRule.Run? {
+        val p = prefs(ctx)
+        val first = p.getLong("hotspot_first_on_at", 0L)
+        val asker = p.getString("hotspot_asker", null)
+        if (first <= 0L || asker == null) return null
+        return dev.pocketdesk.android.windows.HotspotRule.Run(first, p.getLong("hotspot_on_at", first), asker)
+    }
+
+    fun setHotspotRun(ctx: Context, run: dev.pocketdesk.android.windows.HotspotRule.Run?) {
+        prefs(ctx).edit {
+            if (run == null) {
+                remove("hotspot_first_on_at")
+                remove("hotspot_on_at")
+                remove("hotspot_asker")
+                remove("hotspot_stop_pending")
+            } else {
+                putLong("hotspot_first_on_at", run.firstOnAtMs)
+                putLong("hotspot_on_at", run.lastOnAtMs)
+                putString("hotspot_asker", run.asker)
+            }
+        }
+    }
+
+    /** Whether a stop is owed (a reason came up) and has not gone through yet; it is tried again until it does. */
+    fun hotspotStopPending(ctx: Context): Boolean = prefs(ctx).getBoolean("hotspot_stop_pending", false)
+
+    fun setHotspotStopPending(ctx: Context, pending: Boolean) {
+        prefs(ctx).edit { putBoolean("hotspot_stop_pending", pending) }
+    }
+
+    /**
+     * Hands-free: Pocketdesk accepts Android's own screen-sharing question for
+     * the phone's own computer, when that computer asked to open an app (off by
+     * default). It needs "Let the computer open my apps" and Pocketdesk control.
+     */
+    fun autoAcceptScreen(ctx: Context): Boolean =
+        prefs(ctx).getBoolean("auto_accept_screen", false)
+
+    fun setAutoAcceptScreen(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean("auto_accept_screen", enabled) }
         bump()
     }
 
@@ -684,6 +824,19 @@ object Prefs {
         bump()
     }
 
+    /**
+     * Whether a scanned direct link (a computer's own Wi-Fi, made for this
+     * phone) is joined for Pocketdesk only. On by default; the system asks
+     * the owner each time as well.
+     */
+    fun directLinks(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_DIRECT_LINKS, true)
+
+    fun setDirectLinks(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_DIRECT_LINKS, enabled) }
+        bump()
+    }
+
     /** Show the PIN digits in the pairing sheet without tapping the eye. */
     fun revealPin(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_REVEAL_PIN, false)
@@ -753,6 +906,31 @@ object Prefs {
     fun setOfferWake(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_OFFER_WAKE, enabled) }
         bump()
+    }
+
+    /**
+     * "Wake helper for this home" (off by default): while on, on a charger and on
+     * Wi-Fi, this phone sends the magic packet for the owner's other phones that ask
+     * through it, and nothing else.
+     */
+    fun wakeHelper(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_WAKE_HELPER, false)
+
+    /** Turning it on is a fresh offer: only that undoes a removal at the computer. */
+    fun setWakeHelper(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit {
+            putBoolean(KEY_WAKE_HELPER, enabled)
+            putBoolean(KEY_WAKE_HELPER_FRESH, enabled)
+        }
+        bump()
+    }
+
+    /** The next offer to the computer says the owner just turned the switch on. */
+    fun wakeHelperFresh(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_WAKE_HELPER_FRESH, false)
+
+    fun setWakeHelperFresh(ctx: Context, fresh: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_WAKE_HELPER_FRESH, fresh) }
     }
 
     fun setHaptics(ctx: Context, enabled: Boolean) {
@@ -854,6 +1032,20 @@ object Prefs {
 
     fun setCameraAsks(ctx: Context, on: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_CAMERA_ASKS, on) }
+        bump()
+    }
+
+    /**
+     * F6 part 2: the computer may ask this phone to be its camera, offered
+     * in a notification; the camera opens only on a tap, and only while
+     * the cast's notification shows. Off by default.
+     */
+    fun webcam(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_WEBCAM, false)
+
+    fun setWebcam(ctx: Context, on: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_WEBCAM, on) }
+        // Off closes a camera the computer uses now (PR #604 review N4).
+        if (!on) dev.pocketdesk.android.cast.CastService.stopWebcam(ctx)
         bump()
     }
 

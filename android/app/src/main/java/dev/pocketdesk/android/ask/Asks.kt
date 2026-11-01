@@ -28,6 +28,7 @@ object Asks {
     const val EXTRA_ID = "id"
     const val EXTRA_QUESTION = "question"
     const val EXTRA_EXPIRES = "expires_unix"
+    const val EXTRA_APPROVE = "approve"
 
     /** Take the questions waiting; [own] is the computer the phone works with. */
     fun take(context: Context, own: HostStore.Host?) {
@@ -42,7 +43,24 @@ object Asks {
                 Log.i(TAG, "a question from the computer was not offered: $decision")
                 continue
             }
+            // Approve with my phone: only with its own switch on and a key
+            // to sign with.
+            if (ask.approve != null) {
+                val parsed = ApproveRule.parse(ask.approve)
+                val approve = ApproveRule.decide(
+                    Prefs.approveRequests(context),
+                    ApproveKey.exists(context),
+                    parsed?.pin == true,
+                    ask.expiresUnix,
+                    now,
+                )
+                if (approve != ApproveRule.Decision.Offer || parsed == null) {
+                    Log.i(TAG, "an approval request was not offered: $approve")
+                    continue
+                }
+            }
             offer(context, ask, now)
+            keep(context, ask, ApproveRule.parse(ask.approve), now)
             // For the device checks; never the question.
             Log.i(TAG, "a question from the computer was offered")
         }
@@ -50,7 +68,57 @@ object Asks {
 
     /** Take the question [id]'s notification away: it was answered. */
     fun cancel(context: Context, id: String) {
+        waiting.remove(id)
         context.getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_TAG, id.hashCode())
+    }
+
+    /** A question that was offered and still waits, as a watch may list it. */
+    class Waiting(
+        val host: String,
+        val port: Int,
+        val id: String,
+        /** A request that needs the fingerprint: a watch can only say No to it. */
+        val approval: Boolean,
+        /** What it is for, in words made here from the request's fields, never its free text. */
+        val text: String,
+        val expiresUnix: Long,
+    )
+
+    private val waiting = java.util.concurrent.ConcurrentHashMap<String, Waiting>()
+
+    private fun keep(context: Context, ask: RustCore.AskQuestion, approval: ApproveRule.Approval?, now: Long) {
+        // A pin makes a key; it is the phone's own to answer.
+        if (approval?.pin == true) return
+        val text = when {
+            approval == null -> ask.question
+            approval.unlock -> context.getString(R.string.approve_unlock, approval.user)
+            else -> context.getString(R.string.approve_admin, approval.service, approval.user) +
+                approval.command.takeIf { it.isNotEmpty() }?.let { ": $it" }.orEmpty()
+        }
+        waiting.entries.removeIf { it.value.expiresUnix <= now }
+        waiting[ask.id] = Waiting(ask.host, ask.port, ask.id, approval != null, text, ask.expiresUnix)
+    }
+
+    /** The questions still waiting, soonest to run out first; the ones whose time ran out are dropped. */
+    fun waiting(nowUnix: Long = System.currentTimeMillis() / 1000): List<Waiting> {
+        waiting.entries.removeIf { it.value.expiresUnix <= nowUnix }
+        return waiting.values.sortedBy { it.expiresUnix }
+    }
+
+    /**
+     * Say No to the waiting question [id] for a watch: the same unsigned
+     * answer a tap on No sends. Fails for one that is not waiting.
+     */
+    fun deny(context: Context, id: String): Result<Unit> {
+        val ask = waiting().firstOrNull { it.id == id }
+            ?: return Result.failure(IllegalStateException("not waiting"))
+        val body = AskRule.body(ask.id, yes = false) ?: return Result.failure(IllegalStateException("bad id"))
+        val sent = RustCore.sendPhonePacket(ask.host, ask.port, AskRule.ANSWER, body)
+        if (sent.isSuccess) {
+            cancel(context, ask.id)
+            Log.i(TAG, "answered no, from the watch")
+        }
+        return sent
     }
 
     private fun offer(context: Context, ask: RustCore.AskQuestion, now: Long) {
@@ -67,6 +135,7 @@ object Asks {
             .putExtra(EXTRA_ID, ask.id)
             .putExtra(EXTRA_QUESTION, ask.question)
             .putExtra(EXTRA_EXPIRES, ask.expiresUnix)
+            .putExtra(EXTRA_APPROVE, ask.approve)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val pending = PendingIntent.getActivity(
             context,

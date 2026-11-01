@@ -37,10 +37,48 @@ pub(crate) fn receive(body: &serde_json::Value, host: &str, port: u16) {
             if pocketdesk_core::protocol::phone_action::valid_app_id(app) =>
         {
             ask["app"] = serde_json::Value::from(app);
+            // Apps part 1: the computer wants the phone's screen shown too.
+            if body.get("screen").and_then(|v| v.as_bool()) == Some(true) {
+                ask["screen"] = serde_json::Value::from(true);
+            }
+            // Phone apps tier 2: the computer wants the app in a window of its
+            // own: a sound one (an id the cap allows, a size and density in
+            // bounds) or none; and then it wants no screen of the phone's.
+            if let Some(window) =
+                pocketdesk_core::protocol::phone_action::WindowAsk::from_body(body)
+            {
+                ask["window"] = serde_json::to_value(window).unwrap_or_default();
+                ask.as_object_mut().map(|o| o.remove("screen"));
+            }
         }
         (PhoneAction::Open, _) => {
             tracing::warn!("An ask to open an app was dropped: no app named");
             return;
+        }
+        // Apps part 2: a share names the file being sent, by name and size.
+        (PhoneAction::Share, _) => {
+            let name = body.get("name").and_then(|v| v.as_str());
+            let size = body.get("size").and_then(|v| v.as_u64());
+            match (name, size) {
+                (Some(name), Some(size))
+                    if pocketdesk_core::protocol::phone_action::valid_share_name(name) =>
+                {
+                    ask["name"] = serde_json::Value::from(name);
+                    ask["size"] = serde_json::Value::from(size);
+                }
+                _ => {
+                    tracing::warn!("An ask to share a file was dropped: no file named");
+                    return;
+                }
+            }
+        }
+        // Apps part 1: the icons the computer keeps (id and version), so
+        // only the rest are sent.
+        (PhoneAction::Apps, _) => {
+            let have = pocketdesk_core::protocol::phone_action::parse_have(body);
+            if !have.is_empty() {
+                ask["have"] = serde_json::json!(have);
+            }
         }
         _ => {}
     }
@@ -95,6 +133,101 @@ mod tests {
             serde_json::json!([{ "host": "192.0.2.7", "port": 1716, "action": "lock" }])
         );
         assert_eq!(take_json(), "[]");
+    }
+
+    /// Apps part 2: a share names the file being sent, by name and size, or is dropped.
+    #[tokio::test]
+    async fn a_share_ask_names_its_file() {
+        let _globals = crate::api::TRANSFER_TEST_LOCK.lock().await;
+        forget();
+        receive(
+            &serde_json::json!({ "action": "share", "name": "a.png", "size": 12 }),
+            "192.0.2.7",
+            1716,
+        );
+        for bad in [
+            serde_json::json!({ "action": "share" }),
+            serde_json::json!({ "action": "share", "name": "a.png" }),
+            serde_json::json!({ "action": "share", "name": "../a.png", "size": 1 }),
+            serde_json::json!({ "action": "share", "name": "a.png", "size": "1" }),
+        ] {
+            receive(&bad, "192.0.2.7", 1716);
+        }
+        let waiting: serde_json::Value = serde_json::from_str(&take_json()).unwrap();
+        assert_eq!(
+            waiting,
+            serde_json::json!([
+                { "host": "192.0.2.7", "port": 1716, "action": "share", "name": "a.png", "size": 12 },
+            ])
+        );
+    }
+
+    /// Apps part 1: an open may want the screen, and a list ask carries the
+    /// icons kept, only well-formed ones.
+    #[tokio::test]
+    async fn an_apps_ask_carries_what_the_computer_has() {
+        let _globals = crate::api::TRANSFER_TEST_LOCK.lock().await;
+        forget();
+        receive(
+            &serde_json::json!({ "action": "apps", "have": {"org.example.a": 3, "bad id": 1, "org.example.b": "x"} }),
+            "192.0.2.7",
+            1716,
+        );
+        receive(
+            &serde_json::json!({ "action": "open", "app": "org.example.a", "screen": true }),
+            "192.0.2.7",
+            1716,
+        );
+        receive(
+            &serde_json::json!({ "action": "open", "app": "org.example.b", "screen": "yes" }),
+            "192.0.2.7",
+            1716,
+        );
+        let waiting: serde_json::Value = serde_json::from_str(&take_json()).unwrap();
+        assert_eq!(
+            waiting,
+            serde_json::json!([
+                { "host": "192.0.2.7", "port": 1716, "action": "apps", "have": {"org.example.a": 3} },
+                { "host": "192.0.2.7", "port": 1716, "action": "open", "app": "org.example.a", "screen": true },
+                { "host": "192.0.2.7", "port": 1716, "action": "open", "app": "org.example.b" },
+            ])
+        );
+    }
+
+    /// Phone apps tier 2: an open for a window passes on a sound window (and
+    /// no screen), and an unsound one is read as the ordinary open.
+    #[tokio::test]
+    async fn an_open_may_name_a_window_of_its_own() {
+        let _globals = crate::api::TRANSFER_TEST_LOCK.lock().await;
+        forget();
+        receive(
+            &serde_json::json!({ "action": "open", "app": "org.example.a", "screen": true,
+                "window": {"id": 2, "width": 720, "height": 1280, "dpi": 320} }),
+            "192.0.2.7",
+            1716,
+        );
+        receive(
+            &serde_json::json!({ "action": "open", "app": "org.example.b",
+                "window": {"id": 9, "width": 720, "height": 1280, "dpi": 320} }),
+            "192.0.2.7",
+            1716,
+        );
+        receive(
+            &serde_json::json!({ "action": "open", "app": "org.example.c",
+                "window": {"id": 1, "width": 1, "height": 1280, "dpi": 320} }),
+            "192.0.2.7",
+            1716,
+        );
+        let waiting: serde_json::Value = serde_json::from_str(&take_json()).unwrap();
+        assert_eq!(
+            waiting,
+            serde_json::json!([
+                { "host": "192.0.2.7", "port": 1716, "action": "open", "app": "org.example.a",
+                  "window": {"id": 2, "width": 720, "height": 1280, "dpi": 320} },
+                { "host": "192.0.2.7", "port": 1716, "action": "open", "app": "org.example.b" },
+                { "host": "192.0.2.7", "port": 1716, "action": "open", "app": "org.example.c" },
+            ])
+        );
     }
 
     /// O2 review: an ask read over a minute late is dropped.

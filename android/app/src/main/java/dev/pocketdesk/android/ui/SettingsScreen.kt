@@ -185,8 +185,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                 KeyboardMouseSetting()
                 PhoneActionsSetting()
                 AppsSetting()
+                AutoAcceptSetting()
+                WindowsSetting()
+                HotspotSetting()
                 CopiesSetting()
                 CastSoundSetting()
+                WebcamSetting()
+                PhoneLocationSetting()
             }
 
             SettingsGroup(stringResource(R.string.settings_session)) {
@@ -242,6 +247,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                     ),
                     Prefs.captureMouse(context),
                     { Prefs.setCaptureMouse(context, it) },
+                )
+                SettingSwitch(
+                    stringResource(R.string.settings_smooth_scrolling),
+                    stringResource(R.string.settings_smooth_scrolling_summary),
+                    Prefs.smoothScrolling(context),
+                    { Prefs.setSmoothScrolling(context, it) },
                 )
                 TrackpadSpeed()
                 AirMouseSpeed()
@@ -306,6 +317,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                     },
                 )
                 SettingSwitch(
+                    stringResource(R.string.settings_direct_links),
+                    stringResource(R.string.settings_direct_links_summary),
+                    Prefs.directLinks(context),
+                    { Prefs.setDirectLinks(context, it) },
+                )
+                SettingSwitch(
                     stringResource(R.string.settings_links_from_computer),
                     stringResource(R.string.settings_links_from_computer_summary),
                     Prefs.linksFromComputer(context),
@@ -352,6 +369,10 @@ fun SettingsScreen(onBack: () -> Unit) {
                     Prefs.questionsFromComputer(context),
                     { Prefs.setQuestionsFromComputer(context, it) },
                 )
+                // Approve with my phone: sudo, polkit, the lock screen.
+                ApproveSetting()
+                // Item 9: a Wear OS watch's buttons, over Bluetooth.
+                WatchSetting()
                 // L4: the dialer opens with a number the computer sends.
                 SettingSwitch(
                     stringResource(R.string.settings_calls_from_computer),
@@ -487,6 +508,8 @@ fun SettingsScreen(onBack: () -> Unit) {
                 )
                 ScreenshotsSection()
                 CameraUploadsSection()
+                // Folders the owner picks, kept on the computer by themselves.
+                KeptFoldersSection()
                 RecentPhotosSection()
                 // M5: a photo's place kept when it is sent.
                 PhotoPlaceSection()
@@ -571,6 +594,18 @@ fun SettingsScreen(onBack: () -> Unit) {
                     stringResource(R.string.settings_offer_wake_summary),
                     Prefs.offerWake(context),
                     { Prefs.setOfferWake(context, it) },
+                )
+                // A spare phone at home sends the wake for the owner's other phones.
+                SettingSwitch(
+                    stringResource(R.string.settings_wake_helper),
+                    stringResource(R.string.settings_wake_helper_summary),
+                    Prefs.wakeHelper(context),
+                    {
+                        Prefs.setWakeHelper(context, it)
+                        val app = context.applicationContext
+                        if (!it) dev.pocketdesk.android.service.WakeHelperService.turnedOff(app)
+                        Thread { runCatching { dev.pocketdesk.android.service.WakeHelperService.sync(app) } }.start()
+                    },
                 )
             }
 

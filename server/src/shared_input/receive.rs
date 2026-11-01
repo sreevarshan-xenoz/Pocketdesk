@@ -36,6 +36,17 @@ use super::status;
 use super::wire::{self, Msg, Screen, Timing};
 use crate::input_injector::InputInjector;
 
+/// A fine wheel turn from the wire (positive down, and right) as the
+/// injector takes it (positive up, and right). Its notches are not read
+/// where the fine turn is.
+fn fine_wheel_packet(dx: i16, dy: i16) -> InputPacket {
+    InputPacket::MouseScroll {
+        dx: 0,
+        dy: 0,
+        fine: Some((dx, dy.saturating_neg())),
+    }
+}
+
 /// Where what the driving computer sends ends up.
 pub trait Inject: Send {
     /// Press or let go of the key with this evdev code.
@@ -45,6 +56,9 @@ pub trait Inject: Send {
     fn button(&mut self, button: u8, pressed: bool);
     /// Turn the wheel, in notches, positive down and to the right.
     fn wheel(&mut self, dx: i16, dy: i16);
+    /// Turn the wheel in 120ths of a notch (fine scrolling), signs as
+    /// [`Inject::wheel`].
+    fn wheel_fine(&mut self, dx: i16, dy: i16);
     /// Put the pointer at 0..=65535 across this computer's screens'
     /// bounding box, 65535 being its last pixel.
     fn move_abs(&mut self, x: u16, y: u16);
@@ -85,8 +99,13 @@ impl Inject for InputInjector {
             InputPacket::MouseScroll {
                 dx,
                 dy: dy.saturating_neg(),
+                fine: None,
             },
         );
+    }
+
+    fn wheel_fine(&mut self, dx: i16, dy: i16) {
+        inject(self, fine_wheel_packet(dx, dy));
     }
 
     fn move_abs(&mut self, x: u16, y: u16) {
@@ -341,13 +360,17 @@ impl Receiver {
         }
         if matches!(
             msg,
-            Msg::Key { .. } | Msg::Button { .. } | Msg::Wheel { .. }
+            Msg::Key { .. } | Msg::Button { .. } | Msg::Wheel { .. } | Msg::WheelFine { .. }
         ) {
             self.inputs = self.inputs.wrapping_add(1);
         }
         if matches!(
             msg,
-            Msg::Key { .. } | Msg::Button { .. } | Msg::Wheel { .. } | Msg::Move { .. }
+            Msg::Key { .. }
+                | Msg::Button { .. }
+                | Msg::Wheel { .. }
+                | Msg::WheelFine { .. }
+                | Msg::Move { .. }
         ) {
             self.input_at = self.input_at.max(Some(now));
         }
@@ -380,6 +403,10 @@ impl Receiver {
             }
             Msg::Wheel { dx, dy } => {
                 self.inject.wheel(dx, dy);
+                self.time(false, n, arrived_us);
+            }
+            Msg::WheelFine { dx, dy } => {
+                self.inject.wheel_fine(dx, dy);
                 self.time(false, n, arrived_us);
             }
             Msg::ReleaseAll => {
@@ -607,6 +634,12 @@ impl Inject for LazyInjector {
         }
     }
 
+    fn wheel_fine(&mut self, dx: i16, dy: i16) {
+        if let Some(injector) = self.get() {
+            Inject::wheel_fine(injector, dx, dy);
+        }
+    }
+
     fn move_abs(&mut self, x: u16, y: u16) {
         #[cfg(windows)]
         let (x, y) = {
@@ -633,6 +666,23 @@ impl Inject for LazyInjector {
 /// screens is written: a silent driver is let go of within a tick of
 /// [`SILENCE_RELEASE`].
 const TICK: Duration = Duration::from_millis(100);
+
+/// How often they are looked at while no computer drives this one, it is
+/// not held awake and nothing heard waits to be written: a refusal for a
+/// computer told this one's screens goes within it (plan item 3e: the
+/// receive loop woke ten times a second for the server's life).
+const IDLE_TICK: Duration = Duration::from_secs(1);
+
+/// How long until the receive loop looks again: [`TICK`] while a computer
+/// drives this one (its silence is timed), it is held awake or quick, or
+/// screens heard wait to be written; else [`IDLE_TICK`].
+fn tick_every(driven: bool, held: bool, heard: bool) -> Duration {
+    if driven || held || heard {
+        TICK
+    } else {
+        IDLE_TICK
+    }
+}
 
 /// How often this computer's own screens are looked at.
 const SCREENS_EVERY: Duration = Duration::from_secs(5);
@@ -1057,13 +1107,15 @@ fn answer_hello(channels: &mut HashMap<String, Channel>, to: &str, screens: &[Sc
 
 /// The answer to a hello, in order: this computer's `screens` (the answer
 /// the driving side waits for), then its `name` (which a computer that
-/// only takes input says nowhere else).
-fn hello_answer(screens: &[Screen], name: &str) -> [Msg; 2] {
+/// only takes input says nowhere else), then that it takes fine wheel
+/// turns.
+fn hello_answer(screens: &[Screen], name: &str) -> [Msg; 3] {
     [
         Msg::Screens(screens.to_vec()),
         Msg::Name {
             name: name.to_string(),
         },
+        Msg::TakesFineWheel,
     ]
 }
 
@@ -1268,9 +1320,11 @@ fn drives_now(msg: &Msg, from: &str, allowed: bool, driver: Option<&str>) -> boo
     allowed
         && match msg {
             Msg::Enter { .. } => true,
-            Msg::Move { .. } | Msg::Key { .. } | Msg::Button { .. } | Msg::Wheel { .. } => {
-                driver == Some(from)
-            }
+            Msg::Move { .. }
+            | Msg::Key { .. }
+            | Msg::Button { .. }
+            | Msg::Wheel { .. }
+            | Msg::WheelFine { .. } => driver == Some(from),
             _ => false,
         }
 }
@@ -1336,8 +1390,9 @@ pub async fn run() {
     let mut own = OwnScreens::default();
     let mut channels: HashMap<String, Channel> = HashMap::new();
     let mut heard = Heard::new();
-    let mut tick = tokio::time::interval(TICK);
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // When the loop last looked at silences, permissions and the
+    // keep-awake: it looks again at the next deadline, not on a fixed tick.
+    let mut ticked = tokio::time::Instant::now();
     let mut look = tokio::time::interval(SCREENS_EVERY);
     look.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     // Read off this loop: a slow compositor never delays an injection.
@@ -1364,6 +1419,11 @@ pub async fn run() {
         follow_sound(&mut sound, &receiver, &mut channels);
         // And whether this computer's own driver may watch its edges.
         set_driven_by(receiver.driven_by(Instant::now()));
+        let every = tick_every(
+            receiver.driver().is_some(),
+            awake.is_held() || quick.is_held(),
+            !heard.is_empty(),
+        );
         tokio::select! {
             arrival = arriving.recv() => {
                 let Some(first) = arrival else { break };
@@ -1479,7 +1539,8 @@ pub async fn run() {
                     }
                 }
             }
-            _ = tick.tick() => {
+            _ = tokio::time::sleep_until(ticked + every) => {
+                ticked = tokio::time::Instant::now();
                 // A computer told this one's screens (one that may cross
                 // onto it) whose permission went, or with sharing turned
                 // off here, is told it may not.
@@ -1638,6 +1699,21 @@ pub async fn run() {
         }
     }
     set_driven_by(None);
+}
+
+#[cfg(test)]
+mod tick_tests {
+    use super::*;
+
+    /// At rest the loop wakes once a second, not ten times; anything to
+    /// time or write brings the tenth of a second back.
+    #[test]
+    fn the_loop_looks_often_only_while_something_is_under_way() {
+        assert_eq!(tick_every(false, false, false), IDLE_TICK);
+        assert_eq!(tick_every(true, false, false), TICK);
+        assert_eq!(tick_every(false, true, false), TICK);
+        assert_eq!(tick_every(false, false, true), TICK);
+    }
 }
 
 #[cfg(test)]
@@ -2122,6 +2198,7 @@ mod tests {
         Key(u16, bool),
         Button(u8, bool),
         Wheel(i16, i16),
+        WheelFine(i16, i16),
         Move(u16, u16),
     }
 
@@ -2159,6 +2236,9 @@ mod tests {
         }
         fn wheel(&mut self, dx: i16, dy: i16) {
             self.0.lock().unwrap().push(Call::Wheel(dx, dy));
+        }
+        fn wheel_fine(&mut self, dx: i16, dy: i16) {
+            self.0.lock().unwrap().push(Call::WheelFine(dx, dy));
         }
         fn move_abs(&mut self, x: u16, y: u16) {
             self.0.lock().unwrap().push(Call::Move(x, y));
@@ -2365,6 +2445,34 @@ mod tests {
         assert!(!drives_now(&key, "pc", true, None));
         assert!(!drives_now(&Msg::Ping { t_us: 1 }, "pc", true, Some("pc")));
         assert!(!drives_now(&Msg::Leave, "pc", true, Some("pc")));
+    }
+
+    /// Review N7: a fine wheel turn from the computer driving this one is
+    /// injected fine, the wire's down as the injector's negative; from one
+    /// that does not drive it, not at all.
+    #[test]
+    fn a_fine_wheel_turn_from_the_driver_is_injected_fine() {
+        let (mut r, fake) = receiver();
+        r.handle("pc", Msg::WheelFine { dx: 0, dy: 30 }, true);
+        assert_eq!(fake.take(), vec![], "not driven yet");
+        r.handle("pc", Msg::Enter { x: 1, y: 2 }, true);
+        fake.take();
+        r.handle("pc", Msg::WheelFine { dx: -60, dy: 30 }, true);
+        r.handle("other", Msg::WheelFine { dx: 0, dy: 120 }, true);
+        assert_eq!(fake.take(), vec![Call::WheelFine(-60, 30)]);
+        match fine_wheel_packet(-60, 30) {
+            InputPacket::MouseScroll { dx, dy, fine } => {
+                assert_eq!((dx, dy, fine), (0, 0, Some((-60, -30))))
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            fine_wheel_packet(0, i16::MIN),
+            InputPacket::MouseScroll {
+                fine: Some((0, i16::MAX)),
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -2959,7 +3067,8 @@ mod tests {
                 Msg::Screens(vec![screen]),
                 Msg::Name {
                     name: "Arch laptop".to_string()
-                }
+                },
+                Msg::TakesFineWheel,
             ]
         );
     }

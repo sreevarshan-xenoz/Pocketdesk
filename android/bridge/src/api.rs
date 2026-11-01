@@ -883,10 +883,39 @@ pub async fn connect_to_peer(
                                 }
                                 // The computer's requests for this phone's
                                 // recent photos (C7).
-                                if trimmed.contains("phone_photos.")
+                                // F6 part 2: and to be its camera, kept with them.
+                                if (trimmed.contains("phone_photos.")
+                                    || trimmed.contains("phone_camera."))
                                     && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
                                 {
                                     crate::photo_requests::receive(
+                                        &pkt.packet_type,
+                                        &pkt.body,
+                                        &from_peer.0,
+                                        from_peer.1,
+                                    );
+                                }
+                                // The computer's asks for this phone's
+                                // location (GeoClue); the place is never
+                                // kept here, only the ask.
+                                if trimmed.contains("phone_location.ask")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                {
+                                    crate::location_requests::receive(
+                                        &pkt.packet_type,
+                                        &pkt.body,
+                                        &from_peer.0,
+                                        from_peer.1,
+                                    );
+                                }
+                                // What the computer says of wake helpers: a
+                                // helper's duty, an owner phone's word of the
+                                // helper. Read again here; only a body that
+                                // reads is kept for the app.
+                                if trimmed.contains("pocketdesk.wake_helper_")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                {
+                                    crate::wake_helper::receive(
                                         &pkt.packet_type,
                                         &pkt.body,
                                         &from_peer.0,
@@ -1090,6 +1119,7 @@ async fn forget_link(from: &(String, u16)) {
     crate::notification_answers::forget_from(&from.0, from.1);
     crate::phone_file_requests::forget();
     crate::photo_requests::forget();
+    crate::location_requests::forget();
     crate::quiet_requests::forget();
 }
 
@@ -1307,10 +1337,13 @@ pub fn take_sms_requests() -> String {
 /// The packets the app may send through [`send_phone_packet`]: its texts
 /// and the results of the replies it sent (N5b), its battery (T8b), and
 /// what it plays (T8d), its folders' listings (T10g), its recent photos
-/// (C7) and which of its features are on (L7).
-const PHONE_PACKETS: [&str; 14] = [
+/// (C7), which of its features are on (L7), and the runs of its kept folders.
+const PHONE_PACKETS: [&str; 19] = [
     // P2: its apps that open, answering the computer's ask; P10: its contacts.
     pocketdesk_core::protocol::phone_action::PHONE_APPS,
+    // Apps part 1: those apps' icons, and how an ask for them or an open went.
+    pocketdesk_core::protocol::phone_action::PHONE_APP_ICONS,
+    pocketdesk_core::protocol::phone_action::PHONE_APP_OPENED,
     pocketdesk_core::protocol::phone_action::PHONE_CONTACTS,
     // N7: is the computer in use?
     pocketdesk_core::protocol::in_use::ASK,
@@ -1330,6 +1363,14 @@ const PHONE_PACKETS: [&str; 14] = [
     "kdeconnect.pocketdesk.switches",
     // BF3: the owner's answer to the computer's question.
     pocketdesk_core::protocol::ask::ASK_ANSWER,
+    // Approve with my phone: its approval key, given or taken back.
+    pocketdesk_core::protocol::approve::APPROVE_KEY,
+    // A run of a folder this phone keeps on the computer: its start, its
+    // deletions and its end.
+    pocketdesk_core::protocol::kept::KEEP_RUN,
+    // Phone location: its answer to the computer's ask, a place or why not
+    // (it was missing, so no answer ever went: device batch 2026-11-01).
+    pocketdesk_core::protocol::phone_location::FIX,
 ];
 
 /// Send one of [`PHONE_PACKETS`] with `body` (a JSON object) to the desktop.
@@ -1530,6 +1571,21 @@ async fn request_answer(
 
 #[cfg(test)]
 mod reply_tests {
+    /// Every answer the phone gives to a computer's ask is a packet it may
+    /// send: the location's was missing, so none ever went (device batch
+    /// 2026-11-01).
+    #[test]
+    fn the_phones_answers_are_packets_it_may_send() {
+        for answer in [
+            pocketdesk_core::protocol::phone_location::FIX,
+            pocketdesk_core::protocol::phone_action::PHONE_APPS,
+            pocketdesk_core::protocol::phone_action::PHONE_APP_OPENED,
+            pocketdesk_core::protocol::ask::ASK_ANSWER,
+        ] {
+            assert!(super::PHONE_PACKETS.contains(&answer), "{answer}");
+        }
+    }
+
     /// U3: the phone's name is the app's, cleaned, and a placeholder until
     /// it says.
     #[test]
@@ -2061,6 +2117,10 @@ pub struct ShareTags {
     pub drive: Option<String>,
     /// The file's modified time, ms since 1970 (K1); none to send none.
     pub modified: Option<u64>,
+    /// A file of a folder this phone keeps on the computer: with the
+    /// [`FolderPart`] (its folder's stable id, name and path), it replaces
+    /// its older copy there, in that folder's own place.
+    pub keep: bool,
 }
 
 /// A file's source id (T6a): 32 hex digits naming the file at its source,
@@ -2120,6 +2180,31 @@ pub async fn send_file_fd(
     Err("file descriptors are only passed on Android".to_string())
 }
 
+/// What a share request says beside its file: the file's source id (T6a),
+/// where it sits in a folder send (T6b), the drive fetch it answers (D8),
+/// its modified time (K1), and that it belongs to a folder the phone keeps
+/// on the computer.
+fn tag_body(body: &mut serde_json::Value, source: Option<&str>, tags: &ShareTags) {
+    if let Some(source) = source {
+        body["sourceId"] = serde_json::json!(source);
+    }
+    if let Some(part) = &tags.folder {
+        body["folderId"] = serde_json::json!(part.folder_id);
+        body["folder"] = serde_json::json!(part.folder);
+        body["path"] = serde_json::json!(part.path);
+    }
+    if let Some(drive) = &tags.drive {
+        body["drive"] = serde_json::json!(drive);
+    }
+    // Only with its folder fields: a kept file has nowhere to go without.
+    if tags.keep && tags.folder.is_some() {
+        body["keep"] = serde_json::json!(true);
+    }
+    if let Some(ms) = tags.modified {
+        body[pocketdesk_core::protocol::file_time::FIELD] = serde_json::json!(ms);
+    }
+}
+
 /// Offer `file_size` bytes from `file` to the desktop as `filename`, and send
 /// them when it connects back with the key: from where the desktop's partial
 /// copy of the same `source` ends, if it kept one (T6a).
@@ -2148,20 +2233,7 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
         "filename": filename,
         "payloadTransferInfo": crate::link::transfer_info(&arrival, &key),
     });
-    if let Some(source) = &source {
-        body["sourceId"] = serde_json::json!(source);
-    }
-    if let Some(part) = &tags.folder {
-        body["folderId"] = serde_json::json!(part.folder_id);
-        body["folder"] = serde_json::json!(part.folder);
-        body["path"] = serde_json::json!(part.path);
-    }
-    if let Some(drive) = &tags.drive {
-        body["drive"] = serde_json::json!(drive);
-    }
-    if let Some(ms) = tags.modified {
-        body[pocketdesk_core::protocol::file_time::FIELD] = serde_json::json!(ms);
-    }
+    tag_body(&mut body, source.as_deref(), &tags);
     let request = NetworkPacket::new("kdeconnect.share.request")
         .with_body(body)
         .with_payload_size(file_size);
@@ -2798,7 +2870,7 @@ pub async fn connect_streaming_wan(
 /// the desktop can bind its WAN sessions to it (device keys). `None` without
 /// a data directory, or if the key cannot be read; the dial then uses a
 /// throwaway key, which a desktop that has bound one refuses.
-fn device_wan_key() -> Option<pocketdesk_core::streaming::IrohSecretKey> {
+pub(crate) fn device_wan_key() -> Option<pocketdesk_core::streaming::IrohSecretKey> {
     // One caller at a time: two first calls at once (a LAN connect and a WAN
     // dial) must not each make a key.
     static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -4020,6 +4092,7 @@ pub async fn send_mouse_event(
             InputPacket::MouseScroll {
                 dx: x as i16,
                 dy: y as i16,
+                fine: None,
             }
         } else if button != 0 {
             InputPacket::MouseClick {
@@ -4226,6 +4299,40 @@ pub async fn send_mouse_click(button: u8, pressed: bool) -> Result<(), String> {
         .ok_or_else(|| "Mouse click requires an active QUIC streaming connection".to_string())?;
 
     let data = InputPacket::MouseClick { button, pressed }.encode();
+    let mut send_stream = conn
+        .open_uni()
+        .await
+        .map_err(|e| format!("QUIC open stream: {e}"))?;
+    send_stream
+        .write_all(&data)
+        .await
+        .map_err(|e| format!("QUIC write: {e}"))?;
+    send_stream
+        .finish()
+        .map_err(|e| format!("QUIC finish: {e}"))?;
+    Ok(())
+}
+
+/// A wheel turn on the screen session: whole notches (`dx` right, `dy` up)
+/// and, with smooth scrolling, the same turn in 120ths of a notch, which a
+/// computer before fine scrolling ignores ([`InputPacket::MouseScroll`]).
+pub async fn send_scroll(dx: i16, dy: i16, fine: Option<(i16, i16)>) -> Result<(), String> {
+    let quic_conn = {
+        let guard = (*STREAMING_HANDLE).lock().await;
+        if let Some(h) = guard.as_ref() {
+            Some(h.connection.clone())
+        } else {
+            let v2_guard = (*crate::V2_HANDLE).lock().await;
+            v2_guard
+                .as_ref()
+                .map(|h| QuinnConnection::shared(h.connection.clone()))
+        }
+    };
+
+    let conn = quic_conn
+        .ok_or_else(|| "Scrolling requires an active QUIC streaming connection".to_string())?;
+
+    let data = InputPacket::MouseScroll { dx, dy, fine }.encode();
     let mut send_stream = conn
         .open_uni()
         .await
@@ -4953,6 +5060,7 @@ mod pin_certificate_tests {
                 name: Some("Study PC".to_string()),
                 sends: None,
                 version: None,
+                takes: None,
             },
         );
         let forgot = super::forget_peer_certificate("192.0.2.80".to_string());
@@ -5723,5 +5831,62 @@ mod internet_road_tests {
             "the phone's identity: {phone}"
         );
         desktop.close().await;
+    }
+}
+
+#[cfg(test)]
+mod share_tag_tests {
+    use super::{FolderPart, ShareTags, tag_body};
+    use serde_json::json;
+
+    fn part() -> FolderPart {
+        FolderPart {
+            folder_id: "0123456789abcdef0123456789abcdef".to_string(),
+            folder: "Notes".to_string(),
+            path: vec!["a".to_string(), "b.txt".to_string()],
+        }
+    }
+
+    #[test]
+    fn a_plain_share_carries_no_folder_and_no_keep() {
+        let mut body = json!({"filename": "a.txt"});
+        tag_body(&mut body, Some("s"), &ShareTags::default());
+        assert_eq!(body, json!({"filename": "a.txt", "sourceId": "s"}));
+    }
+
+    #[test]
+    fn a_kept_file_says_keep_beside_its_folder_fields() {
+        let mut body = json!({"filename": "b.txt"});
+        let tags = ShareTags {
+            folder: Some(part()),
+            keep: true,
+            modified: Some(1_780_000_000_000),
+            ..Default::default()
+        };
+        tag_body(&mut body, None, &tags);
+        assert_eq!(body["keep"], json!(true));
+        assert_eq!(body["folderId"], json!("0123456789abcdef0123456789abcdef"));
+        assert_eq!(body["folder"], json!("Notes"));
+        assert_eq!(body["path"], json!(["a", "b.txt"]));
+        assert!(body.get("sourceId").is_none());
+    }
+
+    #[test]
+    fn keep_without_its_folder_is_not_sent_and_a_folder_send_is_not_a_keep() {
+        let mut body = json!({});
+        let tags = ShareTags {
+            keep: true,
+            ..Default::default()
+        };
+        tag_body(&mut body, None, &tags);
+        assert!(body.get("keep").is_none(), "nowhere to go without a folder");
+        let mut body = json!({});
+        let tags = ShareTags {
+            folder: Some(part()),
+            ..Default::default()
+        };
+        tag_body(&mut body, None, &tags);
+        assert!(body.get("keep").is_none());
+        assert!(body.get("folderId").is_some());
     }
 }

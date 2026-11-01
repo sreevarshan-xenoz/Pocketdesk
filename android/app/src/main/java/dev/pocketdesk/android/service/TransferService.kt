@@ -6,6 +6,8 @@ import dev.pocketdesk.android.ui.plainErrorText
 
 import dev.pocketdesk.android.automation.PhoneEventBroadcast
 import dev.pocketdesk.android.automation.PhoneEvents
+import dev.pocketdesk.android.files.KeptFolders
+import dev.pocketdesk.android.files.KeptRule
 import dev.pocketdesk.android.files.PhoneFilesRule
 import android.app.Notification
 import android.app.NotificationChannel
@@ -58,6 +60,9 @@ class TransferService : Service() {
 
         /** Every file under a folder the person picked (T6b). */
         class SendFolder(override val address: String, override val port: Int, val tree: Uri) : Job
+
+        /** A run of the folders kept on the computer: what is new or changed in each, then its deletions and its end. */
+        class Keep(override val address: String, override val port: Int) : Job
 
         class Receive(
             override val address: String,
@@ -215,6 +220,7 @@ class TransferService : Service() {
                 },
             )
         }
+        if (intent.getBooleanExtra(EXTRA_KEEP, false)) return Job.Keep(address, port)
         androidx.core.content.IntentCompat.getParcelableExtra(intent, EXTRA_TREE, Uri::class.java)?.let { return Job.SendFolder(address, port, it) }
         val uris = intent.clipData
             ?.let { clip -> (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri } }
@@ -246,6 +252,7 @@ class TransferService : Service() {
             "job $number: " + when (job) {
                 is Job.Send -> "send ${job.uris.size} file(s)"
                 is Job.SendFolder -> "send a folder"
+                is Job.Keep -> "keep folders"
                 is Job.Receive -> "receive"
             },
         )
@@ -253,6 +260,7 @@ class TransferService : Service() {
             when (job) {
                 is Job.Send -> sendAll(job)
                 is Job.SendFolder -> sendFolder(job)
+                is Job.Keep -> keepAll(job)
                 is Job.Receive -> receive(job)
             }
         } catch (t: Throwable) {
@@ -349,6 +357,183 @@ class TransferService : Service() {
         }
     }
 
+    /**
+     * A run of the kept folders: for each, what is new or changed since the
+     * last run (by size and modified time) goes to the computer through the
+     * ordinary send, each file whole-file checked and resumable, replacing
+     * its older copy there. Then, only when the owner mirrors deletions and
+     * the whole folder was read, what was deleted on the phone is named to
+     * the computer, which deletes it only if its own setting allows. Never
+     * a word of deletion otherwise.
+     */
+    private fun keepAll(job: Job.Keep) {
+        val folders = KeptFolders.folders(this)
+        if (folders.isEmpty()) return
+        val mirror = KeptFolders.mirror(this)
+        val computerId = HostStore.pairedDesktopId(this, job.address) ?: job.address
+        // The run's start: it reaches the computer, and tells whether it
+        // keeps folders (an older one would take the files as folder sends
+        // and pile a copy into Downloads at every run).
+        val first = folders.first()
+        val hello = keepPacket(job, first, mirror)
+        if (hello.isFailure || !RustCore.takesKept(job.address)) {
+            val why = if (hello.isFailure) getString(R.string.kept_unreachable) else getString(R.string.kept_old_computer)
+            plannedSends = 1
+            sendCount++
+            lastError = why
+            folders.forEach { keepStatus(it, sent = 0, failed = 0, note = why) }
+            return
+        }
+        for (folder in folders) {
+            if (stopped()) {
+                cancelledAny = true
+                return
+            }
+            if (!keepOne(job, folder, computerId, mirror)) return
+        }
+    }
+
+    /** One of the run's packets to the computer: [extra] added to the folder's id, name and the mirror switch. */
+    private fun keepPacket(
+        job: Job.Keep,
+        folder: KeptFolders.Folder,
+        mirror: Boolean,
+        extra: org.json.JSONObject.() -> Unit = {},
+    ): Result<Unit> {
+        val body = org.json.JSONObject()
+            .put("folderId", folder.id)
+            .put("folder", folder.label)
+            .put("mirror", mirror)
+            .apply(extra)
+        return RustCore.sendPhonePacket(job.address, job.port, KEEP_RUN, body.toString())
+    }
+
+    private fun keepStatus(
+        folder: KeptFolders.Folder,
+        sent: Int,
+        failed: Int,
+        note: String?,
+        held: KeptRule.Held? = null,
+    ) = KeptFolders.setStatus(
+        this,
+        folder.id,
+        KeptFolders.Status(System.currentTimeMillis(), sent, failed, note, held),
+    )
+
+    /** One kept folder's run; false when the whole run should stop (the computer is full, will not keep folders, or stopped answering). */
+    private fun keepOne(
+        job: Job.Keep,
+        folder: KeptFolders.Folder,
+        computerId: String,
+        mirror: Boolean,
+    ): Boolean {
+        if (!KeptFolders.readable(this, folder)) {
+            // Taken back in Android's settings, or its storage removed: said, not skipped silently.
+            val why = getString(R.string.kept_access_lost, folder.label)
+            plannedSends++
+            sendCount++
+            lastError = why
+            keepStatus(folder, sent = 0, failed = 0, note = why)
+            return true
+        }
+        val tree = folder.uri.toUri()
+        val rootId = runCatching { DocumentsContract.getTreeDocumentId(tree) }.getOrNull()
+        if (rootId == null) {
+            keepStatus(folder, sent = 0, failed = 0, note = getString(R.string.kept_access_lost, folder.label))
+            return true
+        }
+        val plan = FolderWalk.plan(rootId, KEPT_LIMITS) { children(tree, it, sizeRequired = true) }
+        val record = KeptFolders.record(this, folder, computerId).toMutableMap()
+        val diff = KeptRule.diff(plan, record)
+        // A file of no bytes cannot be shared (a share names its bytes), so
+        // it is told in the run's own packet: a file emptied on the phone is
+        // emptied there too, and not left holding its old content.
+        val (empties, send) = diff.send.partition { it.size == 0L }
+        plannedSends += send.size + empties.size
+        var sent = 0
+        var failed = 0
+        var stop = false
+        var note: String? = null
+        val streak = TransferRetry.FolderStreak()
+        for ((index, file) in send.withIndex()) {
+            if (stopped()) {
+                cancelledAny = true
+                sendCount += send.size - index
+                stop = true
+                break
+            }
+            val uri = DocumentsContract.buildDocumentUriUsingTree(tree, file.id)
+            val part = RustCore.FolderPart(folder.id, folder.label, file.path, keep = true)
+            val title = getString(R.string.transfer_sending_folder, folder.label, index + 1, send.size)
+            val result = sendCounted(job.address, job.port, uri, file.path.last(), part, title)
+            if (result.isSuccess) {
+                sent++
+                record[KeptRule.key(file.path)] = KeptRule.Mark(file.size, file.modified)
+                // Kept as it goes: a run cut short continues where it was.
+                if (sent % RECORD_EVERY == 0) KeptFolders.saveRecord(this, folder, computerId, record)
+                continue
+            }
+            failed++
+            val error = result.exceptionOrNull()?.message
+            val left = send.size - index - 1
+            when {
+                KeptRule.isFull(error) -> note = getString(R.string.kept_full)
+                KeptRule.isNotKept(error) -> note = getString(R.string.kept_refused)
+                TransferRetry.isCancel(error) -> cancelledAny = true
+                !streak.record(false, error) -> note = getString(R.string.transfer_folder_stopped, folder.label, left)
+                else -> continue
+            }
+            sendCount += left
+            stop = true
+            break
+        }
+        if (!stop) {
+            for (chunk in empties.chunked(KeptRule.MAX_GONE_PER_PACKET)) {
+                val told = keepPacket(job, folder, mirror) {
+                    put("empty", org.json.JSONArray(chunk.map { org.json.JSONArray(it.path) }))
+                }
+                sendCount += chunk.size
+                if (told.isSuccess) {
+                    sentTotal += chunk.size
+                    sent += chunk.size
+                    chunk.forEach { record[KeptRule.key(it.path)] = KeptRule.Mark(0, it.modified) }
+                } else {
+                    failed += chunk.size
+                    lastError = told.exceptionOrNull()?.message
+                    break
+                }
+            }
+        }
+        // Deletions: only from a whole read of the folder, only when the
+        // owner mirrors them, and told only after the files are sent.
+        val gone = diff.gone
+        if (!stop && gone.isNotEmpty()) {
+            if (!mirror) {
+                // Nothing to tell the computer: the record forgets them.
+                gone.forEach { record.remove(it) }
+            } else {
+                for (chunk in gone.chunked(KeptRule.MAX_GONE_PER_PACKET)) {
+                    val told = keepPacket(job, folder, true) {
+                        put("gone", org.json.JSONArray(chunk.map { org.json.JSONArray(KeptRule.path(it)) }))
+                    }
+                    if (told.isFailure) break
+                    chunk.forEach { record.remove(it) }
+                }
+            }
+        }
+        KeptFolders.saveRecord(this, folder, computerId, record)
+        // The run's end: the computer counts the folder again and records it.
+        keepPacket(job, folder, mirror) {
+            put("done", true)
+            put("sent", sent)
+            put("failed", failed)
+        }.onFailure { Log.w(TAG, "the computer was not told a kept folder's run ended: ${it.message}") }
+        val heldNote = diff.held?.let { getString(if (it == KeptRule.Held.MANY) R.string.kept_held_many else R.string.kept_held_part) }
+        keepStatus(folder, sent, failed, note ?: heldNote, diff.held)
+        if (plan.skipped > 0) Log.i(TAG, "a kept folder: ${plan.skipped} names left out (hidden, or the computer would refuse them)")
+        return !stop
+    }
+
     /** One file sent, retried as the settings say, and counted; how it went. */
     private fun sendCounted(
         address: String,
@@ -429,24 +614,36 @@ class TransferService : Service() {
     }
 
     /** The children of folder [id] in the picked [tree]; null when the provider could not list it. */
-    private fun children(tree: Uri, id: String): List<FolderWalk.Entry>? {
+    private fun children(tree: Uri, id: String, sizeRequired: Boolean = false): List<FolderWalk.Entry>? {
         val projection = arrayOf(
             DocumentsContract.Document.COLUMN_DOCUMENT_ID,
             DocumentsContract.Document.COLUMN_DISPLAY_NAME,
             DocumentsContract.Document.COLUMN_MIME_TYPE,
             DocumentsContract.Document.COLUMN_SIZE,
+            DocumentsContract.Document.COLUMN_LAST_MODIFIED,
         )
         val uri = DocumentsContract.buildChildDocumentsUriUsingTree(tree, id)
         return runCatching {
             contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
                 buildList {
                     while (cursor.moveToNext()) {
+                        val rowId = cursor.getString(0)
+                        val rowName = cursor.getString(1)
+                        val isDir = cursor.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR
+                        // A row with no id or name cannot be sent, and is said so;
+                        // with [sizeRequired] (a kept folder, where size 0 means an
+                        // emptied file) a file with no size is as unreadable.
+                        if (rowId == null || rowName == null || (sizeRequired && !isDir && cursor.isNull(3))) {
+                            add(FolderWalk.Entry("", "", isDir = false, size = 0, unreadable = true))
+                            continue
+                        }
                         add(
                             FolderWalk.Entry(
-                                id = cursor.getString(0) ?: continue,
-                                name = cursor.getString(1) ?: continue,
-                                isDir = cursor.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR,
+                                id = rowId,
+                                name = rowName,
+                                isDir = isDir,
                                 size = if (cursor.isNull(3)) 0 else cursor.getLong(3),
+                                modified = if (cursor.isNull(4)) 0 else cursor.getLong(4),
                             ),
                         )
                     }
@@ -507,6 +704,8 @@ class TransferService : Service() {
             offline.reset()
             // Ecosystem 1f: its type and size, never its name.
             val mime = uri?.let { runCatching { contentResolver.getType(it) }.getOrNull() } ?: "application/octet-stream"
+            // Apps part 2: a file dropped on the screen window, shared into the app in front when one was asked for.
+            dev.pocketdesk.android.control.ShareDrops.arrived(this, job.address, job.name, job.size, uri, mime)
             PhoneEventBroadcast.send(
                 this,
                 PhoneEvents.Kind.FILE_RECEIVED,
@@ -542,6 +741,15 @@ class TransferService : Service() {
             jobs.set(queued)
             if (queued > 0) return
             if (cancelledAny) notice = getString(R.string.transfer_cancelled)
+            // A scheduled run of the kept folders that found nothing new is
+            // no news: no "0 files sent" left in the shade.
+            if (sentTotal == 0 && sendCount == 0 && savedTotal == 0 && receiveCount == 0 && lastError == null && notice == null) {
+                runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+                runCatching { manager().cancel(NOTIFICATION_ID) }
+                current = null
+                stopSelf(lastStartId)
+                return
+            }
             val done = doneNotification()
             cancelledAny = false
             sentTotal = 0
@@ -628,7 +836,7 @@ class TransferService : Service() {
                 // A provider that cannot say how big the file is (a
                 // stream): copy it so the desktop is told an exact size.
                 descriptor.close()
-                sendCopy(address, port, uri, name, drive)
+                sendCopy(address, port, uri, name, drive, part)
             }
         }
     } catch (t: Throwable) {
@@ -752,7 +960,7 @@ class TransferService : Service() {
     private fun sourceKey(uri: Uri, original: Boolean): String =
         if (original) "$uri#original" else uri.toString()
 
-    private fun sendCopy(address: String, port: Int, uri: Uri, name: String, drive: String?): Result<Unit> {
+    private fun sendCopy(address: String, port: Int, uri: Uri, name: String, drive: String?, part: RustCore.FolderPart? = null): Result<Unit> {
         val dir = File(cacheDir, "share").apply { mkdirs() }
         // The bridge names the file after its path: copy straight to a name
         // that is a plain file name here (the desktop makes it safe there).
@@ -776,7 +984,7 @@ class TransferService : Service() {
                     val modified = lastModified(uri)
                     val source = SourceId.of(sourceKey(uri, opened.original), size, modified)
                     RustCore.sendFileFd(
-                        address, port, descriptor.detachFd(), name, size, source, null, drive,
+                        address, port, descriptor.detachFd(), name, size, source, part, drive,
                         FileDates.toSend(Prefs.keepFileDates(this), modified),
                     )
                 }
@@ -936,6 +1144,7 @@ class TransferService : Service() {
         private const val EXTRA_SOURCE = "source"
         private const val EXTRA_LAST_MODIFIED = "last_modified"
         private const val EXTRA_TREE = "tree"
+        private const val EXTRA_KEEP = "keep"
         private const val EXTRA_FOLDER_ID = "folder_id"
         private const val EXTRA_FOLDER = "folder"
         private const val EXTRA_PATH = "path"
@@ -962,6 +1171,15 @@ class TransferService : Service() {
         }
         private const val KEEP_PARTIAL_HOURS = 24
 
+        /** The packet that tells the computer how a kept folder's run went (`core::protocol::kept::KEEP_RUN`). */
+        private const val KEEP_RUN = "kdeconnect.pocketdesk.keep_run"
+
+        /** A kept folder's walk is cut far later than a folder send a person waits for. */
+        private val KEPT_LIMITS = FolderWalk.Limits(maxFiles = 200_000, maxBytes = Long.MAX_VALUE)
+
+        /** A kept folder's record is saved after this many files, so a run cut short continues. */
+        private const val RECORD_EVERY = 25
+
         /** Send [uris] to the desktop at [address]; the caller's read grant passes on. */
         fun start(context: Context, address: String, port: Int, uris: List<Uri>, drive: String? = null) {
             val clip = android.content.ClipData.newRawUri("", uris.first())
@@ -985,6 +1203,19 @@ class TransferService : Service() {
                 .putExtra(EXTRA_ADDRESS, address)
                 .putExtra(EXTRA_PORT, port)
                 .putExtra(EXTRA_TREE, tree)
+            context.startForegroundService(intent)
+        }
+
+        /**
+         * A run of the folders kept on the computer at [address]: each
+         * folder's changes go, as the settings say. The folders' grants are
+         * this app's own (the picker's), so nothing is passed on.
+         */
+        fun keep(context: Context, address: String, port: Int) {
+            val intent = Intent(context, TransferService::class.java)
+                .putExtra(EXTRA_ADDRESS, address)
+                .putExtra(EXTRA_PORT, port)
+                .putExtra(EXTRA_KEEP, true)
             context.startForegroundService(intent)
         }
 

@@ -13,6 +13,10 @@ import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.files.ScreenshotPrefs
 import dev.pocketdesk.android.notify.NotificationActionRule
+import dev.pocketdesk.android.windows.HotspotRule
+import dev.pocketdesk.android.windows.PhoneHotspot
+import dev.pocketdesk.android.windows.ShizukuBridge
+import dev.pocketdesk.android.windows.WindowRule
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -27,23 +31,12 @@ object PhoneActions {
     /** Phone → computer: the apps that open (P2), `core::protocol::phone_action::PHONE_APPS`. */
     private const val PHONE_APPS = "kdeconnect.pocketdesk.phone_apps"
 
-    /** The apps that open from the launcher, by their label, never this one. */
-    private fun apps(context: Context): JSONObject {
-        val pm = context.packageManager
-        val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val seen = mutableSetOf<String>()
-        val list = JSONArray()
-        runCatching { pm.queryIntentActivities(launcher, 0) }.getOrDefault(emptyList())
-            .mapNotNull { info ->
-                val pkg = info.activityInfo?.packageName ?: return@mapNotNull null
-                pkg to runCatching { info.loadLabel(pm).toString() }.getOrDefault(pkg)
-            }
-            .filter { (pkg, _) -> pkg != context.packageName && seen.add(pkg) }
-            .sortedBy { it.second.lowercase() }
-            .take(PhoneActionRule.MAX_APPS)
-            .forEach { (pkg, label) -> list.put(JSONObject().put("id", pkg).put("name", label)) }
-        return JSONObject().put("apps", list)
-    }
+    /** Phone → computer (Apps part 1): the icons it did not have, `core::protocol::phone_action::PHONE_APP_ICONS`. */
+    private const val PHONE_APP_ICONS = "kdeconnect.pocketdesk.phone_app_icons"
+
+    /** Phone → computer (Apps part 1): how an ask for the apps or an open went, `PHONE_APP_OPENED`. */
+    private const val PHONE_APP_OPENED = "kdeconnect.pocketdesk.phone_app_opened"
+
     private val budget = NotificationActionRule.Budget(PhoneActionRule.PER_MINUTE)
 
     /** The apps last listed for the computer: an open takes one of them only (P2 review). */
@@ -122,6 +115,93 @@ object PhoneActions {
     }
 
     /**
+     * Start [pkg]'s launcher activity from the bound control service (Apps
+     * part 1). Android lets an accessibility service the system has bound
+     * start an activity from the background (a documented exemption of its
+     * background-start limits), so the service's own context starts it; if
+     * the service refuses, the same intent goes by N3's opt-in. The words of
+     * [AppOpenRule]: opened, not found, or failed.
+     */
+    internal fun launchFromService(context: Context, pkg: String): String {
+        val intent = context.packageManager.getLaunchIntentForPackage(pkg)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            ?: return AppOpenRule.NOT_FOUND
+        val service = ControlService.instance
+        if (service != null && runCatching { service.startActivity(intent) }.isSuccess) return AppOpenRule.OPENED
+        val tap = android.app.PendingIntent.getActivity(
+            context,
+            pkg.hashCode(),
+            intent,
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        return if (runCatching { tap.send(context, 0, null, null, null, null, openOptions()) }.isSuccess) {
+            AppOpenRule.OPENED
+        } else {
+            AppOpenRule.FAILED
+        }
+    }
+
+    /** Tell the computer at [address]:[controlPort] how an ask went, over the link already up to it. */
+    internal fun report(
+        address: String,
+        controlPort: Int,
+        about: String,
+        app: String?,
+        result: String,
+        name: String? = null,
+        window: Int? = null,
+    ) {
+        val sent = RustCore.sendPhonePacketOnLink(
+            address,
+            controlPort,
+            PHONE_APP_OPENED,
+            AppOpenRule.report(about, app, result, name, window).toString(),
+        ).isSuccess
+        Log.i(TAG, if (sent) "told the computer: $about $result" else "could not tell the computer: $about $result")
+    }
+
+    /**
+     * The app the computer named opens once the phone's screen is shown to
+     * it (Apps part 1): after the owner's one consent, [CastService] is up,
+     * and with the control service bound the app starts and the computer is
+     * told. Waits at most 30 s, off the main thread.
+     */
+    fun openWhenShown(context: Context, pkg: String, address: String, controlPort: Int) {
+        val app = context.applicationContext
+        Thread {
+            val until = SystemClock.elapsedRealtime() + SHOW_WAIT_MS
+            while (SystemClock.elapsedRealtime() < until) {
+                if (dev.pocketdesk.android.cast.CastService.screenTo == address && ControlService.instance != null) {
+                    // Asked again now, not only before the consent and the
+                    // wait: the switch, the lock and the computer (review).
+                    val result = stillRefused(app, address) ?: launchFromService(app, pkg)
+                    report(address, controlPort, "open", pkg, result)
+                    return@Thread
+                }
+                Thread.sleep(250)
+            }
+            report(address, controlPort, "open", pkg, if (ControlService.instance == null) AppOpenRule.CONTROL_OFF else AppOpenRule.FAILED)
+        }.start()
+    }
+
+    /**
+     * Why an open asked earlier may not go ahead now, or null when it may: the
+     * switch turned off, the phone locked, or [address] no longer the computer
+     * the phone works with.
+     */
+    internal fun stillRefused(context: Context, address: String): String? = when {
+        !Prefs.appsFromComputer(context) -> AppOpenRule.OFF
+        KeyguardDismiss.kind(context) == LockRule.Kind.SECURE -> AppOpenRule.LOCKED_SECURE
+        context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked ?: true -> AppOpenRule.LOCKED
+        // The screen off at the moment of the open or the share (a file may take minutes).
+        context.getSystemService(PowerManager::class.java)?.isInteractive == false -> AppOpenRule.ASLEEP
+        dev.pocketdesk.android.notify.PhoneLink.target(context)?.address != address -> AppOpenRule.OFF
+        else -> null
+    }
+
+    /** How long an open waits for the screen to be shown first. */
+    private const val SHOW_WAIT_MS = 30_000L
+
+    /**
      * Open [pkg]: through N3's road while the control service is bound
      * (Android lets the app start one from the background then, with its
      * opt-in), else "Tap to open" for ten minutes. What it did.
@@ -135,7 +215,7 @@ object PhoneActions {
             intent,
             android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        if (service && runCatching { tap.send(context, 0, null, null, null, null, openOptions()) }.isSuccess) return "opened"
+        if (service && launchFromService(context, pkg) == AppOpenRule.OPENED) return "opened"
         val manager = context.getSystemService(android.app.NotificationManager::class.java) ?: return "not offered"
         if (!manager.areNotificationsEnabled()) return "not offered: notifications are off"
         if (manager.getNotificationChannel(OPEN_CHANNEL) == null) {
@@ -161,14 +241,203 @@ object PhoneActions {
         return if (runCatching { manager.notify("open-app", pkg.hashCode(), notification) }.isSuccess) "offered" else "not offered"
     }
 
+    /** Send the icons of [apps] to [own], [AppsList.MAX_ICONS_PER_PACKET] or fewer a packet. */
+    private fun sendIcons(context: Context, own: HostStore.Host, apps: List<AppsList.App>) {
+        val icons = apps.mapNotNull { AppsList.icon(context, it) }
+        var sent = 0
+        for (batch in AppsList.batches(icons, { it.png.length }, AppsList.MAX_ICONS_PER_PACKET, AppsList.MAX_PACKET_CHARS)) {
+            val ok = RustCore.sendPhonePacketOnLink(
+                own.address,
+                own.controlPort,
+                PHONE_APP_ICONS,
+                AppsList.iconsBody(batch).toString(),
+            ).isSuccess
+            if (!ok) break
+            sent += batch.size
+        }
+        Log.i(TAG, "$sent of ${icons.size} app icons were sent to the computer")
+    }
+
+    /**
+     * An open [PhoneActionRule] allowed: what the computer asked for decides
+     * how it goes ([AppOpenRule.plan]), and the computer is told the result.
+     */
+    /** Where separate windows stand now (Phone apps tier 2). */
+    internal fun windowMode(context: Context): WindowRule.Mode = WindowRule.mode(
+        Build.VERSION.SDK_INT,
+        ShizukuBridge.running(),
+        ShizukuBridge.permitted(),
+        Prefs.separateWindows(context),
+    )
+
+    /**
+     * An open for an app window (Phone apps tier 2) that [PhoneActionRule]
+     * allowed. The phone's own screen is not shown or touched. A window is
+     * made only with the switch on, Shizuku's permission, the apps switch and
+     * this phone's own computer (asked again right before anything starts),
+     * within the limit; otherwise the computer is told and opens the app the
+     * ordinary way.
+     */
+    private fun openWindowAsked(context: Context, ask: RustCore.PhoneActionAsk, own: HostStore.Host, window: WindowRule.Ask) {
+        val word = when (WindowRule.decide(windowMode(context), window.id, dev.pocketdesk.android.cast.CastService.windowIds)) {
+            WindowRule.Decision.UNAVAILABLE -> AppOpenRule.WINDOWS_UNAVAILABLE
+            WindowRule.Decision.LIMIT -> AppOpenRule.WINDOW_LIMIT
+            // The switch, the lock and the computer, once more before a display is made.
+            WindowRule.Decision.START -> stillRefused(context, own.address)
+        }
+        if (word != null) {
+            Log.i(TAG, "an app window was not made: $word")
+            Thread { report(own.address, own.controlPort, "open", ask.app, word, window = window.id) }.start()
+            return
+        }
+        if (!dev.pocketdesk.android.cast.CastService.openWindow(context, own, ask.app, window)) {
+            Thread { report(own.address, own.controlPort, "open", ask.app, AppOpenRule.WINDOWS_UNAVAILABLE, window = window.id) }.start()
+        }
+    }
+
+    private fun openAsked(context: Context, ask: RustCore.PhoneActionAsk, own: HostStore.Host?, service: Boolean) {
+        if (own == null) return
+        // Phone apps tier 2: in a window of its own, not on the phone's screen.
+        ask.window?.let { return openWindowAsked(context, ask, own, it) }
+        // Hands-free: a lock that guards nothing is swiped away, and a screen
+        // that is off woken, first (off this tick: it waits for Android). A
+        // secure lock never got here; the window looks again before it acts.
+        val awake = context.getSystemService(PowerManager::class.java)?.isInteractive ?: false
+        if (service && LockRule.needsDismiss(KeyguardDismiss.kind(context), awake)) {
+            val app = context.applicationContext
+            Thread {
+                if (KeyguardDismiss.dismiss(app)) {
+                    openUnlocked(app, ask, own, true)
+                } else {
+                    val why = if (KeyguardDismiss.kind(app) == LockRule.Kind.SECURE) AppOpenRule.LOCKED_SECURE else AppOpenRule.LOCKED
+                    Log.i(TAG, "the lock screen was not dismissed for an open: $why")
+                    report(own.address, own.controlPort, "open", ask.app, why)
+                }
+            }.start()
+            return
+        }
+        openUnlocked(context, ask, own, service)
+    }
+
+    /** The open itself, once the phone is awake and unlocked. */
+    private fun openUnlocked(context: Context, ask: RustCore.PhoneActionAsk, own: HostStore.Host, service: Boolean) {
+        // Right before anything starts, the lock is read once more: an app is never opened
+        // (nor a screen share asked for) over a lock screen, whatever was true when the ask came.
+        val awake = context.getSystemService(PowerManager::class.java)?.isInteractive ?: false
+        val lock = KeyguardDismiss.kind(context)
+        if (service && !LockRule.openNow(lock, awake)) {
+            val why = if (lock == LockRule.Kind.SECURE) AppOpenRule.LOCKED_SECURE else AppOpenRule.LOCKED
+            Log.i(TAG, "the phone is not open at the moment of the open: $why")
+            Thread { report(own.address, own.controlPort, "open", ask.app, why) }.start()
+            return
+        }
+        val casting = dev.pocketdesk.android.cast.CastService.screenTo == own.address
+        val paused = dev.pocketdesk.android.cast.CastService.pausedFor == own.address
+        val result = when (AppOpenRule.plan(ask.screen, service, casting, paused)) {
+            AppOpenRule.Plan.TAP -> {
+                // As P2: at once with the service, else "Tap to open".
+                val done = open(context, ask.app, ask.host, service)
+                Log.i(TAG, "an app the computer named: $done")
+                when (done) {
+                    "opened" -> AppOpenRule.OPENED
+                    "not found" -> AppOpenRule.NOT_FOUND
+                    "offered" -> AppOpenRule.CONTROL_OFF
+                    else -> AppOpenRule.FAILED
+                }
+            }
+            AppOpenRule.Plan.CONTROL_OFF -> AppOpenRule.CONTROL_OFF
+            // One consent for the connection: the owner is asked once, by a tap, and the app opens after.
+            AppOpenRule.Plan.SHOW_SCREEN_FIRST -> showScreenFirst(context, ask, own)
+            // The cast already shown is reused: no new consent.
+            AppOpenRule.Plan.START -> launchFromService(context, ask.app)
+            // Hands-free: the share paused when this computer left resumes with the consent already
+            // given; the app opens when it is up (and the computer is told then). Not resumable now
+            // (it ran out, or the switch went off): asked for as if none was kept.
+            AppOpenRule.Plan.RESUME ->
+                if (dev.pocketdesk.android.cast.CastService.resume(context, own.address, own.port)) {
+                    openWhenShown(context.applicationContext, ask.app, own.address, own.controlPort)
+                    null
+                } else {
+                    showScreenFirst(context, ask, own)
+                }
+        }
+        if (result != null) Thread { report(own.address, own.controlPort, "open", ask.app, result) }.start()
+    }
+
+    /**
+     * The owner is asked once, at the phone, for the screen; the computer is
+     * told so. With "Accept screen sharing for my computers" on and everything
+     * it needs in place, Pocketdesk starts the question itself instead and
+     * presses it ([ConsentRule]); then nothing is told yet: the app opens (and
+     * the computer is told) when the cast is up, or [consentNeedsTap] says why not.
+     */
+    private fun showScreenFirst(context: Context, ask: RustCore.PhoneActionAsk, own: HostStore.Host): String? {
+        val service = ControlService.instance
+        if (service != null && ConsentRule.mayArm(
+                autoOn = Prefs.autoAcceptScreen(context),
+                appsOn = Prefs.appsFromComputer(context),
+                own = true,
+                service = true,
+            )
+        ) {
+            val started = runCatching {
+                service.startActivity(
+                    Intent(context, dev.pocketdesk.android.cast.ScreenForAppActivity::class.java)
+                        .putExtra(dev.pocketdesk.android.cast.ScreenForApp.EXTRA_ADDRESS, own.address)
+                        .putExtra(dev.pocketdesk.android.cast.ScreenForApp.EXTRA_PORT, own.port)
+                        .putExtra(dev.pocketdesk.android.cast.ScreenForApp.EXTRA_CONTROL_PORT, own.controlPort)
+                        .putExtra(dev.pocketdesk.android.cast.ScreenForApp.EXTRA_APP, ask.app)
+                        .putExtra(dev.pocketdesk.android.cast.ScreenForApp.EXTRA_AUTO, true)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+            if (started.isSuccess) return null
+            Log.w(TAG, "the screen-sharing window did not start from the service", started.exceptionOrNull())
+        }
+        offerScreen(context, ask.app, own)
+        return AppOpenRule.NEEDS_SCREEN
+    }
+
+    /** The one-tap notification for the screen, naming the app. */
+    private fun offerScreen(context: Context, pkg: String, own: HostStore.Host) {
+        val pm = context.packageManager
+        val label = runCatching { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() }
+            .getOrDefault(pkg)
+        dev.pocketdesk.android.cast.ScreenForApp.offer(context, own, pkg, label)
+    }
+
+    /**
+     * Hands-free could not accept the screen-sharing question by itself: the
+     * ordinary one-tap notification is offered, silently, and the computer is
+     * told a tap is needed ("needs_tap").
+     */
+    fun consentNeedsTap(context: Context, own: HostStore.Host, pkg: String) {
+        offerScreen(context, pkg, own)
+        Thread { report(own.address, own.controlPort, "open", pkg, AppOpenRule.NEEDS_TAP) }.start()
+    }
+
     /** Take the asks waiting; [own] is the computer the phone works with. */
     fun take(context: Context, own: HostStore.Host?) {
+        // Let my computers turn on my hotspot: one the owner's minutes are up on goes off now.
+        PhoneHotspot.tick(context, System.currentTimeMillis())
         val asks = RustCore.takePhoneActions()
         if (asks.isEmpty()) return
         val service = ControlService.instance
         for (ask in asks) {
             val action = PhoneActionRule.Action.parse(ask.action) ?: continue
             val ownComputer = own != null && own.address == ask.host && own.controlPort == ask.port
+            // Let my computers turn on my hotspot: its own gate (the switch, Shizuku, the
+            // phone's own computer, a rate limit), never the control service or the lock.
+            if (action == PhoneActionRule.Action.HOTSPOT_ON || action == PhoneActionRule.Action.HOTSPOT_OFF) {
+                val hotspot = if (action == PhoneActionRule.Action.HOTSPOT_ON) HotspotRule.Ask.ON else HotspotRule.Ask.OFF
+                val decided = PhoneHotspot.decide(context, hotspot, ownComputer, SystemClock.elapsedRealtime())
+                if (decided == HotspotRule.Decision.DO) {
+                    PhoneHotspot.run(context, hotspot, own?.address.orEmpty())
+                } else {
+                    Log.i(TAG, "an ask from the computer (${action.word}) was not done: $decided")
+                }
+                continue
+            }
             var decision = PhoneActionRule.decide(
                 action = action,
                 on = Prefs.phoneActionsFromComputer(context),
@@ -176,6 +445,7 @@ object PhoneActions {
                 service = service != null,
                 sdk = Build.VERSION.SDK_INT,
                 locked = context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked ?: true,
+                secureLock = KeyguardDismiss.kind(context) == LockRule.Kind.SECURE,
                 awake = context.getSystemService(PowerManager::class.java)?.isInteractive ?: false,
                 // T10h carries it, to the clipboard or Downloads (O2 review: with
                 // both off, it would be taken and go nowhere).
@@ -193,6 +463,21 @@ object PhoneActions {
             }
             if (decision != PhoneActionRule.Decision.DO) {
                 Log.i(TAG, "an ask from the computer (${action.word}) was not done: $decision")
+                // Apps part 1: the phone's own computer is told why a list or an
+                // open was refused, so it can say so; any other is told nothing.
+                val word = AppOpenRule.tell(decision, ownComputer)
+                if (own != null && word != null &&
+                    (action == PhoneActionRule.Action.APPS || action == PhoneActionRule.Action.OPEN || action == PhoneActionRule.Action.SHARE)
+                ) {
+                    val about = when (action) {
+                        PhoneActionRule.Action.OPEN -> "open"
+                        PhoneActionRule.Action.SHARE -> "share"
+                        else -> "apps"
+                    }
+                    val named = if (action == PhoneActionRule.Action.OPEN) ask.app else null
+                    val file = if (action == PhoneActionRule.Action.SHARE) ask.name else null
+                    Thread { report(own.address, own.controlPort, about, named, word, file) }.start()
+                }
                 continue
             }
             // P2: the apps listed for the computer, off this tick, or one opened.
@@ -219,15 +504,20 @@ object PhoneActions {
             if (action == PhoneActionRule.Action.APPS) {
                 if (own == null || !listing.compareAndSet(false, true)) continue
                 val app = context.applicationContext
+                val have = ask.have
                 Thread {
                     try {
-                        val body = apps(app)
-                        val ids = mutableSetOf<String>()
-                        val list = body.getJSONArray("apps")
-                        for (i in 0 until list.length()) ids.add(list.getJSONObject(i).getString("id"))
-                        listed = ids
-                        val sent = RustCore.sendPhonePacketOnLink(own.address, own.controlPort, PHONE_APPS, body.toString()).isSuccess
+                        val apps = AppsList.collect(app, PhoneActionRule.MAX_APPS)
+                        listed = apps.map { it.pkg }.toSet()
+                        val sent = RustCore.sendPhonePacketOnLink(
+                            own.address,
+                            own.controlPort,
+                            PHONE_APPS,
+                            AppsList.listBody(apps, WindowRule.listBody(windowMode(app))).toString(),
+                        ).isSuccess
                         Log.i(TAG, if (sent) "the apps were listed for the computer" else "the apps could not be sent")
+                        // The icons the computer does not keep at these versions, once each, in batches.
+                        if (sent) sendIcons(app, own, AppsList.missing(apps, have))
                     } finally {
                         listing.set(false)
                     }
@@ -235,7 +525,12 @@ object PhoneActions {
                 continue
             }
             if (action == PhoneActionRule.Action.OPEN) {
-                Log.i(TAG, "an app the computer named: ${open(context, ask.app, ask.host, service != null)}")
+                openAsked(context, ask, own, service != null)
+                continue
+            }
+            // Apps part 2: a file dropped on the screen window, shared into the app in front.
+            if (action == PhoneActionRule.Action.SHARE) {
+                if (own != null) ShareDrops.ask(context, own, ask.name, ask.size)
                 continue
             }
             if (service == null) continue

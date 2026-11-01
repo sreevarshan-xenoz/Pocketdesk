@@ -91,7 +91,7 @@ fn switches_table(
 }
 
 /// The Devices tab's switches, in the order a person thinks of them.
-pub(crate) const PERMISSIONS: [(Capability, &str, &str); 25] = [
+pub(crate) const PERMISSIONS: [(Capability, &str, &str); 26] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -161,6 +161,11 @@ pub(crate) const PERMISSIONS: [(Capability, &str, &str); 25] = [
         Capability::Cast,
         "Show its screen or camera here",
         "The phone can show its own screen, or its camera, in a window here, when its owner starts it on the phone.",
+    ),
+    (
+        Capability::Webcam,
+        "Use its camera as a webcam",
+        "On Linux, with \u{201c}Offer phones as a camera\u{201d} on in Settings (Phones), this computer can ask the phone to be its camera (Use the phone as a camera, on the Overview): apps here then see \u{201c}Pocketdesk camera\u{201d}. The phone asks its owner each time in a notification, and shows its own while the camera is in use, with \u{201c}Let the computer use my camera\u{201d} on there. Off unless you turn it on.",
     ),
     (
         Capability::Dial,
@@ -235,6 +240,7 @@ pub(crate) const PERMISSION_GROUPS: [(&str, &[Capability]); 5] = [
         "Screen, sound and media",
         &[
             Capability::Cast,
+            Capability::Webcam,
             Capability::Audio,
             Capability::Mic,
             Capability::Media,
@@ -376,6 +382,7 @@ fn shown_for(capability: Capability, computer: bool) -> bool {
                 | Capability::Peek
                 | Capability::Ask
                 | Capability::Notes
+                | Capability::Webcam
         ))
 }
 
@@ -390,6 +397,12 @@ fn away_lock_unavailable() -> Option<&'static str> {
 
 /// Settings → Other computers' pointer to the Pair page (UX 2).
 pub const PAIR_ELSEWHERE: &str = "Pair a computer on the Pair page.";
+
+/// What the wake helper row says with no helper.
+const WAKE_HELPER_NONE: &str = "None. On a spare phone paired as one of yours, turn on \"Wake helper for this home\" in its Settings and leave it on a charger on the home Wi-Fi: your other phones can then wake this computer from anywhere.";
+
+/// What the wake helper row says beside a helper.
+const WAKE_HELPER_ABOUT: &str = "It sends this computer's magic packet onto your home network when one of your other phones asks, at most once every 30 seconds per phone, and serves nothing else. Removing it here is not a security control: it stops this computer using the phone as its helper, but the phone itself can still be switched on again by whoever holds it. To take its access away, unpair the phone.";
 /// Its button, and the fix where no computer is paired.
 pub const PAIR_A_COMPUTER: &str = "Pair a computer";
 
@@ -416,6 +429,7 @@ pub enum Tab {
     Messages,
     Notifications,
     Phone,
+    Apps,
     Clipboard,
     Settings,
     Diagnostics,
@@ -453,6 +467,8 @@ pub struct PocketdeskApp {
     /// When this window started: a tray's Quit from before it is not for it (E2 review).
     started_unix: u64,
     pair: PairView,
+    /// The Pair page's direct link (a hotspot for one phone).
+    direct_link: crate::direct_link_view::DirectLinkCard,
     /// Loaded when the Settings tab opens; an unreadable file is shown, not
     /// overwritten.
     settings: Option<Result<SettingsForm, String>>,
@@ -465,6 +481,9 @@ pub struct PocketdeskApp {
     /// A setting that runs a program (the file manager's menu, the
     /// browser's host), off the UI thread: what it says once done.
     setting_job: Option<std::thread::JoinHandle<Result<String, String>>>,
+    /// Joining a phone's hotspot network after it was asked to turn it on
+    /// (Linux, a saved network the owner named), off the UI thread.
+    hotspot_join: Option<std::thread::JoinHandle<Result<String, String>>>,
     /// Restart was asked for while phones are connected; awaiting a yes.
     confirm_restart: bool,
     /// Held sessions already brought to the owner's attention.
@@ -497,8 +516,13 @@ pub struct PocketdeskApp {
     overview_link: Option<(String, String)>,
     /// The link box was just opened: its field takes the cursor once.
     overview_link_focus: bool,
-    /// The Overview's "Open an app on the phone…" box (P2).
-    apps_box: Option<crate::apps_view::AppsBox>,
+    /// The Phone apps page (Apps part 1, over P2's box).
+    apps_page: crate::apps_view::AppsPage,
+    /// A phone's app asked for by a pinned shortcut or a notification, and
+    /// the phone's word on it (Apps part 2).
+    phone_open: crate::phone_open::OpenWatch,
+    /// Phone apps tier 2: each app opened in a window of its own.
+    phone_windows: crate::phone_windows::Windows,
     /// A "Choose file…" dialog that is open.
     picking: Option<std::thread::JoinHandle<Option<PathBuf>>>,
     /// The Diagnostics tab (F10).
@@ -579,11 +603,13 @@ impl PocketdeskApp {
             quitting: false,
             started_unix: now_unix(),
             pair: PairView::default(),
+            direct_link: Default::default(),
             settings: None,
             settings_query: String::new(),
             job: None,
             started_at: None,
             setting_job: None,
+            hotspot_join: None,
             confirm_restart: false,
             raised_approvals: Vec::new(),
             send_to: None,
@@ -599,7 +625,9 @@ impl PocketdeskApp {
             recent_sessions_stamp: None,
             overview_link: None,
             overview_link_focus: false,
-            apps_box: None,
+            apps_page: Default::default(),
+            phone_open: Default::default(),
+            phone_windows: Default::default(),
             picking: None,
             diagnostics: Default::default(),
             messages: Default::default(),
@@ -757,6 +785,21 @@ impl PocketdeskApp {
         self.tel_registered = None;
     }
 
+    /// Use my phone's hotspot: say how joining its network went, once it is over.
+    fn finish_hotspot_join(&mut self) {
+        if !self.hotspot_join.as_ref().is_some_and(|h| h.is_finished()) {
+            return;
+        }
+        let Some(handle) = self.hotspot_join.take() else {
+            return;
+        };
+        self.notice = crate::notice::Notice::outcome(
+            handle
+                .join()
+                .unwrap_or_else(|_| Err("Joining the phone's network failed.".to_string())),
+        );
+    }
+
     fn finish_job(&mut self) {
         if !self.job.as_ref().is_some_and(|(_, h)| h.is_finished()) {
             return;
@@ -845,6 +888,7 @@ impl PocketdeskApp {
         }
         if self.tab == Tab::Pair && tab != Tab::Pair {
             self.pair.reset(&self.state_dir);
+            self.direct_link.leave(&self.state_dir);
             self.nearby.stop();
         }
         if tab == Tab::Activity && self.tab != Tab::Activity {
@@ -1031,6 +1075,10 @@ impl PocketdeskApp {
                 .as_ref()
                 .is_some_and(|c| c.computer_view_lock_on_close),
         );
+        // Item 8: "Fit the screen to this window" starts a window so.
+        view.set_fit_default(self.config.as_ref().is_some_and(|c| c.computer_view_fit));
+        // Fine scrolling: "Smooth scrolling" too.
+        view.set_smooth_scrolling(self.config.as_ref().is_none_or(|c| c.smooth_scrolling));
         if let Err(e) = view.open(device_id, name, 0, preset, view_only, stats) {
             self.notice = crate::notice::Notice::error(e);
         }
@@ -1047,6 +1095,15 @@ impl PocketdeskApp {
             if open.quits(self.started_unix) {
                 self.quitting = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            return;
+        }
+        // Apps part 2: a pinned phone app. It brings up no page and does not
+        // raise this window: the phone's screen window comes up when the app
+        // has opened.
+        if open.page == pocketdesk_core::local::app_open::PHONE_APP {
+            if let (Some(phone), Some(app)) = (&open.phone, &open.app) {
+                self.open_phone_app(phone, app);
             }
             return;
         }
@@ -1071,6 +1128,65 @@ impl PocketdeskApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    }
+
+    /// Ask `phone` to open its app `app`, from a pinned shortcut or a
+    /// notification (Apps part 2): only an app the phone listed, as the
+    /// Phone apps page's click does, with the phone's screen shown here too.
+    fn open_phone_app(&mut self, phone: &str, app: &str) {
+        let who = crate::model::device_label(&self.snapshot.devices, phone);
+        let list = pocketdesk_core::local::phone_apps::read(&self.state_dir).remove(phone);
+        let device = self.snapshot.devices.iter().find(|d| d.id == phone);
+        // Phone apps tier 2: in a window of its own when the phone offers it.
+        let route = crate::phone_windows::Route {
+            mode: list.as_ref().map(|l| l.windows).unwrap_or_default(),
+            setting: self.config.as_ref().is_none_or(|c| c.phone_app_windows),
+            used: self.phone_windows.used(),
+        };
+        let started = crate::phone_open::check(device, list.as_ref(), app, &who).and_then(|name| {
+            let ask = crate::phone_open::OpenAsk {
+                phone,
+                who: &who,
+                app,
+                name: &name,
+            };
+            self.phone_open
+                .start(&self.state_dir, &ask, &route, now_unix())
+                .map(|window| (name, window))
+        });
+        if let Ok((name, Some(id))) = &started {
+            self.phone_windows.reserve(*id, name, app);
+        }
+        let started = started.map(|(name, _)| name);
+        self.notice = match started {
+            Ok(name) => {
+                crate::notice::Notice::working(format!("Asking {who} to open {name}\u{2026}"))
+            }
+            Err(e) => crate::notice::Notice::error(e),
+        };
+    }
+
+    /// Look at the phone's word on the app asked for (Apps part 2), and
+    /// bring up the phone's screen window when it opened.
+    fn watch_phone_open(&mut self, ctx: &egui::Context) {
+        if !self.phone_open.waiting() {
+            return;
+        }
+        let done = self.phone_open.tick(&self.state_dir, now_unix());
+        if let Some(id) = done.released {
+            self.phone_windows.release(id);
+        }
+        if let Some(notice) = done.notice {
+            self.notice = Some(notice);
+        }
+        if done.raise
+            && let Some(cast) = &self.cast
+        {
+            cast.raise(ctx);
+        }
+        if self.phone_open.waiting() {
+            ctx.request_repaint_after(Duration::from_secs(1));
+        }
     }
 
     /// Show the computer `id`'s screen as the tray asked (PC6), from the
@@ -1195,7 +1311,17 @@ impl PocketdeskApp {
         };
         let waiting = self.snapshot.approvals.len();
         let mut verdict = None;
-        egui::Window::new("A phone wants to connect")
+        let computer = self
+            .snapshot
+            .devices
+            .iter()
+            .any(|d| d.id == request.device_id && d.computer);
+        let title = if computer {
+            "A computer wants to connect"
+        } else {
+            "A phone wants to connect"
+        };
+        egui::Window::new(title)
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -1482,6 +1608,15 @@ impl PocketdeskApp {
                 );
                 if self.pair.mode != crate::pair_view::PairFor::Computer {
                     self.nearby.stop();
+                    // A phone's way in when no shared network works.
+                    self.direct_link.show(
+                        ui,
+                        &self.state_dir,
+                        self.config.as_ref(),
+                        &self.snapshot.devices,
+                        self.snapshot.running,
+                        now_unix(),
+                    );
                 }
                 // UX 2: the other computer's link is pasted here too.
                 if self.pair.mode == crate::pair_view::PairFor::Computer {
@@ -1513,6 +1648,34 @@ impl PocketdeskApp {
                 // C7: the chosen phone's recent photos below its folders.
                 if let Some(phone) = self.phone_files.phone().map(str::to_string) {
                     self.photos.show(ui, &self.state_dir, &phone, now_unix());
+                }
+            }
+            Tab::Apps => {
+                let ctx = ui.ctx().clone();
+                self.apps_page.pins_off = self.config.as_ref().is_some_and(|c| !c.phone_apps_pin);
+                self.apps_page.windows_setting =
+                    self.config.as_ref().is_none_or(|c| c.phone_app_windows);
+                self.apps_page.used_windows = self.phone_windows.used();
+                let action =
+                    self.apps_page
+                        .show(ui, &self.state_dir, &self.snapshot.devices, now_unix());
+                // Phone apps tier 2: the window an open asked for is held, and
+                // one the phone did not make is let go.
+                if let Some((id, name, package)) = self.apps_page.take_asked_window() {
+                    self.phone_windows.reserve(id, &name, &package);
+                }
+                if let Some(id) = self.apps_page.take_released_window() {
+                    self.phone_windows.release(id);
+                }
+                match action {
+                    Some(crate::apps_view::Action::Go(tab)) => self.switch_to(tab),
+                    // An app opened: the phone's screen window, brought up.
+                    Some(crate::apps_view::Action::Raise(_phone)) => {
+                        if let Some(cast) = &self.cast {
+                            cast.raise(&ctx);
+                        }
+                    }
+                    None => {}
                 }
             }
             Tab::Clipboard => {
@@ -2028,6 +2191,25 @@ impl PocketdeskApp {
         );
     }
 
+    /// Ask the phone `id` to be this computer's camera (F6 part 2, from the
+    /// Overview), and say how that went.
+    fn start_webcam(&mut self, id: &str) {
+        let who = self.label(id);
+        self.notice = crate::notice::Notice::outcome(
+            match pocketdesk_core::local::phone_photos::request(
+                &self.state_dir,
+                id,
+                pocketdesk_core::local::phone_photos::Ask::Webcam,
+                now_unix(),
+            ) {
+                Ok(_) => Ok(format!(
+                    "Asked {who}: tap its notification to start the camera (\u{201c}Let the computer use my camera\u{201d} on in its Settings); apps here then see \u{201c}Pocketdesk camera\u{201d}. Stop it from the phone's notification."
+                )),
+                Err(e) => Err(format!("Could not ask {who} for its camera: {e}")),
+            },
+        );
+    }
+
     /// Ask the phone `id` for a screenshot or to lock (O2), and say how that went.
     fn phone_action(
         &mut self,
@@ -2051,25 +2233,26 @@ impl PocketdeskApp {
                     PhoneAction::Apps => format!("Asked {who} for its apps."),
                     PhoneAction::Open => format!("Asked {who} to open an app."),
                     PhoneAction::Contacts => format!("Asked {who} for its contacts."),
+                    PhoneAction::Share => format!("Asked {who} to share a file."),
+                    PhoneAction::HotspotOn => {
+                        // Linux, a saved network the owner named: join it once it appears.
+                        let join = self.config.as_ref().and_then(|c| {
+                            crate::phone_hotspot::network_to_join(
+                                &c.phone_hotspot_network,
+                                cfg!(target_os = "linux"),
+                            )
+                        });
+                        if let Some(name) = join.clone()
+                            && self.hotspot_join.is_none()
+                        {
+                            self.hotspot_join = Some(std::thread::spawn(move || {
+                                crate::phone_hotspot::join(&name)
+                            }));
+                        }
+                        crate::phone_hotspot::asked_words(&who, join.as_deref())
+                    }
+                    PhoneAction::HotspotOff => format!("Asked {who} to turn its hotspot off."),
                 }),
-                Err(e) => Err(format!("Could not ask {who}: {e}")),
-            },
-        );
-    }
-
-    /// P2: ask the phone `id` to open the app `app`, and say how that went.
-    fn open_phone_app(&mut self, id: &str, app: &str, name: &str) {
-        let who = self.label(id);
-        self.notice = crate::notice::Notice::outcome(
-            match pocketdesk_core::local::phone_actions::request_open(
-                &self.state_dir,
-                id,
-                app,
-                now_unix(),
-            ) {
-                Ok(_) => Ok(format!(
-                    "Asked {who} to open {name}. With the phone unlocked it opens at once while Pocketdesk control is on, else the phone offers \"Tap to open\"."
-                )),
                 Err(e) => Err(format!("Could not ask {who}: {e}")),
             },
         );
@@ -2090,10 +2273,12 @@ impl PocketdeskApp {
         let mut open_link = None;
         let mut send_clip = None;
         let mut take_photo = None;
+        let mut start_webcam = None;
+        let mut stop_webcam = None;
+        let offers_camera = self.config.as_ref().is_some_and(|c| c.phone_camera);
+        let cameras = model::cameras(&self.snapshot.sessions);
         let mut phone_action = None;
         let mut open_apps = None;
-        // P2: the phones listed, for the apps box drawn after them.
-        let listed: Vec<String> = rows.iter().map(|r| r.device.id.clone()).collect();
         let mut type_to = None;
         let mut media_press = None;
         let control_on = self.config.as_ref().is_none_or(|c| c.cast_control);
@@ -2298,6 +2483,35 @@ impl PocketdeskApp {
                     {
                         take_photo = Some(device.id.clone());
                     }
+                    // F6 part 2: the phone as this computer's camera.
+                    let webcam_reach = model::webcam_reach(
+                        cfg!(target_os = "linux"),
+                        offers_camera,
+                        device.permissions.allows(Capability::Webcam),
+                        device.linked,
+                    );
+                    let webcam_why = webcam_reach.err().unwrap_or(
+                        "The phone shows a notification; a tap there starts its camera, and apps here see \u{201c}Pocketdesk camera\u{201d} until it stops. On the phone it needs \u{201c}Let the computer use my camera\u{201d} on.",
+                    );
+                    if ui
+                        .add_enabled(webcam_reach.is_ok(), egui::Button::new("Use as a camera"))
+                        .on_hover_text(webcam_why)
+                        .on_disabled_hover_text(webcam_why)
+                        .clicked()
+                    {
+                        start_webcam = Some(device.id.clone());
+                    }
+                    // PR #604 review N5: and stopped from here, while it is.
+                    if cameras.contains(&device.id)
+                        && ui
+                            .button("Stop camera")
+                            .on_hover_text(
+                                "Ends the phone's session here, which closes its camera; apps here lose \u{201c}Pocketdesk camera\u{201d}.",
+                            )
+                            .clicked()
+                    {
+                        stop_webcam = Some(device.id.clone());
+                    }
                     // O2: a screenshot of the phone, or its screen locked.
                     let action_reach = model::phone_action_reach(
                         device.linked,
@@ -2325,12 +2539,44 @@ impl PocketdeskApp {
                             phone_action = Some((device.id.clone(), action));
                         }
                     }
+                    // Use my phone's hotspot: only for a phone that said its own
+                    // switch is on (it is off by default there, and shown only
+                    // with Shizuku running), so most phones show nothing here.
+                    if model::hotspot_shown(device.switches.as_ref()) {
+                        let hotspot_reach = model::hotspot_reach(
+                            device.linked,
+                            device.permissions.allows(Capability::PhoneActions),
+                            device.switches.as_ref(),
+                        );
+                        for (label, action, why) in [
+                            (
+                                "Use my phone's hotspot",
+                                pocketdesk_core::protocol::phone_action::PhoneAction::HotspotOn,
+                                "The phone turns on its own Wi-Fi hotspot, as it is set in Android (nothing about its name or password is sent), so this computer can get internet through it. Then connect to its network here (or, on Linux, name it in Settings to be joined when it is already saved). The phone shows its usual hotspot indicator.",
+                            ),
+                            (
+                                "Turn its hotspot off",
+                                pocketdesk_core::protocol::phone_action::PhoneAction::HotspotOff,
+                                "The phone turns its hotspot off. It also turns it off by itself after the minutes set on the phone.",
+                            ),
+                        ] {
+                            let why = hotspot_reach.err().unwrap_or(why);
+                            if ui
+                                .add_enabled(hotspot_reach.is_ok(), egui::Button::new(label))
+                                .on_hover_text(why)
+                                .on_disabled_hover_text(why)
+                                .clicked()
+                            {
+                                phone_action = Some((device.id.clone(), action));
+                            }
+                        }
+                    }
                     // P2: one of the phone's apps opened from here.
                     let apps_why = action_reach.err().unwrap_or(
-                        "Lists the phone's apps, to open one there. On the phone it needs \"Let the computer open my apps\" on, and the Pocketdesk control service to open one.",
+                        "The Phone apps page: the phone's apps as icons, to open one there with its screen in a window here. On the phone it needs \"Let the computer open my apps\" on, and the Pocketdesk control service.",
                     );
                     if ui
-                        .add_enabled(action_reach.is_ok(), egui::Button::new("Open an app on the phone…"))
+                        .add_enabled(action_reach.is_ok(), egui::Button::new("Phone apps…"))
                         .on_hover_text(apps_why)
                         .on_disabled_hover_text(apps_why)
                         .clicked()
@@ -2420,43 +2666,24 @@ impl PocketdeskApp {
         if let Some(id) = take_photo {
             self.take_photo(&id);
         }
+        if let Some(id) = start_webcam {
+            self.start_webcam(&id);
+        }
+        if let Some(id) = stop_webcam {
+            self.end_sessions_of(&id);
+            self.notice = crate::notice::Notice::outcome(Ok(format!(
+                "Asked {}'s camera to stop.",
+                self.label(&id)
+            )));
+        }
         if let Some((id, action)) = phone_action {
             self.phone_action(&id, action);
         }
         if let Some(id) = open_apps {
-            self.phone_action(
-                &id,
-                pocketdesk_core::protocol::phone_action::PhoneAction::Apps,
-            );
-            self.apps_box = Some(crate::apps_view::AppsBox::new(id, now));
-        }
-        // The box for the phone it was opened for, while that phone is listed.
-        let box_for = self.apps_box.as_ref().map(|b| b.device_id.clone());
-        if let Some(id) = box_for {
-            if listed.contains(&id) {
-                let who = self.label(&id);
-                let state_dir = self.state_dir.clone();
-                let action = self
-                    .apps_box
-                    .as_mut()
-                    .and_then(|b| b.ui(ui, &state_dir, &who));
-                match action {
-                    Some(crate::apps_view::Action::Open(app, name)) => {
-                        self.open_phone_app(&id, &app, &name)
-                    }
-                    Some(crate::apps_view::Action::Close) => self.apps_box = None,
-                    Some(crate::apps_view::Action::AskAgain) => {
-                        self.phone_action(
-                            &id,
-                            pocketdesk_core::protocol::phone_action::PhoneAction::Apps,
-                        );
-                        self.apps_box = Some(crate::apps_view::AppsBox::new(id.clone(), now));
-                    }
-                    None => {}
-                }
-            } else {
-                self.apps_box = None;
-            }
+            // P2's box is the Phone apps page now.
+            self.apps_page.choose(&id);
+            self.switch_to(Tab::Apps);
+            self.chosen = Tab::Apps;
         }
         if let Some((id, name)) = type_to {
             self.type_view.open(&self.state_dir, &id, &name);
@@ -3359,6 +3586,11 @@ impl PocketdeskApp {
                     {
                         self.muted_apps_setting(ui);
                     }
+                    crate::settings_view::Section::Wake
+                        if extra(crate::settings_view::EXTRA_WAKE_HELPER) =>
+                    {
+                        self.wake_helper_setting(ui);
+                    }
                     crate::settings_view::Section::KdeConnect
                         if extra(crate::settings_view::EXTRA_KDE) =>
                     {
@@ -3415,6 +3647,8 @@ impl PocketdeskApp {
                             #[cfg(windows)]
                             view.set_grab_keys(form.saved_computer_view_grab_keys());
                             view.set_lock_on_close(form.saved_computer_view_lock_on_close());
+                            view.set_fit_default(form.saved_computer_view_fit());
+                            view.set_smooth_scrolling(form.saved_smooth_scrolling());
                         }
                         self.notice = crate::notice::Notice::done("Saved.");
                     }
@@ -3569,6 +3803,41 @@ impl PocketdeskApp {
 
     /// Phone numbers' links open on the phone (M8): registered by the
     /// server program, which says so in `<config>/tel_handler.json`.
+    /// The phone this computer holds as its wake helper, and Remove. The
+    /// phone offers itself ("Wake helper for this home" on it, an owner
+    /// phone only); removing it here tells it, and it stays removed until
+    /// its owner turns that switch off and on again on the phone.
+    fn wake_helper_setting(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(8.0);
+        ui.label(RichText::new(crate::settings_view::EXTRA_WAKE_HELPER).strong());
+        let held = pocketdesk_core::local::wake_helper::read(&self.state_dir).helper;
+        let Some(helper) = held else {
+            ui.label(
+                RichText::new(WAKE_HELPER_NONE)
+                    .small()
+                    .color(crate::theme::muted(ui)),
+            );
+            return;
+        };
+        let name = model::device_label(&self.snapshot.devices, &helper.device_id);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(format!("{name} is this computer's wake helper."));
+            if ui.button("Remove").clicked() {
+                self.notice = match pocketdesk_core::local::wake_helper::remove(&self.state_dir) {
+                    Ok(_) => crate::notice::Notice::done(format!(
+                        "{name} is no longer this computer's wake helper"
+                    )),
+                    Err(e) => crate::notice::Notice::error(format!("Not removed: {e}")),
+                };
+            }
+        });
+        ui.label(
+            RichText::new(WAKE_HELPER_ABOUT)
+                .small()
+                .color(crate::theme::muted(ui)),
+        );
+    }
+
     fn tel_setting(&mut self, ui: &mut egui::Ui) {
         let Ok(config) = pocketdesk_core::local::paths::config_dir() else {
             return;
@@ -3673,9 +3942,74 @@ impl PocketdeskApp {
             self.send_box(ui);
             ui.add_space(12.0);
             self.under_way_list(ui);
+            self.kept_list(ui);
             self.sent_list(ui);
             self.received_list(ui);
         });
+    }
+
+    /// The phone folders kept on this computer, by themselves: each phone
+    /// folder with its place, size, last run and any problem (the cap, a
+    /// refused name). Nothing is shown until a phone keeps one.
+    fn kept_list(&mut self, ui: &mut egui::Ui) {
+        if self.snapshot.kept.is_empty() {
+            return;
+        }
+        crate::theme::section(ui, "Kept folders");
+        ui.label(
+            RichText::new(
+                "Folders your phones keep here, on their own (the phone's Settings, Folders kept on my computer).",
+            )
+            .color(crate::theme::muted(ui)),
+        );
+        let now = now_unix();
+        let mut show = None;
+        for folder in &self.snapshot.kept {
+            let there = std::path::Path::new(&folder.path).is_dir();
+            crate::theme::card(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    crate::theme::dot(
+                        ui,
+                        if folder.errors.is_empty() {
+                            crate::theme::GOOD
+                        } else {
+                            crate::theme::BAD
+                        },
+                    );
+                    ui.label(
+                        RichText::new(format!("{} / {}", folder.phone, folder.label)).strong(),
+                    )
+                    .on_hover_text(&folder.path);
+                    ui.label(
+                        RichText::new(model::kept_summary(folder, now))
+                            .color(crate::theme::muted(ui)),
+                    );
+                    if there && ui.button("Show in folder").clicked() {
+                        show = Some(folder.path.clone());
+                    }
+                });
+                if let Some(deletions) = model::kept_deletions(folder) {
+                    ui.label(RichText::new(deletions).color(crate::theme::muted(ui)));
+                }
+                // The newest problems, newest first: a full cap says so here.
+                for error in folder.errors.iter().rev().take(3) {
+                    ui.label(
+                        RichText::new(format!(
+                            "{}: {}",
+                            crate::words::ago(now, error.at_unix),
+                            error.message
+                        ))
+                        .color(crate::theme::bad(ui)),
+                    );
+                }
+            });
+        }
+        if let Some(path) = show
+            && let Err(e) = crate::reveal::show_in_folder(std::path::Path::new(&path))
+        {
+            self.notice = crate::notice::Notice::error(format!("Could not open the folder: {e}"));
+        }
+        ui.add_space(12.0);
     }
 
     /// Files dropped with several phones or computers to take them: which
@@ -4408,6 +4742,7 @@ impl eframe::App for PocketdeskApp {
         }
         self.finish_job();
         self.finish_setting();
+        self.finish_hotspot_join();
         // Closing hides to the tray; Quit (or no tray to come back from) exits.
         if ctx.input(|i| i.viewport().close_requested())
             && !self.quitting
@@ -4430,6 +4765,7 @@ impl eframe::App for PocketdeskApp {
             {
                 self.open_asked(ctx, open);
             }
+            self.watch_phone_open(ctx);
             self.raise_for_approvals(ctx);
             self.raise_for_tasks(ctx);
             self.update_tray();
@@ -4450,7 +4786,20 @@ impl eframe::App for PocketdeskApp {
                 &self.snapshot.devices,
                 self.config.as_ref().is_none_or(|c| c.cast_control),
                 model::send_target_ids(&self.snapshot),
+                self.config.as_ref().is_none_or(|c| c.phone_drop_share),
+                self.config.as_ref().is_some_and(|c| c.phone_app_keymaps),
             );
+        // Phone apps tier 2: a window for each app the phone shows in one.
+        self.phone_windows.tick(ctx, &self.state_dir);
+        self.phone_windows.show(
+            ctx,
+            &self.snapshot.devices,
+            self.config.as_ref().is_none_or(|c| c.cast_control),
+            self.config.as_ref().is_some_and(|c| c.phone_app_keymaps),
+        );
+        if self.phone_windows.busy() {
+            ctx.request_repaint_after(Duration::from_millis(500));
+        }
         // BK7: another computer's screen, while its window is open.
         if let Some(view) = &self.computer_view {
             view.show(ctx);
@@ -4470,6 +4819,15 @@ impl eframe::App for PocketdeskApp {
                 }
                 if let Some(Ok(form)) = self.settings.as_mut() {
                     form.saved_elsewhere_computer_view_lock_on_close(on);
+                }
+            }
+            // Item 8: its "Fit the screen to this window", likewise.
+            if let Some(on) = view.take_fit_saved() {
+                if let Some(config) = self.config.as_mut() {
+                    config.computer_view_fit = on;
+                }
+                if let Some(Ok(form)) = self.settings.as_mut() {
+                    form.saved_elsewhere_computer_view_fit(on);
                 }
             }
             // PC4: its "Send Win and Alt+Tab there", likewise.
@@ -4551,6 +4909,12 @@ impl eframe::App for PocketdeskApp {
                                 );
                             }
                             for tab in group.pages {
+                                // The Phone apps page, unless Settings unlists it.
+                                if *tab == Tab::Apps
+                                    && self.config.as_ref().is_some_and(|c| !c.phone_apps_page)
+                                {
+                                    continue;
+                                }
                                 // What waits there, after its name (I3).
                                 let label = match crate::nav::badge(*tab, waiting) {
                                     Some(badge) => {
@@ -4667,6 +5031,7 @@ impl eframe::App for PocketdeskApp {
             self.arrange.take_notice(),
             self.messages.take_notice(),
             self.logs.take_notice(),
+            self.apps_page.take_notice(),
         ];
         if let Some(notice) = said.into_iter().flatten().last() {
             self.notice = Some(notice);
@@ -4676,6 +5041,11 @@ impl eframe::App for PocketdeskApp {
         // An empty page's button asked for another page (E5).
         if let Some(tab) = self.notes.take_go_to().or(self.phone_files.take_go_to()) {
             self.switch_to(tab);
+        }
+        // A notification's "Open app on the phone" (Apps part 2).
+        if let Some((phone, app)) = self.notes.take_open_app() {
+            self.open_phone_app(&phone, &app);
+            ui.ctx().request_repaint();
         }
         // A page's fix for a control it shows off (UX 1).
         if let Some(ask) = crate::widgets::take_ask(ui.ctx()) {

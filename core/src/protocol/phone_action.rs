@@ -12,8 +12,21 @@ pub const PHONE_ACTION: &str = "kdeconnect.pocketdesk.phone_action";
 /// open, answering `apps`. Under the Phone actions permission.
 pub const PHONE_APPS: &str = "kdeconnect.pocketdesk.phone_apps";
 
+/// Phone → computer (Apps part 1): `{icons: [{id, v, png}]}`, the icons of
+/// apps the computer did not have at that version, `png` base64, sent in
+/// batches after the list. Under the Phone actions permission.
+pub const PHONE_APP_ICONS: &str = "kdeconnect.pocketdesk.phone_app_icons";
+
+/// Phone → computer (Apps part 1): `{about, app?, result}`, how an `apps`
+/// or `open` ask went, given only to the phone's own computer. Under the
+/// Phone actions permission.
+pub const PHONE_APP_OPENED: &str = "kdeconnect.pocketdesk.phone_app_opened";
+
 /// The most apps a list holds.
 pub const MAX_APPS: usize = 500;
+
+/// The most icons one [`PHONE_APP_ICONS`] packet holds.
+pub const MAX_ICONS_PER_PACKET: usize = 40;
 
 /// Phone → computer (P10): `{contacts: [{name, numbers}]}`, the phone's
 /// contacts, names and numbers only, answering `contacts`. Under the Texts
@@ -88,11 +101,15 @@ pub fn parse_contacts(body: &serde_json::Value) -> Vec<PhoneContact> {
 /// The longest app id (an Android package name) taken.
 pub const MAX_APP_ID: usize = 255;
 
-/// One of the phone's apps (P2): its package name and its label.
+/// One of the phone's apps (P2): its package name and its label, and (Apps
+/// part 1) its version code, which names the icon the computer keeps for
+/// it (0 from a phone that does not say).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PhoneApp {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub version: u64,
 }
 
 /// Whether `id` is an Android package name: dotted words of letters,
@@ -104,6 +121,20 @@ pub fn valid_app_id(id: &str) -> bool {
             part.starts_with(|c: char| c.is_ascii_alphabetic())
                 && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
         })
+}
+
+/// The package an Android notification key names, if it is a valid one:
+/// the key the phone sends as a notification's id is Android's own,
+/// `user|package|id|tag|uid` (the user a number). Anything else, a call's
+/// note or another system's key, names no app.
+pub fn app_of_notification_key(key: &str) -> Option<String> {
+    let mut parts = key.split('|');
+    let user = parts.next()?;
+    let app = parts.next()?;
+    // An id follows the package in every key Android makes.
+    parts.next()?;
+    let user_ok = !user.is_empty() && user.bytes().all(|b| b.is_ascii_digit());
+    (user_ok && valid_app_id(app)).then(|| app.to_string())
 }
 
 /// The apps in a [`PHONE_APPS`] body: those with a valid id, their names
@@ -136,12 +167,321 @@ pub fn parse_apps(body: &serde_json::Value) -> Vec<PhoneApp> {
             } else {
                 name
             },
+            version: app.get("v").and_then(|v| v.as_u64()).unwrap_or(0),
         });
         if apps.len() == MAX_APPS {
             break;
         }
     }
     apps
+}
+
+/// The icons the computer already has, from an `apps` ask's `have`
+/// (`{id: version}`): only valid ids, at most [`MAX_APPS`].
+pub fn parse_have(body: &serde_json::Value) -> std::collections::BTreeMap<String, u64> {
+    body.get("have")
+        .and_then(|h| h.as_object())
+        .map(|have| {
+            have.iter()
+                .filter(|(id, _)| valid_app_id(id))
+                .filter_map(|(id, v)| Some((id.clone(), v.as_u64()?)))
+                .take(MAX_APPS)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The packet's body for an `apps` ask: the icons already kept (an app's
+/// id and the version of its icon), so the phone sends only the rest.
+pub fn apps_body(have: &std::collections::BTreeMap<String, u64>) -> serde_json::Value {
+    if have.is_empty() {
+        return json!({ "action": PhoneAction::Apps.as_str() });
+    }
+    json!({ "action": PhoneAction::Apps.as_str(), "have": have })
+}
+
+/// The packet's body for an `open` ask; `screen` asks that the phone's
+/// screen be shown here too (one consent for the connection, not one per
+/// app), and is left out when not.
+pub fn open_body(app: &str, screen: bool) -> serde_json::Value {
+    let mut open = body(PhoneAction::Open, Some(app));
+    if screen {
+        open["screen"] = json!(true);
+    }
+    open
+}
+
+/// Phone apps tier 2: the size an app window is asked at, and the id of the
+/// window it is, in an `open` ask's `window` object. Left out, the open is
+/// the ordinary one (the app on the phone's own screen).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WindowAsk {
+    /// 1 to [`crate::streaming::cast::MAX_WINDOWS`].
+    pub id: u8,
+    /// The window's picture, in pixels.
+    pub width: u16,
+    pub height: u16,
+    /// The density the app lays out at, in dots per inch.
+    pub dpi: u16,
+}
+
+/// The smallest and largest side a window may be asked at, in pixels.
+pub const MIN_WINDOW_SIDE: u16 = 240;
+pub const MAX_WINDOW_SIDE: u16 = 3840;
+/// The lowest and highest density a window may be asked at.
+pub const MIN_WINDOW_DPI: u16 = 120;
+pub const MAX_WINDOW_DPI: u16 = 640;
+
+impl WindowAsk {
+    /// A window of the usual phone shape: 720 by 1280 pixels at 320 dpi,
+    /// which lays an app out as on a 360 dp wide phone.
+    pub fn standard(id: u8) -> WindowAsk {
+        WindowAsk {
+            id,
+            width: 720,
+            height: 1280,
+            dpi: 320,
+        }
+    }
+
+    /// Whether the id is one a phone may use and the size and density are
+    /// within bounds.
+    pub fn is_sound(&self) -> bool {
+        crate::streaming::cast::valid_window(self.id)
+            && (MIN_WINDOW_SIDE..=MAX_WINDOW_SIDE).contains(&self.width)
+            && (MIN_WINDOW_SIDE..=MAX_WINDOW_SIDE).contains(&self.height)
+            && (MIN_WINDOW_DPI..=MAX_WINDOW_DPI).contains(&self.dpi)
+    }
+
+    /// The ask in an `open` body's `window`, if it has a sound one.
+    pub fn from_body(body: &serde_json::Value) -> Option<WindowAsk> {
+        serde_json::from_value::<WindowAsk>(body.get("window")?.clone())
+            .ok()
+            .filter(WindowAsk::is_sound)
+    }
+}
+
+/// The packet's body for an `open` ask that wants the app in a window of
+/// its own (Phone apps tier 2) and no screen of the phone's shown.
+pub fn open_window_body(app: &str, window: &WindowAsk) -> serde_json::Value {
+    let mut open = body(PhoneAction::Open, Some(app));
+    open["window"] = serde_json::to_value(window).unwrap_or_else(|_| json!({}));
+    open
+}
+
+/// What a phone says, in its list of apps, of opening them in windows of
+/// their own (Phone apps tier 2): `windows {on, max}`. Absent from a phone
+/// before it, and from one with the switch off or no Shizuku running, it
+/// means the phone does not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct WindowsMode {
+    pub on: bool,
+    #[serde(default)]
+    pub max: u8,
+}
+
+impl WindowsMode {
+    /// How many windows the phone takes at once: at most the cap, none when
+    /// it is off.
+    pub fn limit(&self) -> u8 {
+        if self.on {
+            self.max.min(crate::streaming::cast::MAX_WINDOWS)
+        } else {
+            0
+        }
+    }
+}
+
+/// The mode in a [`PHONE_APPS`] body, or off when it says none.
+pub fn parse_windows_mode(body: &serde_json::Value) -> WindowsMode {
+    body.get("windows")
+        .and_then(|w| serde_json::from_value::<WindowsMode>(w.clone()).ok())
+        .unwrap_or_default()
+}
+
+/// How an open goes from this computer (Phone apps tier 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenMode {
+    /// In app window `n`, the phone's screen left alone.
+    Window(u8),
+    /// As before: the app on the phone's own screen, shown here.
+    Screen,
+    /// The phone takes no more windows; this open waits for one to close.
+    AtLimit,
+}
+
+/// How an open is made: in a window when the phone said it takes windows
+/// and `setting` (this computer's own switch) is on, with the lowest id of
+/// those the phone takes that is not in `used`; else as before.
+pub fn open_mode(mode: Option<WindowsMode>, setting: bool, used: &[u8]) -> OpenMode {
+    let limit = mode.map_or(0, |m| m.limit());
+    if !setting || limit == 0 {
+        return OpenMode::Screen;
+    }
+    (1..=limit)
+        .find(|id| !used.contains(id))
+        .map_or(OpenMode::AtLimit, OpenMode::Window)
+}
+
+/// What came of an ask the phone answers with [`PHONE_APP_OPENED`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AppResult {
+    /// The app was started.
+    Opened,
+    /// The phone's screen is not shown here yet: its owner is asked once,
+    /// and the app opens after.
+    NeedsScreen,
+    /// Pocketdesk's control service on the phone is off.
+    ControlOff,
+    /// The phone is locked.
+    Locked,
+    /// Hands-free: the phone has a secure lock (PIN, pattern, password or
+    /// biometric) that is on now. It is never bypassed from here: unlock the
+    /// phone, or let Android keep it unlocked near this computer.
+    LockedSecure,
+    /// Hands-free: the phone could not accept its own screen-sharing
+    /// question (the option is off, Android hid the button from the control
+    /// service, or the screen names it differently), so one notification on
+    /// the phone waits for one tap, and the app opens after it.
+    NeedsTap,
+    /// The phone's screen is off.
+    Asleep,
+    /// "Let the computer open my apps" is off.
+    Off,
+    /// An app the phone did not list for the computer.
+    NotListed,
+    /// The app is gone or has nothing to open.
+    NotFound,
+    /// More asks than the phone does a minute.
+    TooMany,
+    /// Android refused it.
+    Failed,
+    /// Apps part 2: the file dropped on the phone's screen window was
+    /// shared into the app in front.
+    Shared,
+    /// Apps part 2: no app in front that the phone could tell (or none it
+    /// lists), so the file stays in Downloads.
+    NoApp,
+    /// Apps part 2: the app in front takes no file of that type, so the
+    /// file stays in Downloads.
+    CannotTake,
+    /// Tier 2: the phone cannot open an app in a window of its own now (the
+    /// switch is off, Shizuku is not running or has not allowed it, or
+    /// Android refused a display); the computer opens it the ordinary way.
+    WindowsUnavailable,
+    /// Tier 2: the phone already has as many windows open as it takes.
+    WindowLimit,
+}
+
+impl AppResult {
+    /// Every result.
+    pub const ALL: [AppResult; 17] = [
+        AppResult::Opened,
+        AppResult::NeedsScreen,
+        AppResult::ControlOff,
+        AppResult::Locked,
+        AppResult::LockedSecure,
+        AppResult::NeedsTap,
+        AppResult::Asleep,
+        AppResult::Off,
+        AppResult::NotListed,
+        AppResult::NotFound,
+        AppResult::TooMany,
+        AppResult::Failed,
+        AppResult::Shared,
+        AppResult::NoApp,
+        AppResult::CannotTake,
+        AppResult::WindowsUnavailable,
+        AppResult::WindowLimit,
+    ];
+
+    /// The word the packet carries.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AppResult::Opened => "opened",
+            AppResult::NeedsScreen => "needs_screen",
+            AppResult::ControlOff => "control_off",
+            AppResult::Locked => "locked",
+            AppResult::LockedSecure => "locked_secure",
+            AppResult::NeedsTap => "needs_tap",
+            AppResult::Asleep => "asleep",
+            AppResult::Off => "off",
+            AppResult::NotListed => "not_listed",
+            AppResult::NotFound => "not_found",
+            AppResult::TooMany => "too_many",
+            AppResult::Failed => "failed",
+            AppResult::Shared => "shared",
+            AppResult::NoApp => "no_app",
+            AppResult::CannotTake => "cannot_take",
+            AppResult::WindowsUnavailable => "windows_unavailable",
+            AppResult::WindowLimit => "window_limit",
+        }
+    }
+
+    /// The result `word` names, or `None`.
+    pub fn parse(word: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|r| r.as_str() == word)
+    }
+}
+
+/// How an ask went, as a phone says it ([`PHONE_APP_OPENED`]): which ask
+/// (`apps`, `open` or `share`), the app an open named (or a share went to),
+/// the file a share was for, and the result.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AppReport {
+    pub about: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    /// The file a `share` was about (Apps part 2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Tier 2: the app window an `open` was for, when it was for one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<u8>,
+    pub result: AppResult,
+}
+
+impl AppReport {
+    /// The report in `body`: an `apps` or `open` ask with a result this
+    /// computer knows, and for an open a valid app id.
+    pub fn from_body(body: &serde_json::Value) -> Option<AppReport> {
+        let about = body.get("about")?.as_str()?;
+        let result = AppResult::parse(body.get("result")?.as_str()?)?;
+        let app = body
+            .get("app")
+            .and_then(|a| a.as_str())
+            .filter(|a| valid_app_id(a))
+            .map(str::to_string);
+        // A share names the file it was for, as the computer sent it.
+        let name = body
+            .get("name")
+            .and_then(|n| n.as_str())
+            .filter(|n| valid_share_name(n))
+            .map(str::to_string);
+        match (about, &app, &name) {
+            ("open", Some(_), None) | ("apps", None, None) | ("share", _, Some(_)) => {}
+            _ => return None,
+        }
+        // Only an open is for a window, and one that is a window's id.
+        let window = body
+            .get("window")
+            .and_then(|w| w.as_u64())
+            .and_then(|w| u8::try_from(w).ok())
+            .filter(|w| about == "open" && crate::streaming::cast::valid_window(*w));
+        Some(AppReport {
+            about: about.to_string(),
+            app,
+            name,
+            window,
+            result,
+        })
+    }
+
+    /// The packet's body.
+    pub fn to_body(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or_else(|_| json!({}))
+    }
 }
 
 /// What the phone is asked to do.
@@ -157,15 +497,27 @@ pub enum PhoneAction {
     Open,
     /// List the contacts, names and numbers only (P10).
     Contacts,
+    /// Share the file being sent into the app in front on the phone (Apps
+    /// part 2), the file's name and size beside the action.
+    Share,
+    /// Turn the phone's own Wi-Fi hotspot on, with the hotspot settings the
+    /// phone already has (the computer sends none), so this computer can get
+    /// internet through it. Nothing but the action travels.
+    HotspotOn,
+    /// Turn that hotspot off again.
+    HotspotOff,
 }
 
 impl PhoneAction {
-    pub const ALL: [PhoneAction; 5] = [
+    pub const ALL: [PhoneAction; 8] = [
         PhoneAction::Screenshot,
         PhoneAction::Lock,
         PhoneAction::Apps,
         PhoneAction::Open,
         PhoneAction::Contacts,
+        PhoneAction::Share,
+        PhoneAction::HotspotOn,
+        PhoneAction::HotspotOff,
     ];
 
     /// The word the packet and the request files carry.
@@ -176,6 +528,9 @@ impl PhoneAction {
             PhoneAction::Apps => "apps",
             PhoneAction::Open => "open",
             PhoneAction::Contacts => "contacts",
+            PhoneAction::Share => "share",
+            PhoneAction::HotspotOn => "hotspot_on",
+            PhoneAction::HotspotOff => "hotspot_off",
         }
     }
 
@@ -183,6 +538,25 @@ impl PhoneAction {
     pub fn parse(word: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|a| a.as_str() == word)
     }
+}
+
+/// The longest file name a share names, in characters.
+pub const MAX_SHARE_NAME: usize = 255;
+
+/// Whether `name` can be the name of a file a share is for: one line, no
+/// path, at most [`MAX_SHARE_NAME`] characters.
+pub fn valid_share_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.chars().count() <= MAX_SHARE_NAME
+        && !name
+            .chars()
+            .any(|c| c.is_control() || c == '/' || c == '\\')
+}
+
+/// The packet's body for a `share` ask: the file being sent (its name and
+/// size in bytes), which the phone matches to the file that arrives.
+pub fn share_body(name: &str, size: u64) -> serde_json::Value {
+    json!({ "action": PhoneAction::Share.as_str(), "name": name, "size": size })
 }
 
 /// The packet's body for `action`, with the app `open` opens.
@@ -212,6 +586,82 @@ mod tests {
         assert_eq!(PhoneAction::parse("unlock"), None);
     }
 
+    /// The hotspot asks carry nothing but their word: no name, password or band.
+    #[test]
+    fn a_hotspot_ask_carries_only_its_word() {
+        for action in [PhoneAction::HotspotOn, PhoneAction::HotspotOff] {
+            assert_eq!(body(action, None).as_object().unwrap().len(), 1);
+        }
+        assert_eq!(PhoneAction::HotspotOn.as_str(), "hotspot_on");
+        assert_eq!(PhoneAction::HotspotOff.as_str(), "hotspot_off");
+        assert_eq!(PhoneAction::parse("hotspot"), None);
+    }
+
+    /// Apps part 2: a share names its file, and a report of one says so.
+    #[test]
+    fn a_share_names_its_file_and_its_report_does_too() {
+        assert!(valid_share_name("photo 1.png"));
+        assert!(!valid_share_name(""));
+        assert!(!valid_share_name("a/b"));
+        assert!(!valid_share_name("a\\b"));
+        assert!(!valid_share_name("a\nb"));
+        assert!(!valid_share_name(&"x".repeat(MAX_SHARE_NAME + 1)));
+        let ask = share_body("a.png", 10);
+        assert_eq!(ask["action"], "share");
+        assert_eq!(ask["name"], "a.png");
+        assert_eq!(ask["size"], 10);
+        assert_eq!(PhoneAction::parse("share"), Some(PhoneAction::Share));
+        let report = AppReport::from_body(&json!({
+            "about": "share", "app": "org.example.notes", "name": "a.png", "result": "shared"
+        }))
+        .unwrap();
+        assert_eq!(report.result, AppResult::Shared);
+        assert_eq!(report.name.as_deref(), Some("a.png"));
+        assert_eq!(report.app.as_deref(), Some("org.example.notes"));
+        // An app is not needed (none in front); a file name is.
+        assert!(
+            AppReport::from_body(&json!({
+                "about": "share", "name": "a.png", "result": "no_app"
+            }))
+            .is_some()
+        );
+        for bad in [
+            json!({"about": "share", "result": "shared"}),
+            json!({"about": "share", "name": "../a", "result": "shared"}),
+            json!({"about": "share", "name": "a.png", "result": "nope"}),
+            json!({"about": "open", "app": "org.example.notes", "name": "a.png", "result": "opened"}),
+            json!({"about": "apps", "name": "a.png", "result": "opened"}),
+        ] {
+            assert_eq!(AppReport::from_body(&bad), None, "{bad}");
+        }
+    }
+
+    /// Apps part 2: a notification's key names its app only in Android's form.
+    #[test]
+    fn a_notification_key_names_its_app_in_androids_form() {
+        assert_eq!(
+            app_of_notification_key("0|org.example.chat|12|null|10123").as_deref(),
+            Some("org.example.chat")
+        );
+        assert_eq!(
+            app_of_notification_key("10|org.example.chat|7|tag|10123").as_deref(),
+            Some("org.example.chat")
+        );
+        for bad in [
+            "",
+            "org.example.chat",
+            "pocketdesk:call:1",
+            "0|org.example.chat",
+            "x|org.example.chat|1|null|1",
+            "|org.example.chat|1|null|1",
+            "0|nodots|1|null|1",
+            "0|org.example.chat;rm|1|null|1",
+            "0| |1|null|1",
+        ] {
+            assert_eq!(app_of_notification_key(bad), None, "{bad:?}");
+        }
+    }
+
     /// P2: an app is named by a package name, and a list keeps the valid ones once.
     #[test]
     fn a_phone_app_list_is_read_with_care() {
@@ -223,7 +673,7 @@ mod tests {
         assert!(!valid_app_id("org.app;rm"));
         assert!(!valid_app_id(&format!("a.{}", "b".repeat(MAX_APP_ID))));
         let apps = parse_apps(&json!({"apps": [
-            {"id": "org.example.app", "name": "Example\nApp"},
+            {"id": "org.example.app", "name": "Example\nApp", "v": 12},
             {"id": "org.example.app", "name": "Again"},
             {"id": "bad id", "name": "Bad"},
             {"id": "org.example.blank", "name": "  "},
@@ -233,11 +683,13 @@ mod tests {
             vec![
                 PhoneApp {
                     id: "org.example.app".into(),
-                    name: "Example App".into()
+                    name: "Example App".into(),
+                    version: 12
                 },
                 PhoneApp {
                     id: "org.example.blank".into(),
-                    name: "org.example.blank".into()
+                    name: "org.example.blank".into(),
+                    version: 0
                 },
             ]
         );
@@ -246,6 +698,72 @@ mod tests {
             .collect();
         assert_eq!(parse_apps(&json!({ "apps": many })).len(), MAX_APPS);
         assert!(parse_apps(&json!({})).is_empty());
+    }
+
+    /// Apps part 1: an ask says which icons the computer has, and an open
+    /// may want the screen too.
+    #[test]
+    fn an_apps_ask_says_what_the_computer_has() {
+        let none = std::collections::BTreeMap::new();
+        assert_eq!(apps_body(&none), json!({"action": "apps"}));
+        let have = std::collections::BTreeMap::from([("org.example.app".to_string(), 7u64)]);
+        assert_eq!(parse_have(&apps_body(&have)), have);
+        let odd = json!({"have": {"bad id": 1, "org.example.b": "x", "org.example.c": 3}});
+        assert_eq!(
+            parse_have(&odd),
+            std::collections::BTreeMap::from([("org.example.c".to_string(), 3u64)])
+        );
+        assert!(parse_have(&json!({"have": [1]})).is_empty());
+        assert!(open_body("org.example.app", false).get("screen").is_none());
+        assert_eq!(open_body("org.example.app", true)["screen"], true);
+        assert_eq!(open_body("org.example.app", true)["action"], "open");
+    }
+
+    /// Apps part 1: a report of an ask is read with care.
+    #[test]
+    fn a_report_of_an_ask_is_read_with_care() {
+        for result in AppResult::ALL {
+            assert_eq!(AppResult::parse(result.as_str()), Some(result));
+            let report = AppReport {
+                about: "open".into(),
+                app: Some("org.example.app".into()),
+                name: None,
+                window: None,
+                result,
+            };
+            assert_eq!(AppReport::from_body(&report.to_body()), Some(report));
+        }
+        let list = json!({"about": "apps", "result": "off"});
+        assert_eq!(AppReport::from_body(&list).unwrap().app, None);
+        // An open names its app, a list names none, and a result is a known word.
+        assert!(AppReport::from_body(&json!({"about": "open", "result": "off"})).is_none());
+        let named = json!({"about": "apps", "app": "org.example.app", "result": "off"});
+        assert!(AppReport::from_body(&named).is_none());
+        let bad = json!({"about": "open", "app": "no", "result": "off"});
+        assert!(AppReport::from_body(&bad).is_none());
+        let word = json!({"about": "open", "app": "org.example.app", "result": "yes"});
+        assert!(AppReport::from_body(&word).is_none());
+        assert!(AppReport::from_body(&json!({"about": "lock", "result": "off"})).is_none());
+    }
+
+    /// Hands-free: the two new words are in the packet's vocabulary under
+    /// the names the phone sends, and an older word is read as before.
+    #[test]
+    fn the_hands_free_results_have_their_words() {
+        for (word, result) in [
+            ("locked_secure", AppResult::LockedSecure),
+            ("needs_tap", AppResult::NeedsTap),
+            ("locked", AppResult::Locked),
+        ] {
+            assert_eq!(AppResult::parse(word), Some(result));
+            let body = json!({"about": "open", "app": "org.example.app", "result": word});
+            assert_eq!(AppReport::from_body(&body).unwrap().result, result);
+        }
+        // Every word is unique, so none can be read as another.
+        let mut words: Vec<_> = AppResult::ALL.iter().map(|r| r.as_str()).collect();
+        words.sort_unstable();
+        words.dedup();
+        assert_eq!(words.len(), AppResult::ALL.len());
     }
 
     /// P10: contacts with a name and a callable number, each number once.
@@ -265,5 +783,144 @@ mod tests {
             "each once, no codes"
         );
         assert_eq!(contacts[1].numbers.len(), MAX_NUMBERS);
+    }
+
+    /// Phone apps tier 2: an open for a window carries a sound window, and one
+    /// that is not is not read.
+    #[test]
+    fn an_open_for_a_window_carries_a_sound_window() {
+        let ask = WindowAsk::standard(3);
+        let body = open_window_body("org.example.app", &ask);
+        assert_eq!(body["action"], "open");
+        assert_eq!(body["app"], "org.example.app");
+        assert!(body.get("screen").is_none(), "no screen of the phone's");
+        assert_eq!(WindowAsk::from_body(&body), Some(ask));
+        // The ordinary open names none.
+        assert_eq!(
+            WindowAsk::from_body(&open_body("org.example.app", true)),
+            None
+        );
+        for bad in [
+            WindowAsk { id: 0, ..ask },
+            WindowAsk {
+                id: crate::streaming::cast::MAX_WINDOWS + 1,
+                ..ask
+            },
+            WindowAsk {
+                width: MIN_WINDOW_SIDE - 1,
+                ..ask
+            },
+            WindowAsk {
+                height: MAX_WINDOW_SIDE + 1,
+                ..ask
+            },
+            WindowAsk {
+                dpi: MIN_WINDOW_DPI - 1,
+                ..ask
+            },
+            WindowAsk {
+                dpi: MAX_WINDOW_DPI + 1,
+                ..ask
+            },
+        ] {
+            assert!(!bad.is_sound(), "{bad:?}");
+            assert_eq!(
+                WindowAsk::from_body(&open_window_body("org.example.app", &bad)),
+                None
+            );
+        }
+        assert_eq!(WindowAsk::from_body(&json!({"window": "big"})), None);
+        assert_eq!(WindowAsk::from_body(&json!({"window": {"id": 1}})), None);
+    }
+
+    /// Phone apps tier 2: the phone's word on windows is read as it is said,
+    /// and a phone that says none takes none.
+    #[test]
+    fn the_phone_says_whether_it_takes_windows() {
+        let on = json!({"apps": [], "windows": {"on": true, "max": 4}});
+        assert_eq!(parse_windows_mode(&on), WindowsMode { on: true, max: 4 });
+        assert_eq!(parse_windows_mode(&on).limit(), 4);
+        let more = json!({"windows": {"on": true, "max": 200}});
+        assert_eq!(
+            parse_windows_mode(&more).limit(),
+            crate::streaming::cast::MAX_WINDOWS,
+            "never past the cap"
+        );
+        let off = json!({"windows": {"on": false, "max": 4}});
+        assert_eq!(parse_windows_mode(&off).limit(), 0);
+        assert_eq!(
+            parse_windows_mode(&json!({"apps": []})),
+            WindowsMode::default()
+        );
+        assert_eq!(
+            parse_windows_mode(&json!({"windows": 7})),
+            WindowsMode::default()
+        );
+        assert_eq!(
+            parse_windows_mode(&json!({"windows": {"on": true}})).limit(),
+            0
+        );
+    }
+
+    /// Phone apps tier 2: the mode an open goes in follows the phone's word, this
+    /// computer's own switch, and the windows already open.
+    #[test]
+    fn an_open_goes_in_a_window_only_when_both_say_so() {
+        let phone = Some(WindowsMode { on: true, max: 4 });
+        assert_eq!(open_mode(phone, true, &[]), OpenMode::Window(1));
+        assert_eq!(open_mode(phone, true, &[1, 2]), OpenMode::Window(3));
+        assert_eq!(
+            open_mode(phone, true, &[1, 3]),
+            OpenMode::Window(2),
+            "the lowest free"
+        );
+        assert_eq!(open_mode(phone, true, &[1, 2, 3, 4]), OpenMode::AtLimit);
+        let two = Some(WindowsMode { on: true, max: 2 });
+        assert_eq!(
+            open_mode(two, true, &[1, 2]),
+            OpenMode::AtLimit,
+            "the phone's own limit"
+        );
+        assert_eq!(
+            open_mode(phone, false, &[]),
+            OpenMode::Screen,
+            "this computer's switch is off"
+        );
+        assert_eq!(
+            open_mode(None, true, &[]),
+            OpenMode::Screen,
+            "a phone before windows"
+        );
+        let off = Some(WindowsMode { on: false, max: 4 });
+        assert_eq!(
+            open_mode(off, true, &[]),
+            OpenMode::Screen,
+            "the phone's switch is off"
+        );
+    }
+
+    /// Phone apps tier 2: a report of an open names its window, only an open does,
+    /// and the two new words read back.
+    #[test]
+    fn a_report_names_the_window_of_an_open() {
+        let report = AppReport {
+            about: "open".into(),
+            app: Some("org.example.app".into()),
+            name: None,
+            window: Some(2),
+            result: AppResult::WindowLimit,
+        };
+        assert_eq!(AppReport::from_body(&report.to_body()), Some(report));
+        for word in ["windows_unavailable", "window_limit"] {
+            assert!(AppResult::parse(word).is_some(), "{word}");
+        }
+        let past =
+            json!({"about": "open", "app": "org.example.app", "window": 9, "result": "opened"});
+        assert_eq!(AppReport::from_body(&past).unwrap().window, None);
+        let apps = json!({"about": "apps", "window": 2, "result": "off"});
+        assert_eq!(AppReport::from_body(&apps).unwrap().window, None);
+        // An older computer's report names none.
+        let old = json!({"about": "open", "app": "org.example.app", "result": "opened"});
+        assert_eq!(AppReport::from_body(&old).unwrap().window, None);
     }
 }

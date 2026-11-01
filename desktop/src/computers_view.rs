@@ -1681,6 +1681,7 @@ mod tests {
             fingerprint: Some("ab".repeat(32)),
             endpoint,
             mine: true,
+            wifi: None,
         }
         .to_uri()
     }
@@ -2317,6 +2318,7 @@ mod tests {
             fingerprint: Some("cd".repeat(32)),
             endpoint: None,
             mine: false,
+            wifi: None,
         }
         .to_uri();
         let empty = page(&dir, true, "").query_by_label(NO_ANSWER).is_some();

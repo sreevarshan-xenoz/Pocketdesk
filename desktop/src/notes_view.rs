@@ -30,6 +30,11 @@ pub struct NotesView {
     /// Each notification's reply being typed, by phone and key.
     drafts: HashMap<(String, String), String>,
     read_at: Option<Instant>,
+    /// The apps each phone listed (Apps part 2), to offer opening a
+    /// notification's app.
+    app_lists: std::collections::BTreeMap<String, pocketdesk_core::local::phone_apps::AppList>,
+    /// The phone and app a notification's "Open app on the phone" asked for.
+    open_app: Option<(String, String)>,
     /// What it said happened, until the app takes it (E5).
     notice: Option<crate::notice::Notice>,
     /// The page an empty state's button asked for (E5).
@@ -89,6 +94,11 @@ impl NotesView {
     pub fn take_go_to(&mut self) -> Option<crate::app::Tab> {
         self.go_to.take()
     }
+    /// The phone and app (a package name) a notification's "Open app on the
+    /// phone" asked for since the last call (Apps part 2).
+    pub fn take_open_app(&mut self) -> Option<(String, String)> {
+        self.open_app.take()
+    }
     /// What this page said happened since the last call, for the app's one
     /// notice (E5).
     pub fn take_notice(&mut self) -> Option<crate::notice::Notice> {
@@ -103,6 +113,7 @@ impl NotesView {
         cards.reverse();
         self.cards = cards;
         self.answers = answers::read(state_dir);
+        self.app_lists = pocketdesk_core::local::phone_apps::read(state_dir);
         // Drafts for notifications that went are dropped.
         let live: Vec<(String, String)> = self
             .notes
@@ -320,6 +331,30 @@ impl NotesView {
                                 .clicked()
                         {
                             self.answer(state_dir, note, Answer::Open, now_unix);
+                        }
+                        // Apps part 2: the notification's app, as the Phone apps
+                        // page opens one, when the phone listed it.
+                        if let Some(app) =
+                            pocketdesk_core::protocol::phone_action::app_of_notification_key(
+                                &note.key,
+                            )
+                            && let Some(list) = self.app_lists.get(&note.device_id)
+                            && list.apps.iter().any(|a| a.id == app)
+                        {
+                            let who = crate::model::device_label(devices, &note.device_id);
+                            let device = devices.iter().find(|d| d.id == note.device_id);
+                            let ask = crate::phone_open::check(device, Some(list), &app, &who);
+                            let button =
+                                ui.add_enabled(ask.is_ok(), egui::Button::new("Open app on the phone"));
+                            let button = match &ask {
+                                Ok(_) => button.on_hover_text(
+                                    "Opens the app on the phone and shows the phone's screen in a window here; the phone must be unlocked",
+                                ),
+                                Err(why) => button.on_disabled_hover_text(why),
+                            };
+                            if button.clicked() {
+                                self.open_app = Some((note.device_id.clone(), app));
+                            }
                         }
                         // L1: cleared here, cleared on the phone; an ended
                         // call is gone there, so only here (M8 review).

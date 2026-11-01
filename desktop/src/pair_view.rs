@@ -134,6 +134,7 @@ pub fn link_for(
             .map(identity::fingerprint_hex),
         endpoint: identity::read_endpoint(state_dir).map(|e| e.to_string()),
         mine: whose.mine && whose.is_owners(),
+        wifi: None,
     })
 }
 
@@ -172,7 +173,7 @@ pub fn qr_modules(text: &str) -> Result<Vec<Vec<bool>>, String> {
 
 /// Dark modules on white with the standard 4-module quiet zone, `scale` px
 /// per module.
-fn qr_image(modules: &[Vec<bool>], scale: usize) -> ColorImage {
+pub(crate) fn qr_image(modules: &[Vec<bool>], scale: usize) -> ColorImage {
     const QUIET: usize = 4;
     let n = modules.len();
     let side = (n + 2 * QUIET) * scale;

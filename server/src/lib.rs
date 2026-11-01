@@ -18,10 +18,17 @@ pub mod computer_wake;
 pub mod config;
 pub mod conn_budget;
 pub mod crash_report;
+pub mod direct_link;
 pub mod done;
 pub(crate) mod drive;
 pub mod driving;
 pub mod events;
+pub mod fit_screen;
+// The fuzz targets' entry points (`fuzz/`), only under `cargo fuzz`.
+#[cfg(target_os = "linux")]
+pub mod attestation;
+#[cfg(fuzzing)]
+pub mod fuzzing;
 pub mod gamepad_pad;
 pub mod home_assistant;
 pub mod hypr_events;
@@ -39,6 +46,7 @@ pub mod introductions;
 pub mod iroh_endpoint;
 pub mod kde;
 pub mod kdeconnect_compat;
+pub mod kept_folders;
 pub mod laser;
 #[cfg(target_os = "linux")]
 mod laser_linux;
@@ -53,15 +61,22 @@ pub mod mic_relay;
 #[path = "mic_relay_windows.rs"]
 pub mod mic_relay;
 pub(crate) mod nearby;
+pub mod nmea;
+pub mod nmea_announce;
 #[cfg(windows)]
 mod notification_listener_windows;
 pub mod notification_monitor;
 pub mod offers;
 pub mod overlay;
 pub mod packets;
+#[cfg(target_os = "linux")]
+pub mod pam_ask;
 pub mod paused;
 pub mod peer_computers;
 pub mod pen;
+pub mod phone_approves;
+pub mod phone_camera;
+pub mod phone_location;
 pub mod phone_sound;
 pub mod platform;
 pub mod plugins;
@@ -84,6 +99,7 @@ pub mod toast_answers;
 pub mod transfers;
 pub mod v2_multiplexer;
 pub mod virtual_screen;
+pub mod wake_helper;
 pub mod wake_info;
 #[cfg(windows)]
 pub mod windows_desktop;

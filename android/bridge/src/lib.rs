@@ -21,6 +21,7 @@ mod introductions;
 mod link;
 mod link_quiet;
 mod links;
+mod location_requests;
 mod logcat;
 mod media_presses;
 mod notes;
@@ -37,6 +38,7 @@ mod session;
 mod tasks;
 mod typing;
 mod unpaired;
+mod wake_helper;
 
 pub(crate) use session::*;
 
@@ -404,6 +406,18 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakesLi
     crate::peer_names::takes_live(&address) as jboolean
 }
 
+/// Whether the computer at `address` keeps a phone's folders, as it said when
+/// last heard: an older one would take a kept folder's files as folder sends.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakesKept(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+) -> jboolean {
+    let address = jstring_to_string(&mut env, &address);
+    crate::peer_names::takes_kept(&address) as jboolean
+}
+
 /// Whether a streaming session is currently active.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeIsStreamingActive(
@@ -636,6 +650,8 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
     address: JString<'_>,
     port: jint,
     sound_alone: jboolean,
+    webcam: jboolean,
+    windows: jboolean,
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let json = envelope_unit(RUNTIME.block_on(api::connect_streaming(
@@ -643,7 +659,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
         port as u16,
         None,
         0,
-        cast_mode(sound_alone),
+        cast_mode(sound_alone, webcam, windows),
     )));
     to_jstring(&mut env, json)
 }
@@ -657,6 +673,8 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
     address: JString<'_>,
     identity_json: JString<'_>,
     sound_alone: jboolean,
+    webcam: jboolean,
+    windows: jboolean,
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let identity = jstring_to_string(&mut env, &identity_json);
@@ -665,15 +683,25 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
         identity,
         None,
         0,
-        cast_mode(sound_alone),
+        cast_mode(sound_alone, webcam, windows),
     )));
     to_jstring(&mut env, json)
 }
 
-/// A cast's mode: its screen, or its sound alone (M7).
-fn cast_mode(sound_alone: jboolean) -> pocketdesk_core::streaming::SessionMode {
+/// A cast's mode: its screen, its sound alone (M7), its camera as the
+/// computer's camera (F6 part 2), or app windows with no screen of the
+/// phone's (Phone apps tier 2).
+fn cast_mode(
+    sound_alone: jboolean,
+    webcam: jboolean,
+    windows: jboolean,
+) -> pocketdesk_core::streaming::SessionMode {
     if sound_alone != 0 {
         pocketdesk_core::streaming::SessionMode::PhoneSound
+    } else if webcam != 0 {
+        pocketdesk_core::streaming::SessionMode::Webcam
+    } else if windows != 0 {
+        pocketdesk_core::streaming::SessionMode::Windows
     } else {
         pocketdesk_core::streaming::SessionMode::Cast
     }
@@ -737,6 +765,90 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastFra
     // and the caller keeps it alive and unchanged until this returns.
     let access_unit = unsafe { std::slice::from_raw_parts(address.add(offset), size) };
     cast::frame(keyframe != 0, seq as u64, access_unit)
+}
+
+/// App window `window`'s encoder (re)started at `width`×`height` (Phone
+/// apps tier 2); `input`: the phone takes the computer's touch and typing in
+/// it. 0 queued, 1 the link is behind (try again), 2 no cast session.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastWindowConfig(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    window: jint,
+    width: jint,
+    height: jint,
+    input: jboolean,
+) -> jint {
+    let (Ok(window), Ok(width), Ok(height)) = (
+        u8::try_from(window),
+        u16::try_from(width),
+        u16::try_from(height),
+    ) else {
+        return cast::NO_CAST;
+    };
+    RUNTIME.block_on(cast::window_config(window, width, height, input != 0))
+}
+
+/// One access unit of app window `window` (Phone apps tier 2), as
+/// `nativeCastFrame` takes one of the screen's.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastWindowFrame(
+    env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    window: jint,
+    buffer: jni::objects::JByteBuffer<'_>,
+    offset: jint,
+    size: jint,
+    keyframe: jboolean,
+    seq: jlong,
+) -> jint {
+    let (Ok(window), Ok(offset), Ok(size)) = (
+        u8::try_from(window),
+        usize::try_from(offset),
+        usize::try_from(size),
+    ) else {
+        return cast::NO_CAST;
+    };
+    let (Ok(address), Ok(capacity)) = (
+        env.get_direct_buffer_address(&buffer),
+        env.get_direct_buffer_capacity(&buffer),
+    ) else {
+        return cast::NO_CAST;
+    };
+    if address.is_null() || offset.checked_add(size).is_none_or(|end| end > capacity) {
+        return cast::NO_CAST;
+    }
+    // SAFETY: the buffer is direct, `offset + size` is within its capacity,
+    // and the caller keeps it alive and unchanged until this returns.
+    let access_unit = unsafe { std::slice::from_raw_parts(address.add(offset), size) };
+    cast::window_frame(window, keyframe != 0, seq as u64, access_unit)
+}
+
+/// App window `window` ended on the phone (Phone apps tier 2).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastWindowClosed(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    window: jint,
+) -> jint {
+    let Ok(window) = u8::try_from(window) else {
+        return cast::NO_CAST;
+    };
+    RUNTIME.block_on(cast::window_closed(window))
+}
+
+/// Whether the computer asked for a keyframe of app window `window` since the
+/// last look (Phone apps tier 2).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastWindowKeyframeWanted(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    window: jint,
+) -> jboolean {
+    let Ok(window) = u8::try_from(window) else {
+        return 0;
+    };
+    jboolean::from(cast::window_keyframe_wanted(window))
 }
 
 /// The cast session's state (T10k), as `nativeRemoteState`'s, but `none`
@@ -1028,6 +1140,25 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendMou
     to_jstring(&mut env, json)
 }
 
+/// A wheel turn: whole notches and, when `fine` is set, the turn in 120ths
+/// of a notch (`x120`, `y120`) beside them. Values saturate to the wire's
+/// `i16`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendScroll(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    dx: jint,
+    dy: jint,
+    x120: jint,
+    y120: jint,
+    fine: jboolean,
+) -> jstring {
+    use pocketdesk_core::streaming::wheel::clamp16;
+    let fine = (fine != 0).then(|| (clamp16(x120), clamp16(y120)));
+    let json = envelope_unit(RUNTIME.block_on(api::send_scroll(clamp16(dx), clamp16(dy), fine)));
+    to_jstring(&mut env, json)
+}
+
 /// Restrict capture to a window (R3#7 crop + R4 B2 compositor-side capture);
 /// zero width/height clears it. `address` is the Hyprland window address as
 /// reported by `get_windows` — empty when unknown, which leaves the server
@@ -1076,6 +1207,8 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeNetwork
     _class: JClass<'_>,
 ) {
     RUNTIME.spawn(pocketdesk_core::streaming::network_changed());
+    // The wake helper's own endpoint, if it listens.
+    RUNTIME.spawn(wake_helper::network_changed());
     // A new network may reach a computer the old one could not (BB5).
     api::INTERNET_PAUSE.clear();
 }
@@ -1265,7 +1398,9 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFil
 /// `source` so a retry continues it (T6a), and, for a file of a folder send,
 /// where it sits (`folder_id`, `folder`, `path_json` a JSON array of names;
 /// T6b), and with its modified time (`last_modified`, ms since 1970, 0 for
-/// none; K1): `{"ok": null}` or `{"err": "..."}`.
+/// none; K1), and, with `keep`, as a file of a folder this phone keeps on the
+/// computer (the folder fields then name that folder): `{"ok": null}` or
+/// `{"err": "..."}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFileFd(
     mut env: JNIEnv<'_>,
@@ -1281,6 +1416,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFil
     path_json: JString<'_>,
     drive: JString<'_>,
     last_modified: jlong,
+    keep: jboolean,
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let name = jstring_to_string(&mut env, &name);
@@ -1310,6 +1446,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFil
             folder,
             drive,
             modified: u64::try_from(last_modified).ok().filter(|ms| *ms > 0),
+            keep: keep != 0,
         },
     ))));
     to_jstring(&mut env, json)
@@ -1800,6 +1937,17 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakePho
     _class: JClass<'_>,
 ) -> jstring {
     let json = envelope(Ok(photo_requests::take_json()));
+    to_jstring(&mut env, json)
+}
+
+/// The computer's asks for this phone's location since the last call
+/// (GeoClue): `{"ok": "[{host, port, precision}]"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeLocationRequests(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(location_requests::take_json()));
     to_jstring(&mut env, json)
 }
 
@@ -2448,5 +2596,89 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWakeVia
     let broadcast = jstring_to_string(&mut env, &broadcast);
     let json =
         envelope_unit(RUNTIME.block_on(api::wake_via_relay(address, port as u16, mac, broadcast)));
+    to_jstring(&mut env, json)
+}
+
+/// Start the wake helper's listener (its switch is on, on a charger, on
+/// Wi-Fi): `{"ok": "{running, id, relays, ...}"}`. The helper key is its
+/// own, kept in the data folder.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWakeHelperStart(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(RUNTIME.block_on(wake_helper::start()));
+    to_jstring(&mut env, json)
+}
+
+/// Stop the wake helper's listener.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWakeHelperStop(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    RUNTIME.block_on(wake_helper::stop());
+    to_jstring(&mut env, envelope_unit(Ok(())))
+}
+
+/// The wake helper's state: `{"ok": "{running, id, relays, sent, refused,
+/// dropped}"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWakeHelperStatus(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(RUNTIME.block_on(wake_helper::status())));
+    to_jstring(&mut env, json)
+}
+
+/// Set the duties the helper serves, from the computers' words the app
+/// kept (a JSON array of `wake_helper_duty` bodies): how many are held.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWakeHelperSetDuties(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    duties_json: JString<'_>,
+) -> jstring {
+    let duties_json = jstring_to_string(&mut env, &duties_json);
+    let json = envelope(wake_helper::set_duties(&duties_json).map(|n| n.to_string()));
+    to_jstring(&mut env, json)
+}
+
+/// Set the broadcast addresses of the networks the phone is on (a JSON
+/// array of strings): how many read.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWakeHelperSetNetworks(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    networks_json: JString<'_>,
+) -> jstring {
+    let networks_json = jstring_to_string(&mut env, &networks_json);
+    let json = envelope(wake_helper::set_networks(&networks_json).map(|n| n.to_string()));
+    to_jstring(&mut env, json)
+}
+
+/// What the computer said about wake helpers since the last call:
+/// `{"ok": "[{type, host, port, body}]"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeWakeHelper(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(wake_helper::take_json()));
+    to_jstring(&mut env, json)
+}
+
+/// Ask the wake helper a computer named (its `wake_helper_info` body) to
+/// wake that computer: `{"ok": "sent" | "slow_down" | "unknown" |
+/// "failed"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWakeViaHelper(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    info_json: JString<'_>,
+) -> jstring {
+    let info_json = jstring_to_string(&mut env, &info_json);
+    let json = envelope(RUNTIME.block_on(wake_helper::ask(&info_json)));
     to_jstring(&mut env, json)
 }

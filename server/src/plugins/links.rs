@@ -209,7 +209,7 @@ pub async fn run_dials() {
 /// permission is on. Runs for the server's life.
 pub async fn run_phone_actions() {
     use pocketdesk_core::local::phone_actions;
-    use pocketdesk_core::protocol::phone_action::{PHONE_ACTION, body};
+    use pocketdesk_core::protocol::phone_action::{PHONE_ACTION, apps_body, body, open_body};
     let Ok(dir) = crate::state::state_dir() else {
         return;
     };
@@ -265,8 +265,32 @@ pub async fn run_phone_actions() {
                 }
                 continue;
             };
-            let packet =
-                NetworkPacket::new(PHONE_ACTION).with_body(body(action, ask.app.as_deref()));
+            // Apps part 1: a list ask says which icons are kept, an open
+            // may want the screen shown here too.
+            let ask_body = match (action, ask.app.as_deref()) {
+                (pocketdesk_core::protocol::phone_action::PhoneAction::Apps, _) => apps_body(
+                    &pocketdesk_core::local::phone_app_icons::have(&dir, &ask.device_id),
+                ),
+                // Phone apps tier 2: an open for a window of its own asks for no
+                // screen of the phone's.
+                (pocketdesk_core::protocol::phone_action::PhoneAction::Open, Some(app)) => {
+                    match &ask.window {
+                        Some(window) => {
+                            pocketdesk_core::protocol::phone_action::open_window_body(app, window)
+                        }
+                        None => open_body(app, ask.screen),
+                    }
+                }
+                // Apps part 2: the file being sent, to be shared into the app in front.
+                (pocketdesk_core::protocol::phone_action::PhoneAction::Share, _) => {
+                    let (Some(name), Some(size)) = (ask.name.as_deref(), ask.size) else {
+                        continue;
+                    };
+                    pocketdesk_core::protocol::phone_action::share_body(name, size)
+                }
+                (_, app) => body(action, app),
+            };
+            let packet = NetworkPacket::new(PHONE_ACTION).with_body(ask_body);
             match phone.send_packet(&packet).await {
                 Ok(()) => tracing::info!("Asked the phone for a {}", action.as_str()),
                 Err(e) => tracing::warn!("A {} was not asked of the phone: {e}", action.as_str()),

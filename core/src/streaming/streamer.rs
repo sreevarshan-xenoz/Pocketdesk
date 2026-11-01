@@ -86,6 +86,12 @@ struct ClientClaim {
     /// The phone's sound alone, played here (M7): no input, no picture
     /// either way, and no window.
     phone_sound: bool,
+    /// A cast for this computer's camera (F6 part 2): its picture goes to a
+    /// camera device, not a window. Said with [`super::client::CAST_WEBCAM_FLAG`].
+    webcam: bool,
+    /// A cast of app windows only (Phone apps tier 2), no screen of the
+    /// phone's. Said with [`super::client::CAST_WINDOWS_FLAG`].
+    windows: bool,
 }
 
 /// Tells the relay a cast ended, however its session ends (T10k).
@@ -130,6 +136,51 @@ fn screen_feature_byte(input: bool, mic: bool, per_screen: bool) -> u8 {
         byte |= super::client::SCREEN_FEATURE_PEN | super::client::SCREEN_FEATURE_INPUT;
     }
     byte
+}
+
+/// The ready stream said again once a session's input is found refused (a
+/// GNOME dialog answered with "Allow Remote Interaction" off): the same
+/// header and feature byte as the first, with input and the pen gone, which
+/// a client takes over what the first said (it keeps the last).
+fn input_refused_ready(mic: bool, per_screen: bool) -> Vec<u8> {
+    let header = super::transport::PacketHeader {
+        sequence: 0,
+        stream_kind: super::transport::STREAM_KIND_READY,
+        is_keyframe: false,
+        timestamp_us: 0,
+    };
+    let mut said = header.as_bytes().to_vec();
+    said.push(screen_feature_byte(false, mic, per_screen));
+    said
+}
+
+/// Wait until the capture's input is found refused, then say so to the
+/// phone on a ready stream ([`input_refused_ready`]): the log said it
+/// already, and a phone whose taps do nothing needs to know why. Ends with
+/// the session.
+async fn tell_input_refused(
+    connection: SharedConnection,
+    mut refused: watch::Receiver<bool>,
+    mic: bool,
+    per_screen: bool,
+    cancel: CancellationToken,
+) {
+    while !*refused.borrow_and_update() {
+        tokio::select! {
+            _ = cancel.cancelled() => return,
+            changed = refused.changed() => if changed.is_err() { return },
+        }
+    }
+    warn!("This computer's session takes no input: telling the phone it is view-only");
+    match connection.open_uni().await {
+        Ok(mut ready) => {
+            if let Err(e) = ready.write_all(&input_refused_ready(mic, per_screen)).await {
+                debug!(error = %e, "Could not tell the phone its input is refused");
+            }
+            let _ = ready.finish();
+        }
+        Err(e) => debug!(error = %e, "Could not tell the phone its input is refused"),
+    }
 }
 
 /// What a remote's ready stream says this computer offers it (G4): a laser
@@ -421,6 +472,10 @@ pub struct StreamingServer {
     /// player). Bounded with drop-on-full, as the mic's. Unset, a cast's
     /// sound is not taken, and the phone is told so.
     phone_sound_tx: Option<tokio::sync::mpsc::Sender<Vec<u8>>>,
+    /// F6 part 2: whether this computer offers phones as a camera now (the
+    /// owner's setting, read at each session). Unset, a camera cast is
+    /// refused.
+    webcam_offer: Option<fn() -> bool>,
     /// Optional session gate (pairing, F5 permissions and approval): called
     /// with the device id the client announced in-band (None if it sent
     /// none); `None` rejects the session before capture starts, `Some` is what
@@ -478,6 +533,7 @@ impl StreamingServer {
             mic_tx: None,
             cast_tx: None,
             phone_sound_tx: None,
+            webcam_offer: None,
             session_gate: None,
             telemetry: false,
             view_only: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -548,6 +604,12 @@ impl StreamingServer {
     /// Set where cast sessions' screens go (T10k). See the `cast_tx` field docs.
     pub fn set_cast_channel(&mut self, tx: tokio::sync::mpsc::Sender<super::cast::CastEvent>) {
         self.cast_tx = Some(tx);
+    }
+
+    /// Say whether phones may be this computer's camera (F6 part 2), asked
+    /// as each camera cast arrives. See the `webcam_offer` field docs.
+    pub fn set_webcam_offer(&mut self, offered: fn() -> bool) {
+        self.webcam_offer = Some(offered);
     }
 
     /// Decide each session before any video/input pipeline starts: `None`
@@ -674,6 +736,10 @@ impl StreamingServer {
         let input_only = claim.input_only;
         // The phone's own screen, shown here (T10k).
         let cast = claim.cast;
+        // F6 part 2: its camera as this computer's camera, not in a window.
+        let webcam = cast && claim.webcam;
+        // Phone apps tier 2: app windows and no screen of the phone's.
+        let windows_only = cast && !webcam && claim.windows;
         // The phone as this computer's speaker and mic (N5).
         let sound = claim.sound;
         // The phone's sound alone (M7): a cast's sound with no screen.
@@ -778,7 +844,15 @@ impl StreamingServer {
         }
         // A cast needs its own permission, and somewhere to show it.
         let cast_tx = if cast {
-            let refusal: Option<&[u8]> = if !permissions.allows(Capability::Cast) {
+            let refusal: Option<&[u8]> = if webcam {
+                // Its own permission and the owner's setting, not the
+                // screen's: a phone may show its screen without being a
+                // camera, and the other way round.
+                webcam_refusal(
+                    permissions.allows(Capability::Webcam),
+                    self.cast_tx.is_some() && self.webcam_offer.is_some_and(|offered| offered()),
+                )
+            } else if !permissions.allows(Capability::Cast) {
                 Some(b"phone screen not allowed")
             } else if self.cast_tx.is_none() {
                 Some(b"phone screen not shown here")
@@ -854,6 +928,7 @@ impl StreamingServer {
                 video: !no_picture,
                 cast,
                 phone_sound: allow_phone_sound,
+                webcam,
             },
         );
         // Where this session's absolute moves land (PC11 on Linux): read
@@ -937,6 +1012,9 @@ impl StreamingServer {
         // while the phone's last word was that it takes them.
         let (cast_control_tx, cast_control_rx) = mpsc::channel::<Vec<u8>>(CAST_CONTROL_QUEUE);
         let cast_control_on = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // Phone apps tier 2: bit `n - 1` is set while app window `n` takes
+        // the computer's touch and typing, as the phone said in its config.
+        let cast_window_input = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
         let _cast_ended = match &cast_tx {
             Some(tx) => {
                 let start = super::cast::CastEvent::Start {
@@ -944,11 +1022,17 @@ impl StreamingServer {
                     device_id: device_id.clone(),
                     want_keyframe: cast_want_tx.clone(),
                     control: cast_control_tx.clone(),
+                    webcam,
+                    windows_only,
                 };
                 if tx.send(start).await.is_err() {
                     warn!("The cast relay is gone");
                 }
-                info!("Cast session: the phone's screen is shown here");
+                if webcam {
+                    info!("Cast session: the phone's camera is this computer's camera");
+                } else {
+                    info!("Cast session: the phone's screen is shown here");
+                }
                 Some(CastEnded {
                     tx: tx.clone(),
                     session_id: _live_session.id(),
@@ -995,6 +1079,7 @@ impl StreamingServer {
             let control_conn = connection.clone();
             let mut control_rx = cast_control_rx;
             let control_on = cast_control_on.clone();
+            let window_input = cast_window_input.clone();
             let control_cancel = cancel.clone();
             tasks.spawn(async move {
                 loop {
@@ -1002,7 +1087,11 @@ impl StreamingServer {
                         _ = control_cancel.cancelled() => break,
                         batch = control_rx.recv() => match batch {
                             Some(batch) => {
-                                if control_on.load(std::sync::atomic::Ordering::Acquire) {
+                                if super::cast_control::passes(
+                                    &batch,
+                                    control_on.load(std::sync::atomic::Ordering::Acquire),
+                                    window_input.load(std::sync::atomic::Ordering::Acquire),
+                                ) {
                                     send_cast_control(&control_conn, &batch).await;
                                 } else {
                                     debug!("Control for a phone that does not take it, dropped");
@@ -1061,6 +1150,18 @@ impl StreamingServer {
             .await
             .context("Failed to start screen capture")?;
             info!("Screen capture session started");
+            // A capture that carries input itself (GNOME's and KDE's portal,
+            // mutter) may find it refused only when the first event comes:
+            // the phone hears then.
+            if !force_view_only && let Some(refused) = session.input_refused() {
+                tokio::spawn(tell_input_refused(
+                    connection.clone(),
+                    refused,
+                    allow_mic,
+                    per_screen,
+                    cancel.clone(),
+                ));
+            }
             Some(session)
         };
 
@@ -1720,7 +1821,11 @@ impl StreamingServer {
         let monitor_cast_tx = cast_tx.clone();
         let monitor_cast_want = cast_want_tx;
         let monitor_cast_control_on = cast_control_on;
+        let monitor_window_input = cast_window_input;
         let mut cast_chain = super::cast::CastChain::default();
+        // Each app window is its own decode chain (Phone apps tier 2).
+        let mut window_chains: [super::cast::CastChain; super::cast::MAX_WINDOWS as usize] =
+            Default::default();
         // A cast's frames are far larger than input packets.
         let client_stream_max = if casting {
             super::cast::MAX_CAST_STREAM
@@ -1810,6 +1915,32 @@ impl StreamingServer {
                                                         .store(*on, std::sync::atomic::Ordering::Release);
                                                     false
                                                 }
+                                                super::cast::CastPayload::WindowConfig { window, width, height, input } => {
+                                                    info!(window, width, height, input, "The phone's cast started an app window");
+                                                    let slot = usize::from(*window) - 1;
+                                                    window_chains[slot].restart();
+                                                    let bit = 1u8 << slot;
+                                                    if *input {
+                                                        monitor_window_input
+                                                            .fetch_or(bit, std::sync::atomic::Ordering::AcqRel);
+                                                    } else {
+                                                        monitor_window_input
+                                                            .fetch_and(!bit, std::sync::atomic::Ordering::AcqRel);
+                                                    }
+                                                    false
+                                                }
+                                                super::cast::CastPayload::WindowFrame { window, keyframe, seq, .. } => {
+                                                    window_chains[usize::from(*window) - 1]
+                                                        .on_frame(*keyframe, *seq, now)
+                                                }
+                                                super::cast::CastPayload::WindowClosed { window } => {
+                                                    info!(window, "The phone's cast ended an app window");
+                                                    let slot = usize::from(*window) - 1;
+                                                    window_chains[slot].restart();
+                                                    monitor_window_input
+                                                        .fetch_and(!(1u8 << slot), std::sync::atomic::Ordering::AcqRel);
+                                                    false
+                                                }
                                                 // Its sound (K5): to the player, never
                                                 // the viewer; stale sound is worse than
                                                 // a gap, so a full channel drops it.
@@ -1822,6 +1953,12 @@ impl StreamingServer {
                                                     continue;
                                                 }
                                             };
+                                            let payload_window = match &payload {
+                                                super::cast::CastPayload::WindowConfig { window, .. }
+                                                | super::cast::CastPayload::WindowFrame { window, .. }
+                                                | super::cast::CastPayload::WindowClosed { window } => Some(*window),
+                                                _ => None,
+                                            };
                                             let delivered = monitor_cast_tx.as_ref().is_some_and(|tx| {
                                                 tx.try_send(super::cast::CastEvent::Payload {
                                                     session_id: live_id,
@@ -1829,7 +1966,15 @@ impl StreamingServer {
                                                 })
                                                 .is_ok()
                                             });
-                                            if ask || (!delivered && cast_chain.lost(now)) {
+                                            // A window frame that missed the viewer breaks that window's
+            // chain, not the screen's (asked lazily: asking costs the pace).
+            if ask
+                || (!delivered
+                    && match payload_window {
+                        Some(window) => window_chains[usize::from(window) - 1].lost(now),
+                        None => cast_chain.lost(now),
+                    })
+            {
                                                 let _ = monitor_cast_want.try_send(());
                                             }
                                             continue;
@@ -2244,9 +2389,9 @@ async fn read_client_config(
     hevc_allowed: bool,
 ) -> ClientClaim {
     use super::client::{
-        CODEC_CAPS_MARKER, DEVICE_ID_MARKER, IROH_KEY_MARKER, MONITOR_CONFIG_MARKER,
-        SESSION_MODE_CAST, SESSION_MODE_INPUT_ONLY, SESSION_MODE_MARKER, SESSION_MODE_PHONE_SOUND,
-        SESSION_MODE_SOUND,
+        CAST_WEBCAM_FLAG, CAST_WINDOWS_FLAG, CODEC_CAPS_MARKER, DEVICE_ID_MARKER, IROH_KEY_MARKER,
+        MONITOR_CONFIG_MARKER, SESSION_MODE_CAST, SESSION_MODE_INPUT_ONLY, SESSION_MODE_MARKER,
+        SESSION_MODE_PHONE_SOUND, SESSION_MODE_SOUND,
     };
 
     let mut claim = ClientClaim::default();
@@ -2334,11 +2479,38 @@ async fn read_client_config(
             claim.sound = mode[0] == SESSION_MODE_SOUND;
             claim.phone_sound = mode[0] == SESSION_MODE_PHONE_SOUND;
             info!(mode = mode[0], "Client session mode");
+            // F6 part 2: a camera cast's flag follows its mode; a mode
+            // stream that ends there (any other session) says nothing more.
+            if claim.cast {
+                let mut flag = [0u8; 1];
+                if read_with_timeout(&mut *stream, &mut flag).await {
+                    if flag[0] == CAST_WEBCAM_FLAG {
+                        claim.webcam = true;
+                        info!("Client cast is for this computer's camera");
+                    } else if flag[0] == CAST_WINDOWS_FLAG {
+                        claim.windows = true;
+                        info!("Client cast is for app windows only");
+                    }
+                }
+            }
         } else {
             debug!("Unknown config marker: {:02X?}", &marker);
         }
     }
     claim
+}
+
+/// Why a camera cast (F6 part 2) is refused, or `None` when it may go:
+/// the phone needs its Webcam permission, and the computer must offer
+/// phones as a camera (its setting, and somewhere for the picture to go).
+fn webcam_refusal(allowed: bool, offered: bool) -> Option<&'static [u8]> {
+    if !allowed {
+        Some(b"phone camera not allowed")
+    } else if !offered {
+        Some(b"phone camera not offered here")
+    } else {
+        None
+    }
 }
 
 /// R4 C1: pick the session codec from the client's capability bits and the
@@ -3193,6 +3365,97 @@ mod tests {
         assert_eq!(claim.device_id.as_deref(), Some("device-c1"));
     }
 
+    /// F6 part 2: a camera cast is a cast that says so after its mode.
+    #[tokio::test]
+    async fn a_camera_cast_says_so_after_its_mode() {
+        use super::super::client::StreamingClient;
+
+        let certs = std::sync::Arc::new(CertManager::new().expect("certs"));
+        let alpn = vec![StreamTransportConfig::default().alpn];
+        let server_endpoint = quinn::Endpoint::server(
+            certs.server_config(alpn.clone()).expect("server config"),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .expect("bind");
+        let addr = server_endpoint.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let incoming = server_endpoint.accept().await.expect("incoming");
+            QuinnConnection::shared(incoming.await.expect("accept"))
+        });
+        let (client, _frames, _audio) = StreamingClient::connect(
+            &addr.to_string(),
+            certs,
+            None,
+            Some("device-w1"),
+            None,
+            None,
+            super::super::client::SessionMode::Webcam,
+        )
+        .await
+        .expect("connect");
+        assert!(client.remote().cast);
+        let server_conn = accept.await.expect("accept task");
+        let mut config = StreamingConfig::default();
+        let claim = read_client_config(&server_conn, &mut config, true).await;
+        assert!(claim.cast && claim.webcam && claim.input_only);
+        assert_eq!(claim.device_id.as_deref(), Some("device-w1"));
+    }
+
+    /// Phone apps tier 2: a cast of app windows only says so after its mode,
+    /// and is neither the camera nor an ordinary screen cast.
+    #[tokio::test]
+    async fn a_windows_cast_says_so_after_its_mode() {
+        use super::super::client::StreamingClient;
+
+        let certs = std::sync::Arc::new(CertManager::new().expect("certs"));
+        let alpn = vec![StreamTransportConfig::default().alpn];
+        let server_endpoint = quinn::Endpoint::server(
+            certs.server_config(alpn.clone()).expect("server config"),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .expect("bind");
+        let addr = server_endpoint.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let incoming = server_endpoint.accept().await.expect("incoming");
+            QuinnConnection::shared(incoming.await.expect("accept"))
+        });
+        let (client, _frames, _audio) = StreamingClient::connect(
+            &addr.to_string(),
+            certs,
+            None,
+            Some("device-w2"),
+            None,
+            None,
+            super::super::client::SessionMode::Windows,
+        )
+        .await
+        .expect("connect");
+        assert!(client.remote().cast);
+        let server_conn = accept.await.expect("accept task");
+        let mut config = StreamingConfig::default();
+        let claim = read_client_config(&server_conn, &mut config, true).await;
+        assert!(claim.cast && claim.windows && claim.input_only);
+        assert!(!claim.webcam, "app windows are not the camera");
+        assert_eq!(claim.device_id.as_deref(), Some("device-w2"));
+    }
+
+    #[test]
+    fn a_camera_cast_needs_its_permission_and_the_owners_offer() {
+        assert_eq!(
+            webcam_refusal(false, true),
+            Some(&b"phone camera not allowed"[..])
+        );
+        assert_eq!(
+            webcam_refusal(true, false),
+            Some(&b"phone camera not offered here"[..])
+        );
+        assert_eq!(
+            webcam_refusal(false, false),
+            Some(&b"phone camera not allowed"[..])
+        );
+        assert_eq!(webcam_refusal(true, true), None);
+    }
+
     #[test]
     fn a_pen_is_offered_only_to_a_phone_whose_input_is_taken() {
         use super::super::client::{SCREEN_FEATURE_PEN, screen_features};
@@ -3221,6 +3484,31 @@ mod tests {
             0,
             "said, and view-only"
         );
+    }
+
+    /// A session whose input is found refused says the ready stream again,
+    /// view-only, with everything else it said before.
+    #[test]
+    fn a_refused_session_says_ready_again_view_only_and_nothing_else_changed() {
+        use super::super::client::{
+            screen_features, screen_input_per_screen, screen_takes_input, screen_takes_mic,
+        };
+        use super::super::transport::{PacketHeader, STREAM_KIND_READY};
+        for (mic, per_screen) in [(true, true), (false, true), (true, false)] {
+            let said = input_refused_ready(mic, per_screen);
+            let header = PacketHeader::from_bytes(said[..18].try_into().unwrap()).unwrap();
+            assert_eq!(header.stream_kind, STREAM_KIND_READY);
+            let features = screen_features(&said[18..]);
+            assert_eq!(screen_takes_input(features), Some(false), "view-only");
+            assert_eq!(screen_takes_mic(features), Some(mic), "the mic as it was");
+            // A Windows computer is always per screen, whatever the bit says.
+            assert_eq!(
+                screen_input_per_screen(features),
+                Some(per_screen || cfg!(windows)),
+                "the screen as it was"
+            );
+            assert_eq!(said.len(), 19, "a header and one byte, as the first");
+        }
     }
 
     /// PC4: a screen session hears which system this computer runs.

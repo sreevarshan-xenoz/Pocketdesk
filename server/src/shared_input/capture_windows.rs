@@ -76,18 +76,19 @@ use windows::core::w;
 use super::awake::KeepAwake;
 use super::badge;
 use super::drag_files::{self, Catch, Catcher, Dropped, Outcome};
-use super::drive::{Action, Driver, OpenChannel, SavedLayout, layout_for, reachable};
+use super::drive::{Action, Driver, LayoutFiles, OpenChannel, SavedLayout, layout_from, reachable};
 pub use super::drive::{Captured, Mode};
 use super::drop_windows::{self, Caught, DropCatcher};
 use super::game_lock;
 use super::link::{self, Channel};
+use super::pace::MovePacer;
 use super::phone::{self, PhoneChannel};
 use super::quick::{KeepQuick, Nudge};
+use super::refresh::{Freshness, Refresher, STALE_AFTER};
 use super::screens::{Desktop, Motion};
 use super::sound;
 use super::status;
 use super::wire::{self, Msg};
-use pocketdesk_core::local::shared_input::PHONE_READY;
 
 /// The thread message that sets the mode (its `WPARAM`: 0 off, 1 watch,
 /// 2 away).
@@ -119,9 +120,6 @@ const WM_POWERBROADCAST: u32 = 0x0218;
 const PBT_APMSUSPEND: usize = 0x4;
 const PBT_APMRESUMESUSPEND: usize = 0x7;
 const PBT_APMRESUMEAUTOMATIC: usize = 0x12;
-
-/// One notch of a wheel.
-const WHEEL_DELTA: i32 = 120;
 
 /// The input thread: its hooks, the switch key and the hidden window. The
 /// system cursors are restored when it starts (a crash while away must not
@@ -278,13 +276,19 @@ pub(crate) fn hotkey_hit(mods: u32, vk: u32, hotkey: &Hotkey) -> bool {
     vk == hotkey.key && mods & (MOD_ALT | MOD_CONTROL | MOD_SHIFT | MOD_WIN) == wanted
 }
 
-/// A wheel's turn (`WHEEL_DELTA` units, as the hook has them) added to what
-/// was left of the last, as whole notches; the rest is kept.
-pub(crate) fn notches(rest: &mut i32, delta: i32) -> i16 {
-    *rest = rest.saturating_add(delta);
-    let whole = *rest / WHEEL_DELTA;
-    *rest -= whole * WHEEL_DELTA;
-    whole.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16
+/// A wheel's turn (`WHEEL_DELTA` units, 120ths of a notch, as the hook has
+/// them; a precision touchpad's are less than a notch) as the driver takes
+/// it: in the same units, positive down and to the right. Windows' forward
+/// turn is up.
+pub(crate) fn wheel_turn(horizontal: bool, delta: i32) -> Option<Captured> {
+    match (horizontal, delta) {
+        (_, 0) => None,
+        (true, d) => Some(Captured::Wheel { dx: d, dy: 0 }),
+        (false, d) => Some(Captured::Wheel {
+            dx: 0,
+            dy: d.saturating_neg(),
+        }),
+    }
 }
 
 /// What the hooks and the hidden window need, on the input thread.
@@ -302,7 +306,6 @@ struct ThreadState {
     mods: u32,
     /// The switch key was taken by the hook: its key-up is swallowed too.
     hotkey_down: bool,
-    wheel: (i32, i32),
     /// The session is locked; the computer is going to sleep.
     locked: bool,
     asleep: bool,
@@ -436,18 +439,8 @@ fn on_mouse(
             }),
             _ => None,
         },
-        // Windows' forward turn is up; the wire's positive is down.
-        WM_MOUSEWHEEL => match notches(&mut s.wheel.1, wheel_delta) {
-            0 => None,
-            n => Some(Captured::Wheel {
-                dx: 0,
-                dy: n.saturating_neg(),
-            }),
-        },
-        WM_MOUSEHWHEEL => match notches(&mut s.wheel.0, wheel_delta) {
-            0 => None,
-            n => Some(Captured::Wheel { dx: n, dy: 0 }),
-        },
+        WM_MOUSEWHEEL => wheel_turn(false, wheel_delta),
+        WM_MOUSEHWHEEL => wheel_turn(true, wheel_delta),
         _ => None,
     };
     // A button held here when the mouse went away (a drag) comes up here
@@ -643,9 +636,6 @@ fn apply_mode(s: &mut ThreadState, mode: Mode) {
         // SAFETY: a hook this thread set.
         let _ = unsafe { UnhookWinEvent(hook) };
     }
-    if mode != Mode::Away {
-        s.wheel = (0, 0);
-    }
     // The driver brings the keyboard and mouse home, the cursor shown.
     if hooks_missing(mode, s.mouse.is_some(), s.keyboard.is_some()) {
         let _ = s.events.send(Captured::HookFailed);
@@ -766,7 +756,6 @@ fn spawn_input_thread(events: Sender<Captured>, hotkey: Option<Hotkey>) -> Optio
                 instance,
                 mods: 0,
                 hotkey_down: false,
-                wheel: (0, 0),
                 locked: false,
                 asleep: false,
                 park: None,
@@ -1016,6 +1005,23 @@ fn idle_ms() -> u32 {
     }
 }
 
+/// How often the loop looks at the rest (pings, sound, status, the link,
+/// the layout), whatever input comes, while a key held on a phone repeats
+/// there (every 33 ms), or on Windows while the drop catcher is up or just
+/// after a window came to the front.
+const TICK: Duration = Duration::from_millis(50);
+/// How often while away on a computer: its pings go every 200 ms, its link
+/// is looked at every 250 ms and a silence counts after a second (plan
+/// item 3e; a fixed 50 ms tick woke the loop twenty times a second).
+const AWAY_TICK: Duration = Duration::from_millis(100);
+/// How often at home: its next deadline is the activity note.
+const HOME_TICK: Duration = ACTIVE_EVERY;
+/// How early a timer may count as due on a tick: a pass on its tick finds
+/// a 200 ms timer a hair short of due, and without this slack it went on
+/// the pass after (activity notes every 400 ms at home, review N1).
+const TICK_SLACK: Duration = Duration::from_millis(10);
+/// The most events taken in one turn before the rest is looked at.
+const BATCH_MOST: usize = 256;
 /// How often what the owner does is told to every computer with a channel.
 const ACTIVE_EVERY: Duration = Duration::from_millis(200);
 /// How often, while away, the link is looked at.
@@ -1043,19 +1049,41 @@ const GAME_SETTLE_FOR: Duration = Duration::from_millis(500);
 /// gaming lock off, and the services only while a game is in front (the
 /// only time the answer matters).
 fn foreground_now(game_lock: bool, lock_programs: &[String], desktop: &Desktop) -> Captured {
+    logical_foreground(foreground_physical(game_lock, lock_programs), desktop)
+}
+
+/// [`foreground_now`] with the cursor still in physical pixels: what the
+/// read off the loop's thread sees, put in logical pixels by the loop.
+fn foreground_physical(game_lock: bool, lock_programs: &[String]) -> Captured {
     if !game_lock {
         return Captured::Foreground {
             fg: game_lock::Foreground::default(),
             kernel_anti_cheat: false,
         };
     }
-    let mut fg = game_lock::foreground();
-    fg.cursor = fg.cursor.map(|at| desktop.to_logical(at));
+    let fg = game_lock::foreground();
     let kernel_anti_cheat = game_lock::in_front(&fg, lock_programs, game_lock)
         && game_lock::kernel_anti_cheat_running();
     Captured::Foreground {
         fg,
         kernel_anti_cheat,
+    }
+}
+
+/// `captured`'s cursor in logical pixels.
+fn logical_foreground(captured: Captured, desktop: &Desktop) -> Captured {
+    match captured {
+        Captured::Foreground {
+            mut fg,
+            kernel_anti_cheat,
+        } => {
+            fg.cursor = fg.cursor.map(|at| desktop.to_logical(at));
+            Captured::Foreground {
+                fg,
+                kernel_anti_cheat,
+            }
+        }
+        other => other,
     }
 }
 
@@ -1105,6 +1133,9 @@ struct Glue {
     phone_ids: HashSet<String>,
     phones: HashMap<String, PhoneChannel>,
     pongs_seen: HashMap<String, u64>,
+    /// Moves sent at most every 2 ms (plan item 3a), behind the quick
+    /// link's switch.
+    pacer: MovePacer,
     /// The sound of the computer driven (BK6): the setting, what was asked
     /// for, and its playing while asked.
     sound_on: bool,
@@ -1191,8 +1222,21 @@ impl Glue {
         }
     }
 
-    /// Do what the driver wants.
+    /// Do what the driver wants, its moves paced ([`MovePacer`]).
     fn apply(&mut self, driver: &mut Driver, actions: Vec<Action>) {
+        let actions = self.pacer.pace(actions, Instant::now());
+        self.act(driver, actions);
+    }
+
+    /// The move the pacer held back, once its time came.
+    fn send_due(&mut self, driver: &mut Driver) {
+        if let Some(due) = self.pacer.due(Instant::now()) {
+            self.act(driver, vec![due]);
+        }
+    }
+
+    /// Do `actions`, already paced.
+    fn act(&mut self, driver: &mut Driver, actions: Vec<Action>) {
         let mut queue = std::collections::VecDeque::from(actions);
         while let Some(action) = queue.pop_front() {
             match action {
@@ -1210,6 +1254,7 @@ impl Glue {
                     if let Err(e) = channel.send(&msg) {
                         tracing::debug!("Shared input: not sent to the phone: {e}");
                         self.phones.remove(&to);
+                        self.pacer.forget(&to);
                         if driver.away_on() == Some(to.as_str()) {
                             queue.retain(|a| match a {
                                 Action::Send(t, _) | Action::PushClipboard(t) => *t != to,
@@ -1239,6 +1284,7 @@ impl Glue {
                     if let Err(e) = sent {
                         tracing::debug!(to, "Shared input: not sent: {e}");
                         self.channels.remove(&to);
+                        self.pacer.forget(&to);
                         if driver.away_on() == Some(to.as_str()) {
                             // Home now; the rest queued for it is dropped.
                             queue.retain(|a| match a {
@@ -1727,6 +1773,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         quick: KeepQuick::default(),
         quick_on: config.shared_input_low_latency,
         nudge: Nudge::default(),
+        pacer: MovePacer::new(config.shared_input_low_latency),
         files_on: false,
         catcher: Catcher::default(),
         drop_catcher: None,
@@ -1741,57 +1788,55 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
     };
     // The catcher's thread ready before a drag first needs it.
     glue.files_setting(config.shared_input_files);
-    // The owner's arrangement, read again when its file changes.
+    // The owner's arrangement, read again when its file changes; the files
+    // read once here, then off this thread ([`Refresher`]).
     let mut saved = SavedLayout::default();
-    // The owner's phones said as screens (BK5) are placed as computers
-    // are, while linked.
-    let mut read_layout = |glue: &mut Glue| {
-        let file = state_dir
-            .as_deref()
-            .map(pocketdesk_core::local::shared_input::read)
-            .unwrap_or_default();
-        glue.phone_ids = file
-            .computers
-            .iter()
-            .filter(|c| c.phone.is_some() && !c.this_computer)
-            .map(|c| c.device_id.clone())
-            .collect();
-        let mut linked = link::linked();
-        linked.extend(
-            glue.phone_ids
-                .iter()
-                .filter(|id| phone::is_linked(id))
-                .cloned(),
-        );
-        let mut layout = layout_for(
-            &me.device_id,
-            &me.device_name,
-            glue.own.clone(),
-            &file,
-            &linked,
-            state_dir.as_deref().and_then(|dir| saved.get(dir)),
-        );
-        // Each named as the owner paired it, whatever it calls itself
-        // (one that only takes input never said its name): the badge
-        // never says "this computer" of another.
-        if layout.computers.len() > 1 {
-            let paired = state_dir
-                .as_deref()
-                .map(status::paired_names)
-                .unwrap_or_default();
-            layout.name_as_paired(&paired);
-        }
-        layout
-    };
+    let mut files = LayoutFiles::read(state_dir.as_deref(), &mut saved);
+    glue.phone_ids = files.phones.clone();
     // What is in front is weighed before anything else, so a game already
     // there never sees a hook.
     let mut game_lock_on = config.shared_input_game_lock;
     let mut lock_programs = config.shared_input_lock_programs.clone();
-    let mut driver = Driver::new(&me.device_id, read_layout(&mut glue))
-        .with_game_lock(game_lock_on, lock_programs.clone());
+    let layout = layout_from(&me.device_id, &me.device_name, glue.own.clone(), &files);
+    let mut driver =
+        Driver::new(&me.device_id, layout).with_game_lock(game_lock_on, lock_programs.clone());
     driver.set_clipboard(config.shared_input_clipboard);
+    // When what is in front was last looked at on this thread: a read off
+    // it that started before is older news.
+    let mut probed_at = Instant::now();
     let actions = driver.on(foreground_now(game_lock_on, &lock_programs, &glue.desktop));
     glue.apply(&mut driver, actions);
+    // The files, the settings and the monitors every two seconds, and what
+    // is in front every half second, read on threads of their own: on this
+    // one a slow disk stalled the moves.
+    let (mut settings, mut read_desktop) = (config.clone(), glue.desktop.clone());
+    // Started again should it die (its reads stale meanwhile, below).
+    let start_reads = {
+        let state_dir = state_dir.clone();
+        move || {
+            let state_dir = state_dir.clone();
+            let mut saved = SavedLayout::default();
+            Refresher::start("pd-shared-read", LAYOUT_EVERY, move || {
+                let config = crate::events::current_config();
+                let desktop = Desktop::arrange(&crate::windows_desktop::monitors_scaled());
+                let files = LayoutFiles::read(state_dir.as_deref(), &mut saved);
+                (config, desktop, files)
+            })
+        }
+    };
+    drop(saved);
+    let mut reads = start_reads();
+    let mut reads_started = Instant::now();
+    // What only the driver checks (a phone's permission, the clipboard
+    // following the mouse) is refused while the reads are stale.
+    let mut freshness = Freshness::default();
+    let fronts = Refresher::start("pd-shared-front", GAME_EVERY, || {
+        let config = crate::events::current_config();
+        foreground_physical(
+            config.shared_input_game_lock,
+            &config.shared_input_lock_programs,
+        )
+    });
     let start = driver.start();
     glue.apply(&mut driver, start);
     tracing::info!("Shared input: this computer's keyboard and mouse may go to the others");
@@ -1807,6 +1852,9 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
     // Until when what is in front is looked at every 50 ms, after a window
     // came to the front.
     let mut settle_until: Option<Instant> = None;
+    // When the rest (pings, sound, status, the link, the layout) was last
+    // looked at.
+    let mut housekept = Instant::now();
     while !stop.load(Ordering::SeqCst) && !STOPPING.load(Ordering::SeqCst) {
         if !glue.input.is_alive() {
             tracing::warn!(
@@ -1821,37 +1869,79 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             // fresh driver after a pause.
             return;
         }
-        glue.follow_driven(
-            &mut driver,
-            last_input.elapsed() < super::receive::DRIVEN_FOR,
-        );
-        match captured.recv_timeout(Duration::from_millis(50)) {
-            // Looked at at once (and again for a while), before any move
-            // queued behind it can cross an edge.
-            Ok(Captured::ForegroundChanged) => {
-                let actions = driver.on(Captured::ForegroundChanged);
-                glue.apply(&mut driver, actions);
-                let now = foreground_now(game_lock_on, &lock_programs, &glue.desktop);
-                let actions = driver.on(now);
-                glue.apply(&mut driver, actions);
-                game_at = Instant::now();
-                settle_until = Some(game_at + GAME_SETTLE_FOR);
-            }
-            Ok(event) => {
-                last_input = Instant::now();
-                // A move queued as another computer arrived crosses nowhere.
-                glue.follow_driven(
-                    &mut driver,
-                    last_input.elapsed() < super::receive::DRIVEN_FOR,
-                );
-                if let Some(event) = glue.logical(&driver, event) {
-                    let actions = driver.on(event);
-                    glue.apply(&mut driver, actions);
+        // At most until the next look at the rest, less while a move waits
+        // its turn.
+        let busy = driver
+            .away_on()
+            .is_some_and(|to| glue.phone_ids.contains(to))
+            || glue.catcher.shown()
+            || settle_until.is_some_and(|until| Instant::now() < until);
+        let every = match driver.away_on() {
+            _ if busy => TICK,
+            Some(_) => AWAY_TICK,
+            None => HOME_TICK,
+        };
+        let next = housekept + every;
+        let next = glue.pacer.deadline().map_or(next, |at| at.min(next));
+        match captured.recv_timeout(next.saturating_duration_since(Instant::now())) {
+            Ok(first) => {
+                // This one and what queued behind it (up to a batch), with
+                // who drives this computer looked at once for them all: a
+                // move queued as another computer arrived crosses nowhere.
+                let mut event = first;
+                let mut taken = 0;
+                let mut looked = false;
+                loop {
+                    match event {
+                        // Looked at at once (and again for a while), before
+                        // any move queued behind it can cross an edge.
+                        Captured::ForegroundChanged => {
+                            let actions = driver.on(Captured::ForegroundChanged);
+                            glue.apply(&mut driver, actions);
+                            probed_at = Instant::now();
+                            let now = foreground_now(game_lock_on, &lock_programs, &glue.desktop);
+                            let actions = driver.on(now);
+                            glue.apply(&mut driver, actions);
+                            game_at = Instant::now();
+                            settle_until = Some(game_at + GAME_SETTLE_FOR);
+                        }
+                        event => {
+                            last_input = Instant::now();
+                            if !looked {
+                                looked = true;
+                                glue.follow_driven(&mut driver, true);
+                            }
+                            if let Some(event) = glue.logical(&driver, event) {
+                                let actions = driver.on(event);
+                                glue.apply(&mut driver, actions);
+                            }
+                        }
+                    }
+                    taken += 1;
+                    // Past a batch, the rest waits for the next turn.
+                    if taken >= BATCH_MOST {
+                        break;
+                    }
+                    match captured.try_recv() {
+                        Ok(next) => event = next,
+                        Err(_) => break,
+                    }
                 }
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
+        glue.send_due(&mut driver);
+        // The rest is looked at on a timer, never per event: at 1 kHz it
+        // ran a thousand times a second.
+        if housekept.elapsed() < every {
+            continue;
+        }
+        housekept = Instant::now();
+        glue.follow_driven(
+            &mut driver,
+            last_input.elapsed() < super::receive::DRIVEN_FOR,
+        );
         // Files dragged across: the catcher looked at, its drops sent.
         glue.files_dropped(&driver);
         // The computer driven answering its pings, or not: one silent for
@@ -1883,7 +1973,8 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
                 driver.answered(id, now);
             }
         }
-        let actions = driver.tick(now);
+        // Pings fall due on the tick they are due by, not the one after.
+        let actions = driver.tick(now + TICK_SLACK);
         glue.apply(&mut driver, actions);
         // The quick link while away and someone types or moves here, let
         // go after ten seconds without (BK10 review M3).
@@ -1896,20 +1987,26 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         glue.follow_sound(&mut driver);
         // A game in front keeps the keyboard and mouse here with no hooks;
         // one come to the front while away brings them home.
-        let game_every = if settle_until.is_some_and(|until| Instant::now() < until) {
-            GAME_SETTLE_EVERY
-        } else {
-            GAME_EVERY
-        };
-        if game_at.elapsed() >= game_every {
-            game_at = Instant::now();
-            let now = foreground_now(game_lock_on, &lock_programs, &glue.desktop);
-            let actions = driver.on(now);
+        // Just after a window came to the front it is looked at here, often;
+        // otherwise what the read off this thread saw, unless this thread
+        // looked since that read started.
+        if settle_until.is_some_and(|until| Instant::now() < until) {
+            if game_at.elapsed() >= GAME_SETTLE_EVERY {
+                game_at = Instant::now();
+                probed_at = game_at;
+                let now = foreground_now(game_lock_on, &lock_programs, &glue.desktop);
+                let actions = driver.on(now);
+                glue.apply(&mut driver, actions);
+            }
+        } else if let Some((front, started)) = fronts.as_ref().and_then(Refresher::take)
+            && started > probed_at
+        {
+            let actions = driver.on(logical_foreground(front, &glue.desktop));
             glue.apply(&mut driver, actions);
         }
         // Who is at this computer, to every computer with a channel: the
         // driven one lets go after a second without a word.
-        if active_at.elapsed() >= ACTIVE_EVERY {
+        if active_at.elapsed() + TICK_SLACK >= ACTIVE_EVERY {
             active_at = Instant::now();
             let idle =
                 idle_ms().min(u32::try_from(last_input.elapsed().as_millis()).unwrap_or(u32::MAX));
@@ -1953,23 +2050,39 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             // It refused while driven: home within a quarter of a second.
             glue.take_refusals(&mut driver, Some(&to));
         }
-        if layout_at.elapsed() >= LAYOUT_EVERY {
+        // A read that came back is taken on this turn, never left for the
+        // layout pass, and laid out at once: a setting lands within the
+        // read's two seconds and a tick.
+        // No read back for a while (one hangs, or the reader died): what
+        // only the driver checks is refused until one comes, said once.
+        let (read, layout_now) = freshness.turn(reads.as_ref());
+        if let Some((config, desktop, read)) = read {
+            settings = config;
+            read_desktop = desktop;
+            files = read;
+        }
+        let stale = freshness.stale();
+        if reads.as_ref().is_none_or(Refresher::died) && reads_started.elapsed() >= STALE_AFTER {
+            reads_started = Instant::now();
+            reads = start_reads();
+        }
+        if layout_now || layout_at.elapsed() >= LAYOUT_EVERY {
             layout_at = Instant::now();
+            let config = &settings;
             // The gaming lock's settings, taken without a restart.
-            let config = crate::events::current_config();
             game_lock_on = config.shared_input_game_lock;
-            lock_programs = config.shared_input_lock_programs;
-            driver.set_clipboard(config.shared_input_clipboard);
+            lock_programs = config.shared_input_lock_programs.clone();
+            driver.set_clipboard(config.shared_input_clipboard && !stale);
             glue.sound_on = config.shared_input_sound;
             glue.quick_on = config.shared_input_low_latency;
+            glue.pacer.set(glue.quick_on);
             if config.shared_input_files != glue.files_on {
                 glue.files_setting(config.shared_input_files);
             }
             let actions = driver.set_game_lock(game_lock_on, lock_programs.clone());
             glue.apply(&mut driver, actions);
-            let desktop = Desktop::arrange(&crate::windows_desktop::monitors_scaled());
-            if desktop != glue.desktop {
-                glue.desktop = desktop;
+            if read_desktop != glue.desktop {
+                glue.desktop = read_desktop.clone();
                 glue.own = glue.desktop.screens();
                 let screens = Msg::Screens(glue.own.clone());
                 let to: Vec<String> = glue.channels.keys().cloned().collect();
@@ -2005,7 +2118,8 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
                 glue.channels.retain(|id, _| link::connection(id).is_some());
                 glue.phones.retain(|_, channel| !channel.is_closed());
             }
-            let layout = read_layout(&mut glue);
+            glue.phone_ids = files.phones.clone();
+            let layout = layout_from(&me.device_id, &me.device_name, glue.own.clone(), &files);
             let actions = driver.set_layout(layout);
             glue.apply(&mut driver, actions);
             // A computer that refused since its channel opened is left, and
@@ -2028,12 +2142,11 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             let mut reachable = reachable(&open, &link::screens_heard());
             // A phone may be crossed onto while it is linked and both it
             // and this computer allow it (BK5).
-            reachable.extend(
-                glue.phone_ids
-                    .iter()
-                    .filter(|id| phone::standing_now(id) == PHONE_READY)
-                    .cloned(),
-            );
+            // A phone's permission is this driver's to check: none while
+            // the reads are stale.
+            if !stale {
+                reachable.extend(files.phones_ready.iter().cloned());
+            }
             // One that answers takes input: its next refusal starts the
             // wait over.
             for id in &reachable {
@@ -2226,7 +2339,6 @@ mod tests {
             instance: HINSTANCE::default(),
             mods: 0,
             hotkey_down: false,
-            wheel: (0, 0),
             locked: false,
             asleep: false,
             park: None,
@@ -2278,16 +2390,21 @@ mod tests {
     }
 
     #[test]
-    fn a_fine_wheel_turns_by_whole_notches() {
-        let mut rest = 0;
-        assert_eq!(notches(&mut rest, 120), 1);
-        assert_eq!(notches(&mut rest, 40), 0);
-        assert_eq!(notches(&mut rest, 40), 0);
-        assert_eq!(notches(&mut rest, 40), 1);
-        assert_eq!(rest, 0);
-        assert_eq!(notches(&mut rest, -240), -2);
-        assert_eq!(notches(&mut rest, -60), 0);
-        assert_eq!(notches(&mut rest, 60), 0);
-        assert_eq!(rest, 0);
+    fn a_wheel_turn_goes_in_120ths_down_and_right() {
+        // A notch forward is up: negative on the wire.
+        assert!(matches!(
+            wheel_turn(false, 120),
+            Some(Captured::Wheel { dx: 0, dy: -120 })
+        ));
+        // A touchpad's part of a notch goes as it is.
+        assert!(matches!(
+            wheel_turn(false, -40),
+            Some(Captured::Wheel { dx: 0, dy: 40 })
+        ));
+        assert!(matches!(
+            wheel_turn(true, 30),
+            Some(Captured::Wheel { dx: 30, dy: 0 })
+        ));
+        assert!(wheel_turn(true, 0).is_none());
     }
 }

@@ -64,6 +64,7 @@ object RustCore {
     private external fun nativeSessionStatus(): String
     private external fun nativeIsStreamingActive(): Boolean
     private external fun nativeTakesLive(address: String): Boolean
+    private external fun nativeTakesKept(address: String): Boolean
     private external fun nativeStreamClosedReason(): String
     private external fun nativeGetStreamingRtt(): Int
     private external fun nativeGetStreamingStats(): String
@@ -90,8 +91,19 @@ object RustCore {
     private external fun nativeConnectSound(address: String, port: Int): String
     private external fun nativeConnectSoundWan(address: String, identityJson: String): String
     private external fun nativeRemoteState(): String
-    private external fun nativeConnectCast(address: String, port: Int, soundAlone: Boolean): String
-    private external fun nativeConnectCastWan(address: String, identityJson: String, soundAlone: Boolean): String
+    private external fun nativeConnectCast(address: String, port: Int, soundAlone: Boolean, webcam: Boolean, windows: Boolean): String
+    private external fun nativeConnectCastWan(address: String, identityJson: String, soundAlone: Boolean, webcam: Boolean, windows: Boolean): String
+    private external fun nativeCastWindowConfig(window: Int, width: Int, height: Int, input: Boolean): Int
+    private external fun nativeCastWindowFrame(
+        window: Int,
+        buffer: java.nio.ByteBuffer,
+        offset: Int,
+        size: Int,
+        keyframe: Boolean,
+        seq: Long,
+    ): Int
+    private external fun nativeCastWindowClosed(window: Int): Int
+    private external fun nativeCastWindowKeyframeWanted(window: Int): Boolean
     private external fun nativeCastConfig(width: Int, height: Int): Int
     private external fun nativeCastFrame(
         buffer: java.nio.ByteBuffer,
@@ -144,6 +156,8 @@ object RustCore {
     private external fun nativeLaserSupported(): Boolean
     private external fun nativeSendMouseClick(button: Int, pressed: Boolean): String
 
+    private external fun nativeSendScroll(dx: Int, dy: Int, x120: Int, y120: Int, fine: Boolean): String
+
     private external fun nativeSendKeyboardEvent(
         address: String,
         port: Int,
@@ -165,6 +179,7 @@ object RustCore {
         pathJson: String,
         drive: String,
         lastModified: Long,
+        keep: Boolean,
     ): String
     private external fun nativeTransferProgress(): LongArray?
     private external fun nativeCancelTransfer()
@@ -200,6 +215,8 @@ object RustCore {
     private external fun nativeTakeNotificationAnswers(): String
     private external fun nativeTakePhoneFileRequests(): String
     private external fun nativeTakePhotoRequests(): String
+
+    private external fun nativeTakeLocationRequests(): String
 
     private external fun nativeTakeQuiet(): String
     private external fun nativeDeclineOffer(address: String, port: Int, id: String, reason: String): String
@@ -270,6 +287,20 @@ object RustCore {
         mac: String,
         broadcast: String,
     ): String
+
+    private external fun nativeWakeHelperStart(): String
+
+    private external fun nativeWakeHelperStop(): String
+
+    private external fun nativeWakeHelperStatus(): String
+
+    private external fun nativeWakeHelperSetDuties(dutiesJson: String): String
+
+    private external fun nativeWakeHelperSetNetworks(networksJson: String): String
+
+    private external fun nativeTakeWakeHelper(): String
+
+    private external fun nativeWakeViaHelper(infoJson: String): String
 
     val version: String
         get() = nativeVersion()
@@ -520,6 +551,9 @@ object RustCore {
     /** Whether the computer at [address] shows ongoing updates as one card (N4); false when unknown. */
     fun takesLive(address: String): Boolean = runCatching { nativeTakesLive(address) }.getOrDefault(false)
 
+    /** Whether the computer at [address] said it keeps a phone's folders, when last heard. */
+    fun takesKept(address: String): Boolean = runCatching { nativeTakesKept(address) }.getOrDefault(false)
+
     /** Why the desktop closed the stream (e.g. "session refused"); null while open. */
     val streamClosedReason: String?
         get() = nativeStreamClosedReason().ifEmpty { null }
@@ -635,14 +669,45 @@ object RustCore {
 
     /**
      * Show this phone's screen on the computer at [address] (T10k): a cast
-     * session on the LAN; with [soundAlone], its sound and nothing else (M7).
+     * session on the LAN; with [soundAlone], its sound and nothing else (M7);
+     * with [webcam], the camera's picture as the computer's camera (F6 part 2);
+     * with [windows], app windows only and no screen of the phone's (Phone
+     * apps tier 2).
      */
-    fun connectCast(address: String, port: Int, soundAlone: Boolean = false): Result<Unit> =
-        envelope(nativeConnectCast(address, port, soundAlone)).map { }
+    fun connectCast(
+        address: String,
+        port: Int,
+        soundAlone: Boolean = false,
+        webcam: Boolean = false,
+        windows: Boolean = false,
+    ): Result<Unit> = envelope(nativeConnectCast(address, port, soundAlone, webcam, windows)).map { }
 
     /** [connectCast] over the iroh WAN path, with the desktop's cached endpoint identity. */
-    fun connectCastWan(address: String, identityJson: String, soundAlone: Boolean = false): Result<Unit> =
-        envelope(nativeConnectCastWan(address, identityJson, soundAlone)).map { }
+    fun connectCastWan(
+        address: String,
+        identityJson: String,
+        soundAlone: Boolean = false,
+        webcam: Boolean = false,
+        windows: Boolean = false,
+    ): Result<Unit> = envelope(nativeConnectCastWan(address, identityJson, soundAlone, webcam, windows)).map { }
+
+    /**
+     * App window [window]'s encoder (re)started at [width]×[height] (Phone
+     * apps tier 2); [input]: the phone takes the computer's touch and typing
+     * there. QUEUED, FULL or NO_CAST, as [castConfig].
+     */
+    fun castWindowConfig(window: Int, width: Int, height: Int, input: Boolean): Int =
+        nativeCastWindowConfig(window, width, height, input)
+
+    /** One access unit of app window [window], as [castFrame] takes one of the screen's. */
+    fun castWindowFrame(window: Int, buffer: java.nio.ByteBuffer, offset: Int, size: Int, keyframe: Boolean, seq: Long): Int =
+        nativeCastWindowFrame(window, buffer, offset, size, keyframe, seq)
+
+    /** App window [window] ended on the phone. */
+    fun castWindowClosed(window: Int): Int = nativeCastWindowClosed(window)
+
+    /** Whether the computer asked for a keyframe of app window [window] since the last look. */
+    fun castWindowKeyframeWanted(window: Int): Boolean = nativeCastWindowKeyframeWanted(window)
 
     /**
      * The cast's encoder (re)started at [width]×[height]; waits up to 2 s for
@@ -848,6 +913,15 @@ object RustCore {
     fun sendMouseClick(button: Int, isPressed: Boolean): Result<Unit> =
         envelope(nativeSendMouseClick(button, isPressed)).map { }
 
+    /**
+     * A wheel turn with smooth scrolling: [dx]/[dy] whole notches (right,
+     * up) for a computer older than fine scrolling, and the same turn in
+     * 120ths of a notch ([x120], [y120]) for one that scrolls by them.
+     * Requires an active QUIC streaming connection.
+     */
+    fun sendScroll(dx: Int, dy: Int, x120: Int, y120: Int): Result<Unit> =
+        envelope(nativeSendScroll(dx, dy, x120, y120, true)).map { }
+
     /** Map a view-local pixel offset to the 0..=65535 normalized axis range. */
     fun normalizedCoord(offset: Float, size: Int): Int =
         (offset / size.coerceAtLeast(1) * NORM_COORD_MAX).roundToInt().coerceIn(0, NORM_COORD_MAX)
@@ -947,11 +1021,17 @@ object RustCore {
                 org.json.JSONArray(part?.path.orEmpty()).toString(),
                 drive.orEmpty(),
                 lastModified,
+                part?.keep == true,
             ),
         ).map { }
 
-    /** Where a file sits in a folder the phone sends (T6b). */
-    data class FolderPart(val folderId: String, val folder: String, val path: List<String>)
+    /**
+     * Where a file sits in a folder the phone sends (T6b). With [keep] it is
+     * one file of a folder this phone keeps on the computer: [folderId] is
+     * that folder's id for good, [folder] its name, and the file replaces
+     * its older copy there.
+     */
+    data class FolderPart(val folderId: String, val folder: String, val path: List<String>, val keep: Boolean = false)
 
     /** The running file transfer as (bytes sent, total). */
     /** Stop the file transfer running now, if any (C1): its call fails with "cancelled on the phone". */
@@ -1065,6 +1145,9 @@ object RustCore {
     /** The computer's requests for this phone's recent photos since the last call (C7), as a JSON array. */
     fun takePhotoRequests(): String = envelope(nativeTakePhotoRequests()).getOrDefault("[]")
 
+    /** The computer's asks for this phone's location since the last call (GeoClue): `[{host, port, precision}]`. */
+    fun takeLocationRequests(): String = envelope(nativeTakeLocationRequests()).getOrDefault("[]")
+
     /** D2: the computer's newest mute since the last call, as `{host, port, minutes}`, or "null". */
     fun takeQuiet(): String = envelope(nativeTakeQuiet()).getOrDefault("null")
 
@@ -1165,7 +1248,15 @@ object RustCore {
         }.getOrDefault(emptyList())
 
     /** A question the computer at [host]:[port] put to this phone (BF3). */
-    data class AskQuestion(val host: String, val port: Int, val id: String, val question: String, val expiresUnix: Long)
+    data class AskQuestion(
+        val host: String,
+        val port: Int,
+        val id: String,
+        val question: String,
+        val expiresUnix: Long,
+        /** An approval request's fields as JSON (approve with my phone), or null for a plain question. */
+        val approve: String? = null,
+    )
 
     /** The questions waiting (BF3), taken. */
     fun takeAsks(): List<AskQuestion> =
@@ -1173,12 +1264,33 @@ object RustCore {
             val array = org.json.JSONArray(envelope(nativeTakeAsks()).getOrDefault("[]"))
             (0 until array.length()).map { i ->
                 val a = array.getJSONObject(i)
-                AskQuestion(a.getString("host"), a.getInt("port"), a.getString("id"), a.getString("question"), a.getLong("expires_unix"))
+                AskQuestion(
+                    a.getString("host"),
+                    a.getInt("port"),
+                    a.getString("id"),
+                    a.getString("question"),
+                    a.getLong("expires_unix"),
+                    a.optJSONObject("approve")?.toString(),
+                )
             }
         }.getOrDefault(emptyList())
 
     /** A screenshot or a lock the computer at [host]:[port] asked for (O2). */
-    data class PhoneActionAsk(val host: String, val port: Int, val action: String, val app: String = "")
+    data class PhoneActionAsk(
+        val host: String,
+        val port: Int,
+        val action: String,
+        val app: String = "",
+        /** Apps part 1: for a list, the icons the computer keeps (package to version). */
+        val have: Map<String, Long> = emptyMap(),
+        /** Apps part 1: for an open, the phone's screen is wanted shown there too. */
+        val screen: Boolean = false,
+        /** Apps part 2: for a share, the file the computer is sending: its name and size. */
+        val name: String = "",
+        val size: Long = -1,
+        /** Phone apps tier 2: for an open, the app is wanted in a window of its own (and no screen of the phone's). */
+        val window: dev.pocketdesk.android.windows.WindowRule.Ask? = null,
+    )
 
     /** The screenshots and locks waiting (O2), taken. */
     fun takePhoneActions(): List<PhoneActionAsk> =
@@ -1186,7 +1298,20 @@ object RustCore {
             val array = org.json.JSONArray(envelope(nativeTakePhoneActions()).getOrDefault("[]"))
             (0 until array.length()).map { i ->
                 val a = array.getJSONObject(i)
-                PhoneActionAsk(a.getString("host"), a.getInt("port"), a.getString("action"), a.optString("app"))
+                val have = a.optJSONObject("have")?.let { h ->
+                    h.keys().asSequence().associateWith { h.optLong(it, -1L) }.filterValues { it >= 0 }
+                } ?: emptyMap()
+                PhoneActionAsk(
+                    a.getString("host"),
+                    a.getInt("port"),
+                    a.getString("action"),
+                    a.optString("app"),
+                    have,
+                    a.optBoolean("screen", false),
+                    a.optString("name"),
+                    a.optLong("size", -1),
+                    dev.pocketdesk.android.windows.WindowRule.parseAsk(a.optJSONObject("window")),
+                )
             }
         }.getOrDefault(emptyList())
 
@@ -1466,6 +1591,38 @@ object RustCore {
         mac: String,
         broadcast: String = "",
     ): Result<Unit> = envelope(nativeWakeViaRelay(address, port, mac, broadcast)).map { }
+
+    /**
+     * Start listening as a wake helper (a spare phone at home); the status
+     * JSON `{running, id, relays, sent, refused, dropped}`.
+     */
+    fun wakeHelperStart(): Result<String> = envelope(nativeWakeHelperStart())
+
+    /** Stop listening as a wake helper. */
+    fun wakeHelperStop() {
+        runCatching { nativeWakeHelperStop() }
+    }
+
+    /** The helper's status JSON, as [wakeHelperStart] says it. */
+    fun wakeHelperStatus(): String = envelope(nativeWakeHelperStatus()).getOrDefault("{}")
+
+    /** Set the duties the helper serves (a JSON array of what the computers told it). */
+    fun wakeHelperSetDuties(json: String): Result<String> = envelope(nativeWakeHelperSetDuties(json))
+
+    /** Set the broadcast addresses of the networks the phone is on. */
+    fun wakeHelperSetNetworks(json: String): Result<String> = envelope(nativeWakeHelperSetNetworks(json))
+
+    /**
+     * What computers said about wake helpers since the last call, a JSON
+     * array `[{type, host, port, body}]`, taken.
+     */
+    fun takeWakeHelper(): String = envelope(nativeTakeWakeHelper()).getOrDefault("[]")
+
+    /**
+     * Ask a computer's wake helper (the computer's `wake_helper_info` JSON)
+     * to wake that computer: `sent`, `slow_down`, `unknown` or `failed`.
+     */
+    fun wakeViaHelper(infoJson: String): Result<String> = envelope(nativeWakeViaHelper(infoJson))
 
     // ---- internals ----
 

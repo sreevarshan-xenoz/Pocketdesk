@@ -13,6 +13,12 @@ pub const TRUST_FILE: &str = "trusted_devices.json";
 pub const LIVE_FILE: &str = "live_sessions.json";
 /// The phone's cast the server holds now, for the desktop app (T10k).
 pub const CAST_FILE: &str = "cast.json";
+
+/// The file naming an app window of a phone's cast (Phone apps tier 2):
+/// `cast-window-<n>.json`, one per window.
+pub fn cast_window_file(window: u8) -> String {
+    format!("cast-window-{window}.json")
+}
 /// Another computer's screen the server shows now, for the desktop app (BK7).
 pub const VIEW_FILE: &str = "view.json";
 /// What Pocketdesk did, one event per line (ecosystem phase 1a).
@@ -52,6 +58,14 @@ pub const ALERTS_DIR: &str = "alerts_out";
 pub const ASKS_DIR: &str = "asks_out";
 /// Their answers, which the server leaves for `pocketdesk ask` (BF3).
 pub const ASK_ANSWERS_DIR: &str = "asks_in";
+/// Requests `pocketdesk-pam-ask` leaves for the server to put to the phones
+/// (approve with my phone).
+pub const APPROVE_DIR: &str = "approve_out";
+/// Where the server says how each went: put to phones, no phone, answered.
+pub const APPROVE_STATUS_DIR: &str = "approve_in";
+/// The phones' approval keys, as each phone gave it (owner-only; root pins
+/// its own copy in `/etc/pocketdesk/pam/`).
+pub const APPROVE_KEYS_FILE: &str = "approve_keys.json";
 /// Mutes the desktop app or the local API asks the server to send to a phone (D2).
 pub const QUIET_DIR: &str = "quiet_out";
 /// The texts that crossed between this computer and its phones (D3).
@@ -84,10 +98,28 @@ pub const SHARED_INPUT_STATUS_FILE: &str = "shared_input_status.json";
 /// The desktop app's requests for the shared keyboard and mouse
 /// (Identify), one file each.
 pub const SHARED_INPUT_DIR: &str = "shared_input_out";
+/// The desktop app's asks to make or remove a direct link (a hotspot for one
+/// phone), one file each, taken by the server.
+pub const DIRECT_LINK_DIR: &str = "direct_link_out";
+/// The server's word on the direct link (owner-only: it holds the passphrase).
+pub const DIRECT_LINK_FILE: &str = "direct_link.json";
+/// What the server found a direct link could do on this computer (the plan
+/// the desktop shows before it asks), refreshed while no link is on. The
+/// desktop never asks the system itself: on Windows that is WinRT, which
+/// belongs in the server's one process for it.
+pub const DIRECT_LINK_PLAN_FILE: &str = "direct_link_plan.json";
+/// What this state folder's server made for the direct link (its
+/// connection's id, the interface it added, the connection it took the card
+/// from), so a restart removes and restores exactly that and no other
+/// server's.
+pub const DIRECT_LINK_OWNED_FILE: &str = "direct_link_owned.json";
 /// `share-test`'s last measurement of the shared keyboard and mouse's
 /// latency, written by the server.
 pub const SHARED_INPUT_LATENCY_FILE: &str = "shared_input_latency.json";
 pub const SENT_FILE: &str = "sent.json";
+/// The phone folders kept on this computer (the phone's "Folders kept on my
+/// computer"), written by the server for the desktop app.
+pub const KEPT_FOLDERS_FILE: &str = "kept_folders.json";
 /// The transfers under way (C1), written by the server for the desktop app.
 pub const TRANSFERS_FILE: &str = "transfers.json";
 /// The desktop app's requests to cancel one, one file each.
@@ -108,6 +140,14 @@ pub const PERMISSION_PROFILES_FILE: &str = "permission_profiles.json";
 pub const PAUSE_FILE: &str = "pause.json";
 /// The icons and pictures phones' notifications bring (K3).
 pub const NOTIFICATION_ICONS_DIR: &str = "notification_icons";
+/// The icons of the phones' apps (Apps part 1), a folder for each phone, owner-only.
+pub const PHONE_APP_ICONS_DIR: &str = "phone_app_icons";
+/// Each phone's last word on an apps list or an open (Apps part 1), written by the server.
+pub const PHONE_APP_RESULTS_FILE: &str = "phone_app_results.json";
+/// The apps this computer opened on each phone, last first (Apps part 1), written by the desktop app.
+pub const PHONE_APPS_RECENT_FILE: &str = "phone_apps_recent.json";
+/// The phone apps pinned to this computer's Start or applications menu (Apps part 2), written by the desktop app.
+pub const PHONE_PINS_FILE: &str = "phone_pins.json";
 /// Each phone's last media report (T8d), written by the server.
 pub const PHONE_MEDIA_FILE: &str = "phone_media.json";
 /// The phones' ongoing updates shown here (N4), owner-only.
@@ -144,6 +184,9 @@ pub const PHONE_MEDIA_DIR: &str = "phone_media_out";
 /// Phone notifications cleared here, to clear on the phone (L1).
 pub const NOTIFICATION_CLEARS_DIR: &str = "notification_clears";
 pub const DEVICE_KEYS_FILE: &str = "device_keys.json";
+/// The phone held as this computer's wake helper (a key it announced, its
+/// relays), and the phones the owner removed.
+pub const WAKE_HELPER_FILE: &str = "wake_helper.json";
 /// What the server measured about its internet path (N1): yes/no facts,
 /// never an address.
 pub const WAN_STATUS_FILE: &str = "wan_status.json";
@@ -450,6 +493,8 @@ pub fn is_temp_beside_file(name: &str) -> bool {
         PHONE_NOTES_FILE,
         NOTIFICATION_ANSWERS_FILE,
         DEVICE_KEYS_FILE,
+        WAKE_HELPER_FILE,
+        APPROVE_KEYS_FILE,
         WAN_STATUS_FILE,
         super::sms::SMS_FILE,
         "virtual_screens.json",
@@ -459,7 +504,12 @@ pub fn is_temp_beside_file(name: &str) -> bool {
         .strip_prefix("view-")
         .and_then(|r| r.strip_suffix(".json"))
         .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
-    window || NAMES.contains(&name)
+    // Phone apps tier 2: an app window's `cast-window-<n>.json`.
+    let app_window = name
+        .strip_prefix("cast-window-")
+        .and_then(|r| r.strip_suffix(".json"))
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+    window || app_window || NAMES.contains(&name)
 }
 
 /// Sweep the temp files a crash left in the state and config folders (see
@@ -609,6 +659,7 @@ mod tests {
             "computers.json",
             "trusted_devices.json",
             "view-2.json",
+            "cast-window-2.json",
             "sms.json",
         ] {
             assert!(is_temp_beside_file(ok), "{ok}");
@@ -617,6 +668,8 @@ mod tests {
             "",
             "view-.json",
             "view-x.json",
+            "cast-window-.json",
+            "cast-window-x.json",
             "notes.txt",
             "crash.log",
             "certs",

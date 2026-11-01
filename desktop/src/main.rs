@@ -6,6 +6,7 @@
 
 mod activity_view;
 mod app;
+mod approve_view;
 mod apps_view;
 mod arrange_view;
 mod cast_view;
@@ -13,9 +14,11 @@ mod clipboard_view;
 mod computer_view;
 mod computers_view;
 mod diagnostics_view;
+mod direct_link_view;
 mod fonts;
 mod input_options;
 mod kdeconnect_view;
+mod keymap_view;
 mod keys;
 mod logs_view;
 mod messages_view;
@@ -27,6 +30,9 @@ mod notice;
 mod nv12;
 mod pair_view;
 mod phone_files_view;
+mod phone_hotspot;
+mod phone_open;
+mod phone_windows;
 mod photos_view;
 mod pick_file;
 mod restart;
@@ -39,6 +45,7 @@ mod type_view;
 #[cfg(test)]
 mod ui_tests;
 mod video;
+mod view_fit;
 mod view_follow;
 #[cfg(windows)]
 mod view_grab;
@@ -51,6 +58,7 @@ mod widgets;
 
 use eframe::egui;
 // What the window shares with the tray program (E2).
+use pocketdesk_core::local::phone_pins;
 use pocketdesk_desktop::{icon, model, tray, tray_instance, tray_menu, words};
 
 const TITLE: &str = "Pocketdesk";
@@ -65,7 +73,19 @@ fn main() -> eframe::Result {
         }
         return Ok(());
     }
-    let Some(instance) = single_instance::acquire(TITLE) else {
+    // Apps part 2: a pinned phone app's shortcut starts this program with
+    // `--open-phone-app <phone-id> <package>`, both checked as the packets'
+    // are. The request goes to the running copy, or to this one once it is
+    // up; neither brings the main window forward.
+    let pinned = phone_pins::parse_args(std::env::args_os());
+    let asked_now = pocketdesk_core::local::pin::now_unix;
+    let Some(instance) = single_instance::acquire(TITLE, pinned.is_none()) else {
+        if let (Some((phone, app)), Ok(dir)) = (&pinned, pocketdesk_core::local::paths::state_dir())
+        {
+            let _ =
+                pocketdesk_core::local::app_open::request_phone_app(&dir, phone, app, asked_now());
+            return Ok(());
+        }
         // Another copy is running; it has been brought to the front, and
         // a page asked for goes to it (E2).
         if let (Some(page), Ok(dir)) = (
@@ -86,6 +106,17 @@ fn main() -> eframe::Result {
             std::process::exit(1);
         }
     };
+
+    // The app this launch was asked to open, taken by the first look at the
+    // state folder once the window is up.
+    if let Some((phone, app)) = &pinned {
+        let _ = pocketdesk_core::local::app_open::request_phone_app(
+            &state_dir,
+            phone,
+            app,
+            asked_now(),
+        );
+    }
 
     // E2: the tray program, when installed beside this window, holds the
     // tray (started now if it is not running), and closing the window

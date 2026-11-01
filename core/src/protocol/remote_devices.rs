@@ -26,6 +26,22 @@ pub const REMOVALS_PER_MINUTE: usize = 5;
 /// The longest request id taken: an id is the asker's own, echoed back.
 const MAX_REQUEST: usize = 64;
 
+/// The most devices a list answer may name; more is refused whole, before
+/// any is read.
+pub const MAX_LISTED: usize = 512;
+
+/// The longest device id or name an answer may carry, in bytes (a removal
+/// names at most this many, too).
+const MAX_FIELD: usize = 256;
+
+/// Whether `request` is a request id this protocol takes: 1 to
+/// [`MAX_REQUEST`] printable ASCII characters.
+fn request_reads(request: &str) -> bool {
+    !request.is_empty()
+        && request.len() <= MAX_REQUEST
+        && request.bytes().all(|b| b.is_ascii_graphic())
+}
+
 /// What an owner device asks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ask {
@@ -58,17 +74,14 @@ impl Request {
     /// missing, too long or not printable ASCII.
     pub fn parse(body: &Value) -> Option<Self> {
         let request = body.get("request")?.as_str()?;
-        if request.is_empty()
-            || request.len() > MAX_REQUEST
-            || !request.bytes().all(|b| b.is_ascii_graphic())
-        {
+        if !request_reads(request) {
             return None;
         }
         let ask = match body.get("ask")?.as_str()? {
             "list" => Ask::List,
             "remove" => {
                 let device_id = body.get("deviceId")?.as_str()?;
-                if device_id.is_empty() || device_id.len() > 256 {
+                if device_id.is_empty() || device_id.len() > MAX_FIELD {
                     return None;
                 }
                 Ask::Remove {
@@ -229,16 +242,49 @@ pub enum Answer {
 }
 
 /// The request id an answer names and what it says, or `None` for one
-/// that does not read.
+/// that does not read: a request id that does not read, more than
+/// [`MAX_LISTED`] devices, or an id or name over 256 bytes, each measured
+/// before any of it is copied.
 pub fn read_answer(body: &Value) -> Option<(String, Answer)> {
-    let request = body.get("request")?.as_str()?.to_string();
+    let request = body.get("request")?.as_str()?;
+    if !request_reads(request) {
+        return None;
+    }
+    let request = request.to_string();
     if let Some(code) = body.get("refused").and_then(Value::as_str) {
         return Some((request, Answer::Refused(Refusal::from_code(code))));
     }
     let answer = match body.get("ask")?.as_str()? {
-        "list" => Answer::Listed(serde_json::from_value(body.get("devices")?.clone()).ok()?),
+        "list" => {
+            let devices = body.get("devices")?.as_array()?;
+            if devices.len() > MAX_LISTED {
+                return None;
+            }
+            // Each id and name measured where it lies, then each device
+            // read from it: nothing over the limits is copied.
+            let fits = |item: &Value| {
+                ["id", "name"].iter().all(|key| {
+                    item.get(key)
+                        .and_then(Value::as_str)
+                        .is_none_or(|v| v.len() <= MAX_FIELD)
+                })
+            };
+            if !devices.iter().all(fits) {
+                return None;
+            }
+            let devices = devices
+                .iter()
+                .map(ThereDevice::deserialize)
+                .collect::<Result<Vec<_>, _>>()
+                .ok()?;
+            Answer::Listed(devices)
+        }
         "remove" => {
-            let device_id = body.get("deviceId")?.as_str()?.to_string();
+            let device_id = body.get("deviceId")?.as_str()?;
+            if device_id.len() > MAX_FIELD {
+                return None;
+            }
+            let device_id = device_id.to_string();
             let outcome = if body.get("removed")?.as_bool()? {
                 Ok(())
             } else {
@@ -285,6 +331,36 @@ mod tests {
             json!({ "request": "r", "ask": "remove", "deviceId": "" }),
         ] {
             assert_eq!(Request::parse(&body), None, "{body}");
+        }
+    }
+
+    /// An answer longer than a computer ever sends is refused whole: too
+    /// many devices, a long id or name, a request id that does not read.
+    #[test]
+    fn an_answer_over_the_limits_is_none() {
+        let device = |id: &str, name: &str| json!({ "id": id, "name": name });
+        let list =
+            |devices: Vec<Value>| json!({ "request": "r", "ask": "list", "devices": devices });
+        let most = vec![device("p", "Pixel"); MAX_LISTED];
+        assert!(
+            matches!(read_answer(&list(most)), Some((_, Answer::Listed(d))) if d.len() == MAX_LISTED)
+        );
+        assert_eq!(
+            read_answer(&list(vec![device("p", "Pixel"); MAX_LISTED + 1])),
+            None
+        );
+        let long = "x".repeat(MAX_FIELD + 1);
+        assert_eq!(read_answer(&list(vec![device(&long, "Pixel")])), None);
+        assert_eq!(read_answer(&list(vec![device("p", &long)])), None);
+        let removed = json!({ "request": "r", "ask": "remove", "deviceId": long, "removed": true });
+        assert_eq!(read_answer(&removed), None);
+        for request in [
+            String::new(),
+            "a b".to_string(),
+            "x".repeat(MAX_REQUEST + 1),
+        ] {
+            let body = json!({ "request": request, "refused": "off" });
+            assert_eq!(read_answer(&body), None, "{body}");
         }
     }
 

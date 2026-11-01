@@ -880,7 +880,15 @@ fun RemoteScreen(
             RustCore.peerName(address)?.let { HostStore.saveClaimedName(context, address, it) }
             // Item 4: and the release it runs.
             HostStore.saveClaimedVersion(context, address, RustCore.peerVersion(address))
-            // UX1: its card's "Used just now".
+        }
+    }
+    // UX1: its card's "Used just now", once the session has started: the
+    // picture is in, not merely the link up. A computer that asks before
+    // each session connects first and sends no picture when its owner says no,
+    // so a refused session never stamps its card (review).
+    val started = streamStatus is StreamStatus.Up && !awaitingPicture
+    LaunchedEffect(started) {
+        if (started) {
             HostStore.markUsed(context, address)
             wasUp.set(true)
         }
@@ -930,6 +938,12 @@ fun RemoteScreen(
             // How to wake it later, from this phone (N6).
             withContext(Dispatchers.IO) { RustCore.wakeInfo(address, controlPort) }
                 ?.let { HostStore.saveWakeInfo(context, address, it) }
+            // Where its wake helper is, when it has one, kept for the Wake button.
+            withContext(Dispatchers.IO) {
+                val removed = runCatching { dev.pocketdesk.android.wake.WakeHelperKeeper.poll(context) }.getOrDefault(false)
+                // A computer removed this phone as its helper: the listener stops now.
+                if (removed) dev.pocketdesk.android.service.WakeHelperService.sync(context)
+            }
             delay(5_000)
         }
     }

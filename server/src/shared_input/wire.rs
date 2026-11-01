@@ -48,6 +48,8 @@ const TAG_SOUND_WANTED: u8 = 16;
 const TAG_SOUND_UNAVAILABLE: u8 = 17;
 const TAG_SOUND: u8 = 18;
 const TAG_NAME: u8 = 19;
+const TAG_WHEEL_FINE: u8 = 20;
+const TAG_TAKES_FINE_WHEEL: u8 = 21;
 
 /// The longest Opus packet a [`Msg::Sound`] carries, in bytes (a longer
 /// one is cut short when encoded; the sender never makes one): with its
@@ -189,6 +191,18 @@ pub enum Msg {
     Name {
         name: String,
     },
+    /// A wheel turn in 120ths of a notch (fine scrolling), positive down
+    /// and to the right as [`Msg::Wheel`]. Sent only to a computer that
+    /// said [`Msg::TakesFineWheel`]; any other is sent the whole notches
+    /// the turns add up to, as a [`Msg::Wheel`].
+    WheelFine {
+        dx: i16,
+        dy: i16,
+    },
+    /// The sender takes [`Msg::WheelFine`]: a computer answering a hello
+    /// says it after its name. A build that does not know it skips it, and
+    /// is never sent a fine turn.
+    TakesFineWheel,
 }
 
 /// Why bytes are not a message.
@@ -204,6 +218,10 @@ pub enum WireError {
     InvalidBool(u8),
     /// A whole message and then more bytes.
     TrailingBytes,
+    /// A name, list or sound longer than the encoder ever makes it
+    /// ([`MAX_NAME_BYTES`], [`MAX_SCREENS`], [`MAX_TIMINGS`],
+    /// [`MAX_SOUND_BYTES`]): refused before it is copied.
+    TooLong,
 }
 
 impl std::fmt::Display for WireError {
@@ -214,6 +232,7 @@ impl std::fmt::Display for WireError {
             WireError::InvalidUtf8 => write!(f, "name is not UTF-8"),
             WireError::InvalidBool(b) => write!(f, "flag byte {b} is neither 0 nor 1"),
             WireError::TrailingBytes => write!(f, "bytes after the end of the message"),
+            WireError::TooLong => write!(f, "a field longer than the wire allows"),
         }
     }
 }
@@ -319,8 +338,68 @@ pub fn encode(msg: &Msg) -> Vec<u8> {
             out.push(TAG_NAME);
             put_str(&mut out, name);
         }
+        Msg::WheelFine { dx, dy } => {
+            out.push(TAG_WHEEL_FINE);
+            out.extend_from_slice(&dx.to_be_bytes());
+            out.extend_from_slice(&dy.to_be_bytes());
+        }
+        Msg::TakesFineWheel => out.push(TAG_TAKES_FINE_WHEEL),
     }
     out
+}
+
+/// The most bytes [`encode_small`] makes: a pong's tag and two readings.
+pub const SMALL_MOST: usize = 17;
+
+/// A small message's bytes, on the stack ([`encode_small`]).
+#[derive(Debug, Clone, Copy)]
+pub struct Small {
+    bytes: [u8; SMALL_MOST],
+    len: usize,
+}
+
+impl Small {
+    pub fn as_slice(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+
+    fn put(&mut self, more: &[u8]) {
+        self.bytes[self.len..self.len + more.len()].copy_from_slice(more);
+        self.len += more.len();
+    }
+}
+
+/// [`encode`] with no allocation, for what goes as a datagram many times a
+/// second (a move, an activity note, a ping, a pong); `None` for any other
+/// message.
+pub fn encode_small(msg: &Msg) -> Option<Small> {
+    let mut out = Small {
+        bytes: [0; SMALL_MOST],
+        len: 0,
+    };
+    match msg {
+        Msg::Move { seq, x, y } => {
+            out.put(&[TAG_MOVE]);
+            out.put(&seq.to_be_bytes());
+            out.put(&x.to_be_bytes());
+            out.put(&y.to_be_bytes());
+        }
+        Msg::Active { idle_ms } => {
+            out.put(&[TAG_ACTIVE]);
+            out.put(&idle_ms.to_be_bytes());
+        }
+        Msg::Ping { t_us } => {
+            out.put(&[TAG_PING]);
+            out.put(&t_us.to_be_bytes());
+        }
+        Msg::Pong { t_us, at_us } => {
+            out.put(&[TAG_PONG]);
+            out.put(&t_us.to_be_bytes());
+            out.put(&at_us.to_be_bytes());
+        }
+        _ => return None,
+    }
+    Some(out)
 }
 
 /// A message from the bytes [`encode`] made, all of them and nothing more.
@@ -370,9 +449,14 @@ pub fn decode(bytes: &[u8]) -> Result<Msg, WireError> {
         TAG_SOUND_UNAVAILABLE => Msg::SoundUnavailable { why: r.string()? },
         TAG_SOUND => Msg::Sound {
             seq: r.u32()?,
-            opus: r.bytes()?,
+            opus: r.bytes(MAX_SOUND_BYTES)?,
         },
         TAG_NAME => Msg::Name { name: r.string()? },
+        TAG_WHEEL_FINE => Msg::WheelFine {
+            dx: r.i16()?,
+            dy: r.i16()?,
+        },
+        TAG_TAKES_FINE_WHEEL => Msg::TakesFineWheel,
         tag => return Err(WireError::UnknownTag(tag)),
     };
     if r.rest.is_empty() {
@@ -489,8 +573,13 @@ impl Reader<'_> {
         }
     }
 
+    /// A `u16` length and that much UTF-8, at most [`MAX_NAME_BYTES`] (what
+    /// [`put_str`] clips every string to).
     fn string(&mut self) -> Result<String, WireError> {
         let len = usize::from(self.u16()?);
+        if len > MAX_NAME_BYTES {
+            return Err(WireError::TooLong);
+        }
         if self.rest.len() < len {
             return Err(WireError::Truncated);
         }
@@ -499,9 +588,12 @@ impl Reader<'_> {
         String::from_utf8(head.to_vec()).map_err(|_| WireError::InvalidUtf8)
     }
 
-    /// A `u16` length and that many bytes.
-    fn bytes(&mut self) -> Result<Vec<u8>, WireError> {
+    /// A `u16` length and that many bytes, at most `max`.
+    fn bytes(&mut self, max: usize) -> Result<Vec<u8>, WireError> {
         let len = usize::from(self.u16()?);
+        if len > max {
+            return Err(WireError::TooLong);
+        }
         if self.rest.len() < len {
             return Err(WireError::Truncated);
         }
@@ -512,6 +604,9 @@ impl Reader<'_> {
 
     fn screens(&mut self) -> Result<Vec<Screen>, WireError> {
         let count = usize::from(self.u16()?);
+        if count > MAX_SCREENS {
+            return Err(WireError::TooLong);
+        }
         // Not `with_capacity(count)`: the count is the sender's to claim.
         let mut screens = Vec::with_capacity(count.min(self.rest.len() / 16));
         for _ in 0..count {
@@ -527,6 +622,9 @@ impl Reader<'_> {
 
     fn timings(&mut self) -> Result<Vec<Timing>, WireError> {
         let count = usize::from(self.u16()?);
+        if count > MAX_TIMINGS {
+            return Err(WireError::TooLong);
+        }
         let mut timings = Vec::with_capacity(count.min(self.rest.len() / 17));
         for _ in 0..count {
             timings.push(Timing {
@@ -658,7 +756,25 @@ mod tests {
             Msg::Name {
                 name: String::new(),
             },
+            Msg::WheelFine {
+                dx: i16::MIN,
+                dy: 30,
+            },
+            Msg::TakesFineWheel,
         ]
+    }
+
+    /// Fine scrolling: a fine turn is its tag and two `i16`s, as a wheel
+    /// turn is; the word that a computer takes them is its tag alone.
+    #[test]
+    fn a_fine_wheel_turn_is_its_tag_and_two_values() {
+        assert_eq!(
+            encode(&Msg::WheelFine { dx: -2, dy: 30 }),
+            [20, 0xff, 0xfe, 0, 30]
+        );
+        assert_eq!(encode(&Msg::TakesFineWheel), [21]);
+        assert_eq!(decode(&[20, 0, 1, 0]), Err(WireError::Truncated));
+        assert_eq!(decode(&[21, 0]), Err(WireError::TrailingBytes));
     }
 
     /// BK8 live: a computer that only takes input says its name with its
@@ -732,6 +848,34 @@ mod tests {
         assert_ne!(REFUSE_SHARING_OFF, REFUSE_NOT_ALLOWED);
     }
 
+    /// The stack encoding is the same bytes as [`encode`]'s, for every
+    /// message it takes, and takes nothing that rides the stream.
+    #[test]
+    fn the_small_encoding_is_encode_s_bytes() {
+        let mut small = 0;
+        for msg in every_variant() {
+            match encode_small(&msg) {
+                Some(bytes) => {
+                    assert_eq!(bytes.as_slice(), encode(&msg).as_slice(), "{msg:?}");
+                    small += 1;
+                }
+                None => assert!(
+                    !matches!(
+                        msg,
+                        Msg::Move { .. } | Msg::Active { .. } | Msg::Ping { .. } | Msg::Pong { .. }
+                    ),
+                    "{msg:?}"
+                ),
+            }
+        }
+        assert!(small >= 4);
+        let most = Msg::Pong {
+            t_us: u64::MAX,
+            at_us: u64::MAX,
+        };
+        assert_eq!(encode_small(&most).unwrap().as_slice().len(), SMALL_MOST);
+    }
+
     #[test]
     fn every_message_round_trips() {
         for m in every_variant() {
@@ -757,6 +901,39 @@ mod tests {
         assert_eq!(decode(&[7, 0, 30, 2]), Err(WireError::InvalidBool(2)));
         // A name is UTF-8.
         assert_eq!(decode(&[10, 0, 1, 0xff]), Err(WireError::InvalidUtf8));
+    }
+
+    /// Nothing longer than the encoder makes is taken, and the length is
+    /// judged before the bytes are looked at.
+    #[test]
+    fn a_field_longer_than_the_encoder_makes_is_refused() {
+        let len = |n: usize| (n as u16).to_be_bytes();
+        // A name one byte over, whatever follows.
+        let mut name = vec![TAG_NAME];
+        name.extend_from_slice(&len(MAX_NAME_BYTES + 1));
+        assert_eq!(decode(&name), Err(WireError::TooLong));
+        name.extend(std::iter::repeat_n(b'a', MAX_NAME_BYTES + 1));
+        assert_eq!(decode(&name), Err(WireError::TooLong));
+        // One screen, one timing and one sound byte too many.
+        let mut screens = vec![TAG_SCREENS];
+        screens.extend_from_slice(&len(MAX_SCREENS + 1));
+        assert_eq!(decode(&screens), Err(WireError::TooLong));
+        let mut timings = vec![TAG_TIMINGS];
+        timings.extend_from_slice(&len(MAX_TIMINGS + 1));
+        assert_eq!(decode(&timings), Err(WireError::TooLong));
+        let mut sound = vec![TAG_SOUND, 0, 0, 0, 1];
+        sound.extend_from_slice(&len(MAX_SOUND_BYTES + 1));
+        assert_eq!(decode(&sound), Err(WireError::TooLong));
+        // At the limits, each still reads.
+        let at = Msg::Sound {
+            seq: 1,
+            opus: vec![7; MAX_SOUND_BYTES],
+        };
+        assert_eq!(decode(&encode(&at)), Ok(at));
+        let at = Msg::Name {
+            name: "a".repeat(MAX_NAME_BYTES),
+        };
+        assert_eq!(decode(&encode(&at)), Ok(at));
     }
 
     #[test]

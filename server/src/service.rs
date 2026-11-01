@@ -173,6 +173,9 @@ pub async fn run(config: Config) -> Result<()> {
     tokio::spawn(crate::plugins::links::run_watcher());
     // N1: rings the desktop app or `pocketdesk ring` queues for a phone.
     tokio::spawn(crate::ring_phone::run_watcher());
+    tokio::spawn(crate::wake_helper::run_watcher());
+    // The Pair page's direct link: this computer's own Wi-Fi for a phone.
+    tokio::spawn(crate::direct_link::run());
     // D2: mutes for phones, and what the phones said before this run.
     crate::quiet_phone::load();
     tokio::spawn(crate::quiet_phone::run_watcher());
@@ -188,6 +191,8 @@ pub async fn run(config: Config) -> Result<()> {
     tokio::spawn(crate::drive::live::run());
     tokio::spawn(crate::away_lock::run());
     tokio::spawn(crate::plugins::phone_photos::run_watcher());
+    // The phone's location for GeoClue, while the setting is on.
+    tokio::spawn(crate::phone_location::run());
     // A phone's own screen (T10j): those a stopped server left go before
     // any phone can ask for one (waited for at most 5 s; adds wait behind it
     // either way), and each goes once its phone has no session.
@@ -281,6 +286,8 @@ pub async fn run(config: Config) -> Result<()> {
     tokio::spawn(crate::plugins::links::run_dials());
     // BF3: questions from `pocketdesk ask` for the owner's phones.
     tokio::spawn(crate::asks::run());
+    // Approve with my phone: requests from `pocketdesk-pam-ask`.
+    tokio::spawn(crate::phone_approves::run());
     // O2: screenshots and locks asked of phones.
     tokio::spawn(crate::plugins::links::run_phone_actions());
     // M4: what the typing window types on a phone.
@@ -842,12 +849,15 @@ pub async fn run(config: Config) -> Result<()> {
                                 if let Some(cast_tx) = cast_tx {
                                     streaming_server.set_cast_channel(cast_tx);
                                 }
+                                // F6 part 2: a camera cast, while the owner offers phones as a camera.
+                                streaming_server.set_webcam_offer(crate::phone_camera::offered);
                                 streaming_server.set_session_telemetry(true);
                                 streaming_server.set_hevc_allowed(allow_hevc);
                                 streaming_server.set_slow_link_frame_rate(slow_link_frame_rate);
                                 streaming_server.set_laser(laser);
                                 streaming_server.set_capture_backend(capture_backend);
                                 streaming_server.set_screen_grant(state::screen_grant());
+                                state::apply_gnome_unattended();
                                 // The gate judges the deviceId the client announces in-band
                                 // against the key its TLS certificate proved (device keys). It
                                 // runs with pairing off too, so a paired device's own
@@ -902,6 +912,9 @@ pub async fn run(config: Config) -> Result<()> {
             }
         }
     }
+    // A direct link's access point goes with the server, so it never
+    // outlives it (a kill leaves it for the next start to sweep).
+    crate::direct_link::stop_at_exit().await;
     // The screen sessions first, so a window showing this screen hears the
     // stop at once (PC9a).
     close_screen_sessions(&quic_endpoint, wan_endpoint.as_ref()).await;
@@ -1901,6 +1914,10 @@ where
                                 crate::computer_view::privacy_answer(&device_id, &packet.body);
                                 continue;
                             }
+                            if gate == Gate::FitAnswer {
+                                crate::fit_screen::heard(&device_id, &packet.body);
+                                continue;
+                            }
                             if gate == Gate::Denied {
                                 if denied_said.insert(packet_type.clone()) {
                                     tracing::info!(
@@ -2302,6 +2319,10 @@ pub(crate) enum Gate {
     /// An answer to this computer's window's privacy ask: heard before the
     /// permission gate, which never sees it.
     Answer,
+    /// Another computer's answer to this computer's window asking it for a
+    /// screen to fit the window (item 8): heard before the permission gate
+    /// too, as it asks nothing of this computer.
+    FitAnswer,
     /// Not permitted for this device (`permitted` said no).
     Denied,
     /// To the plugins.
@@ -2315,6 +2336,8 @@ pub(crate) fn gate(packet: &NetworkPacket, permitted: impl FnOnce() -> bool) -> 
         && crate::plugins::privacy::is_answer(&packet.body)
     {
         Gate::Answer
+    } else if crate::fit_screen::is_answer(packet) {
+        Gate::FitAnswer
     } else if permitted() {
         Gate::Dispatch
     } else {
@@ -2394,6 +2417,26 @@ mod gate_tests {
         let other =
             NetworkPacket::new("kdeconnect.clipboard").with_body(serde_json::json!({"ok": true}));
         assert_eq!(gate(&other, || false), Gate::Denied, "only privacy answers");
+    }
+
+    /// Item 8: a screen answer (no action) from a computer asked for one is
+    /// heard before the Input permission, a request for a screen is held
+    /// to it.
+    #[test]
+    fn a_screen_answer_passes_the_gate_and_a_request_does_not() {
+        let answer = NetworkPacket::new(crate::virtual_screen::PACKET)
+            .with_body(serde_json::json!({"name": "PD-0a1b2c3d-1", "index": 1, "id": 3}));
+        assert_eq!(
+            gate(&answer, || panic!("an answer asks no permission")),
+            Gate::FitAnswer
+        );
+        let refusal = NetworkPacket::new(crate::virtual_screen::PACKET)
+            .with_body(serde_json::json!({"error": "no", "id": 3}));
+        assert_eq!(gate(&refusal, || false), Gate::FitAnswer);
+        let request = NetworkPacket::new(crate::virtual_screen::PACKET)
+            .with_body(serde_json::json!({"action": "fit", "width": 800, "height": 600}));
+        assert_eq!(gate(&request, || false), Gate::Denied);
+        assert_eq!(gate(&request, || true), Gate::Dispatch);
     }
 }
 

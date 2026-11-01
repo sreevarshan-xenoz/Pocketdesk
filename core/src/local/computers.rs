@@ -527,6 +527,13 @@ pub enum ComputerAsk {
         /// replaces only its own view.
         #[serde(default, skip_serializing_if = "is_zero")]
         window: u8,
+        /// Fit the other computer's screen to this window (item 8 of the
+        /// plan after 0.8.3): the size of the window's picture area in
+        /// pixels. The server asks that computer for a headless screen of
+        /// that size and shows it in place of `monitor`; absent, the screen
+        /// `monitor` as it is. A server before it ignores the field.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fit: Option<FitSize>,
     },
     /// Ask the nearby computer `device_id` (found by its announcement, at
     /// `address`, control port `port`) to pair ([`super::nearby`]). `mine`:
@@ -590,6 +597,16 @@ pub enum ComputerAsk {
         #[serde(default, skip_serializing_if = "is_zero")]
         window: u8,
     },
+}
+
+/// The size, in pixels, a window asks the other computer's screen to be
+/// (`ComputerAsk::View::fit`). The other computer clamps it to what it
+/// makes (sides even, 320 to 2560 on the long side) and says the size it
+/// gave.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FitSize {
+    pub width: u32,
+    pub height: u32,
 }
 
 /// Whether a window number is the first window's, left out of a request.
@@ -1013,6 +1030,7 @@ mod tests {
                 monitor: 1,
                 hevc: true,
                 window: 0,
+                fit: None,
             },
             100,
         )
@@ -1053,8 +1071,39 @@ mod tests {
                 monitor: 0,
                 hevc: false,
                 window: 0,
+                fit: None,
             },
             "the first screen unless named, and no HEVC from an app before PC5"
+        );
+        // Item 8: a fit size rides the ask; none is left out of it, and an
+        // ask from before it reads as none (above).
+        let fitted = ComputerAsk::View {
+            device_id: "desk".to_string(),
+            monitor: 0,
+            hevc: false,
+            window: 1,
+            fit: Some(FitSize {
+                width: 1280,
+                height: 720,
+            }),
+        };
+        let wire = serde_json::to_value(&fitted).unwrap();
+        assert_eq!(
+            wire["fit"],
+            serde_json::json!({"width": 1280, "height": 720})
+        );
+        assert_eq!(serde_json::from_value::<ComputerAsk>(wire).unwrap(), fitted);
+        let plain = serde_json::to_value(ComputerAsk::View {
+            device_id: "desk".to_string(),
+            monitor: 0,
+            hevc: false,
+            window: 0,
+            fit: None,
+        })
+        .unwrap();
+        assert!(
+            plain.get("fit").is_none(),
+            "left out when not asked: {plain}"
         );
         let raw = serde_json::to_string(&computer("desk")).unwrap();
         let old: PeerComputer =
@@ -1183,6 +1232,7 @@ mod tests {
                         monitor: 0,
                         hevc: false,
                         window: 0,
+                        fit: None,
                     }
                 };
                 asked.push(request(&dir, ask, 100).unwrap());

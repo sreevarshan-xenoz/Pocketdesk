@@ -81,7 +81,7 @@ const MOST_ADDRESSES: usize = 16;
 
 /// Whether `device_id` is an owner phone here: paired for good with this
 /// computer's own code, never a guest's grant nor a computer.
-fn is_owner_phone(store: &TrustStore, file: &ComputersFile, device_id: &str) -> bool {
+pub(crate) fn is_owner_phone(store: &TrustStore, file: &ComputersFile, device_id: &str) -> bool {
     !store.is_computer(device_id) && crate::remote_devices::is_owner_device(store, file, device_id)
 }
 
@@ -91,9 +91,24 @@ fn is_mine_computer(store: &TrustStore, file: &ComputersFile, device_id: &str) -
     store.is_computer(device_id) && crate::remote_devices::is_owner_device(store, file, device_id)
 }
 
+/// The introducer as a demotion's notice names it: as
+/// [`crate::remote_devices::asker_name`] says it while this computer still
+/// knows it (paired, or listed). Once it is forgotten, its name and kind
+/// are gone with it, and `asker_name` would call it a phone, so it is
+/// "a device you removed" instead.
+fn introducer_said(store: &TrustStore, file: &ComputersFile, device_id: &str) -> String {
+    let known =
+        store.is_trusted(device_id) || file.computers.iter().any(|c| c.device_id == device_id);
+    if known {
+        crate::remote_devices::asker_name(store, file, device_id)
+    } else {
+        "a device you removed".to_string()
+    }
+}
+
 /// The name this computer shows `device_id` by: the owner's rename, else
 /// a listed computer's name, else its own word, else the start of its id.
-fn shown(store: &TrustStore, file: &ComputersFile, device_id: &str) -> String {
+pub(crate) fn shown(store: &TrustStore, file: &ComputersFile, device_id: &str) -> String {
     store
         .chosen_name(device_id)
         .map(str::to_string)
@@ -253,6 +268,7 @@ pub(crate) fn link_to(computer: &PeerComputer, name: &str, pin: &str, facts: &Va
         fingerprint: Some(computer.fingerprint.to_ascii_lowercase()),
         endpoint: computer.endpoint.as_ref().map(|e| e.to_string()),
         mine: false,
+        wifi: None,
     }
 }
 
@@ -1018,7 +1034,7 @@ pub(crate) fn demote_orphans_in(dir: &Path, trust: &Path) -> Vec<(String, String
                     .name(phone)
                     .map(str::to_string)
                     .unwrap_or_else(|| phone.chars().take(8).collect());
-                demoted.push((name, crate::remote_devices::asker_name(store, &file, by)));
+                demoted.push((name, introducer_said(store, &file, by)));
             }
         }
         Ok(())

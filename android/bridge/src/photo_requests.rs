@@ -2,11 +2,14 @@
 //! `phone_photos.list {}` and `phone_photos.fetch {id}`, and for a new one
 //! taken with the camera (F3, `phone_photos.take {}`), kept with the
 //! computer they came from for the app, which answers only its own
-//! computer, with its switch on, and sends only a photo it listed.
+//! computer, with its switch on, and sends only a photo it listed. F6 part
+//! 2: the computer's ask to be its camera (`phone_camera.start`) waits
+//! here too, held to what may be asked.
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
+use pocketdesk_core::protocol::phone_camera::{self, CameraAsk};
 use pocketdesk_core::protocol::phone_photos::{FETCH, LIST, TAKE};
 
 /// Requests waiting for the app, at most; the oldest go first.
@@ -27,6 +30,18 @@ pub(crate) fn receive(packet_type: &str, body: &serde_json::Value, host: &str, p
         },
         // F3: the camera, offered to the phone's owner.
         TAKE => serde_json::json!({ "host": host, "port": port, "fetch": false, "take": true }),
+        phone_camera::START => {
+            let ask = CameraAsk::from_body(body);
+            serde_json::json!({
+                "host": host,
+                "port": port,
+                "fetch": false,
+                "webcam": true,
+                "lens": ask.lens.name(),
+                "height": ask.height,
+                "fps": ask.fps,
+            })
+        }
         FETCH => match body.get("id").and_then(|v| v.as_u64()) {
             // T4: or onto the computer's clipboard.
             Some(id) => serde_json::json!({
@@ -105,5 +120,36 @@ mod tests {
         let taken: serde_json::Value = serde_json::from_str(&take_json()).unwrap();
         assert_eq!(taken[0]["take"], true);
         assert_eq!(taken[0]["host"], "192.0.2.7");
+    }
+
+    /// F6 part 2: an ask to be the camera waits, held to what may be asked.
+    #[tokio::test]
+    async fn a_camera_ask_waits_held_to_the_rules() {
+        let _globals = crate::api::TRANSFER_TEST_LOCK.lock().await;
+        forget();
+        receive(
+            phone_camera::START,
+            &serde_json::json!({"lens": "front", "height": 1080, "fps": 24}),
+            "192.0.2.7",
+            1716,
+        );
+        receive(
+            phone_camera::START,
+            &serde_json::json!({"lens": "nope", "height": 9999, "fps": 1}),
+            "192.0.2.7",
+            1716,
+        );
+        let taken: serde_json::Value = serde_json::from_str(&take_json()).unwrap();
+        assert_eq!(taken[0]["webcam"], true);
+        assert_eq!(taken[0]["lens"], "front");
+        assert_eq!(
+            (taken[0]["height"].as_u64(), taken[0]["fps"].as_u64()),
+            (Some(1080), Some(24))
+        );
+        assert_eq!(taken[1]["lens"], "back");
+        assert_eq!(
+            (taken[1]["height"].as_u64(), taken[1]["fps"].as_u64()),
+            (Some(1080), Some(15))
+        );
     }
 }

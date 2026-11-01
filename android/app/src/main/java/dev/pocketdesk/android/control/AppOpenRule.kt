@@ -1,0 +1,113 @@
+package dev.pocketdesk.android.control
+
+import org.json.JSONObject
+
+/**
+ * What the phone says of an ask to list its apps or open one (Apps part 1),
+ * and how an open that asked for the screen goes. Pure, for JVM tests;
+ * [PhoneActions] does it. The words are the computer's
+ * `core::protocol::phone_action::AppResult`.
+ */
+object AppOpenRule {
+    const val OPENED = "opened"
+    const val NEEDS_SCREEN = "needs_screen"
+    const val CONTROL_OFF = "control_off"
+    const val LOCKED = "locked"
+
+    /** Hands-free: a secure lock is on and is never bypassed. */
+    const val LOCKED_SECURE = "locked_secure"
+
+    /** Hands-free: the phone could not press its own screen-sharing question: one tap is needed. */
+    const val NEEDS_TAP = "needs_tap"
+    const val ASLEEP = "asleep"
+    const val OFF = "off"
+    const val NOT_LISTED = "not_listed"
+    const val NOT_FOUND = "not_found"
+    const val TOO_MANY = "too_many"
+    const val FAILED = "failed"
+
+    /** Apps part 2: the file dropped on the screen window was shared into the app in front. */
+    const val SHARED = "shared"
+
+    /** Apps part 2: no app in front that could be told, so the file stays in Downloads. */
+    const val NO_APP = "no_app"
+
+    /** Apps part 2: the app in front takes no file of that type, so the file stays in Downloads. */
+    const val CANNOT_TAKE = "cannot_take"
+
+    /** Tier 2: no window can be made now (the switch is off, Shizuku is not running, Android refused): the computer opens the app the ordinary way. */
+    const val WINDOWS_UNAVAILABLE = "windows_unavailable"
+
+    /** Tier 2: as many windows as the phone takes are open already. */
+    const val WINDOW_LIMIT = "window_limit"
+
+    /**
+     * The word for a refused ask, or null when nothing is said: a computer
+     * that is not the phone's own is never answered, so it learns nothing
+     * of the switch or the lock.
+     */
+    fun refusal(decision: PhoneActionRule.Decision): String? = when (decision) {
+        PhoneActionRule.Decision.DO, PhoneActionRule.Decision.NOT_OWN -> null
+        PhoneActionRule.Decision.OFF -> OFF
+        PhoneActionRule.Decision.LOCKED -> LOCKED
+        PhoneActionRule.Decision.LOCKED_SECURE -> LOCKED_SECURE
+        PhoneActionRule.Decision.ASLEEP -> ASLEEP
+        PhoneActionRule.Decision.NOT_LISTED -> NOT_LISTED
+        PhoneActionRule.Decision.TOO_MANY -> TOO_MANY
+        // Apps part 2: a share needs the control service, as an open that shows the screen does.
+        PhoneActionRule.Decision.NO_SERVICE -> CONTROL_OFF
+        else -> FAILED
+    }
+
+    /** [refusal], said only to the phone's own computer ([own]). */
+    fun tell(decision: PhoneActionRule.Decision, own: Boolean): String? = if (own) refusal(decision) else null
+
+    /** What an allowed open does. */
+    enum class Plan {
+        /** Start the app now. */
+        START,
+
+        /** The screen is not shown there yet: offer it once, then start. */
+        SHOW_SCREEN_FIRST,
+
+        /**
+         * Hands-free: the screen share was paused when this computer left:
+         * resume it with the consent already given, then start.
+         */
+        RESUME,
+
+        /** Pocketdesk's control service is off, and the computer asked for it. */
+        CONTROL_OFF,
+
+        /** As P2: start it at once with the service, else offer "Tap to open". */
+        TAP,
+    }
+
+    /**
+     * How an open that [PhoneActionRule] allowed goes. [screenWanted]: the
+     * computer asked for the phone's screen too; [service]: the control
+     * service is bound; [casting]: the screen is already shown to that
+     * computer, so it is reused and no new consent is asked; [paused]: a
+     * share paused for that very computer is kept, so it resumes the same way.
+     */
+    fun plan(screenWanted: Boolean, service: Boolean, casting: Boolean, paused: Boolean = false): Plan = when {
+        !screenWanted -> Plan.TAP
+        !service -> Plan.CONTROL_OFF
+        casting -> Plan.START
+        paused -> Plan.RESUME
+        else -> Plan.SHOW_SCREEN_FIRST
+    }
+
+    /**
+     * The body of the report to the computer: `{about, app?, name?, window?, result}`
+     * (`name`: the file of a share; `window`: the app window an open was for).
+     */
+    fun report(about: String, app: String?, result: String, name: String? = null, window: Int? = null): JSONObject =
+        JSONObject().put("about", about)
+            .apply {
+                if (app != null) put("app", app)
+                if (name != null) put("name", name)
+                if (window != null) put("window", window)
+            }
+            .put("result", result)
+}

@@ -176,6 +176,51 @@ pub(crate) fn frame(keyframe: bool, seq: u64, access_unit: &[u8]) -> i32 {
     offer(queue_tx(), wire::frame_bytes(keyframe, seq, access_unit))
 }
 
+/// App window `window`'s encoder (re)started at `width`×`height` (Phone
+/// apps tier 2); waits for room, as a config does. `input`: the phone takes
+/// the computer's touch and typing in this window.
+pub(crate) async fn window_config(window: u8, width: u16, height: u16, input: bool) -> i32 {
+    if !wire::valid_window(window) {
+        return NO_CAST;
+    }
+    let Some(tx) = queue_tx() else {
+        return NO_CAST;
+    };
+    let bytes = wire::window_config_bytes(window, width, height, input);
+    match tokio::time::timeout(CONFIG_WAIT, tx.send(bytes)).await {
+        Ok(Ok(())) => QUEUED,
+        Ok(Err(_)) => NO_CAST,
+        Err(_) => FULL,
+    }
+}
+
+/// One access unit of app window `window`; never waits.
+pub(crate) fn window_frame(window: u8, keyframe: bool, seq: u64, access_unit: &[u8]) -> i32 {
+    if !wire::valid_window(window) {
+        return NO_CAST;
+    }
+    offer(
+        queue_tx(),
+        wire::window_frame_bytes(window, keyframe, seq, access_unit),
+    )
+}
+
+/// App window `window` ended on the phone; waits for room, as a config does,
+/// so the computer does not keep a window the phone no longer has.
+pub(crate) async fn window_closed(window: u8) -> i32 {
+    if !wire::valid_window(window) {
+        return NO_CAST;
+    }
+    let Some(tx) = queue_tx() else {
+        return NO_CAST;
+    };
+    match tokio::time::timeout(CONFIG_WAIT, tx.send(wire::window_closed_bytes(window))).await {
+        Ok(Ok(())) => QUEUED,
+        Ok(Err(_)) => NO_CAST,
+        Err(_) => FULL,
+    }
+}
+
 /// Tell the computer whether this phone takes control now (C8); waits for
 /// room, as a config does: a lost "off" would leave the computer sending.
 pub(crate) async fn control_state(on: bool) -> i32 {
@@ -209,8 +254,27 @@ pub(crate) fn take_control(timeout: Duration) -> Option<String> {
         .map(|b| b.to_json().to_string())
 }
 
-/// Whether the computer asked for a keyframe since the last look.
-pub(crate) fn keyframe_wanted() -> bool {
+/// Which encoders still owe the keyframe the computer asked for: bit 0 is
+/// the phone's screen, bit `n` app window `n` (Phone apps tier 2). One ask
+/// from the computer is for all of them, and each takes its own bit.
+static KEYFRAMES_OWED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Every encoder's bit: the screen's and each window's.
+const ALL_ENCODERS: u8 = 0b1_1111;
+
+/// Whether encoder `bit` owes a keyframe: `asked` is a new ask from the
+/// computer (which makes every encoder owe one), and `owed` is what is
+/// still owed. Takes `bit`'s share.
+fn owes_keyframe(owed: &std::sync::atomic::AtomicU8, asked: bool, bit: u8) -> bool {
+    use std::sync::atomic::Ordering;
+    if asked {
+        owed.fetch_or(ALL_ENCODERS, Ordering::AcqRel);
+    }
+    let mine = 1u8 << bit;
+    owed.fetch_and(!mine, Ordering::AcqRel) & mine != 0
+}
+
+fn session_asked_for_keyframe() -> bool {
     crate::session::REMOTE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -219,6 +283,21 @@ pub(crate) fn keyframe_wanted() -> bool {
             r.keyframe_wanted
                 .swap(false, std::sync::atomic::Ordering::AcqRel)
         })
+}
+
+/// Whether the computer asked for a keyframe of the phone's screen since the
+/// last look.
+pub(crate) fn keyframe_wanted() -> bool {
+    owes_keyframe(&KEYFRAMES_OWED, session_asked_for_keyframe(), 0)
+}
+
+/// Whether the computer asked for a keyframe of app window `window` since
+/// the last look (Phone apps tier 2).
+pub(crate) fn window_keyframe_wanted(window: u8) -> bool {
+    if !wire::valid_window(window) {
+        return false;
+    }
+    owes_keyframe(&KEYFRAMES_OWED, session_asked_for_keyframe(), window)
 }
 
 #[cfg(test)]
@@ -300,6 +379,33 @@ mod tests {
             "and the queue behind it"
         );
         cancel.cancel();
+    }
+
+    /// Phone apps tier 2: one ask for a keyframe is for every encoder, each
+    /// encoder takes only its own share, and a share is taken once.
+    #[test]
+    fn one_ask_for_a_keyframe_is_owed_to_every_encoder_once() {
+        use std::sync::atomic::AtomicU8;
+        let owed = AtomicU8::new(0);
+        assert!(!owes_keyframe(&owed, false, 0), "nothing asked");
+        assert!(owes_keyframe(&owed, true, 2), "window 2 takes its share");
+        assert!(!owes_keyframe(&owed, false, 2), "taken once");
+        assert!(
+            owes_keyframe(&owed, false, 0),
+            "the screen's share is still owed"
+        );
+        assert!(owes_keyframe(&owed, false, 1));
+        assert!(owes_keyframe(&owed, false, 4));
+        assert!(owes_keyframe(&owed, false, 3));
+        assert!(!owes_keyframe(&owed, false, 3), "taken once");
+    }
+
+    #[test]
+    fn a_window_outside_the_cap_has_no_cast() {
+        assert_eq!(window_frame(0, true, 0, &[1]), NO_CAST);
+        assert_eq!(window_frame(wire::MAX_WINDOWS + 1, true, 0, &[1]), NO_CAST);
+        assert!(!window_keyframe_wanted(0));
+        assert!(!window_keyframe_wanted(wire::MAX_WINDOWS + 1));
     }
 
     #[test]

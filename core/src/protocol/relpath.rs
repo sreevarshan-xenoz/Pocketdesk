@@ -12,6 +12,11 @@ pub const MAX_DEPTH: usize = 32;
 /// The longest one component may be, in bytes (Linux allows 255).
 pub const MAX_COMPONENT_BYTES: usize = 255;
 
+/// The longest a whole path under the top may be, in bytes, its separators
+/// counted: an absurd stack of names is refused here, not left to fail at
+/// the disk.
+pub const MAX_PATH_BYTES: usize = 1024;
+
 /// Why `component` cannot be part of a path, or `None` when it can.
 pub fn component_problem(component: &str) -> Option<String> {
     if component.is_empty() {
@@ -76,6 +81,9 @@ pub fn path_problem(path: &[String]) -> Option<String> {
     }
     if path.len() > MAX_DEPTH {
         return Some(format!("deeper than {MAX_DEPTH} folders"));
+    }
+    if path.iter().map(|c| c.len() + 1).sum::<usize>() > MAX_PATH_BYTES {
+        return Some(format!("a path longer than {MAX_PATH_BYTES} bytes"));
     }
     path.iter().find_map(|c| component_problem(c))
 }
@@ -142,5 +150,52 @@ mod tests {
         assert!(path_problem(&deep[..MAX_DEPTH]).is_none());
         assert!(component_problem(&"a".repeat(MAX_COMPONENT_BYTES + 1)).is_some());
         assert!(component_problem(&"a".repeat(MAX_COMPONENT_BYTES)).is_none());
+    }
+
+    #[test]
+    fn a_long_path_is_refused_as_a_whole() {
+        // Each name is fine and the depth is fine; together they are not.
+        let long: Vec<String> = (0..8).map(|i| format!("{i}{}", "a".repeat(199))).collect();
+        assert!(path_problem(&long).is_some());
+        assert!(path_problem(&long[..4]).is_none());
+    }
+
+    #[test]
+    fn absolute_and_odd_paths_are_refused_as_a_phone_could_send_them() {
+        for bad in [
+            r"/etc",
+            r"/",
+            r"\\server",
+            r"\\?\C:",
+            r"C:\Windows",
+            r"..\..",
+            "a\nb",
+            "a\tb",
+            "f.txt::$DATA",
+            "aux.tar.gz",
+            "Prn",
+            "CONIN$",
+            "CONOUT$",
+            "a/b",
+            "trailing ",
+            "trailing.",
+            "\u{7f}",
+            "...",
+        ] {
+            assert!(component_problem(bad).is_some(), "{bad:?}");
+            assert!(path_problem(&path(&["ok", bad])).is_some(), "{bad:?}");
+        }
+        // Climbing in the middle of an otherwise fine path.
+        assert!(path_problem(&path(&["a", "..", "..", "b"])).is_some());
+        assert!(path_problem(&path(&["a", "", "b"])).is_some());
+        // A single leading dot is a hidden file, not an escape.
+        assert!(path_problem(&path(&[".nomedia"])).is_none());
+    }
+
+    #[test]
+    fn a_name_that_is_all_dots_or_spaces_is_refused() {
+        for bad in [".", "..", "...", "....", " ", "  "] {
+            assert!(component_problem(bad).is_some(), "{bad:?}");
+        }
     }
 }

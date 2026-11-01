@@ -36,6 +36,25 @@ video_quality = "balanced"
 # (see SECURITY.md). Off, the portal asks at every session.
 # remember_screen_grant = false
 
+# GNOME only: start the screen and the keyboard and mouse through mutter's own
+# D-Bus API, which asks no one at this computer, instead of the screen-sharing
+# dialog (what gnome-remote-desktop's headless mode does). Any program running
+# as you can make the same calls, so it is off by default (see SECURITY.md).
+# If mutter's D-Bus is missing or refuses, the portal is used.
+# gnome_unattended = false
+
+# Offer a direct link: the Pair page's "Make a direct link" makes this
+# computer's own Wi-Fi for one phone, for a train, a cafe with client
+# isolation or a guest network where phones cannot reach this computer. You
+# start each one, it turns itself off, and the phone joins it for Pocketdesk
+# only. Linux through NetworkManager, Windows through the Mobile Hotspot.
+# Off, the button is not shown.
+# direct_link = true
+# The band: "auto" (2.4 GHz, which every phone can join), "2.4" or "5".
+# direct_link_band = "auto"
+# Minutes with no phone using it before it turns itself off (1 to 120).
+# direct_link_idle_minutes = 10
+
 # Reachable from the internet: phones away from home and your other computers
 # reach this computer, directly or through a relay, and the DHT keeps a record
 # of it. Off, no relay or DHT is contacted and no router port is mapped: phones
@@ -83,6 +102,67 @@ video_quality = "balanced"
 # Off: the window only shows.
 # cast_control = true
 
+# The desktop app lists a Phone apps page: a linked phone's apps, to open one
+# there with its screen in a window here. The phone decides whether it may be
+# asked ("Let the computer open my apps", off by default). Off: not listed.
+# phone_apps_page = true
+
+# Right-click a phone app on that page to pin it to Start (Windows) or the
+# applications menu (Linux): a shortcut named "<app> (phone)" that opens the
+# app on the phone from this computer. Off: no pin menu; shortcuts already
+# pinned keep working.
+# phone_apps_pin = true
+
+# A file dropped on a phone's screen window is also shared into the app in
+# front on the phone, when that app takes it (the phone's "Let the computer
+# open my apps" must be on, off by default). Off: a dropped file is only sent.
+# phone_drop_share = true
+
+# Open a phone's app in a window of its own, several at once, when the phone
+# offers it (its "Separate windows (Shizuku)", off by default there, shown
+# only with Shizuku running). Off, or with a phone that does not offer it, an
+# app opens on the phone's own screen as before.
+# phone_app_windows = true
+
+# Keys to taps: play a phone's game from this computer's keyboard and mouse in
+# its app window (needs the windows above, so Shizuku on the phone). A keymap
+# is drawn per app in the window; the mouse aims while the pointer is locked.
+# Off by default: some online games flag injected input.
+# phone_app_keymaps = false
+
+# Linux with NetworkManager: after "Use my phone's hotspot" (Overview, for a
+# phone whose "Let my computers turn on my hotspot" is on, which needs Shizuku)
+# asks the phone to turn its hotspot on, join the Wi-Fi network of this name,
+# but only if it is already saved on this computer. The phone's password is
+# never asked for, kept or sent. Empty: you are only told to connect.
+# phone_hotspot_network = ""
+
+# Linux: offer phones as this computer's camera. A phone with "Use its camera
+# as a webcam" on in the desktop app (Devices) and "Let the computer use
+# my camera" on in its Settings, asked from the Overview, is published as a
+# PipeWire camera ("Pocketdesk camera (<phone>)") that browsers, OBS and
+# video-call apps can open; V4L2-only apps reach it through pw-v4l2. No kernel
+# module. Off by default. The lens (back or front), the height (720 or 1080)
+# and the frame rate (15, 24 or 30) are what the phone is asked for.
+# phone_camera = false
+# phone_camera_lens = "back"
+# phone_camera_height = 720
+# phone_camera_fps = 30
+
+# Linux: give this computer's apps the location of a phone, through GeoClue
+# (night light, weather, time zone, maps). This computer serves one NMEA
+# source on its loopback only and tells GeoClue about it over Avahi
+# (`_nmea-0183._tcp`, on this computer's loopback only); when an app wants a
+# place it asks the linked phone for one fix (at most every ten minutes) and
+# hands it on. The phone must have "Give my computer my location" on in its
+# own Settings. Nothing is stored or logged but the accuracy. Off by default.
+# precision: "city" (rounded to about 1 km; the default) or "exact" (which the
+# phone must also allow). phone: a paired phone's device id, or empty for any
+# of your phones that is linked.
+# phone_location = false
+# phone_location_precision = "city"
+# phone_location_phone = ""
+
 # On Linux, the phone's gamepad is a game controller (an Xbox 360 pad's
 # layout, through uinput) that games see. Off, or without uinput rights, it
 # types keys and moves the mouse instead.
@@ -124,6 +204,26 @@ video_quality = "balanced"
 # A notification when a phone in a session reports a low battery (15 % or
 # less, not charging).
 # phone_battery_alerts = true
+
+# Approve with my phone (Linux): sudo and administrator prompts approved on a
+# linked phone with its fingerprint or screen lock, through
+# /usr/lib/pocketdesk/pocketdesk-pam-ask, which you add to /etc/pam.d
+# yourself as "auth sufficient" (Pocketdesk never edits PAM; the password
+# always still works) after pinning the phone's key as root. Off by default.
+# See docs/guide.md, "Approve With My Phone".
+# phone_approves = false
+# How long a request waits for the phone, 5 to 60 seconds.
+# phone_approves_timeout_secs = 20
+# The lock screen too (hyprlock, swaylock, KDE, gtklock), with its own PAM line.
+# phone_approves_lock_screen = false
+# polkit too, with its own PAM line: off, as PAM is not told polkit's action
+# and the socket-started agent has no ancestry to judge ssh by.
+# phone_approves_polkit = false
+# Only from this desk: a request from an ssh session asks for the password (a
+# best-effort guard: tmux, systemd-run or a timer over ssh get past it).
+# phone_approves_local_only = true
+# Which phones may approve (device ids); empty is every phone pinned.
+# phone_approves_phones = []
 
 # Waking this computer from the phone. Paired phones are told this
 # computer's network adapter (MAC and broadcast address) so they can send

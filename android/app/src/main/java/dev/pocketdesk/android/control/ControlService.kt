@@ -63,23 +63,110 @@ class ControlService : AccessibilityService() {
         // watched every SystemUI window for nothing).
         val on = wanted && dev.pocketdesk.android.clip.CopyWatchRule.supported(Build.VERSION.SDK_INT)
         if (on == watchingCopies) return@post
-        val info = serviceInfo ?: return@post
-        if (on) {
+        watchingCopies = on
+        applyInfo()
+        Log.i(TAG, "watching copies: $on")
+    }
+
+    /**
+     * The package of the window in front, read once now (Apps part 2: the
+     * app a file dropped on the phone's screen window is shared into): only
+     * its package name, never its contents. Null when Android gives none.
+     */
+    fun foregroundPackage(): String? = runCatching {
+        val root = rootInActiveWindow
+        val pkg = root?.packageName?.toString()
+        @Suppress("DEPRECATION")
+        root?.recycle()
+        pkg
+    }.getOrNull()
+
+    /** Hands-free: the screen-sharing question being accepted now, if any. */
+    private var consent: ConsentPress? = null
+    private var consentPackage: String? = null
+
+    /** The xml's own event timeout, put back when no question is waiting. */
+    private var baseTimeout = -1L
+
+    /**
+     * What the service listens for, from what is wanted now: SystemUI's
+     * window changes while copies are watched (M10); the one package of the
+     * screen-sharing question, its window-state events only and with no
+     * delay, while one is being accepted (Hands-free); nothing otherwise,
+     * as C8 does. Windows and view ids are read while either wants them.
+     */
+    private fun applyInfo() {
+        val info = serviceInfo ?: return
+        if (baseTimeout < 0) baseTimeout = info.notificationTimeout
+        val consenting = consentPackage != null
+        var types = 0
+        val packages = LinkedHashSet<String>()
+        if (watchingCopies) {
             // A copy made while the preview is still up changes its
             // contents, not its window (M10 review).
-            info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
-            info.packageNames = arrayOf(dev.pocketdesk.android.clip.CopyWatchRule.SYSTEM_UI)
-            info.flags = info.flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
-                AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
-        } else {
-            info.eventTypes = 0
-            info.packageNames = null
-            info.flags = info.flags and
-                (AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS).inv()
+            types = types or AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+            packages.add(dev.pocketdesk.android.clip.CopyWatchRule.SYSTEM_UI)
         }
+        consentPackage?.let {
+            types = types or AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+            packages.add(it)
+        }
+        val reading = AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+        info.eventTypes = types
+        info.packageNames = packages.takeIf { it.isNotEmpty() }?.toTypedArray()
+        info.flags = if (watchingCopies || consenting) info.flags or reading else info.flags and reading.inv()
+        info.notificationTimeout = if (consenting) 0 else baseTimeout
         serviceInfo = info
-        watchingCopies = on
-        Log.i(TAG, "watching copies: $on")
+    }
+
+    /**
+     * Hands-free: accept Android's screen-sharing question that Pocketdesk is
+     * launching right now for an open [address] asked (see [ConsentRule]):
+     * only when the owner's opt-in, the apps switch and the computer all
+     * still say so, for [ConsentRule.APPEAR_MS] + [ConsentRule.STEPS_MS] at
+     * most, ending at its first press. [expectedPackage] and [expectedClass]
+     * are the activity Android resolved the question's intent to: only a
+     * window of exactly that is ever read or pressed. [done] is told once, on
+     * the main thread, with [ConsentRule.PRESSED], [ConsentRule.NOT_FOUND] or
+     * [ConsentRule.NOT_ALLOWED].
+     */
+    fun armConsent(
+        address: String,
+        label: String,
+        expectedPackage: String?,
+        expectedClass: String?,
+        done: (String) -> Unit,
+    ) = main.post {
+        val own = dev.pocketdesk.android.notify.PhoneLink.target(this)?.address == address
+        val allowed = ConsentRule.mayArm(
+            autoOn = dev.pocketdesk.android.Prefs.autoAcceptScreen(this),
+            appsOn = dev.pocketdesk.android.Prefs.appsFromComputer(this),
+            own = own,
+            service = instance === this,
+        ) && !expectedPackage.isNullOrBlank() && !expectedClass.isNullOrBlank() && expectedPackage != packageName
+        if (!allowed || consent != null) {
+            Log.i(TAG, "the screen-sharing question is not accepted by itself: ${if (allowed) "one is already waiting" else "not allowed now"}")
+            done(ConsentRule.NOT_ALLOWED)
+            return@post
+        }
+        consentPackage = expectedPackage
+        applyInfo()
+        val press = ConsentPress(this, label, expectedPackage!!, expectedClass!!) { result ->
+            consent = null
+            consentPackage = null
+            applyInfo()
+            done(result)
+        }
+        consent = press
+        press.start()
+    }
+
+    /** Stop accepting (the cast came up, or the service is going). */
+    fun disarmConsent() = main.post {
+        consent?.cancel()
+        consent = null
+        consentPackage = null
+        applyInfo()
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
@@ -100,13 +187,17 @@ class ControlService : AccessibilityService() {
 
     override fun onDestroy() {
         if (instance === this) instance = null
+        consent?.cancel()
         removePointer()
         typing.quitSafely()
         super.onDestroy()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (!watchingCopies || event == null) return
+        if (event == null) return
+        // Hands-free: the question's window is named by its own event.
+        consent?.onEvent(event)
+        if (!watchingCopies) return
         val stateChanged = event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
         if (!stateChanged && event.eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) return
         if (event.packageName != dev.pocketdesk.android.clip.CopyWatchRule.SYSTEM_UI) return

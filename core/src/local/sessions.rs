@@ -53,6 +53,9 @@ pub struct MirrorSession {
     /// The phone's own sound plays here, with no screen (M7).
     #[serde(default)]
     pub phone_sound_only: bool,
+    /// The cast is this computer's camera (F6 part 2), not a window.
+    #[serde(default)]
+    pub webcam: bool,
 }
 
 /// A phone with a control link to the server, in a session or not (T10d).
@@ -297,6 +300,7 @@ mod tests {
                 control_only: false,
                 sound_only: false,
                 phone_sound_only: false,
+                webcam: false,
                 cast: false,
             }],
             false,
@@ -337,6 +341,7 @@ mod tests {
                 control_only: false,
                 sound_only: false,
                 phone_sound_only: false,
+                webcam: false,
                 cast: true,
             }],
             true,

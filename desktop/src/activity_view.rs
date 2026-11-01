@@ -320,12 +320,32 @@ pub fn describe(event: &Event) -> String {
             ),
             None => "Removed from afar".to_string(),
         },
+        // PR #597 review I1: a clipboard over the computers' limit.
+        "clipboard_too_big" => {
+            let kb = (number(event, "bytes").unwrap_or(0).max(0) as u64).div_ceil(1024);
+            let limit = number(event, "limit").unwrap_or(0).max(0) / 1024;
+            if flag("out") {
+                format!("Clipboard too big to share ({kb} KB, over {limit} KB)")
+            } else {
+                format!("Its clipboard was too big to copy ({kb} KB, over {limit} KB)")
+            }
+        }
         "phone_battery" => format!(
             "Battery {} %{}",
             number(event, "charge").unwrap_or(0),
             if flag("charging") { ", charging" } else { "" }
         ),
         "phone_battery_low" => format!("Battery low: {} %", number(event, "charge").unwrap_or(0)),
+        // Where it is is never in the event: only how close it was given.
+        "phone_location" => format!(
+            "Gave this computer's apps its {} location, accurate to {} m",
+            if text(event, "precision") == Some("exact") {
+                "exact"
+            } else {
+                "city"
+            },
+            number(event, "accuracy").unwrap_or(0)
+        ),
         "away_locked" => if flag("failed") {
             "Left, but locking this computer failed"
         } else {
@@ -487,6 +507,27 @@ mod tests {
         );
     }
 
+    /// The phone's location for GeoClue: how close and how accurate, under
+    /// Phones, and never where.
+    #[test]
+    fn a_location_fix_reads_by_its_accuracy_alone() {
+        assert!(Filter::Phones.admits("phone_location"));
+        assert_eq!(
+            describe(&event(
+                "phone_location",
+                json!({"accuracy": 1000, "precision": "city"})
+            )),
+            "Gave this computer's apps its city location, accurate to 1000 m"
+        );
+        assert!(
+            describe(&event(
+                "phone_location",
+                json!({"accuracy": 8, "precision": "exact"})
+            ))
+            .contains("exact location, accurate to 8 m")
+        );
+    }
+
     /// H1: a deck press reads as one, under Tasks, deck and hooks.
     #[test]
     fn a_deck_press_reads_as_a_sentence() {
@@ -506,6 +547,27 @@ mod tests {
         let mut named = event("deck_pressed", json!({"kind": "media", "ok": true}));
         named.fields.insert("label".into(), json!("Pause"));
         assert_eq!(describe(&named), "Deck \"Pause\" pressed (a media key)");
+    }
+
+    /// PR #597 review I1: a clipboard too big says which way and how big.
+    #[test]
+    fn a_clipboard_too_big_says_which_way_and_how_big() {
+        let came = event(
+            "clipboard_too_big",
+            json!({"bytes": 263_000, "limit": 262_144}),
+        );
+        assert_eq!(
+            describe(&came),
+            "Its clipboard was too big to copy (257 KB, over 256 KB)"
+        );
+        let went = event(
+            "clipboard_too_big",
+            json!({"bytes": 307_200, "limit": 262_144, "out": true}),
+        );
+        assert_eq!(
+            describe(&went),
+            "Clipboard too big to share (300 KB, over 256 KB)"
+        );
     }
 
     /// Remote revoke: a removal from afar says who did it.

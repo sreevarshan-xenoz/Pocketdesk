@@ -890,6 +890,48 @@ fn empty_sessions_and_files_are_cards_with_the_next_step() {
     assert!(app.query_by_label_contains("shows here").is_some());
 }
 
+/// A phone's kept folder shows on Files: its phone and folder, its size and
+/// last run, and the problem that stopped it (the cap).
+#[test]
+fn files_lists_the_kept_folders_with_their_problems() {
+    let fixture = Fixture::new();
+    let full = format!(
+        "{}: 9.0 GB of the 10 GB cap",
+        pocketdesk_core::protocol::kept::FULL
+    );
+    let folder = pocketdesk_core::local::kept_folders::KeptFolder {
+        device_id: "kept-phone".to_string(),
+        folder_id: "0".repeat(32),
+        phone: "Test Phone".to_string(),
+        label: "Notes".to_string(),
+        path: "/kept/Test Phone/Notes".to_string(),
+        phone_dir: "Test Phone".to_string(),
+        folder_dir: "Notes".to_string(),
+        files: 12,
+        bytes: 2_100_000,
+        last_unix: pocketdesk_core::local::pin::now_unix(),
+        last_sent: 12,
+        last_failed: 0,
+        deleted: 0,
+        deletes_skipped: 0,
+        mirror: false,
+        errors: vec![pocketdesk_core::local::kept_folders::KeptError {
+            at_unix: pocketdesk_core::local::pin::now_unix(),
+            message: full.clone(),
+        }],
+    };
+    pocketdesk_core::local::kept_folders::write(fixture.state(), &[folder]).unwrap();
+    let mut app = fixture.open(Some(Tab::Files));
+    app.run_steps(3);
+    assert!(app.query_by_label("Kept folders").is_some());
+    assert!(app.query_by_label("Test Phone / Notes").is_some());
+    assert!(app.query_by_label_contains("12 files · 2.0 MB").is_some());
+    assert!(
+        app.query_by_label_contains(&full).is_some(),
+        "the cap says so"
+    );
+}
+
 /// UX 4: with a phone paired, Sessions' empty card has no Pair button.
 #[test]
 fn sessions_with_a_phone_paired_offer_no_pairing() {
@@ -2077,7 +2119,14 @@ fn each_permission_group_switch_saves_its_permissions() {
         ("Control", vec![C::Input, C::SharedInput, C::Power, C::Peek]),
         (
             "Screen, sound and media",
-            vec![C::Cast, C::Audio, C::Mic, C::Media, C::PhoneSound],
+            vec![
+                C::Cast,
+                C::Webcam,
+                C::Audio,
+                C::Mic,
+                C::Media,
+                C::PhoneSound,
+            ],
         ),
         (
             "Files and clipboard",

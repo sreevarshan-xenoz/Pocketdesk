@@ -43,6 +43,7 @@ pub async fn answer_denied(packet: &NetworkPacket, sender: &dyn DeviceSender) {
     share::answer_denied(packet, sender).await;
     audio_control::answer_denied(packet, sender).await;
     privacy::answer_denied(packet, sender).await;
+    crate::virtual_screen::answer_denied(packet, sender).await;
     notification::answer_denied(packet, sender).await;
     tasks::answer_denied(packet, sender).await;
     peek::answer_denied(packet, sender).await;
@@ -58,6 +59,10 @@ pub const SERVER_PUSHES: &[&str] = &[
     crate::hypr_events::STATE_PACKET,
     crate::iroh_endpoint::ENDPOINT_PACKET,
     crate::wake_info::WAKE_INFO,
+    // A spare phone as the wake helper: the computer tells the helper its
+    // duty and each owner phone where the helper is.
+    crate::wake_helper::DUTY,
+    crate::wake_helper::INFO,
     // N1: the computer rings a phone with the packet a phone rings it with.
     crate::ring_phone::FIND,
 ];
@@ -91,6 +96,7 @@ pub fn register_all() -> PluginSet {
     registry.register(in_use::InUsePlugin);
     registry.register(phone_files::PhoneFilesPlugin);
     registry.register(phone_photos::PhonePhotosPlugin);
+    registry.register(crate::phone_location::PhoneLocationPlugin);
     registry.register(phone_screen::PhoneScreenPlugin);
     registry.register(crate::quiet_phone::PhoneQuietPlugin);
     registry.register(crate::virtual_screen::VirtualScreenPlugin);
@@ -119,5 +125,6 @@ pub fn register_all() -> PluginSet {
     registry.register(note::NotePlugin);
     registry.register(crate::remote_devices::RemoteDevicesPlugin);
     registry.register(crate::introductions::IntroductionsPlugin);
+    registry.register(crate::wake_helper::WakeHelperPlugin);
     registry
 }

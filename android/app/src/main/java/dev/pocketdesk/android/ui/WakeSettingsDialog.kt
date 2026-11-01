@@ -14,6 +14,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -29,6 +30,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.R
+import dev.pocketdesk.android.wake.WakeHelperRule
 import dev.pocketdesk.android.wake.WakeMethod
 import dev.pocketdesk.android.wake.WakePlan
 import dev.pocketdesk.android.wake.WakeSettings
@@ -51,6 +53,10 @@ fun WakeSettingsDialog(address: String, onDismiss: () -> Unit) {
     var outsideHost by remember { mutableStateOf(saved.outsideHost) }
     var outsidePort by remember { mutableStateOf(if (saved.outsidePort > 0) saved.outsidePort.toString() else "") }
     var mac by remember { mutableStateOf(saved.mac) }
+    // A spare phone at home, which this computer introduced to this phone.
+    val helperInfo = remember { HostStore.wakeHelperInfo(context, address) }
+    val helperKnown = WakeHelperRule.helperKnown(helperInfo)
+    var viaHelper by remember { mutableStateOf(saved.viaHelper) }
     val portOk = WakePlan.validPort(outsidePort)
     val hostOk = WakePlan.validHost(outsideHost)
     val macOk = mac.isBlank() || WakePlan.validMac(mac)
@@ -86,6 +92,34 @@ fun WakeSettingsDialog(address: String, onDismiss: () -> Unit) {
                 }
                 MethodRow(WakeMethod.OFF, method, R.string.wake_method_off, null) { method = it }
 
+                if (method != WakeMethod.OFF) {
+                    Spacer(Modifier.height(4.dp))
+                    if (helperKnown) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(stringResource(R.string.wake_helper_via), style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    stringResource(
+                                        R.string.wake_helper_via_summary,
+                                        WakeHelperRule.helperName(helperInfo).ifBlank { stringResource(R.string.wake_helper_unnamed) },
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(checked = viaHelper, onCheckedChange = { viaHelper = it })
+                        }
+                    } else {
+                        Text(
+                            stringResource(R.string.wake_helper_via_none),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 if (method == WakeMethod.RELAY) {
                     Spacer(Modifier.height(4.dp))
                     Text(stringResource(R.string.wake_relay_label), style = MaterialTheme.typography.labelLarge)
@@ -163,6 +197,7 @@ fun WakeSettingsDialog(address: String, onDismiss: () -> Unit) {
                             outsideHost = outsideHost.trim(),
                             outsidePort = outsidePort.trim().toIntOrNull() ?: 0,
                             mac = mac.trim(),
+                            viaHelper = viaHelper && helperKnown,
                         ),
                     )
                     onDismiss()

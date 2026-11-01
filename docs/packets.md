@@ -23,6 +23,7 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.notification.request` | yes | yes | none (any paired phone) | notification |
 | `kdeconnect.pair` | yes | yes | none (any phone: pairing) | pair |
 | `kdeconnect.pocketdesk.allowed` | yes | yes | none (any paired phone) | allowed |
+| `kdeconnect.pocketdesk.approve_key` | yes |  | Ask | ask |
 | `kdeconnect.pocketdesk.ask` |  | yes |  | ask |
 | `kdeconnect.pocketdesk.ask_answer` | yes |  | Ask | ask |
 | `kdeconnect.pocketdesk.audio` | yes | yes | Audio | audio_control |
@@ -55,6 +56,7 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.pocketdesk.introduce_answer` |  | yes |  | introductions |
 | `kdeconnect.pocketdesk.introduce_phone` | yes | yes | none (a computer paired both ways only) | introductions |
 | `kdeconnect.pocketdesk.introduce_phone_answer` | yes | yes | none (only the computer asked, for the introduction waiting) | introductions |
+| `kdeconnect.pocketdesk.keep_run` | yes |  | Files | share |
 | `kdeconnect.pocketdesk.link` | yes | yes | Links | links |
 | `kdeconnect.pocketdesk.link_role` | yes |  | none (any paired phone) | link_role |
 | `kdeconnect.pocketdesk.monitors` | yes | yes | none (any paired phone) | monitors |
@@ -66,13 +68,18 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.pocketdesk.pair` | yes | yes | none (any phone: pairing) | pair |
 | `kdeconnect.pocketdesk.peek` | yes |  | Peek | peek |
 | `kdeconnect.pocketdesk.phone_action` |  | yes |  | links |
+| `kdeconnect.pocketdesk.phone_app_icons` | yes |  | PhoneActions | phone_apps |
+| `kdeconnect.pocketdesk.phone_app_opened` | yes |  | PhoneActions | phone_apps |
 | `kdeconnect.pocketdesk.phone_apps` | yes |  | PhoneActions | phone_apps |
+| `kdeconnect.pocketdesk.phone_camera.start` |  | yes |  | phone_photos |
 | `kdeconnect.pocketdesk.phone_contacts` | yes |  | Texts | phone_contacts |
 | `kdeconnect.pocketdesk.phone_files.fetch` |  | yes |  | phone_files |
 | `kdeconnect.pocketdesk.phone_files.list` |  | yes |  | phone_files |
 | `kdeconnect.pocketdesk.phone_files.listing` | yes |  | Files | phone_files |
 | `kdeconnect.pocketdesk.phone_files.mkdir` |  | yes |  | phone_files |
 | `kdeconnect.pocketdesk.phone_files.put` |  | yes |  | phone_files |
+| `kdeconnect.pocketdesk.phone_location` | yes |  | none (any paired phone) | phone_location |
+| `kdeconnect.pocketdesk.phone_location.ask` |  | yes |  | phone_location |
 | `kdeconnect.pocketdesk.phone_media` | yes |  | Media | phone_media |
 | `kdeconnect.pocketdesk.phone_media_control` |  | yes |  | phone_media |
 | `kdeconnect.pocketdesk.phone_photos` | yes |  | Files | phone_photos |
@@ -96,6 +103,9 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.pocketdesk.tasks` | yes | yes | Tasks | tasks |
 | `kdeconnect.pocketdesk.type` |  | yes |  | typing |
 | `kdeconnect.pocketdesk.virtual_screen` | yes | yes | Input | virtual_screen |
+| `kdeconnect.pocketdesk.wake_helper` | yes |  | none (an owner phone only) | wake_helper |
+| `kdeconnect.pocketdesk.wake_helper_duty` |  | yes |  | server |
+| `kdeconnect.pocketdesk.wake_helper_info` |  | yes |  | server |
 | `kdeconnect.pocketdesk.wake_info` |  | yes |  | server |
 | `kdeconnect.pocketdesk.wan_key` | yes |  | none (any paired phone) | pair |
 | `kdeconnect.pocketdesk.windows` | yes | yes | none (any paired phone) | windows |

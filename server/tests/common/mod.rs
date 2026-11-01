@@ -112,6 +112,7 @@ pub fn pairing_link(state: &Path, control: u16, streaming: u16, pin: &str) -> Pa
         )),
         endpoint: identity::read_endpoint(state).map(|e| e.to_string()),
         mine: false,
+        wifi: None,
     }
 }
 

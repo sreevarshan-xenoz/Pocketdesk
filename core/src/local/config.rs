@@ -76,6 +76,29 @@ pub struct Config {
     /// Off, the portal asks at every session.
     #[serde(default)]
     pub remember_screen_grant: bool,
+    /// GNOME only ("Unattended on GNOME"): start the screen and input
+    /// through mutter's own D-Bus API, which asks no one at the desk, instead
+    /// of the screen-sharing portal's dialog. Off by default: any program
+    /// running as you can make the same calls (SECURITY.md). If mutter's
+    /// D-Bus is missing or refuses, the portal is used. Read at each session.
+    #[serde(default)]
+    pub gnome_unattended: bool,
+    /// Offer a direct link: the Pair page's "Make a direct link" makes this
+    /// computer's own Wi-Fi for one phone, for where no shared network
+    /// works (a train, a café with client isolation). On by default; the
+    /// owner starts each link, and it turns itself off. Off, the button is
+    /// not shown and the server refuses to make one. Read at each ask.
+    #[serde(default = "default_true")]
+    pub direct_link: bool,
+    /// The band a direct link uses: `"auto"` (2.4 GHz, which every phone
+    /// can join), `"2.4"` or `"5"`. A card that keeps one channel for both
+    /// connections follows its own connection's band instead.
+    #[serde(default = "default_direct_link_band")]
+    pub direct_link_band: String,
+    /// Minutes with no phone using a direct link before it turns itself off,
+    /// 1 to 120.
+    #[serde(default = "default_direct_link_idle_minutes")]
+    pub direct_link_idle_minutes: u32,
     /// Reachable from the internet (the WAN endpoint): phones away from home
     /// and your other computers connect through a relay, and this computer
     /// keeps a record on the Mainline DHT (`dht_publish`). Off, no relay or
@@ -125,10 +148,93 @@ pub struct Config {
     /// Downloads. A folder that is gone falls back to Downloads.
     #[serde(default)]
     pub downloads_folder: String,
+    /// Phones may keep folders on this computer (the phone's "Folders kept
+    /// on my computer"): only an owner phone, into `kept_folders_root`. On
+    /// by default; each phone folder is still the owner's own pick.
+    #[serde(default = "default_true")]
+    pub kept_folders: bool,
+    /// Where phones' kept folders land, one folder per phone and per kept
+    /// folder: an absolute folder, or empty for `Documents/Pocketdesk
+    /// phones`.
+    #[serde(default)]
+    pub kept_folders_root: String,
+    /// The most all kept folders may hold, in GiB; 0 for no limit. A file
+    /// that would pass it is refused, and the Files page says so.
+    #[serde(default = "default_kept_folders_cap_gb")]
+    pub kept_folders_cap_gb: u32,
+    /// A phone that mirrors deletions may delete, from its kept folder
+    /// here, the files it deleted. Off by default: nothing is ever deleted
+    /// here unless this and the phone's own switch are both on.
+    #[serde(default)]
+    pub kept_folders_allow_delete: bool,
     /// The window showing a phone's screen controls the phone, when the
     /// phone allows it (C8); off, the window only shows.
     #[serde(default = "default_true")]
     pub cast_control: bool,
+    /// The Phone apps page in the desktop app's list (Apps part 1): a
+    /// phone's apps, to open one there. Off, the page is not listed; the
+    /// phone's own switch still decides whether it may be asked.
+    #[serde(default = "default_true")]
+    pub phone_apps_page: bool,
+    /// The right-click menu on a phone app to pin it to Start (Windows) or
+    /// the applications menu (Linux) (Apps part 2). Off, the page offers
+    /// no pin; shortcuts already pinned keep working.
+    #[serde(default = "default_true")]
+    pub phone_apps_pin: bool,
+    /// A file dropped on a phone's screen window is also shared into the app
+    /// in front on the phone, when that app takes it (Apps part 2). Off, a
+    /// dropped file is only sent. The phone's own switch ("Let the computer
+    /// open my apps", off by default) decides whether it ever is.
+    #[serde(default = "default_true")]
+    pub phone_drop_share: bool,
+    /// Open a phone's app in a window of its own, several at once, when the
+    /// phone says it can (Phone apps tier 2: the phone's "Separate windows
+    /// (Shizuku)", off by default there and shown only with Shizuku
+    /// running). Off, or with a phone that does not offer it, an app opens
+    /// on the phone's own screen as before.
+    #[serde(default = "default_true")]
+    pub phone_app_windows: bool,
+    /// Keys to taps (needs Phone apps tier 2's windows): a phone app's window
+    /// can be played from this computer's keyboard and mouse, with a keymap
+    /// of the owner's own drawn per app. Off by default: it sends several
+    /// fingers at once to a phone, and some online games flag injected input.
+    #[serde(default)]
+    pub phone_app_keymaps: bool,
+    /// Linux, with NetworkManager: after "Use my phone's hotspot" asks a
+    /// phone to turn its hotspot on, join the Wi-Fi network of this name, but
+    /// only if it is one already saved here (its password stays in
+    /// NetworkManager; Pocketdesk never stores or sees it). Empty (the
+    /// default): only tell the owner to connect.
+    #[serde(default)]
+    pub phone_hotspot_network: String,
+    /// Offer phones as this computer's camera (F6 part 2, Linux): a phone
+    /// with the Webcam permission, asked from here, is published as a
+    /// PipeWire camera apps can open. Off by default: a camera from afar.
+    #[serde(default)]
+    pub phone_camera: bool,
+    /// The phone's camera asked for: `back` or `front`.
+    #[serde(default = "default_phone_camera_lens")]
+    pub phone_camera_lens: String,
+    /// The camera's picture height: 720 or 1080.
+    #[serde(default = "default_phone_camera_height")]
+    pub phone_camera_height: u32,
+    /// The camera's frames a second: 15, 24 or 30.
+    #[serde(default = "default_phone_camera_fps")]
+    pub phone_camera_fps: u32,
+    /// Give this computer's apps the location of a phone, through GeoClue
+    /// (Linux): an NMEA source on this computer's own addresses, announced
+    /// as `_nmea-0183._tcp` for GeoClue to find. The phone is asked for one
+    /// fix when an app wants a place, at most every ten minutes, and only
+    /// with its own "Give my computer my location" on. Off by default.
+    #[serde(default)]
+    pub phone_location: bool,
+    /// How close the place is given: `city` (about a kilometre; the
+    /// default) or `exact`, which the phone must also allow.
+    #[serde(default = "default_phone_location_precision")]
+    pub phone_location_precision: String,
+    /// The phone asked, by device id; empty is any linked phone of the owner's.
+    #[serde(default)]
+    pub phone_location_phone: String,
     /// On Linux, the phone's gamepad is a game controller (T7) where uinput
     /// may be used; off, or where it may not, it types keys and moves the
     /// mouse as before.
@@ -243,6 +349,31 @@ pub struct Config {
     /// gone before the computer locks (D9), in minutes, 2 to 60.
     #[serde(default = "default_away_lock_minutes")]
     pub away_lock_minutes: u32,
+    /// Approve with my phone: sudo and polkit (and the lock screen with
+    /// [`Config::phone_approves_lock_screen`]) may be approved on a linked
+    /// phone, through `pocketdesk-pam-ask` in PAM as `auth sufficient`, so
+    /// the password always stays. Off by default; the owner adds the PAM
+    /// lines and pins the phone's key as root.
+    #[serde(default)]
+    pub phone_approves: bool,
+    /// How long a request waits for the phone, 5 to 60 seconds.
+    #[serde(default = "default_phone_approves_timeout")]
+    pub phone_approves_timeout_secs: u64,
+    /// The lock screen too (hyprlock, swaylock, KDE's). Off.
+    #[serde(default)]
+    pub phone_approves_lock_screen: bool,
+    /// polkit too: its own switch, off even with the feature on, as PAM is
+    /// told neither polkit's action nor (reliably) who asked, and the
+    /// socket-activated agent has no ancestry to judge ssh by.
+    #[serde(default)]
+    pub phone_approves_polkit: bool,
+    /// Only from this desk: refuse a request from an ssh session. On.
+    #[serde(default = "default_true")]
+    pub phone_approves_local_only: bool,
+    /// Which phones may approve (device ids); empty is every phone whose
+    /// key root pinned.
+    #[serde(default)]
+    pub phone_approves_phones: Vec<String>,
     /// Whether phones are told when this computer is in use (N7), so a
     /// phone with "Toast only on the computer I'm using" on keeps its
     /// notifications off the others' screens. On.
@@ -431,6 +562,14 @@ pub struct Config {
     /// chosen, there or in Settings.
     #[serde(default)]
     pub computer_view_lock_on_close: bool,
+    /// A computer's screen window starts with "Fit the screen to this
+    /// window": a Linux computer on Hyprland or Sway makes a headless
+    /// screen of the window's size, shows that, and resizes it as the
+    /// window does (item 8 of the plan after 0.8.3). Read as a window
+    /// starts showing a computer; an open window keeps its own switch. Off
+    /// until chosen, there or in Settings.
+    #[serde(default)]
+    pub computer_view_fit: bool,
     /// A computer's screen window starts with "Keys by position" (scancode
     /// mode): every key goes to that computer as the key at its place on
     /// the keyboard, for games, instead of typing text. Each computer's own
@@ -438,6 +577,17 @@ pub struct Config {
     /// Read as each window opens. Off by default.
     #[serde(default)]
     pub computer_view_scancodes: bool,
+    /// Smooth scrolling: a touchpad's scroll goes to the other computer in
+    /// 120ths of a notch (`wheel120`), as finely as it comes, from a
+    /// computer's screen window and from shared input; that computer takes
+    /// it as finely as its backend can. Off, the window sends what it sent
+    /// before fine scrolling, and shared input whole notches added up as
+    /// before.
+    /// A computer older than fine scrolling gets whole notches either way.
+    /// Read as each window opens, and by shared input within a second or
+    /// two. On by default.
+    #[serde(default = "default_true")]
+    pub smooth_scrolling: bool,
     /// The microphone a computer's screen window sends to that computer
     /// with "Send my mic" (PC10): part of its name as Windows lists it, or
     /// the source's name on Linux. None (blank) is the system's default
@@ -456,6 +606,22 @@ pub struct Config {
     /// Read by the desktop app; nothing asks the internet. On by default.
     #[serde(default = "default_true")]
     pub version_hints: bool,
+}
+
+fn default_phone_location_precision() -> String {
+    "city".to_string()
+}
+
+fn default_phone_camera_lens() -> String {
+    "back".to_string()
+}
+
+fn default_phone_camera_height() -> u32 {
+    720
+}
+
+fn default_phone_camera_fps() -> u32 {
+    30
 }
 
 fn default_computer_view_quality() -> String {
@@ -506,8 +672,20 @@ fn default_quiet_days() -> Vec<String> {
         .collect()
 }
 
+fn default_direct_link_band() -> String {
+    "auto".to_string()
+}
+
+fn default_direct_link_idle_minutes() -> u32 {
+    super::direct_link::DEFAULT_IDLE_MINUTES
+}
+
 fn default_away_lock_minutes() -> u32 {
     5
+}
+
+fn default_phone_approves_timeout() -> u64 {
+    crate::protocol::approve::DEFAULT_TIMEOUT_SECS
 }
 
 fn default_input_idle_secs() -> u32 {
@@ -527,6 +705,11 @@ pub enum InputControlMode {
 
 fn default_true() -> bool {
     true
+}
+
+/// GiB all kept folders may hold by default.
+fn default_kept_folders_cap_gb() -> u32 {
+    50
 }
 
 fn default_notifications_per_minute() -> u32 {
@@ -611,6 +794,10 @@ impl Default for Config {
             mic_relay_device: None,
             lan_discovery: true,
             remember_screen_grant: false,
+            gnome_unattended: false,
+            direct_link: true,
+            direct_link_band: default_direct_link_band(),
+            direct_link_idle_minutes: default_direct_link_idle_minutes(),
             internet_path: true,
             relay_urls: Vec::new(),
             dht_publish: DhtPublish::Relay,
@@ -620,7 +807,24 @@ impl Default for Config {
             phone_live_updates: true,
             notification_pictures: true,
             downloads_folder: String::new(),
+            kept_folders: true,
+            kept_folders_root: String::new(),
+            kept_folders_cap_gb: default_kept_folders_cap_gb(),
+            kept_folders_allow_delete: false,
             cast_control: true,
+            phone_apps_page: true,
+            phone_apps_pin: true,
+            phone_drop_share: true,
+            phone_app_windows: true,
+            phone_app_keymaps: false,
+            phone_hotspot_network: String::new(),
+            phone_camera: false,
+            phone_camera_lens: default_phone_camera_lens(),
+            phone_camera_height: default_phone_camera_height(),
+            phone_camera_fps: default_phone_camera_fps(),
+            phone_location: false,
+            phone_location_precision: default_phone_location_precision(),
+            phone_location_phone: String::new(),
             gamepad_controller: true,
             notifications_per_minute: default_notifications_per_minute(),
             sms_notify: true,
@@ -648,6 +852,12 @@ impl Default for Config {
             phone_drive: false,
             phone_drive_write: true,
             away_lock_minutes: default_away_lock_minutes(),
+            phone_approves: false,
+            phone_approves_timeout_secs: default_phone_approves_timeout(),
+            phone_approves_lock_screen: false,
+            phone_approves_polkit: false,
+            phone_approves_local_only: true,
+            phone_approves_phones: Vec::new(),
             tell_in_use: true,
             kdeconnect_compat: true,
             phone_battery_alerts: true,
@@ -693,7 +903,9 @@ impl Default for Config {
             computer_view_hw_decode: true,
             computer_view_hevc: true,
             computer_view_lock_on_close: false,
+            computer_view_fit: false,
             computer_view_scancodes: false,
+            smooth_scrolling: true,
             computer_view_mic_device: None,
             computer_wake_facts: true,
             version_hints: true,
@@ -879,6 +1091,10 @@ impl Config {
         "mic_relay_device",
         "lan_discovery",
         "remember_screen_grant",
+        "gnome_unattended",
+        "direct_link",
+        "direct_link_band",
+        "direct_link_idle_minutes",
         "internet_path",
         "relay_urls",
         "dht_publish",
@@ -888,7 +1104,24 @@ impl Config {
         "phone_live_updates",
         "notification_pictures",
         "downloads_folder",
+        "kept_folders",
+        "kept_folders_root",
+        "kept_folders_cap_gb",
+        "kept_folders_allow_delete",
         "cast_control",
+        "phone_apps_page",
+        "phone_apps_pin",
+        "phone_drop_share",
+        "phone_app_windows",
+        "phone_app_keymaps",
+        "phone_hotspot_network",
+        "phone_camera",
+        "phone_camera_lens",
+        "phone_camera_height",
+        "phone_camera_fps",
+        "phone_location",
+        "phone_location_precision",
+        "phone_location_phone",
         "gamepad_controller",
         "notifications_per_minute",
         "sms_notify",
@@ -914,6 +1147,12 @@ impl Config {
         "phone_drive",
         "phone_drive_write",
         "away_lock_minutes",
+        "phone_approves",
+        "phone_approves_timeout_secs",
+        "phone_approves_lock_screen",
+        "phone_approves_polkit",
+        "phone_approves_local_only",
+        "phone_approves_phones",
         "tell_in_use",
         "kdeconnect_compat",
         "phone_battery_alerts",
@@ -961,7 +1200,9 @@ impl Config {
         "computer_view_hw_decode",
         "computer_view_hevc",
         "computer_view_lock_on_close",
+        "computer_view_fit",
         "computer_view_scancodes",
+        "smooth_scrolling",
         "computer_view_mic_device",
         "computer_wake_facts",
         "version_hints",
@@ -1491,6 +1732,26 @@ phone_battery = \"x\"
         );
     }
 
+    /// Fine scrolling: smooth until turned off, and the choice saves and
+    /// reads back.
+    #[test]
+    fn scrolling_is_smooth_until_turned_off() {
+        let path = temp("smooth-scrolling");
+        std::fs::write(&path, "").unwrap();
+        assert!(Config::load_from(&path).unwrap().smooth_scrolling);
+        assert!(Config::default().smooth_scrolling);
+        let chosen = Config {
+            smooth_scrolling: false,
+            ..Config::default()
+        };
+        chosen.save_keys_to(&path, &["smooth_scrolling"]).unwrap();
+        assert!(!Config::load_from(&path).unwrap().smooth_scrolling);
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["smooth_scrolling"]
+        );
+    }
+
     /// PC5: the window decodes on the graphics card until turned off, and the
     /// choice saves and reads back.
     #[test]
@@ -1560,6 +1821,26 @@ phone_battery = \"x\"
         assert_eq!(
             Config::default().changed_keys(&chosen),
             ["computer_view_lock_on_close"]
+        );
+    }
+
+    /// Item 8: a computer's screen window fits the other screen to itself
+    /// only once chosen, and the choice saves and reads back.
+    #[test]
+    fn a_computers_window_fits_the_screen_only_once_chosen() {
+        let path = temp("computer-view-fit");
+        std::fs::write(&path, "").unwrap();
+        assert!(!Config::load_from(&path).unwrap().computer_view_fit);
+        assert!(!Config::default().computer_view_fit);
+        let chosen = Config {
+            computer_view_fit: true,
+            ..Config::default()
+        };
+        chosen.save_keys_to(&path, &["computer_view_fit"]).unwrap();
+        assert!(Config::load_from(&path).unwrap().computer_view_fit);
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["computer_view_fit"]
         );
     }
 

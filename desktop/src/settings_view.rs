@@ -108,6 +108,22 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Connection,
     ),
     (
+        "gnome_unattended",
+        "Unattended on GNOME",
+        Section::Connection,
+    ),
+    ("direct_link", "Offer a direct link", Section::Connection),
+    (
+        "direct_link_band",
+        "Direct link's band",
+        Section::Connection,
+    ),
+    (
+        "direct_link_idle_minutes",
+        "Turn the direct link off after",
+        Section::Connection,
+    ),
+    (
         "internet_files",
         "Files over the internet",
         Section::Connection,
@@ -184,6 +200,28 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "Lock after the phone leaves",
         Section::Phones,
     ),
+    ("phone_approves", "Approve with my phone", Section::Phones),
+    (
+        "phone_approves_lock_screen",
+        "The lock screen too",
+        Section::Phones,
+    ),
+    ("phone_approves_polkit", "polkit too", Section::Phones),
+    (
+        "phone_approves_local_only",
+        "Only from this desk, not ssh",
+        Section::Phones,
+    ),
+    (
+        "phone_approves_timeout_secs",
+        "Wait for the phone",
+        Section::Phones,
+    ),
+    (
+        "phone_approves_phones",
+        "Phones that may approve",
+        Section::Phones,
+    ),
     ("open_links", "Links from phones", Section::Phones),
     ("version_hints", VERSION_HINTS, Section::Phones),
     ("link_rules", "Links by site", Section::Phones),
@@ -211,6 +249,26 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "Received files land in",
         Section::Phones,
     ),
+    (
+        "kept_folders",
+        "Phones may keep folders here",
+        Section::Phones,
+    ),
+    (
+        "kept_folders_root",
+        "Folders phones keep here",
+        Section::Phones,
+    ),
+    (
+        "kept_folders_cap_gb",
+        "Size cap for kept folders",
+        Section::Phones,
+    ),
+    (
+        "kept_folders_allow_delete",
+        "Kept folders may mirror deletions",
+        Section::Phones,
+    ),
     ("notes_file", "Notes from phones go in", Section::Phones),
     (
         "cast_control",
@@ -218,8 +276,61 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Phones,
     ),
     (
+        "phone_apps_page",
+        "Show the Phone apps page",
+        Section::Phones,
+    ),
+    (
+        "phone_apps_pin",
+        "Offer to pin phone apps to Start or the applications menu",
+        Section::Phones,
+    ),
+    (
+        "phone_drop_share",
+        "Share a dropped file into the phone's app in front",
+        Section::Phones,
+    ),
+    (
+        "phone_app_windows",
+        "Open phone apps in windows of their own",
+        Section::Phones,
+    ),
+    (
+        "phone_app_keymaps",
+        "Keymaps for phone apps",
+        Section::Phones,
+    ),
+    (
+        "phone_hotspot_network",
+        "Join my phone's hotspot network",
+        Section::Phones,
+    ),
+    (
         "gamepad_controller",
         "The phone's gamepad as a game controller",
+        Section::Phones,
+    ),
+    ("phone_camera", "Offer phones as a camera", Section::Phones),
+    ("phone_camera_lens", "The phone's camera", Section::Phones),
+    (
+        "phone_camera_height",
+        "The camera's picture",
+        Section::Phones,
+    ),
+    (
+        "phone_camera_fps",
+        "The camera's frame rate",
+        Section::Phones,
+    ),
+    ("phone_location", "Location from my phone", Section::Phones),
+    (
+        "phone_location_precision",
+        "How close the location is",
+        Section::Phones,
+    ),
+    (
+        "phone_location_phone",
+        "The phone that gives it",
         Section::Phones,
     ),
     (
@@ -366,10 +477,16 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "computer_view_fit",
+        "Fit the screen to this window",
+        Section::Computers,
+    ),
+    (
         "computer_view_scancodes",
         "Keys by position",
         Section::Computers,
     ),
+    ("smooth_scrolling", "Smooth scrolling", Section::Computers),
     (
         "computer_view_mic_device",
         "Microphone for computer windows",
@@ -483,6 +600,8 @@ pub const EXTRA_COMPUTERS: &str = "Your other computers";
 pub const EXTRA_KDE: &str = "KDE Connect devices";
 /// The phone apps muted here, beside Notifications' rows (K2b).
 pub const EXTRA_MUTED: &str = "Muted apps";
+/// The phone this computer holds as its wake helper, beside Wake's rows.
+pub const EXTRA_WAKE_HELPER: &str = "Wake helper phone";
 
 /// What a section draws beside its rows, by name.
 fn extras(section: Section) -> &'static [&'static str] {
@@ -491,6 +610,7 @@ fn extras(section: Section) -> &'static [&'static str] {
         Section::Computers => &[EXTRA_COMPUTERS],
         Section::KdeConnect => &[EXTRA_KDE],
         Section::Notifications => &[EXTRA_MUTED],
+        Section::Wake => &[EXTRA_WAKE_HELPER],
         _ => &[],
     }
 }
@@ -516,6 +636,8 @@ fn drawn_in(key: &str) -> &str {
         "mqtt_broker" | "mqtt_user" | "mqtt_password" => "home_assistant",
         "events_detail" => "events",
         "quiet_from" | "quiet_to" | "quiet_days" => "quiet_hours",
+        // Ticked beside each phone's key in the set-up.
+        "phone_approves_phones" => "phone_approves",
         _ => key,
     }
 }
@@ -534,7 +656,12 @@ pub fn computer_quality_label(name: &str) -> &'static str {
 /// system only (J2 review: on Windows "grant" opened an empty Connection).
 pub(crate) fn drawn_here(key: &str) -> bool {
     match key {
-        "remember_screen_grant" => cfg!(target_os = "linux"),
+        "remember_screen_grant" | "gnome_unattended" => cfg!(target_os = "linux"),
+        // The direct link is made on Linux (NetworkManager) and on Windows
+        // (the Mobile Hotspot).
+        "direct_link" | "direct_link_band" | "direct_link_idle_minutes" => {
+            cfg!(any(target_os = "linux", windows))
+        }
         // P3: Windows says when it is presenting; Linux does not.
         // Q4: GNOME's and KDE's Do Not Disturb on Linux.
         "quiet_presenting" => cfg!(any(windows, target_os = "linux")),
@@ -544,6 +671,19 @@ pub(crate) fn drawn_here(key: &str) -> bool {
         "clipboard_hotkey" | "typing_hotkey" => cfg!(any(windows, target_os = "linux")),
         // R3: the lock on Linux too.
         "away_lock_minutes" => cfg!(any(windows, target_os = "linux")),
+        // Approve with my phone: Linux's PAM.
+        "phone_approves"
+        | "phone_approves_lock_screen"
+        | "phone_approves_polkit"
+        | "phone_approves_local_only"
+        | "phone_approves_timeout_secs"
+        | "phone_approves_phones" => cfg!(target_os = "linux"),
+        // Joining a phone's hotspot network by itself: NetworkManager's, so Linux.
+        "phone_hotspot_network" => cfg!(target_os = "linux"),
+        // The phone's location for GeoClue: Linux's.
+        "phone_location" | "phone_location_precision" | "phone_location_phone" => {
+            cfg!(target_os = "linux")
+        }
         "mic_relay_device" => cfg!(windows),
         // PC10: the window reads the microphone on Windows and Linux.
         "computer_view_mic_device" => cfg!(any(windows, target_os = "linux")),
@@ -571,9 +711,9 @@ pub(crate) fn drawn_here(key: &str) -> bool {
 /// timer is Windows' only (BK10 review M8).
 pub(crate) fn quick_note() -> &'static str {
     if cfg!(windows) {
-        "While the pointer is on another computer, or this one is driven, and keys or moves keep coming: Windows' timer runs finer for Pocketdesk, and this computer sends the other a byte every 50 ms so its Wi-Fi does not doze between keys. A little more battery while it lasts."
+        "While the pointer is on another computer, or this one is driven, and keys or moves keep coming: Windows' timer runs finer for Pocketdesk, and this computer sends the other a byte every 50 ms so its Wi-Fi does not doze between keys. Moves go at most every 2 ms, the newest kept. A little more battery while it lasts."
     } else {
-        "While the pointer is on another computer, or this one is driven, and keys or moves keep coming: this computer sends the other a byte every 50 ms so its Wi-Fi does not doze between keys. A little more battery while it lasts."
+        "While the pointer is on another computer, or this one is driven, and keys or moves keep coming: this computer sends the other a byte every 50 ms so its Wi-Fi does not doze between keys. Moves go at most every 2 ms, the newest kept. A little more battery while it lasts."
     }
 }
 
@@ -658,8 +798,13 @@ pub fn applies_live(key: &str) -> bool {
             | "computer_view_hevc"
             // PC8: read by an open window at once.
             | "computer_view_lock_on_close"
+            // Item 8: read as a window starts showing a computer.
+            | "computer_view_fit"
             // Read as each window opens.
             | "computer_view_scancodes"
+            // Read by an open window at once, and by shared input within a
+            // second or two.
+            | "smooth_scrolling"
             // PC10: read as the window's mic starts.
             | "computer_view_mic_device"
             | "events"
@@ -682,9 +827,26 @@ pub fn applies_live(key: &str) -> bool {
             | "phone_live_updates"
             | "notification_pictures"
             | "cast_control"
+            | "phone_apps_page"
+            | "phone_apps_pin"
+            | "phone_drop_share"
+            | "phone_app_windows"
+            | "phone_app_keymaps"
+            // Read by the window at each "Use my phone's hotspot".
+            | "phone_hotspot_network"
             | "gamepad_controller"
             | "downloads_folder"
+            // Read by the server at each kept file and each run's end.
+            | "kept_folders"
+            | "kept_folders_root"
+            | "kept_folders_cap_gb"
+            | "kept_folders_allow_delete"
             | "remember_screen_grant"
+            | "gnome_unattended"
+            // Read as each link is asked for, and each tick of one that is on.
+            | "direct_link"
+            | "direct_link_band"
+            | "direct_link_idle_minutes"
             | "clipboard_history"
             | "clipboard_never_from"
             | "clipboard_never_like"
@@ -706,6 +868,13 @@ pub fn applies_live(key: &str) -> bool {
             | "phone_alarms"
             | "link_rules"
             | "away_lock_minutes"
+            // Read by the PAM helper and the server at each request.
+            | "phone_approves"
+            | "phone_approves_lock_screen"
+            | "phone_approves_polkit"
+            | "phone_approves_local_only"
+            | "phone_approves_timeout_secs"
+            | "phone_approves_phones"
             // The key is read at start; the rest at each crossing.
             | "shared_input"
             | "shared_input_drive"
@@ -715,6 +884,15 @@ pub fn applies_live(key: &str) -> bool {
             | "shared_input_files"
             | "shared_input_sound"
             | "shared_input_low_latency"
+            // F6 part 2: read by the server at each camera ask and cast.
+            | "phone_camera"
+            | "phone_camera_lens"
+            | "phone_camera_height"
+            | "phone_camera_fps"
+            // Read by the server every few seconds and at each ask.
+            | "phone_location"
+            | "phone_location_precision"
+            | "phone_location_phone"
     )
 }
 
@@ -769,8 +947,12 @@ pub struct SettingsForm {
     home_assistant: Option<(std::time::Instant, Option<ha::Status>)>,
     /// A folder being picked for received files (C2).
     picking_downloads: Option<std::thread::JoinHandle<Option<std::path::PathBuf>>>,
+    /// A folder being picked for the folders phones keep here.
+    picking_kept: Option<std::thread::JoinHandle<Option<std::path::PathBuf>>>,
     /// A file being picked for notes from phones (BF4).
     picking_notes: Option<std::thread::JoinHandle<Option<std::path::PathBuf>>>,
+    /// Approve with my phone's set-up and Test.
+    approve: crate::approve_view::ApproveUi,
     /// The paired phones, id and name, for the phone commands' pickers
     /// (M9); the window sets it each frame.
     pub phones: Vec<(String, String)>,
@@ -805,7 +987,9 @@ impl SettingsForm {
             wake: pocketdesk_core::local::wake::wake_facts(None),
             home_assistant: None,
             picking_downloads: None,
+            picking_kept: None,
             picking_notes: None,
+            approve: Default::default(),
             phones: Vec::new(),
         }
     }
@@ -872,6 +1056,25 @@ impl SettingsForm {
     /// "Lock it when I close the window" as saved (PC8), for an open window.
     pub fn saved_computer_view_lock_on_close(&self) -> bool {
         self.saved.computer_view_lock_on_close
+    }
+
+    /// "Fit the screen to this window" as saved (item 8), for the windows
+    /// that open next.
+    pub fn saved_computer_view_fit(&self) -> bool {
+        self.saved.computer_view_fit
+    }
+
+    /// The window's bar saved `computer_view_fit` (item 8): this form says
+    /// the same, with nothing left to save.
+    pub fn saved_elsewhere_computer_view_fit(&mut self, on: bool) {
+        self.saved.computer_view_fit = on;
+        self.edited.computer_view_fit = on;
+        self.running.computer_view_fit = on;
+    }
+
+    /// "Smooth scrolling" as saved, for an open window.
+    pub fn saved_smooth_scrolling(&self) -> bool {
+        self.saved.smooth_scrolling
     }
 
     /// The window's bar saved `computer_view_lock_on_close` (PC8): this
@@ -1143,6 +1346,69 @@ impl SettingsForm {
                         {
                             let _ = pocketdesk_core::portal_grant::forget(&dir);
                         }
+                    });
+                }
+                // GNOME only: mutter's own D-Bus API, with no dialog.
+                if drawn_here("gnome_unattended") {
+                    row(ui, "gnome_unattended", |ui| {
+                        ui.checkbox(
+                            &mut e.gnome_unattended,
+                            "start the screen and input with no dialog at this computer",
+                        );
+                        note(
+                            ui,
+                            "GNOME only, off by default. Sessions start through GNOME's own screen-casting and remote-desktop service, as gnome-remote-desktop's headless mode does, so no one has to allow anything at this computer. Any program running as you can make the same calls. If GNOME's service is missing or refuses, the screen-sharing dialog is used instead. Every session still needs a paired phone and its permissions.",
+                        );
+                    });
+                }
+                // Linux and Windows: this computer's own Wi-Fi for one phone.
+                if drawn_here("direct_link") {
+                    row(ui, "direct_link", |ui| {
+                        ui.checkbox(
+                            &mut e.direct_link,
+                            "show \"Make a direct link\" on the Pair page",
+                        );
+                        note(
+                            ui,
+                            if cfg!(windows) {
+                                "For a train, a café with client isolation or a guest Wi-Fi, where a phone cannot reach this computer. You start each link, the phone joins this computer's own Wi-Fi for Pocketdesk only, and it turns itself off. It uses Windows' Mobile Hotspot, which shares this computer's internet connection (so it needs one), and while a link is on it changes the hotspot's name and passphrase and puts them back when it ends. If your own hotspot is on, no link is made."
+                            } else {
+                                "For a train, a café with client isolation or a guest Wi-Fi, where a phone cannot reach this computer. You start each link, the phone joins this computer's own Wi-Fi for Pocketdesk only, and it turns itself off. If this computer's Wi-Fi card cannot host its own network beside its connection, this computer's Wi-Fi disconnects while the link is on, and the Pair page says so first. Needs NetworkManager (and dnsmasq for sharing)."
+                            },
+                        );
+                    });
+                    row(ui, "direct_link_band", |ui| {
+                        let label = |setting: &str| match setting {
+                            "2.4" => "2.4 GHz",
+                            "5" => "5 GHz",
+                            _ => "Automatic (2.4 GHz)",
+                        };
+                        egui::ComboBox::from_id_salt("direct-link-band")
+                            .selected_text(label(&e.direct_link_band))
+                            .show_ui(ui, |ui| {
+                                for setting in ["auto", "2.4", "5"] {
+                                    ui.selectable_value(
+                                        &mut e.direct_link_band,
+                                        setting.to_string(),
+                                        label(setting),
+                                    );
+                                }
+                            });
+                        note(
+                            ui,
+                            "2.4 GHz is joined by every phone; 5 GHz is faster where the card allows a hotspot on it. A card that keeps one channel for both connections uses its connection's band.",
+                        );
+                    });
+                    row(ui, "direct_link_idle_minutes", |ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut e.direct_link_idle_minutes)
+                                .range(1..=120)
+                                .suffix(" min"),
+                        );
+                        note(
+                            ui,
+                            "A direct link turns itself off after this long with no phone using it (a phone has this long to scan and join).",
+                        );
                     });
                 }
                 row(ui, "internet_files", |ui| {
@@ -1469,6 +1735,65 @@ impl SettingsForm {
                         }
                     });
                 }
+                // Approve with my phone (Linux): sudo, polkit, the lock screen.
+                let approve = &mut self.approve;
+                let phones = &self.phones;
+                row(ui, "phone_approves", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_approves,
+                        "approve sudo and administrator prompts on my phone",
+                    );
+                    note(
+                        ui,
+                        "Through PAM, with your fingerprint or screen lock on the phone. The password always still works: when no phone is linked the password prompt comes at once, and otherwise after the wait below. Off by default.",
+                    );
+                    if e.phone_approves {
+                        approve.show(ui, &mut e.phone_approves_phones, phones);
+                    }
+                });
+                if e.phone_approves {
+                    row(ui, "phone_approves_lock_screen", |ui| {
+                        ui.checkbox(
+                            &mut e.phone_approves_lock_screen,
+                            "unlock the lock screen from the phone (hyprlock, swaylock, KDE, gtklock)",
+                        );
+                        note(
+                            ui,
+                            "Its own switch, off by default, and its own PAM line. The phone is asked when the lock screen starts checking; the password works as before.",
+                        );
+                    });
+                    row(ui, "phone_approves_polkit", |ui| {
+                        ui.checkbox(
+                            &mut e.phone_approves_polkit,
+                            "approve polkit's administrator prompts from the phone",
+                        );
+                        note(
+                            ui,
+                            "Its own switch, off by default. polkit does not tell PAM which action it asks for, so the phone cannot show it; a request from another user is refused; and the newer socket-started polkit helper has no parent processes to tell ssh by, so \"Only from this desk\" cannot judge it.",
+                        );
+                    });
+                    row(ui, "phone_approves_local_only", |ui| {
+                        ui.checkbox(
+                            &mut e.phone_approves_local_only,
+                            "refuse requests from an ssh session",
+                        );
+                        note(
+                            ui,
+                            "On by default: a best-effort guard, not a boundary. sudo typed in an ssh session asks for the password, not the phone; but sudo run over ssh inside a tmux started at this desk, or through systemd-run or a timer, is not seen as remote.",
+                        );
+                    });
+                    row(ui, "phone_approves_timeout_secs", |ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut e.phone_approves_timeout_secs)
+                                .range(5..=60)
+                                .suffix(" s"),
+                        );
+                        note(
+                            ui,
+                            "How long a request waits for the phone before the password prompt.",
+                        );
+                    });
+                }
                 row(ui, "open_links", |ui| {
                     ui.checkbox(
                         &mut e.open_links,
@@ -1548,7 +1873,7 @@ impl SettingsForm {
                 row(ui, "virtual_screens", |ui| {
                     ui.checkbox(
                         &mut e.virtual_screens,
-                        "a phone with Input can add a screen of its own shape (Sway, Hyprland)",
+                        "a phone, or a computer's screen window, with Input can add a screen (Sway, Hyprland): a phone's of its own shape, a window's of its own size",
                     );
                 });
                 // BF2: a still of the screen on a phone's Home.
@@ -1594,6 +1919,67 @@ impl SettingsForm {
                         "Files from phones, other computers and KDE Connect devices. A folder that is gone means Downloads.",
                     );
                 });
+                row(ui, "kept_folders", |ui| {
+                    ui.checkbox(
+                        &mut e.kept_folders,
+                        "your phones may keep folders here, on their own",
+                    );
+                    note(
+                        ui,
+                        "Only your own phones, and only the folders you pick on the phone (Settings, Folders kept on my computer). Each phone's folder lands in its own folder below the one chosen next.",
+                    );
+                });
+                // A folder picked for kept folders fills the box.
+                if self.picking_kept.as_ref().is_some_and(|h| h.is_finished())
+                    && let Some(Ok(Some(path))) = self.picking_kept.take().map(|h| h.join())
+                {
+                    e.kept_folders_root = path.display().to_string();
+                }
+                let picking = &mut self.picking_kept;
+                row(ui, "kept_folders_root", |ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut e.kept_folders_root)
+                            .hint_text("Documents/Pocketdesk phones")
+                            .desired_width(320.0),
+                    );
+                    if crate::pick_file::AVAILABLE
+                        && ui
+                            .add_enabled(picking.is_none(), egui::Button::new("Choose folder..."))
+                            .clicked()
+                    {
+                        *picking = Some(crate::pick_file::spawn(true));
+                    }
+                    if !e.kept_folders_root.trim().is_empty()
+                        && ui.button("Use the default").clicked()
+                    {
+                        e.kept_folders_root.clear();
+                    }
+                    note(
+                        ui,
+                        "A folder that is not there, or is Pocketdesk's own, means the default. Files already kept stay where they are if you change it.",
+                    );
+                });
+                row(ui, "kept_folders_cap_gb", |ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut e.kept_folders_cap_gb)
+                            .range(0..=100_000)
+                            .suffix(" GB"),
+                    );
+                    note(
+                        ui,
+                        "All kept folders together. A file that would pass it is refused and the Files page says so; 0 means no limit.",
+                    );
+                });
+                row(ui, "kept_folders_allow_delete", |ui| {
+                    ui.checkbox(
+                        &mut e.kept_folders_allow_delete,
+                        "a phone that mirrors deletions may delete here what it deleted",
+                    );
+                    note(
+                        ui,
+                        "Off, nothing is ever deleted from a kept folder. On, only plain files inside that phone's own folder here, and only ones it names; this and the phone's own Mirror deletions switch must both be on.",
+                    );
+                });
                 // BF4: a file picked for notes from phones fills the box.
                 if self.picking_notes.as_ref().is_some_and(|h| h.is_finished())
                     && let Some(Ok(Some(path))) = self.picking_notes.take().map(|h| h.join())
@@ -1632,6 +2018,158 @@ impl SettingsForm {
                         "Only once the phone allows it: \"Let the computer control this phone\" in Pocketdesk's Settings on the phone.",
                     );
                 });
+                row(ui, "phone_apps_page", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_apps_page,
+                        "list the Phone apps page, to open a phone's apps from here",
+                    );
+                    note(
+                        ui,
+                        "The page shows a linked phone's apps and opens one there, with its screen in a window here. On the phone it needs \"Let the computer open my apps\" on (off by default) and Pocketdesk's control service.",
+                    );
+                });
+                row(ui, "phone_apps_pin", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_apps_pin,
+                        "right-click a phone app to pin it to Start (Windows) or the applications menu (Linux)",
+                    );
+                    note(
+                        ui,
+                        "The pin is a shortcut named \"<app> (phone)\" that opens the app on the phone from this computer. On Windows, right-click it in Start to put it on the taskbar too. Shortcuts already pinned keep working with this off.",
+                    );
+                });
+                row(ui, "phone_drop_share", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_drop_share,
+                        "a file dropped on a phone's screen window is also shared into the app in front there, when it takes that file",
+                    );
+                    note(
+                        ui,
+                        "One file at a time; if the app takes no such file it stays in Downloads and the window says so. On the phone it needs \"Let the computer open my apps\" on (off by default) and Pocketdesk's control service, with the screen shown to this computer. Pocketdesk reads only which app is in front, once, when the file is dropped.",
+                    );
+                });
+                row(ui, "phone_app_windows", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_app_windows,
+                        "open a phone's app in a window of its own, several at once, when the phone offers it",
+                    );
+                    note(
+                        ui,
+                        "Only with the phone's \"Separate windows (Shizuku)\" on, which is off by default and shown there only when Shizuku is installed and running. Each app then runs on a screen of its own on the phone, and the phone's own screen stays off or shows something else. Off, or with a phone that does not offer it, an app opens on the phone's screen as before.",
+                    );
+                });
+                row(ui, "phone_app_keymaps", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_app_keymaps,
+                        "play a phone's game from this computer's keyboard and mouse, in its app window",
+                    );
+                    note(
+                        ui,
+                        "Off by default. Each app window then has \u{201c}Keys to taps\u{201d} on its bar: draw where keys tap, a stick and a swipe on the picture, and lock the pointer to aim with the mouse (Ctrl+Alt+Shift+M). It sends several fingers at once and needs the window setting above, so Shizuku on the phone: the phone's own screen window and a phone without Shizuku have no keymaps. Some online games flag injected input as cheating: use it where that is fine. The keymaps are kept on this computer only, one per app.",
+                    );
+                });
+                // Use my phone's hotspot: joining by itself is NetworkManager's, so Linux only.
+                if drawn_here("phone_hotspot_network") {
+                    row(ui, "phone_hotspot_network", |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut e.phone_hotspot_network)
+                                .char_limit(
+                                    pocketdesk_core::local::phone_hotspot::MAX_NETWORK_BYTES,
+                                )
+                                .hint_text("a saved Wi-Fi network, e.g. My phone"),
+                        );
+                        note(
+                            ui,
+                            "After \u{201c}Use my phone's hotspot\u{201d} (Overview, for a phone that offers it: its \u{201c}Let my computers turn on my hotspot\u{201d} is on, which needs Shizuku), join this Wi-Fi network by itself with NetworkManager, but only if it is already saved on this computer. Empty (the default): you are only told to connect. The phone's password is never asked for, kept or sent; the phone is asked for nothing but \u{201c}on\u{201d} or \u{201c}off\u{201d}.",
+                        );
+                    });
+                }
+                // F6 part 2: a PipeWire camera, so Linux only.
+                if cfg!(target_os = "linux") {
+                    row(ui, "phone_camera", |ui| {
+                        ui.checkbox(
+                            &mut e.phone_camera,
+                            "a phone can be this computer's camera, for video calls, OBS and the browser",
+                        );
+                        note(
+                            ui,
+                            "Use as a camera, on the Overview, asks a phone with \u{201c}Use its camera as a webcam\u{201d} on (Devices); the phone asks its owner in a notification, and while its camera is in use apps here see \u{201c}Pocketdesk camera (phone)\u{201d} (PipeWire; apps that only read /dev/video reach it through pw-v4l2). No kernel module. Stopped from the phone's notification.",
+                        );
+                    });
+                    if e.phone_camera {
+                        row(ui, "phone_camera_lens", |ui| {
+                            for (lens, label) in [("back", "Back"), ("front", "Front")] {
+                                let picked = e.phone_camera_lens.eq_ignore_ascii_case(lens);
+                                if ui.radio(picked, label).clicked() {
+                                    e.phone_camera_lens = lens.to_string();
+                                }
+                            }
+                        });
+                        row(ui, "phone_camera_height", |ui| {
+                            for height in pocketdesk_core::protocol::phone_camera::HEIGHTS {
+                                ui.radio_value(
+                                    &mut e.phone_camera_height,
+                                    u32::from(height),
+                                    format!("{height}p"),
+                                );
+                            }
+                        });
+                        row(ui, "phone_camera_fps", |ui| {
+                            for fps in pocketdesk_core::protocol::phone_camera::FRAME_RATES {
+                                ui.radio_value(
+                                    &mut e.phone_camera_fps,
+                                    u32::from(fps),
+                                    format!("{fps} a second"),
+                                );
+                            }
+                            note(
+                                ui,
+                                "What the phone is asked for; it takes the nearest its camera offers.",
+                            );
+                        });
+                    }
+                }
+                // The phone's location for GeoClue (Linux): off by default.
+                if drawn_here("phone_location") {
+                    let phones = &self.phones;
+                    row(ui, "phone_location", |ui| {
+                        ui.checkbox(
+                            &mut e.phone_location,
+                            "give this computer's apps my phone's location, through GeoClue (weather, night light, time zone, maps)",
+                        );
+                        note(
+                            ui,
+                            "This computer serves one location source to itself only and tells GeoClue about it over Avahi (needs avahi-daemon running); when an app wants a place, the phone is asked for one fix, at most every ten minutes, and only with \u{201c}Give my computer my location\u{201d} on in Pocketdesk's Settings on the phone. Nothing is stored or logged but the accuracy; each fix shows in Activity. Off by default.",
+                        );
+                    });
+                    if e.phone_location {
+                        row(ui, "phone_location_precision", |ui| {
+                            for (name, label) in [("city", "City (about 1 km)"), ("exact", "Exact")]
+                            {
+                                let picked = e.phone_location_precision.eq_ignore_ascii_case(name);
+                                if ui.radio(picked, label).clicked() {
+                                    e.phone_location_precision = name.to_string();
+                                }
+                            }
+                            note(
+                                ui,
+                                "City rounds the place to about a kilometre before it leaves the phone. Exact needs the phone's \u{201c}Exact location\u{201d} on as well; without it the phone still gives the city.",
+                            );
+                        });
+                        row(ui, "phone_location_phone", |ui| {
+                            let any = e.phone_location_phone.is_empty();
+                            if ui.radio(any, "Any of my phones that is linked").clicked() {
+                                e.phone_location_phone.clear();
+                            }
+                            for (id, name) in phones {
+                                let picked = e.phone_location_phone == *id;
+                                if ui.radio(picked, name).clicked() {
+                                    e.phone_location_phone = id.clone();
+                                }
+                            }
+                        });
+                    }
+                }
                 // T7: Linux makes the controller; Windows has the keys only.
                 if !cfg!(windows) {
                     row(ui, "gamepad_controller", |ui| {
@@ -2282,6 +2820,16 @@ impl SettingsForm {
                         "With that computer's own lock, when the window closes, or Pocketdesk quits with it open, while it shows that computer (not while it reconnects); a notification says when it could not lock. That computer decides: its Devices page needs \u{201c}Lock, sleep, privacy and wake others\u{201d} on for this computer. The window's bar has it too, with \u{201c}Hide what I do there\u{201d}.",
                     );
                 });
+                row(ui, "computer_view_fit", |ui| {
+                    ui.checkbox(
+                        &mut e.computer_view_fit,
+                        "fit the screen to this window: a computer's screen window asks the other computer for a screen of its own size, and resizes it as the window is resized",
+                    );
+                    note(
+                        ui,
+                        "Only a Linux computer on Hyprland or Sway can: it makes an extra, empty screen (a virtual one, an \u{201c}empty extra desktop\u{201d}; nothing is moved onto it) and removes it when the window closes. A Windows computer cannot, and the switch is greyed on the window's bar. The other computer needs \u{201c}Phones may add a screen\u{201d} on (Settings under Phones) and Input control on for this one; at most four screens are made there in all. Starts from this the next time a window shows a computer; the window's bar has the switch too.",
+                    );
+                });
                 // Keys by position: the window's start for a computer with
                 // no choice of its own.
                 row(ui, "computer_view_scancodes", |ui| {
@@ -2292,6 +2840,17 @@ impl SettingsForm {
                     note(
                         ui,
                         "The other computer's own keyboard layout then says what each key types. The window's bar switches it for each computer, and that choice is kept for that computer; this is the start for a computer never switched. Shortcuts follow the key's place there too, and the keypad's digits go as the main keyboard's.",
+                    );
+                });
+                // Fine scrolling: a touchpad's scroll in 120ths of a notch.
+                row(ui, "smooth_scrolling", |ui| {
+                    ui.checkbox(
+                        &mut e.smooth_scrolling,
+                        "smooth scrolling: a touchpad's scroll goes to the other computer as finely as it comes, from a computer's screen window and from shared input",
+                    );
+                    note(
+                        ui,
+                        "That computer scrolls by it as finely as it can, so a slow two-finger scroll moves a little at a time instead of a notch at a time. Off, the window sends what it sent before this setting came. A computer older than this gets whole notches either way. The phone has its own switch.",
                     );
                 });
                 // PC10: the microphone "Send my mic" sends.
@@ -2664,7 +3223,7 @@ fn quiet_problem(config: &Config) -> Option<&'static str> {
 }
 
 /// A row's note, small and quiet.
-fn note(ui: &mut egui::Ui, text: impl Into<String>) {
+pub(crate) fn note(ui: &mut egui::Ui, text: impl Into<String>) {
     ui.label(RichText::new(text.into()).small().weak());
 }
 
@@ -2809,6 +3368,9 @@ mod tests {
         // An extra counts for its section.
         assert!(section_shown("browser", Section::Phones));
         assert!(section_shown("kde", Section::KdeConnect));
+        // The wake helper phone sits with the wake rows.
+        assert!(section_shown("wake helper", Section::Wake));
+        assert!(!section_shown("wake helper", Section::Phones));
         for section in Section::ALL {
             assert!(!section_shown("zzzz nothing", section), "{section:?}");
         }
@@ -3104,7 +3666,9 @@ mod tests {
             "computer_view_hw_decode",
             "computer_view_hevc",
             "computer_view_lock_on_close",
+            "computer_view_fit",
             "computer_view_scancodes",
+            "smooth_scrolling",
             "computer_view_mic_device",
         ] {
             assert!(

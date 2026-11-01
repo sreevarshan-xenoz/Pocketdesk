@@ -39,7 +39,7 @@ build() {
   export CARGO_TARGET_DIR=target
   # Two builds, as the release does, so the server's zbus features are not
   # unified into the desktop app's.
-  cargo build --frozen --release --bin pocketdesk
+  cargo build --frozen --release --bin pocketdesk --bin pocketdesk-pam-ask
   cargo build --frozen --release -p pocketdesk-desktop --bin pocketdesk-app --bin pocketdesk-tray
 }
 
@@ -48,6 +48,9 @@ package() {
   for bin in pocketdesk pocketdesk-app pocketdesk-tray; do
     install -Dm755 "target/release/${bin}" "${pkgdir}/usr/bin/${bin}"
   done
+  # "Approve with my phone": PAM's helper, root's. Unused until the owner
+  # adds its line to /etc/pam.d; the package never touches PAM.
+  install -Dm755 target/release/pocketdesk-pam-ask "${pkgdir}/usr/lib/pocketdesk/pocketdesk-pam-ask"
   # Session-bound USER unit: each user can `systemctl --user enable --now
   # pocketdesk` from their desktop session.
   install -dm755 "${pkgdir}/usr/lib/systemd/user"

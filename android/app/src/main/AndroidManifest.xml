@@ -71,13 +71,64 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
+        <!--
+            Phone apps tier 2: which apps are the phone's own settings, application
+            management, installer and permission screens, so that none of them is ever
+            opened in a window of its own. Only package names are read.
+        -->
+        <intent>
+            <action android:name="android.settings.SETTINGS" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.MANAGE_APPLICATIONS_SETTINGS" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.SECURITY_SETTINGS" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.ACCESSIBILITY_SETTINGS" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.APPLICATION_DETAILS_SETTINGS" />
+            <data android:scheme="package" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.INSTALL_PACKAGE" />
+            <data android:mimeType="application/vnd.android.package-archive" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.UNINSTALL_PACKAGE" />
+            <data android:scheme="package" />
+        </intent>
     </queries>
     <!-- Scanning a desktop's pairing code; the app works without a camera. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- GeoClue: "Give my computer my location", off by default. The coarse
+         permission gives the city (about 1 km) and is asked at opt-in; the fine
+         one only when its owner also allows "Exact location". The background
+         one is optional and only for an ask while the app is not on screen:
+         Android shows no location to a background app without it. It is never
+         requested by the app itself, only chosen by its owner in the app's
+         location settings; Google Play wants a declaration for it, GitHub,
+         Obtainium and F-Droid builds do not. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <uses-feature android:name="android.hardware.location.network" android:required="false" />
     <!-- BF3: Yes to the computer's question takes the fingerprint or screen lock. -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+
+    <!-- Item 9: a paired Wear OS watch calls the phone over Bluetooth, only
+         with "Watch controls" on, and the permission is asked only then. It
+         is the nearby-devices permission to connect to a device already
+         paired: no scan, no location, no Google service. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
 
     <!-- R4 E2 mic-share needs a mic but the app is fully usable without one. -->
     <uses-feature
@@ -186,15 +237,42 @@
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
 
+        <!-- A spare phone as the wake helper: in the foreground while its switch is on, listening only on a charger and Wi-Fi. -->
+        <service
+            android:name=".service.WakeHelperService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
         <service
             android:name=".service.TransferService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!--
+            Phone apps tier 2 (separate windows) runs its cast, with no screen of the
+            phone's, as special use: nothing is captured of the phone's own screen.
+        -->
         <service
             android:name=".cast.CastService"
             android:exported="false"
-            android:foregroundServiceType="mediaProjection|camera" />
+            android:foregroundServiceType="mediaProjection|camera|specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Shows phone apps in windows of their own on the paired computer, only when the owner turned on separate windows (Shizuku) and the computer asked for one" />
+        </service>
+
+        <!--
+            Phone apps tier 2: how Shizuku, when the owner runs it, hands this app its
+            binder. Exported with Shizuku's own permission, as its documentation
+            asks; nothing else reads it.
+        -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
         <!-- C8: control from the computer during a cast; only Android binds it. -->
         <service
@@ -247,6 +325,37 @@
             android:excludeFromRecents="true"
             android:exported="false"
             android:noHistory="false"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- F6 part 2: opened by a tap on the computer's camera ask; starts the
+             camera in the cast service, with its notification, and closes. -->
+        <activity
+            android:name=".cast.WebcamActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- Apps part 1: opened by the tap on "show the screen to open an app";
+             asks Android's screen-capture consent once, starts the cast, and closes. -->
+        <activity
+            android:name=".cast.ScreenForAppActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- Hands-free: started only by the control service for an open the computer asked for;
+             wakes the phone and asks Android to swipe away a lock screen that guards nothing
+             (a secure lock is never touched), then closes. Shows nothing. It shows over the
+             lock screen and turns the screen on only from code, after it has looked at the
+             lock again, never by a manifest flag. -->
+        <activity
+            android:name=".control.DismissKeyguardActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
             android:taskAffinity=""
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 

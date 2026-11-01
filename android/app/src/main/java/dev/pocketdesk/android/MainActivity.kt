@@ -145,6 +145,14 @@ class MainActivity : ComponentActivity() {
         // M1: the app in front may start what Android refused from the background.
         val app = applicationContext
         Thread { runCatching { dev.pocketdesk.android.service.LinkKeeperService.sync(app) } }.start()
+        Thread { runCatching { dev.pocketdesk.android.service.WakeHelperService.sync(app) } }.start()
+        // A run of the kept folders that was due while Android would not start it.
+        Thread {
+            runCatching {
+                dev.pocketdesk.android.files.KeptFolders.ensureScheduled(app)
+                dev.pocketdesk.android.files.KeptFolders.startIfDue(app)
+            }
+        }.start()
     }
 
     override fun onStop() {
@@ -373,6 +381,16 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
+                    // A direct link's network (a computer's own Wi-Fi, joined
+                    // for Pocketdesk only) is let go once nothing needs it:
+                    // no pairing under way and no session. Nothing joined,
+                    // nothing happens.
+                    LaunchedEffect(sessionKey, pairLink.value) {
+                        if (sessionKey == null && pairLink.value == null) {
+                            dev.pocketdesk.android.pair.DirectLinkNetwork.release(this@MainActivity)
+                        }
+                    }
+
                     val pairing = pairLink.value
                     if (pairing != null) {
                         Box(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
@@ -576,7 +594,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.putString(STATE_PAIR_LINK, pairLink.value)
+        // Never the Wi-Fi passphrase of a direct link: saved instance state
+        // can reach a backup or a crash report.
+        outState.putString(
+            STATE_PAIR_LINK,
+            pairLink.value?.let { dev.pocketdesk.android.pair.PairLink.withoutWifi(it) },
+        )
         outState.putBoolean(STATE_PAIR_SCANNED, pairLinkScanned.value)
     }
 

@@ -274,6 +274,9 @@ class PhoneNotificationListener : NotificationListenerService() {
     private val recentPhotosTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
     private val phoneFilesTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
 
+    /** The computer asking where this phone is (GeoClue), on the photos' tick: it answers from its own thread. */
+    private val phoneLocation by lazy { dev.pocketdesk.android.location.PhoneLocation(applicationContext) }
+
     /** The computer ringing this phone (N1), on a 2 s tick of its own: its connect can take seconds. */
     private val ring by lazy { dev.pocketdesk.android.ring.BackgroundRing(applicationContext) }
     private val ringTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
@@ -344,7 +347,10 @@ class PhoneNotificationListener : NotificationListenerService() {
             TimeUnit.SECONDS,
         )
         recentPhotosTicker.scheduleWithFixedDelay(
-            { runCatching { recentPhotos.tick() }.onFailure { Log.w("PhoneNotifications", "recent photos failed", it) } },
+            {
+                runCatching { recentPhotos.tick() }.onFailure { Log.w("PhoneNotifications", "recent photos failed", it) }
+                runCatching { phoneLocation.tick() }.onFailure { Log.w("PhoneNotifications", "phone location failed", it) }
+            },
             2,
             2,
             TimeUnit.SECONDS,
@@ -362,6 +368,9 @@ class PhoneNotificationListener : NotificationListenerService() {
             {
                 runCatching { screenshots.tick() }.onFailure { Log.w("PhoneNotifications", "screenshots failed", it) }
                 runCatching { cameraUploads.tick() }.onFailure { Log.w("PhoneNotifications", "camera photos failed", it) }
+                // A run of the kept folders the schedule called while Android would not start it.
+                runCatching { dev.pocketdesk.android.files.KeptFolders.startIfDue(applicationContext) }
+                    .onFailure { Log.w("PhoneNotifications", "kept folders failed", it) }
             },
             2,
             2,
@@ -405,6 +414,7 @@ class PhoneNotificationListener : NotificationListenerService() {
 
     override fun onDestroy() {
         calls.stop()
+        dev.pocketdesk.android.watch.WatchLinkServer.stop()
         answerTicker.shutdownNow()
         inUseAsker.shutdownNow()
         keeperTicker.shutdownNow()
@@ -412,6 +422,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         runCatching { dev.pocketdesk.android.service.LinkKeeperService.sync(this) }
         phoneFilesTicker.shutdownNow()
         recentPhotosTicker.shutdownNow()
+        runCatching { phoneLocation.close() }
         ringTicker.shutdownNow()
         screenshotsTicker.shutdownNow()
         screenshots.close()
@@ -952,6 +963,13 @@ class PhoneNotificationListener : NotificationListenerService() {
         media.sync()
         // Its inputs (the features, shared folders' grants, the saved
         // computers) cost a read each: every 10 s is soon enough (M1 review).
+        if (keeperTicks % 5 == 0) {
+            // What computers said of wake helpers, kept for the Wake button.
+            if (runCatching { dev.pocketdesk.android.wake.WakeHelperKeeper.poll(this) }.getOrDefault(false)) {
+                // A computer removed this phone as its helper: the listener stops now.
+                dev.pocketdesk.android.service.WakeHelperService.sync(this)
+            }
+        }
         if (keeperTicks++ % 5 == 0) dev.pocketdesk.android.service.LinkKeeperService.sync(this)
     }
 
@@ -1038,6 +1056,8 @@ class PhoneNotificationListener : NotificationListenerService() {
         }
         // BF3: questions from `pocketdesk ask`, offered with no session open.
         dev.pocketdesk.android.ask.Asks.take(this, own)
+        // Item 9: the watch's Bluetooth service, while Watch controls is on.
+        dev.pocketdesk.android.watch.WatchLinkServer.sync(this)
         // BF1: alerts from `pocketdesk done`, shown with no session open.
         own?.let { dev.pocketdesk.android.notify.ComputerAlerts.take(this, it.address, it.controlPort) }
         // O2: screenshots and locks the computer asks for, taken whatever

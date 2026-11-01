@@ -37,9 +37,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use pocketdesk_core::local::cast::{TOKEN_LEN, token_hex, token_matches};
-use pocketdesk_core::local::computers::{self, PeerComputer};
+use pocketdesk_core::local::computers::{self, FitSize, PeerComputer};
 use pocketdesk_core::local::view::{
-    self as wire, Message, Phase, ViewFile, ViewPrivacy, ViewStatus,
+    self as wire, Message, Phase, ViewFile, ViewFit, ViewPrivacy, ViewStatus,
 };
 use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
 use pocketdesk_core::streaming::cast::CastChain;
@@ -218,11 +218,14 @@ pub enum Command {
     /// Show the computer `device_id`'s screen `monitor` in the app's
     /// window `window` (PC11: up to [`wire::MAX_VIEWS`] at once), replacing
     /// that window's view. `hevc`: the app decodes HEVC and asks for it (PC5).
+    /// `fit`: the window's size, to show a screen the other computer makes
+    /// to fit it ([`crate::fit_screen`], item 8) in place of `monitor`.
     Start {
         device_id: String,
         monitor: u32,
         hevc: bool,
         window: u8,
+        fit: Option<FitSize>,
     },
     /// Stop showing it: the view `session_id` when given (one since
     /// replaced is left alone, BK7 review M1), else the one the window
@@ -1007,8 +1010,10 @@ async fn session(
     session_id: u64,
     state_dir: PathBuf,
     mut computer: PeerComputer,
-    monitor: u32,
+    asked_monitor: u32,
     hevc: bool,
+    window: u8,
+    fit: Option<FitSize>,
     dialer: Arc<Dialer>,
     events: mpsc::Sender<(u64, Event)>,
     input: mpsc::Receiver<InputPacket>,
@@ -1016,12 +1021,24 @@ async fn session(
 ) {
     let say = Say { session_id, events };
     let name = computer.name.clone();
+    // The screen shown: the one asked for, or the other computer's screen
+    // made to fit the window (item 8) once it says it made one.
+    let mut monitor = asked_monitor;
     let mut status = ViewStatus {
         monitor,
+        fit: Box::new(if fit.is_some() {
+            ViewFit::Asking
+        } else {
+            ViewFit::Off
+        }),
         ..ViewStatus::default()
     };
     crate::peer_computers::ask_screens(&computer.device_id);
     say.say(Event::Status(status.clone())).await;
+    if let Some(size) = fit {
+        monitor = apply_fit(&computer, window, size, asked_monitor, &mut status).await;
+        say.say(Event::Status(status.clone())).await;
+    }
     // The window's input goes to the session of the moment, for the
     // view's whole life.
     let (conn_now, conn_rx) = tokio::sync::watch::channel(None);
@@ -1098,6 +1115,7 @@ async fn session(
             monitors: std::mem::take(&mut status.monitors),
             layout: std::mem::take(&mut status.layout),
             reconnecting: attempt_no,
+            fit: status.fit.clone(),
             ..ViewStatus::default()
         };
         say.say(Event::Status(status.clone())).await;
@@ -1116,6 +1134,42 @@ async fn session(
                     .await;
                 return;
             }
+        }
+        // The fitted screen asked for again (it is the same one, kept there
+        // while the window lives), as a computer that restarted has none and
+        // its screen numbers may have moved on.
+        if let Some(size) = fit {
+            monitor = apply_fit(&computer, window, size, asked_monitor, &mut status).await;
+            say.say(Event::Status(status.clone())).await;
+        }
+    }
+}
+
+/// Ask the computer for the window's fitted screen ([`crate::fit_screen`])
+/// and say how it went in `status`: the screen's number and size, or why
+/// not. The screen to dial: the fitted one, or, when none was made, the one
+/// the window `asked` for.
+async fn apply_fit(
+    computer: &PeerComputer,
+    window: u8,
+    size: FitSize,
+    asked: u32,
+    status: &mut ViewStatus,
+) -> u32 {
+    match crate::fit_screen::fit(&computer.device_id, window, size).await {
+        Ok(fitted) => {
+            *status.fit = ViewFit::Fitted {
+                width: fitted.width,
+                height: fitted.height,
+            };
+            status.monitor = fitted.index;
+            fitted.index
+        }
+        Err(why) => {
+            tracing::info!(device_id = %computer.device_id, "No screen was made to fit the window: {why}");
+            *status.fit = ViewFit::Failed(format!("{}: {why}", computer.name));
+            status.monitor = asked;
+            asked
         }
     }
 }
@@ -1952,12 +2006,19 @@ struct View {
     window_dropped: u64,
     /// The window's focus last passed on, and when (PC3).
     focus_said: Option<(bool, Instant)>,
+    /// The computer whose screen this window may have made to fit it (item
+    /// 8): taken away there as the view ends, unless the window's next view
+    /// of the same computer carries it on.
+    fit_held: Option<String>,
 }
 
 impl Drop for View {
     fn drop(&mut self) {
         if let Some(task) = self.task.take() {
             task.abort();
+        }
+        if let Some(device_id) = self.fit_held.take() {
+            crate::fit_screen::release(&device_id, self.window);
         }
     }
 }
@@ -2105,7 +2166,7 @@ pub async fn run_with(
                 let Some(command) = command else { break };
                 let shown: Vec<Option<u64>> =
                     views.iter().map(|v| v.as_ref().map(|v| v.session_id)).collect();
-                let Command::Start { device_id, monitor, hevc, window } = command else {
+                let Command::Start { device_id, monitor, hevc, window, fit } = command else {
                     match command {
                         Command::Stop { session_id, window } => {
                             if let Some(i) = stop_slot(&shown, session_id, window)
@@ -2156,13 +2217,25 @@ pub async fn run_with(
                     .as_mut()
                     .filter(|v| v.device_id == device_id && v.ended.is_none())
                     .and_then(|v| v.privacy.take().map(|hold| (hold, v.status.privacy.clone())));
-                end(&mut views[slot], &mut viewers[slot], &state_dir, None);
-                next_id += 1;
-                let session_id = next_id;
+                // The same window's next view of the same computer, fitted
+                // again (a resize), keeps the screen it made there: the new
+                // session asks for it at the new size, and the old view's
+                // end does not take it away first (item 8). Only when the
+                // new view will start: with the computer gone from the list,
+                // the old end must still take its screen away (#609 review).
                 let computer = computers::read(&state_dir)
                     .computers
                     .into_iter()
                     .find(|c| c.device_id == device_id);
+                if fit.is_some()
+                    && computer.is_some()
+                    && let Some(old) = views[slot].as_mut().filter(|v| v.device_id == device_id)
+                {
+                    old.fit_held = None;
+                }
+                end(&mut views[slot], &mut viewers[slot], &state_dir, None);
+                next_id += 1;
+                let session_id = next_id;
                 let mut token = [0u8; TOKEN_LEN];
                 rand::rngs::OsRng.fill_bytes(&mut token);
                 let name = computer.as_ref().map_or_else(|| "That computer".to_string(), |c| c.name.clone());
@@ -2189,6 +2262,8 @@ pub async fn run_with(
                             computer,
                             monitor,
                             hevc,
+                            window,
+                            fit,
                             dialer.clone(),
                             events_tx.clone(),
                             input_rx,
@@ -2205,6 +2280,8 @@ pub async fn run_with(
                     Some((hold, said)) => (Some(hold), said),
                     None => (None, ViewPrivacy::Off),
                 };
+                // A view that never started has no screen to take away.
+                let fit_held = (fit.is_some() && task.is_some()).then(|| device_id.clone());
                 views[slot] = Some(View {
                     session_id,
                     window,
@@ -2223,6 +2300,7 @@ pub async fn run_with(
                     asks: CastChain::default(),
                     window_dropped: 0,
                     focus_said: None,
+                    fit_held,
                 });
             }
             Some((session_id, event)) = events.recv() => {

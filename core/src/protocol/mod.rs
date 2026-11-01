@@ -1,3 +1,4 @@
+pub mod approve;
 pub mod ask;
 pub mod backoff;
 pub mod clipboard;
@@ -10,6 +11,7 @@ pub mod file_time;
 pub mod in_use;
 pub mod introductions;
 pub mod kdeconnect;
+pub mod kept;
 pub mod link;
 pub mod live;
 pub mod note;
@@ -18,7 +20,9 @@ pub mod partials;
 pub mod peek;
 pub mod permissions;
 pub mod phone_action;
+pub mod phone_camera;
 pub mod phone_files;
+pub mod phone_location;
 pub mod phone_media;
 pub mod phone_photos;
 pub mod phone_screen;
@@ -28,6 +32,7 @@ pub mod remote_devices;
 pub mod transfer;
 pub mod typing;
 pub mod v2;
+pub mod wake_helper;
 
 #[cfg(test)]
 mod connection_test;
@@ -78,3 +83,9 @@ pub const HANDSHAKE_TLS_REQUIRED: &str = "POCKETDESK_ERR 1 tls-required";
 /// What the control channel over the internet (T10a) answers a phone it
 /// does not admit, in place of the desktop's identity.
 pub const HANDSHAKE_REFUSED: &str = "POCKETDESK_ERR 1 refused";
+
+/// The longest `pocketdesk://pair` link read, in bytes, wherever one
+/// arrives: pasted or scanned (`local::pair_link`), or in an introduction's
+/// answer. A link a desktop makes is a few hundred bytes; a QR code holds
+/// under 3 KB.
+pub const MAX_PAIR_LINK_BYTES: usize = 8 * 1024;

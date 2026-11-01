@@ -75,6 +75,9 @@ pub struct Snapshot {
     pub kde_devices: Vec<(String, String)>,
     /// Files moving now, as the running server last wrote (C1).
     pub under_way: Vec<pocketdesk_core::local::transfers::Transfer>,
+    /// The phone folders kept on this computer, as the server last wrote
+    /// them: each with its place, size and how its last run went.
+    pub kept: Vec<pocketdesk_core::local::kept_folders::KeptFolder>,
     /// The port the running server bound (T1): its own record, not one an
     /// earlier run left.
     pub listening: Option<pocketdesk_core::local::listening::Listening>,
@@ -219,7 +222,53 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
         } else {
             Vec::new()
         },
+        // What was kept stays kept, running or not.
+        kept: pocketdesk_core::local::kept_folders::read(state_dir),
     }
+}
+
+/// What a kept folder's row says of its size and last run: "12 files · 3.1
+/// MB · last run 5 min ago", or that no run has ended yet.
+pub fn kept_summary(folder: &pocketdesk_core::local::kept_folders::KeptFolder, now: u64) -> String {
+    let held = format!(
+        "{} · {}",
+        crate::words::count(folder.files as usize, "file", "files"),
+        crate::words::human_size(folder.bytes)
+    );
+    if folder.last_unix == 0 {
+        return format!("{held} · nothing kept yet");
+    }
+    let mut words = format!(
+        "{held} · last run {}",
+        crate::words::ago(now, folder.last_unix)
+    );
+    if folder.last_failed > 0 {
+        words.push_str(&format!(
+            " · {} not sent",
+            crate::words::count(folder.last_failed as usize, "file", "files")
+        ));
+    }
+    words
+}
+
+/// What a kept folder's row says of deletions, if there is anything: files
+/// deleted here as the phone mirrored its own, and the ones left because
+/// this computer does not allow it.
+pub fn kept_deletions(folder: &pocketdesk_core::local::kept_folders::KeptFolder) -> Option<String> {
+    let mut parts = Vec::new();
+    if folder.deleted > 0 {
+        parts.push(format!(
+            "{} deleted here as on the phone",
+            crate::words::count(folder.deleted as usize, "file", "files")
+        ));
+    }
+    if folder.deletes_skipped > 0 {
+        parts.push(format!(
+            "{} kept although deleted on the phone (Settings, Kept folders may mirror deletions, is off)",
+            crate::words::count(folder.deletes_skipped as usize, "file", "files")
+        ));
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
 /// A file under way by its place: "Holiday/beach.jpg" for a file of a
@@ -745,6 +794,13 @@ pub const FEATURES: &[Feature] = &[
         permission_name: "Peek at this screen",
         android: "",
     },
+    Feature {
+        key: "hotspot",
+        what: "Turning on its hotspot from here",
+        phone_switch: "Let my computers turn on my hotspot",
+        permission_name: "Screenshot, lock and open its apps",
+        android: "Shizuku running and allowed, and notification access",
+    },
 ];
 
 /// Whether O2's screenshot and lock reach a phone now: [`linked`] to this
@@ -753,6 +809,51 @@ pub const FEATURES: &[Feature] = &[
 pub fn phone_action_reach(linked: bool, allowed: bool) -> Result<(), &'static str> {
     if !allowed {
         Err("This phone's \"Screenshot, lock and open its apps\" is off in Devices.")
+    } else if !linked {
+        Err("The phone is not linked now: a session, or one of its background features, links it.")
+    } else {
+        Ok(())
+    }
+}
+
+/// Use my phone's hotspot: whether the buttons are shown for a phone. They are
+/// shown only once the phone said its own switch is on, so a phone that never
+/// offers it (or whose owner has not turned it on) shows nothing.
+pub fn hotspot_shown(
+    switches: Option<&pocketdesk_core::local::phone_switches::PhoneSwitches>,
+) -> bool {
+    switches
+        .and_then(|s| s.switches.get("hotspot"))
+        .is_some_and(|s| s.on)
+}
+
+/// Whether "Use my phone's hotspot" reaches a phone now: the phone linked here
+/// with its Phone actions permission on, and the phone saying it can (its
+/// switch on, Shizuku usable); else why not.
+pub fn hotspot_reach(
+    linked: bool,
+    allowed: bool,
+    switches: Option<&pocketdesk_core::local::phone_switches::PhoneSwitches>,
+) -> Result<(), &'static str> {
+    phone_action_reach(linked, allowed)?;
+    pocketdesk_core::local::phone_hotspot::offered(switches.and_then(|s| s.switches.get("hotspot")))
+}
+
+/// Whether this computer can ask the phone to be its camera (F6 part 2),
+/// or why not: Linux only, the owner's setting, the phone's permission and
+/// its link.
+pub fn webcam_reach(
+    linux: bool,
+    offered: bool,
+    allowed: bool,
+    linked: bool,
+) -> Result<(), &'static str> {
+    if !linux {
+        Err("A phone can be this computer's camera on Linux only (PipeWire).")
+    } else if !offered {
+        Err("Turn on \u{201c}Offer phones as a camera\u{201d} in Settings (Phones).")
+    } else if !allowed {
+        Err("This phone's \u{201c}Use its camera as a webcam\u{201d} is off in Devices.")
     } else if !linked {
         Err("The phone is not linked now: a session, or one of its background features, links it.")
     } else {
@@ -931,7 +1032,9 @@ pub fn last_sessions(lines: &str) -> std::collections::HashMap<String, u64> {
 
 /// What a live session is, as its chip says (J3).
 pub fn session_kind(session: &pocketdesk_core::local::sessions::MirrorSession) -> &'static str {
-    if session.cast {
+    if session.webcam {
+        "its camera as this computer's camera"
+    } else if session.cast {
         "its screen or camera here"
     } else if session.phone_sound_only {
         "its sound here"
@@ -942,6 +1045,16 @@ pub fn session_kind(session: &pocketdesk_core::local::sessions::MirrorSession) -
     } else {
         "screen"
     }
+}
+
+/// The phones whose camera is this computer's camera now (F6 part 2), by
+/// device id: what the Overview's Stop camera ends.
+pub fn cameras(sessions: &[pocketdesk_core::local::sessions::MirrorSession]) -> Vec<String> {
+    sessions
+        .iter()
+        .filter(|s| s.webcam)
+        .filter_map(|s| s.device_id.clone())
+        .collect()
 }
 
 /// A session from the log, as the Sessions page lists it (J3).
@@ -1575,6 +1688,32 @@ mod tests {
         assert_eq!(ours, pocketdesk_core::local::phone_switches::FEATURES);
     }
 
+    /// Use my phone's hotspot: shown only when the phone's own switch is on,
+    /// and working only when the phone also says Shizuku lets it.
+    #[test]
+    fn the_hotspot_button_is_shown_and_works_only_as_the_phone_says() {
+        use pocketdesk_core::local::phone_switches::{PhoneSwitches, from_body};
+        let said = |body: serde_json::Value| PhoneSwitches {
+            switches: from_body(&serde_json::json!({ "switches": body })).unwrap(),
+            updated_unix: 1,
+        };
+        assert!(!super::hotspot_shown(None));
+        assert!(
+            !super::hotspot_shown(Some(&said(serde_json::json!({})))),
+            "an old phone"
+        );
+        let off = said(serde_json::json!({"hotspot": {"on": false, "android": true}}));
+        assert!(!super::hotspot_shown(Some(&off)), "its switch is off");
+        let no_shizuku = said(serde_json::json!({"hotspot": {"on": true, "android": false}}));
+        assert!(super::hotspot_shown(Some(&no_shizuku)));
+        assert!(super::hotspot_reach(true, true, Some(&no_shizuku)).is_err());
+        let ready = said(serde_json::json!({"hotspot": {"on": true, "android": true}}));
+        assert_eq!(super::hotspot_reach(true, true, Some(&ready)), Ok(()));
+        // The permission and the link are said first.
+        assert!(super::hotspot_reach(true, false, Some(&ready)).is_err());
+        assert!(super::hotspot_reach(false, true, Some(&ready)).is_err());
+    }
+
     /// O2: a screenshot and a lock reach a linked phone with its permission
     /// on; the permission is said first, since linking it would not help.
     #[test]
@@ -1595,6 +1734,20 @@ mod tests {
                 .unwrap_err()
                 .contains("not linked")
         );
+    }
+
+    /// F6 part 2: the camera is asked for on Linux, offered, allowed and
+    /// linked; each missing one says what to change.
+    #[test]
+    fn a_phone_is_asked_for_its_camera_only_where_it_can_be_one() {
+        assert_eq!(super::webcam_reach(true, true, true, true), Ok(()));
+        let why = |linux, offered, allowed, linked| {
+            super::webcam_reach(linux, offered, allowed, linked).unwrap_err()
+        };
+        assert!(why(false, true, true, true).contains("Linux only"));
+        assert!(why(true, false, true, true).contains("Settings"));
+        assert!(why(true, true, false, true).contains("Devices"));
+        assert!(why(true, true, true, false).contains("not linked"));
     }
 
     /// Q2: the phone's own switch against Screenshot and Lock, said.
@@ -1938,6 +2091,7 @@ mod tests {
                 control_only,
                 sound_only,
                 phone_sound_only: false,
+                webcam: false,
                 id: 1,
                 device_id: None,
                 peer: String::new(),
@@ -1957,6 +2111,28 @@ mod tests {
             ..session(false, false, false)
         };
         assert_eq!(session_kind(&alone), "its sound here");
+        let camera = pocketdesk_core::local::sessions::MirrorSession {
+            webcam: true,
+            ..session(true, false, false)
+        };
+        assert_eq!(
+            session_kind(&camera),
+            "its camera as this computer's camera"
+        );
+        assert_eq!(
+            cameras(std::slice::from_ref(&camera)),
+            Vec::<String>::new(),
+            "no device said"
+        );
+        let named = pocketdesk_core::local::sessions::MirrorSession {
+            device_id: Some("phone".into()),
+            ..camera
+        };
+        let screen = pocketdesk_core::local::sessions::MirrorSession {
+            device_id: Some("other".into()),
+            ..session(true, false, false)
+        };
+        assert_eq!(cameras(&[named, screen]), vec!["phone".to_string()]);
     }
 
     /// J3: the Sessions page's recent sessions, newest first, in words.
@@ -2790,6 +2966,7 @@ mod tests {
             control_only: false,
             sound_only: false,
             phone_sound_only: false,
+            webcam: false,
             cast: false,
         }
     }
@@ -2826,6 +3003,80 @@ mod tests {
             ..session(4, false)
         };
         assert_eq!(control_cell(&alone, 2, false), ControlCell::Nothing);
+    }
+
+    fn kept(
+        files: u64,
+        bytes: u64,
+        last_unix: u64,
+    ) -> pocketdesk_core::local::kept_folders::KeptFolder {
+        pocketdesk_core::local::kept_folders::KeptFolder {
+            device_id: "phone".to_string(),
+            folder_id: "0".repeat(32),
+            phone: "Phone".to_string(),
+            label: "Notes".to_string(),
+            path: "/kept/Phone/Notes".to_string(),
+            phone_dir: "Phone".to_string(),
+            folder_dir: "Notes".to_string(),
+            files,
+            bytes,
+            last_unix,
+            last_sent: 0,
+            last_failed: 0,
+            deleted: 0,
+            deletes_skipped: 0,
+            mirror: false,
+            errors: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_kept_folders_row_says_its_size_and_its_last_run() {
+        assert_eq!(
+            kept_summary(&kept(0, 0, 0), 1_000),
+            "0 files · 0 B · nothing kept yet"
+        );
+        assert_eq!(
+            kept_summary(&kept(1, 2_100_000, 700), 1_000),
+            "1 file · 2.0 MB · last run 5 min ago"
+        );
+        let mut failing = kept(12, 1024, 940);
+        failing.last_failed = 2;
+        assert_eq!(
+            kept_summary(&failing, 1_000),
+            "12 files · 1.0 KB · last run 1 min ago · 2 files not sent"
+        );
+    }
+
+    #[test]
+    fn a_kept_folders_deletions_are_said_only_when_there_were_any() {
+        assert_eq!(kept_deletions(&kept(1, 1, 1)), None);
+        let mut folder = kept(1, 1, 1);
+        folder.deleted = 1;
+        assert_eq!(
+            kept_deletions(&folder).as_deref(),
+            Some("1 file deleted here as on the phone")
+        );
+        folder.deletes_skipped = 3;
+        let said = kept_deletions(&folder).unwrap();
+        assert!(
+            said.contains("3 files kept although deleted on the phone"),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn the_kept_folders_are_read_whether_or_not_the_server_runs() {
+        let dir = temp_dir("kept-folders");
+        let folders = vec![kept(2, 20, 5)];
+        pocketdesk_core::local::kept_folders::write(&dir, &folders).unwrap();
+        assert_eq!(snapshot_with(&dir, 10, false).kept, folders);
+        assert_eq!(snapshot_with(&dir, 10, true).kept, folders);
+        assert!(
+            snapshot_with(&temp_dir("kept-none"), 10, false)
+                .kept
+                .is_empty()
+        );
     }
 
     #[test]

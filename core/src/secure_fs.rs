@@ -28,7 +28,10 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
     #[cfg(not(unix))]
     {
         std::fs::write(path, bytes)?;
-        restrict_to_owner(path)
+        // A secret that could not be locked down is not left readable.
+        restrict_to_owner(path).inspect_err(|_| {
+            let _ = std::fs::remove_file(path);
+        })
     }
 }
 
