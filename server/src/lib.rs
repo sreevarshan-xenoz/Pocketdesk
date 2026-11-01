@@ -46,6 +46,7 @@ pub mod introductions;
 pub mod iroh_endpoint;
 pub mod kde;
 pub mod kdeconnect_compat;
+pub mod kept_folders;
 pub mod laser;
 #[cfg(target_os = "linux")]
 mod laser_linux;

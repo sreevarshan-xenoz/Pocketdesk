@@ -482,6 +482,12 @@ fn chosen_folder(chosen: &str, protected: &[PathBuf]) -> Option<PathBuf> {
     }
 }
 
+/// `chosen` as a folder that can take kept folders (the kept-folders root):
+/// the same rules as for received files.
+pub(crate) fn chosen_folder_for(chosen: &str) -> Option<PathBuf> {
+    chosen_folder(chosen, &protected_dirs())
+}
+
 /// The server's own folders, which received files never go into.
 fn protected_dirs() -> Vec<PathBuf> {
     [
@@ -529,6 +535,7 @@ impl Plugin for SharePlugin {
             FETCH,
             FOLDER_FETCH,
             crate::offers::DECLINE,
+            pocketdesk_core::protocol::kept::KEEP_RUN,
         ]
     }
 
@@ -548,6 +555,23 @@ impl Plugin for SharePlugin {
         }
         if packet.packet_type == FOLDER_FETCH {
             handle_folder_fetch(packet, sender).await;
+            return Ok(());
+        }
+        if packet.packet_type == pocketdesk_core::protocol::kept::KEEP_RUN {
+            // A run's deletions and end (a phone's kept folder): disk work,
+            // off the reactor.
+            let device = sender.device_id().to_string();
+            let body = packet.body.clone();
+            let config = crate::events::current_config();
+            let done = tokio::task::spawn_blocking(move || {
+                crate::kept_folders::run(&device, &body, &config)
+            })
+            .await;
+            match done {
+                Ok(Err(why)) => tracing::warn!("A kept-folder run was not taken: {why}"),
+                Err(e) => tracing::warn!("A kept-folder run failed: {e}"),
+                Ok(Ok(())) => {}
+            }
             return Ok(());
         }
         if packet.packet_type == crate::offers::DECLINE {
@@ -672,11 +696,36 @@ impl Plugin for SharePlugin {
                 // A file of a folder send (T6b) goes to its place under the
                 // send's own new folder; its path was checked part by part.
                 // Made only now, so a share refused above leaves no folder.
-                let folder_name = folder_of(body).map(|(_, folder, _)| folder);
-                let folder = folder_of(body).filter(|_| drive.is_none());
-                let (dir, name, top) = match folder {
-                    None => (dir, name.clone(), None),
-                    Some((folder_id, folder, path)) => {
+                // A file of a folder a phone keeps here (never one the drive
+                // asked for) goes where the kept folder says, replacing its
+                // older copy; every check is made before anything is made.
+                let kept = match pocketdesk_core::protocol::kept::kept_file(body) {
+                    None => None,
+                    Some(_) if drive.is_some() => {
+                        return refused("a kept folder is not a drive fetch".into()).await;
+                    }
+                    Some(Err(reason)) => return refused(reason).await,
+                    Some(Ok(file)) => {
+                        match crate::kept_folders::accept(
+                            sender.device_id(),
+                            &file,
+                            size,
+                            &crate::events::current_config(),
+                        ) {
+                            Ok(accepted) => Some(accepted),
+                            Err(reason) => return refused(reason).await,
+                        }
+                    }
+                };
+                let folder_name = match &kept {
+                    Some(k) => Some(k.label.clone()),
+                    None => folder_of(body).map(|(_, folder, _)| folder),
+                };
+                let folder = folder_of(body).filter(|_| drive.is_none() && kept.is_none());
+                let (dir, name, top) = match (&kept, folder) {
+                    (Some(k), _) => (k.dir.clone(), k.name.clone(), None),
+                    (None, None) => (dir, name.clone(), None),
+                    (None, Some((folder_id, folder, path))) => {
                         match folder_tops().place(
                             &dir,
                             sender.device_id(),
@@ -718,14 +767,24 @@ impl Plugin for SharePlugin {
                                 progress,
                                 on_saved: {
                                     let from = from.clone();
-                                    Box::new(move |path: &Path| match &drive {
+                                    let kept = kept.clone();
+                                    Box::new(move |path: &Path| match (&drive, &kept) {
                                         // Not received as a share is: no
                                         // notification, list or event.
-                                        Some(id) => crate::drive::live::arrived(id, path),
-                                        None => on_received(path, size, &from, top.as_deref()),
+                                        (Some(id), _) => crate::drive::live::arrived(id, path),
+                                        // Counted in its kept folder: a
+                                        // folder of thousands is not a
+                                        // thousand notifications.
+                                        (None, Some(k)) => {
+                                            crate::kept_folders::placed(&from, k, size)
+                                        }
+                                        (None, None) => {
+                                            on_received(path, size, &from, top.as_deref())
+                                        }
                                     })
                                 },
                                 modified,
+                                replace: kept.is_some(),
                             },
                         )
                         .await
@@ -1645,6 +1704,9 @@ struct Incoming<'a> {
     /// The date the file was last changed where it came from (K1), set
     /// once it is in place; none keeps the arrival's.
     modified: Option<std::time::SystemTime>,
+    /// A kept folder's file replaces its older copy of the same name; any
+    /// other never overwrites one (`name (1)`).
+    replace: bool,
 }
 
 /// Reach the phone by `route` and receive one file with the resumable
@@ -1665,6 +1727,7 @@ async fn receive_file(route: Route, key: &str, incoming: Incoming<'_>) -> Result
         progress,
         on_saved,
         modified,
+        replace,
     } = incoming;
     if size == 0 || size > MAX_FILE_BYTES {
         return Err(io_error(
@@ -1772,7 +1835,11 @@ async fn receive_file(route: Route, key: &str, incoming: Incoming<'_>) -> Result
                 let source = source.clone();
                 async move {
                     let _in_use = in_use_guard;
-                    let placed = place(&part_path, &dir, &name, modified).await;
+                    let placed = if replace {
+                        place_replacing(&part_path, &dir, &name, modified).await
+                    } else {
+                        place(&part_path, &dir, &name, modified).await
+                    };
                     records.remove(&device, &source);
                     let _ = std::fs::remove_file(&part_path);
                     if let Ok(path) = &placed {
@@ -1844,6 +1911,7 @@ pub(crate) async fn receive_offered(
                 on_received(path, size, &announced, top.as_deref())
             }),
             modified: received_date(offer),
+            replace: false,
         },
     )
     .await
@@ -1917,6 +1985,55 @@ pub(crate) async fn place(
     }
     mark_of_the_web(&final_path);
     // After the mark: writing it may touch the file's time.
+    if let Some(at) = modified {
+        set_date(&final_path, at);
+    }
+    Ok(final_path)
+}
+
+/// Move the finished `part` to `dir/name`, replacing the file of that name
+/// (a kept folder is a mirror, not a pile of copies), and return where it
+/// went. A rename replaces on both Linux and Windows; across volumes the
+/// bytes are copied beside the file first and renamed over it, so the old
+/// copy is never left half written. A folder at the place is refused.
+pub(crate) async fn place_replacing(
+    part: &Path,
+    dir: &Path,
+    name: &str,
+    modified: Option<std::time::SystemTime>,
+) -> Result<PathBuf> {
+    tokio::fs::create_dir_all(dir)
+        .await
+        .map_err(|e| io_error("create_dir", e))?;
+    let final_path = dir.join(name);
+    if tokio::fs::symlink_metadata(&final_path)
+        .await
+        .is_ok_and(|m| !m.is_file())
+    {
+        return Err(io_error(
+            "place",
+            "a folder or a link is where the file goes",
+        ));
+    }
+    if tokio::fs::rename(part, &final_path).await.is_err() {
+        // Another volume: a name of its own beside the file, short whatever
+        // the file's name is.
+        let beside = dir.join(format!(".pd-{}.part", uuid::Uuid::new_v4().simple()));
+        let copied = tokio::fs::copy(part, &beside)
+            .await
+            .map_err(|e| io_error("copy", e));
+        let moved = match copied {
+            Ok(_) => tokio::fs::rename(&beside, &final_path)
+                .await
+                .map_err(|e| io_error("replace", e)),
+            Err(e) => Err(e),
+        };
+        if let Err(e) = moved {
+            let _ = tokio::fs::remove_file(&beside).await;
+            return Err(e);
+        }
+    }
+    mark_of_the_web(&final_path);
     if let Some(at) = modified {
         set_date(&final_path, at);
     }
@@ -2048,6 +2165,49 @@ mod tests {
             .duration_since(std::fs::metadata(&undated).unwrap().modified().unwrap())
             .unwrap_or_default();
         assert!(age.as_secs() < 60, "its own date: now");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A kept folder is a mirror: the file replaces its older copy, takes
+    /// its date, and never lands on a folder.
+    #[tokio::test]
+    async fn a_kept_file_replaces_its_older_copy_and_never_a_folder() {
+        let dir = std::env::temp_dir().join(format!("pd-kept-replace-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("in")).unwrap();
+        let june = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_780_000_000);
+        std::fs::write(dir.join("in").join("a.txt"), b"old").unwrap();
+        let part = dir.join("a.part");
+        std::fs::write(&part, b"newer bytes").unwrap();
+        let placed = place_replacing(&part, &dir.join("in"), "a.txt", Some(june))
+            .await
+            .unwrap();
+        assert_eq!(
+            placed,
+            dir.join("in").join("a.txt"),
+            "the same name, no (1)"
+        );
+        assert_eq!(std::fs::read(&placed).unwrap(), b"newer bytes");
+        assert_eq!(
+            std::fs::metadata(&placed).unwrap().modified().unwrap(),
+            june
+        );
+        assert!(!part.exists(), "the part was moved");
+        // The ordinary place keeps both.
+        let part = dir.join("b.part");
+        std::fs::write(&part, b"third").unwrap();
+        let other = place(&part, &dir.join("in"), "a.txt", None).await.unwrap();
+        assert_eq!(other, dir.join("in").join("a (1).txt"));
+        // A folder where the file goes is refused, and the part is left.
+        std::fs::create_dir_all(dir.join("in").join("d")).unwrap();
+        let part = dir.join("c.part");
+        std::fs::write(&part, b"x").unwrap();
+        assert!(
+            place_replacing(&part, &dir.join("in"), "d", None)
+                .await
+                .is_err()
+        );
+        assert!(dir.join("in").join("d").is_dir());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2481,6 +2641,7 @@ mod tests {
             progress: Box::new(|_| {}),
             on_saved: Box::new(|_| {}),
             modified: None,
+            replace: false,
         }
     }
 
