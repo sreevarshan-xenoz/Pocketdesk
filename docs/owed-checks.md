@@ -2,13 +2,13 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1243 open items.
+1245 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 76 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 195 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 197 |
 | A phone with a SIM | 40 |
 | A second phone | 20 |
 | Away from home: another network, or through a router | 43 |
@@ -677,6 +677,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Several fingers at once: hold W (stick), a tap key and the aim together: "Pointer location" shows three pointers at once, each moving on its own, and a drawing app or a map pinch (two taps either side of a point moving apart) responds as to a real multi-touch; releasing them in any order leaves nothing stuck. (where: OPPO)
 - Nothing stuck: with a key, the stick and the aim held, switch to another window (Alt+Tab), turn "Keys to taps" off, open the editor, turn control off, close the window, kill the desktop app: each lifts every finger within a moment (no touch stays in "Pointer location"); the helper's display going with the window ends them anyway. (where: OPPO)
 - The injection stays on the window: with keys held in a window, the phone's own screen shows no touch of them (its own touches in "Show taps" are none), on every Android at hand (14 first; 10 to 13 owed as for section 263); two windows with two different keymaps play only their own app. (where: OPPO)
+- Held fingers survive nothing: hold a mapped key, then pull the desktop's network cable or kill the desktop app, stop the control stream (stop the relay), turn the phone's "Separate windows" off, stop Shizuku, and just stay still with a key held for longer than two seconds (it stays down, kept by the half-second keep-alive in "Pointer location"): after a dropped stream, the switch off or two seconds of silence the touch is gone; with a helper killed (`kill` its process) the next open window works without a phantom touch. (where: OPPO)
+- The limits: a desktop test loop sending 1000 finger downs a second to one window lets about 100 through a second (the rest are not seen in "Pointer location"), finger lifts of fingers that were down always arrive, no finger stays down afterwards, and ordinary aiming at 144 Hz is not cut. (where: OPPO)
 - The typing rule: with keys on, letters typed in the window go nowhere (not to the phone's text fields), Backspace and Enter and Escape (Back) still work when not mapped, and Ctrl+key shortcuts are not taken as keys. (where: OPPO)
 
 ## A phone with a SIM
@@ -2963,5 +2965,5 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **265. Keys to taps: a phone game played from the keyboard and mouse (Settings, Keymaps for phone apps)**
 
 - A swipe: the Swipe tool, drag from a start to an end, a key: pressing it draws a swipe from the start to the end over the set time (a list scrolls by the right amount) and lifts at the end; pressing again meanwhile does nothing; the time slider changes its speed. (where: OPPO)
-- The keymap file: one per app in the state folder under `keymaps/`, named by the package; a second window of the same app opens with it; another app has its own; a file edited into something unsound (a key twice, Escape, a radius out of range, a name with a slash) or past 64 KiB is ignored and the editor starts empty; removing every binding removes the file. No keymap is in any log or sent to the phone. (where: by hand)
+- The keymap file: one per app in the state folder under `keymaps/`, named `app.<package>.json` (a package such as `con.example` is `app.con.example.json`, a file from before the prefix is renamed as it is read); a second window of the same app opens with it; another app has its own; a file edited into something unsound (a key twice, Escape, a radius out of range, a name with a slash) or past 64 KiB is ignored and the editor starts empty; removing every binding removes the file. No keymap is in any log or sent to the phone. (where: by hand)
 - The Settings row and the bar by hand on Windows and on Linux, light and dark, in a narrow window; the editor's list beside the picture, the markers' labels and the warning; the pointer lock on Windows (confined and recentred) and on a Wayland session (locked). The Settings page's snapshot (`settings_*.png`) shows only the top of the page: confirm by eye the Phones section row, as the snapshot test cannot run without a GPU here. (where: by hand)
