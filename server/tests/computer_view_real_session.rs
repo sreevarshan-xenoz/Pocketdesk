@@ -139,6 +139,7 @@ async fn the_real_servers_screen_reaches_the_window_and_the_window_its_input() {
             monitor: 0,
             hevc: false,
             window: 0,
+            fit: None,
         })
         .await
         .unwrap();

@@ -1903,6 +1903,10 @@ where
                                 crate::computer_view::privacy_answer(&device_id, &packet.body);
                                 continue;
                             }
+                            if gate == Gate::FitAnswer {
+                                crate::fit_screen::heard(&device_id, &packet.body);
+                                continue;
+                            }
                             if gate == Gate::Denied {
                                 if denied_said.insert(packet_type.clone()) {
                                     tracing::info!(
@@ -2304,6 +2308,10 @@ pub(crate) enum Gate {
     /// An answer to this computer's window's privacy ask: heard before the
     /// permission gate, which never sees it.
     Answer,
+    /// Another computer's answer to this computer's window asking it for a
+    /// screen to fit the window (item 8): heard before the permission gate
+    /// too, as it asks nothing of this computer.
+    FitAnswer,
     /// Not permitted for this device (`permitted` said no).
     Denied,
     /// To the plugins.
@@ -2317,6 +2325,8 @@ pub(crate) fn gate(packet: &NetworkPacket, permitted: impl FnOnce() -> bool) -> 
         && crate::plugins::privacy::is_answer(&packet.body)
     {
         Gate::Answer
+    } else if crate::fit_screen::is_answer(packet) {
+        Gate::FitAnswer
     } else if permitted() {
         Gate::Dispatch
     } else {
@@ -2396,6 +2406,26 @@ mod gate_tests {
         let other =
             NetworkPacket::new("kdeconnect.clipboard").with_body(serde_json::json!({"ok": true}));
         assert_eq!(gate(&other, || false), Gate::Denied, "only privacy answers");
+    }
+
+    /// Item 8: a screen answer (no action) from a computer asked for one is
+    /// heard before the Input permission, a request for a screen is held
+    /// to it.
+    #[test]
+    fn a_screen_answer_passes_the_gate_and_a_request_does_not() {
+        let answer = NetworkPacket::new(crate::virtual_screen::PACKET)
+            .with_body(serde_json::json!({"name": "PD-0a1b2c3d-1", "index": 1, "id": 3}));
+        assert_eq!(
+            gate(&answer, || panic!("an answer asks no permission")),
+            Gate::FitAnswer
+        );
+        let refusal = NetworkPacket::new(crate::virtual_screen::PACKET)
+            .with_body(serde_json::json!({"error": "no", "id": 3}));
+        assert_eq!(gate(&refusal, || false), Gate::FitAnswer);
+        let request = NetworkPacket::new(crate::virtual_screen::PACKET)
+            .with_body(serde_json::json!({"action": "fit", "width": 800, "height": 600}));
+        assert_eq!(gate(&request, || false), Gate::Denied);
+        assert_eq!(gate(&request, || true), Gate::Dispatch);
     }
 }
 

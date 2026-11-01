@@ -219,6 +219,7 @@ fn the_clipboard_and_files_follow_the_window() {
             monitor: 0,
             hevc: false,
             window: 0,
+            fit: None,
         },
         pin::now_unix(),
     )

@@ -1681,6 +1681,7 @@ fn view_ask(wanted: &Wanted, hevc: bool, slot: u8) -> ComputerAsk {
         monitor: wanted.monitor,
         hevc,
         window: slot,
+        fit: None,
     }
 }
 
@@ -4553,7 +4554,7 @@ mod tests {
         assert!(
             matches!(
                 asked.as_slice(),
-                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: true, window: 0 }
+                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: true, window: 0, fit: None }
             ),
             "{asked:?}"
         );
@@ -4582,7 +4583,7 @@ mod tests {
         assert!(
             matches!(
                 asked.as_slice(),
-                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: false, window: 0 }
+                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: false, window: 0, fit: None }
             ),
             "{asked:?}"
         );
@@ -5916,6 +5917,7 @@ mod tests {
                 monitor: 0,
                 hevc: false,
                 window: 0,
+                fit: None,
             }]
         );
         let (mut relay, _) = listener.accept().unwrap();
@@ -6238,6 +6240,7 @@ mod tests {
                 monitor: 1,
                 hevc: false,
                 window: 2,
+                fit: None,
             }]
         );
         // The same screen again asks nothing.
@@ -6284,6 +6287,7 @@ mod tests {
                 monitor: 1,
                 hevc: false,
                 window: 1,
+                fit: None,
             }]
         );
         // Its close stops its own view alone.
