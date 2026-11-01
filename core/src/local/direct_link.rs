@@ -32,7 +32,9 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use super::approval::is_valid_id;
-use super::paths::{DIRECT_LINK_DIR, DIRECT_LINK_FILE, DIRECT_LINK_OWNED_FILE};
+use super::paths::{
+    DIRECT_LINK_DIR, DIRECT_LINK_FILE, DIRECT_LINK_OWNED_FILE, DIRECT_LINK_PLAN_FILE,
+};
 
 /// Every network name this makes starts so: a phone's list shows what made
 /// it.
@@ -286,7 +288,8 @@ pub enum Mode {
 }
 
 /// Why no link can be made here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Unavailable {
     /// Not a platform this makes links on yet.
     Unsupported,
@@ -331,7 +334,7 @@ impl Unavailable {
 }
 
 /// What starting a link would do on this computer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Plan {
     /// The card's interface (`wlan0`): the hotspot goes on it, or beside it.
     pub device: String,
@@ -799,6 +802,40 @@ pub fn read_status(state_dir: &Path) -> Option<Status> {
 /// Take the status off (the link is off).
 pub fn clear_status(state_dir: &Path) {
     let _ = std::fs::remove_file(state_dir.join(DIRECT_LINK_FILE));
+}
+
+/// How long a plan on file is believed: the server refreshes it every half
+/// minute while no link is on.
+pub const PLAN_FRESH_SECS: u64 = 90;
+
+/// The server's word on what a link could do here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanReport {
+    pub updated_unix: u64,
+    pub plan: Result<Plan, Unavailable>,
+}
+
+/// Leave the plan for the desktop to read. Nothing secret in it.
+pub fn write_plan(state_dir: &Path, report: &PlanReport) -> io::Result<()> {
+    std::fs::create_dir_all(state_dir)?;
+    let json = serde_json::to_string(report).map_err(io::Error::other)?;
+    let file = state_dir.join(DIRECT_LINK_PLAN_FILE);
+    let tmp = file.with_extension("json.tmp");
+    std::fs::write(&tmp, json)?;
+    crate::atomic_file::replace(&tmp, &file)
+}
+
+/// The plan on file, if there is one and it is recent: a plan a stopped
+/// server left says nothing about now.
+pub fn read_plan(state_dir: &Path, now_unix: u64) -> Option<Result<Plan, Unavailable>> {
+    let raw = std::fs::read_to_string(state_dir.join(DIRECT_LINK_PLAN_FILE)).ok()?;
+    let report: PlanReport = serde_json::from_str(&raw).ok()?;
+    (now_unix.saturating_sub(report.updated_unix) <= PLAN_FRESH_SECS).then_some(report.plan)
+}
+
+/// The plan is taken off file as the server starts and stops.
+pub fn clear_plan(state_dir: &Path) {
+    let _ = std::fs::remove_file(state_dir.join(DIRECT_LINK_PLAN_FILE));
 }
 
 // ---- Idle ----
@@ -1483,6 +1520,33 @@ mod tests {
         let mut left = hotspot(false);
         left.settings.ssid = format!("{SSID_PREFIX}ab12");
         assert!(hotspot_start_refusal(&left).unwrap().contains("named like"));
+    }
+
+    #[test]
+    fn the_plan_on_file_is_read_while_recent_and_not_after() {
+        let dir = state_dir("plan");
+        assert!(read_plan(&dir, 1_000).is_none());
+        for plan in [
+            Ok(Plan {
+                device: "wlan0".into(),
+                mode: Mode::TakesOverCard,
+                channel: None,
+                disconnects: true,
+            }),
+            Err(Unavailable::NoConnectionProfile),
+        ] {
+            let report = PlanReport {
+                updated_unix: 1_000,
+                plan,
+            };
+            write_plan(&dir, &report).unwrap();
+            assert_eq!(read_plan(&dir, 1_000 + PLAN_FRESH_SECS), Some(report.plan));
+            assert!(read_plan(&dir, 1_000 + PLAN_FRESH_SECS + 1).is_none());
+        }
+        std::fs::write(dir.join(DIRECT_LINK_PLAN_FILE), "junk").unwrap();
+        assert!(read_plan(&dir, 1_000).is_none());
+        clear_plan(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

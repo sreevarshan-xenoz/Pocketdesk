@@ -42,6 +42,14 @@ pub const CONNECTION_ID: &str = "Pocketdesk direct link";
 pub const SECOND_INTERFACE: &str = "pdlink0";
 /// How often an access point that is on is looked at.
 const TICK: Duration = Duration::from_secs(5);
+/// How often what a link could do here is looked at again, while none is on
+/// (the desktop reads it from `direct_link_plan.json`).
+const PLAN_EVERY: Duration = Duration::from_secs(30);
+/// How often a restore that did not complete (the owner's Windows hotspot
+/// settings) is tried again while no link is on.
+const RETRY_EVERY: Duration = Duration::from_secs(60);
+/// Set when a link ends, so the plan is looked at again at once.
+static PLAN_STALE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 /// What is on now, and what to take down.
 struct Active {
@@ -68,6 +76,9 @@ pub async fn run() {
     // connection comes back). Only what `direct_link_owned.json` names.
     backend::sweep(&dir).await;
     dl::clear_status(&dir);
+    dl::clear_plan(&dir);
+    let mut planned: Option<std::time::Instant> = None;
+    let mut retried = std::time::Instant::now();
     loop {
         crate::inbox::wait_at_most(DIRECT_LINK_DIR, TICK, Duration::from_secs(2)).await;
         let now = pocketdesk_core::local::pin::now_unix();
@@ -80,20 +91,59 @@ pub async fn run() {
             }
         }
         tick(&dir).await;
+        if ACTIVE.lock().await.is_none() {
+            // A restore that did not complete is not left until the next
+            // link: its record is kept, and tried again here.
+            if retried.elapsed() >= RETRY_EVERY {
+                retried = std::time::Instant::now();
+                backend::sweep(&dir).await;
+            }
+            let stale = PLAN_STALE.swap(false, std::sync::atomic::Ordering::Relaxed);
+            if stale || planned.is_none_or(|t| t.elapsed() >= PLAN_EVERY) {
+                planned = Some(std::time::Instant::now());
+                publish_plan(&dir).await;
+            }
+        }
+    }
+}
+
+/// Leave what a link could do here for the desktop to show. Read in this
+/// process, on its blocking pool, so the desktop never asks the system
+/// itself (on Windows that is WinRT). Not while direct links are off.
+async fn publish_plan(dir: &std::path::Path) {
+    if !crate::events::current_config().direct_link {
+        dl::clear_plan(dir);
+        return;
+    }
+    let plan = match tokio::task::spawn_blocking(dl::probe).await {
+        Ok(plan) => plan,
+        Err(_) => Err(dl::Unavailable::Unsupported),
+    };
+    let report = dl::PlanReport {
+        updated_unix: pocketdesk_core::local::pin::now_unix(),
+        plan,
+    };
+    if let Err(e) = dl::write_plan(dir, &report) {
+        tracing::warn!("Direct link: could not write its plan: {e}");
     }
 }
 
 /// Take the access point down as the server goes. Bounded: a stuck
-/// NetworkManager does not hold the exit.
+/// NetworkManager does not hold the exit. Windows has longer: putting the
+/// owner's hotspot back is a stop, a configure and a start (20 + 15 + 30
+/// seconds at worst), and what does not finish stays in the record for the
+/// next start.
 pub async fn stop_at_exit() {
     let Ok(dir) = crate::state::state_dir() else {
         return;
     };
+    let within = if cfg!(windows) { 70 } else { 10 };
     let _ = tokio::time::timeout(
-        Duration::from_secs(10),
+        Duration::from_secs(within),
         stop(&dir, "the server is stopping"),
     )
     .await;
+    dl::clear_plan(&dir);
 }
 
 async fn start(dir: &std::path::Path, request: &Request) {
@@ -185,6 +235,7 @@ async fn stop(dir: &std::path::Path, why: &str) -> bool {
     }
     // A failed status goes with a stop too: the owner dismissed it.
     dl::clear_status(dir);
+    PLAN_STALE.store(true, std::sync::atomic::Ordering::Relaxed);
     was
 }
 

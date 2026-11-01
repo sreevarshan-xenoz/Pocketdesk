@@ -14,7 +14,6 @@
 //! anything starts, and the ask carries the owner's yes.
 
 use std::path::Path;
-use std::sync::mpsc;
 
 use eframe::egui::{self, RichText, TextureHandle, TextureOptions};
 use pocketdesk_core::local::config::Config;
@@ -58,18 +57,6 @@ pub enum Stage {
     On,
     /// The server could not make it, or it did not answer; the words.
     Failed(String),
-}
-
-/// What this computer's network could do, asked of the system. The app's
-/// own tests draw this page on whatever machine runs them and must not
-/// depend on that machine's network stack (on Windows, WinRT), so they get
-/// "not here" instead.
-fn probe() -> Result<Plan, Unavailable> {
-    if cfg!(test) {
-        Err(Unavailable::Unsupported)
-    } else {
-        dl::probe()
-    }
 }
 
 /// The stage from what is known now. Pure, so a test reads it.
@@ -122,8 +109,10 @@ pub fn stage(
 /// The card's state between frames.
 #[derive(Default)]
 pub struct DirectLinkCard {
+    /// What the server last said a link could do here (it looks again every
+    /// half minute, and when a link ends). The app never asks the system
+    /// itself: on Windows that is WinRT, which stays in the server.
     plan: Option<Result<Plan, Unavailable>>,
-    probing: Option<mpsc::Receiver<Result<Plan, Unavailable>>>,
     /// The owner clicked "Make" on a card that will drop the Wi-Fi, and is
     /// being asked once more.
     confirming: bool,
@@ -131,6 +120,7 @@ pub struct DirectLinkCard {
     asked_unix: Option<u64>,
     status: Option<Status>,
     status_read: Option<std::time::Instant>,
+    plan_read: Option<std::time::Instant>,
     /// The devices before the link was on; a new one is the phone that
     /// paired over it.
     known: Option<Vec<String>>,
@@ -179,24 +169,11 @@ impl DirectLinkCard {
             return;
         }
         self.read_status(state_dir);
-        let first_frame = self.plan.is_none() && self.probing.is_none();
-        if first_frame {
-            let (tx, rx) = mpsc::channel();
-            let ctx = ui.ctx().clone();
-            std::thread::spawn(move || {
-                let _ = tx.send(probe());
-                ctx.request_repaint();
-            });
-            self.probing = Some(rx);
-        }
-        if let Some(rx) = &self.probing {
-            if let Ok(plan) = rx.try_recv() {
-                self.plan = Some(plan);
-                self.probing = None;
-            } else {
-                ui.ctx()
-                    .request_repaint_after(std::time::Duration::from_millis(300));
-            }
+        self.read_plan(state_dir, now_unix);
+        if self.plan.is_none() {
+            // Waiting for the server's first word.
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(1000));
         }
         let stage = stage(
             config.direct_link,
@@ -243,6 +220,18 @@ impl DirectLinkCard {
             self.known = None;
             self.paired = false;
             self.drop_code(state_dir);
+        }
+    }
+
+    /// The server's plan on file, read about once a second: it is recent or
+    /// it says nothing (a stopped server's is not believed).
+    fn read_plan(&mut self, state_dir: &Path, now_unix: u64) {
+        let due = self
+            .plan_read
+            .is_none_or(|t| t.elapsed() >= std::time::Duration::from_millis(1000));
+        if due {
+            self.plan_read = Some(std::time::Instant::now());
+            self.plan = dl::read_plan(state_dir, now_unix);
         }
     }
 
