@@ -3485,4 +3485,262 @@ mod tests {
         plugin.handle_packet(&packet, &phone).await.unwrap();
         assert_eq!(refusal(&phone).map(|(k, _)| k), Some(KEY.to_string()));
     }
+
+    /// An owner phone on a link by the internet road, in memory: a stub for
+    /// the phone's side of kept folders (no real phone, no real network).
+    struct LinkPhone {
+        id: String,
+        link: std::sync::Arc<dyn OpenLinkStream>,
+        sent: std::sync::Mutex<Vec<NetworkPacket>>,
+    }
+
+    #[async_trait::async_trait]
+    impl DeviceSender for LinkPhone {
+        fn device_id(&self) -> &str {
+            &self.id
+        }
+        fn connection_id(&self) -> &str {
+            "conn"
+        }
+        fn peer_key(&self) -> Option<pocketdesk_core::streaming::PeerKey> {
+            Some(pocketdesk_core::streaming::PeerKey::Tls(
+                certs().1.cert_fingerprint(),
+            ))
+        }
+        fn link_streams(&self) -> Option<std::sync::Arc<dyn OpenLinkStream>> {
+            Some(self.link.clone())
+        }
+        async fn send_packet(&self, packet: &NetworkPacket) -> Result<()> {
+            self.sent.lock().unwrap().push(packet.clone());
+            Ok(())
+        }
+    }
+
+    /// Send one file of a kept folder through the real share handler, the
+    /// phone's side a stub on the link; the streams back for the next file.
+    async fn send_kept(
+        plugin: &SharePlugin,
+        phone: &LinkPhone,
+        streams: PhoneStreams,
+        folder: &str,
+        path: &[&str],
+        data: &[u8],
+    ) -> PhoneStreams {
+        let size = data.len() as u64;
+        let source = uuid::Uuid::new_v4().simple().to_string();
+        let packet = NetworkPacket::new("kdeconnect.share.request")
+            .with_body(serde_json::json!({
+                "filename": path.last().unwrap(),
+                "keep": true,
+                "folderId": folder,
+                "folder": "Notes",
+                "path": path,
+                "sourceId": source,
+                "payloadTransferInfo": { "key": KEY },
+            }))
+            .with_payload_size(size);
+        let sending = phone_sending_on_link(streams, data.to_vec(), size);
+        plugin.handle_packet(&packet, phone).await.unwrap();
+        let (streams, sent) = tokio::time::timeout(Duration::from_secs(30), sending)
+            .await
+            .expect("the file went in time")
+            .unwrap();
+        sent.expect("the transfer");
+        streams
+    }
+
+    /// The files of a generated test folder: seeded bytes, so both sides
+    /// can be recomputed, and names that are made up.
+    fn generated(seed: u32) -> Vec<(Vec<&'static str>, Vec<u8>)> {
+        let make = |n: u32, len: usize| -> Vec<u8> {
+            (0..len as u32)
+                .map(|i| (i.wrapping_mul(31).wrapping_add(n.wrapping_mul(seed))) as u8)
+                .collect()
+        };
+        vec![
+            (vec!["one.bin"], make(1, 40_000)),
+            (vec!["docs", "two.bin"], make(2, 150_000)),
+            (vec!["docs", "deep", "three.bin"], make(3, 5)),
+            (vec!["four.bin"], make(4, 300_000)),
+            (vec![".nomedia-like", "five.bin"], make(5, 1_000)),
+        ]
+    }
+
+    /// The live check of kept folders, in-process: an owner phone stub sends a
+    /// generated folder through the real share handler and the real transfer
+    /// (the whole-file SHA-256 on both ends), then changes one file and adds
+    /// another, and a stranger and a hostile path are refused. Counts and
+    /// hashes only.
+    #[tokio::test]
+    async fn a_kept_folder_arrives_changes_and_is_counted_end_to_end() {
+        use sha2::{Digest, Sha256};
+        let state = crate::state::use_test_dirs();
+        let root = temp_dir("kept-live-root");
+        // The config the server reads: the folders go under this test's own
+        // root, never the owner's Documents.
+        let config_file = pocketdesk_core::local::paths::config_dir()
+            .unwrap()
+            .join(pocketdesk_core::local::paths::CONFIG_FILE);
+        std::fs::create_dir_all(config_file.parent().unwrap()).unwrap();
+        std::fs::write(
+            &config_file,
+            format!("kept_folders_root = {:?}\n", root.display().to_string()),
+        )
+        .unwrap();
+        let config = crate::events::current_config();
+        assert_eq!(config.kept_folders_root, root.display().to_string());
+
+        // The owner's phone, paired as one with its key bound.
+        let id = "kept-live-phone";
+        pocketdesk_core::protocol::kdeconnect::TrustStore::update(
+            crate::state::trust_store_path().unwrap(),
+            |s| s.trust_phone(id, true),
+        )
+        .unwrap();
+        let key: String = certs()
+            .1
+            .cert_fingerprint()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        pocketdesk_core::local::device_keys::bind_first(&state, id, &key).unwrap();
+
+        let folder = "c".repeat(32);
+        let plugin = SharePlugin::new();
+        let (link, mut streams) = fake_link();
+        let phone = LinkPhone {
+            id: id.to_string(),
+            link,
+            sent: Default::default(),
+        };
+        let files = generated(7);
+        let total: usize = files.iter().map(|(_, d)| d.len()).sum();
+        for (path, data) in &files {
+            streams = send_kept(&plugin, &phone, streams, &folder, path, data).await;
+        }
+        // The run's end: the computer counts the folder again.
+        let end = |sent: u64| {
+            NetworkPacket::new(pocketdesk_core::protocol::kept::KEEP_RUN).with_body(
+                serde_json::json!({
+                    "folderId": folder, "folder": "Notes", "mirror": false,
+                    "done": true, "sent": sent, "failed": 0,
+                }),
+            )
+        };
+        plugin.handle_packet(&end(5), &phone).await.unwrap();
+        let kept = pocketdesk_core::local::kept_folders::read(&state)
+            .into_iter()
+            .find(|f| f.device_id == id)
+            .expect("the folder is recorded");
+        let top = PathBuf::from(&kept.path);
+        assert!(top.starts_with(&root), "under the test's root: {top:?}");
+        let mut hashes = 0;
+        for (path, data) in &files {
+            let at = path.iter().fold(top.clone(), |dir, part| dir.join(part));
+            let there = std::fs::read(&at).unwrap();
+            assert_eq!(
+                Sha256::digest(&there),
+                Sha256::digest(data),
+                "the SHA-256 of {path:?}"
+            );
+            hashes += 1;
+        }
+        assert_eq!((kept.files, kept.bytes), (5, total as u64));
+        assert_eq!((kept.last_sent, kept.last_failed), (5, 0));
+        eprintln!("kept folder: {hashes} of 5 files match by SHA-256, {total} bytes");
+
+        // Change one file and add one: only those two go, the changed one
+        // replacing its older copy, no `(1)` beside it.
+        let changed: Vec<u8> = (0..60_000u32).map(|i| (i * 7) as u8).collect();
+        let added: Vec<u8> = (0..2_000u32).map(|i| (i * 3) as u8).collect();
+        streams = send_kept(
+            &plugin,
+            &phone,
+            streams,
+            &folder,
+            &["docs", "two.bin"],
+            &changed,
+        )
+        .await;
+        let _ = send_kept(&plugin, &phone, streams, &folder, &["six.bin"], &added).await;
+        plugin.handle_packet(&end(2), &phone).await.unwrap();
+        let after = pocketdesk_core::local::kept_folders::read(&state)
+            .into_iter()
+            .find(|f| f.device_id == id)
+            .unwrap();
+        assert_eq!(
+            Sha256::digest(std::fs::read(top.join("docs").join("two.bin")).unwrap()),
+            Sha256::digest(&changed)
+        );
+        assert!(!top.join("docs").join("two (1).bin").exists());
+        assert_eq!(after.files, 6);
+        assert_eq!(
+            after.bytes,
+            (total - files[1].1.len() + changed.len() + added.len()) as u64
+        );
+        assert_eq!(after.last_sent, 2);
+
+        // With deletions not allowed here, a phone that mirrors them deletes
+        // nothing: the file stays and the folder says one was kept.
+        let gone = NetworkPacket::new(pocketdesk_core::protocol::kept::KEEP_RUN).with_body(
+            serde_json::json!({
+                "folderId": folder, "folder": "Notes", "mirror": true,
+                "gone": [["six.bin"]],
+            }),
+        );
+        plugin.handle_packet(&gone, &phone).await.unwrap();
+        assert!(top.join("six.bin").exists(), "kept: deletions are off here");
+        let skipped = pocketdesk_core::local::kept_folders::read(&state)
+            .into_iter()
+            .find(|f| f.device_id == id)
+            .unwrap();
+        assert_eq!(skipped.deletes_skipped, 1);
+
+        // A hostile path is refused and makes nothing outside the folder.
+        let hostile = NetworkPacket::new("kdeconnect.share.request")
+            .with_body(serde_json::json!({
+                "filename": "x", "keep": true, "folderId": folder, "folder": "Notes",
+                "path": ["..", "..", "escaped.bin"],
+                "payloadTransferInfo": { "key": KEY },
+            }))
+            .with_payload_size(10);
+        plugin.handle_packet(&hostile, &phone).await.unwrap();
+        let refused = phone.sent.lock().unwrap().iter().any(|p| {
+            p.packet_type == FETCH_REFUSED
+                && p.body["reason"]
+                    .as_str()
+                    .is_some_and(|r| r.contains("place in the folder"))
+        });
+        assert!(refused, "a path that climbs is refused");
+        assert!(!root.join("escaped.bin").exists());
+        assert!(!root.parent().unwrap().join("escaped.bin").exists());
+
+        // A phone that is not one of the owner's is refused outright.
+        let stranger = LinkPhone {
+            id: "kept-live-stranger".to_string(),
+            link: fake_link().0,
+            sent: Default::default(),
+        };
+        let ask = NetworkPacket::new("kdeconnect.share.request")
+            .with_body(serde_json::json!({
+                "filename": "a.bin", "keep": true, "folderId": "d".repeat(32),
+                "folder": "Mine", "path": ["a.bin"],
+                "payloadTransferInfo": { "key": KEY },
+            }))
+            .with_payload_size(10);
+        plugin.handle_packet(&ask, &stranger).await.unwrap();
+        let said = stranger.sent.lock().unwrap().iter().find_map(|p| {
+            (p.packet_type == FETCH_REFUSED).then(|| p.body["reason"].as_str().unwrap().to_string())
+        });
+        assert_eq!(
+            said.as_deref(),
+            Some(pocketdesk_core::protocol::kept::NOT_OWNER)
+        );
+        assert!(
+            pocketdesk_core::local::kept_folders::read(&state)
+                .iter()
+                .all(|f| f.device_id != "kept-live-stranger")
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
