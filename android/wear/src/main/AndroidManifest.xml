@@ -6,6 +6,9 @@
     <!-- Bluetooth to the phone this watch is paired with: connect to a device
          already paired, no scan and no location. Asked once, in the app. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- Wear OS 3 is Android 11 (API 30): there the bonded-device list and the
+         socket take the old install-time permission instead. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
 
     <application
         android:allowBackup="false"
