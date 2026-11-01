@@ -282,6 +282,12 @@ class WakeHelperService : Service() {
     }
 
     private fun pass() {
+        // The switch went off (a computer removed this phone, or its owner
+        // turned it off): stop now, never serve another pass.
+        if (!Prefs.wakeHelper(this)) {
+            evaluate()
+            return
+        }
         if (WakeHelperKeeper.poll(this)) {
             // A computer removed this phone: the switch is off now.
             handler?.post { evaluate() }
@@ -308,6 +314,8 @@ class WakeHelperService : Service() {
      * relays it is reached through), when that is new, changed or due again.
      */
     private fun offer() {
+        // Never says it is a helper with the switch off.
+        if (!Prefs.wakeHelper(this)) return
         val status = runCatching { JSONObject(RustCore.wakeHelperStatus()) }.getOrNull() ?: return
         val iroh = status.optString("id")
         val relays = status.optJSONArray("relays")?.let { a -> List(a.length()) { a.optString(it) } }.orEmpty()

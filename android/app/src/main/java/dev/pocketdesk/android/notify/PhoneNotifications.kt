@@ -964,7 +964,10 @@ class PhoneNotificationListener : NotificationListenerService() {
         // computers) cost a read each: every 10 s is soon enough (M1 review).
         if (keeperTicks % 5 == 0) {
             // What computers said of wake helpers, kept for the Wake button.
-            runCatching { dev.pocketdesk.android.wake.WakeHelperKeeper.poll(this) }
+            if (runCatching { dev.pocketdesk.android.wake.WakeHelperKeeper.poll(this) }.getOrDefault(false)) {
+                // A computer removed this phone as its helper: the listener stops now.
+                dev.pocketdesk.android.service.WakeHelperService.sync(this)
+            }
         }
         if (keeperTicks++ % 5 == 0) dev.pocketdesk.android.service.LinkKeeperService.sync(this)
     }
