@@ -81,7 +81,9 @@ object ShareDrops {
             return
         }
         val pm = app.packageManager
-        val front = ask.pkg
+        // The app in front when the file is here must still be the one that
+        // was in front at the ask: else nothing is shared into any app.
+        val front = ShareRule.frontStill(ask.pkg, service.foregroundPackage())
         val uri = file.uri?.let { runCatching { Uri.parse(it) }.getOrNull() }
         val mime = ShareRule.mimeOf(file.mime)
         val launchable = front != null && runCatching { pm.getLaunchIntentForPackage(front) != null }.getOrDefault(false)

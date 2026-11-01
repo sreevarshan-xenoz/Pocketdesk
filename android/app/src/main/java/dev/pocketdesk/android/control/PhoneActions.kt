@@ -180,6 +180,8 @@ object PhoneActions {
         !Prefs.appsFromComputer(context) -> AppOpenRule.OFF
         KeyguardDismiss.kind(context) == LockRule.Kind.SECURE -> AppOpenRule.LOCKED_SECURE
         context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked ?: true -> AppOpenRule.LOCKED
+        // The screen off at the moment of the open or the share (a file may take minutes).
+        context.getSystemService(PowerManager::class.java)?.isInteractive == false -> AppOpenRule.ASLEEP
         dev.pocketdesk.android.notify.PhoneLink.target(context)?.address != address -> AppOpenRule.OFF
         else -> null
     }

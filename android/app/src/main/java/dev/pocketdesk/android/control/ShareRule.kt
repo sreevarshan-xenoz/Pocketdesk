@@ -34,6 +34,15 @@ object ShareRule {
     fun matches(pending: Pending, arrived: Arrived): Boolean =
         pending.address == arrived.address && pending.name == arrived.name && pending.size == arrived.size
 
+    /**
+     * The app to share into when the file is here: the one in front when
+     * the ask came ([asked]), but only if it is still the one in front
+     * ([now]); otherwise none, and the file stays in Downloads. The window
+     * may have changed in the minutes the file took.
+     */
+    fun frontStill(asked: String?, now: String?): String? =
+        asked?.takeIf { it.isNotBlank() && it == now }
+
     /** What to do with a file that came whole. */
     enum class Verdict {
         /** Start Android's share into the app in front. */

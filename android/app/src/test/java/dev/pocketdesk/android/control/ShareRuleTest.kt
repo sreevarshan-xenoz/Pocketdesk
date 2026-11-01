@@ -82,6 +82,17 @@ class ShareRuleTest {
     }
 
     @Test
+    fun `the app to share into is the one in front when the ask came, only if it still is`() {
+        assertEquals("org.example.notes", ShareRule.frontStill("org.example.notes", "org.example.notes"))
+        assertNull(ShareRule.frontStill("org.example.notes", "org.example.chat"))
+        assertNull(ShareRule.frontStill("org.example.notes", null))
+        assertNull(ShareRule.frontStill(null, null))
+        assertNull(ShareRule.frontStill("", ""))
+        // Changed since the ask: no app, so the file stays in Downloads.
+        assertEquals(Verdict.NO_APP, ShareRule.verdict(ShareRule.frontStill("org.example.notes", "org.example.chat"), "dev.pocketdesk.android", true, true, true))
+    }
+
+    @Test
     fun `the type is the files own when it reads as one`() {
         assertEquals("image/png", ShareRule.mimeOf("image/png"))
         assertEquals("image/png", ShareRule.mimeOf(" IMAGE/PNG "))
