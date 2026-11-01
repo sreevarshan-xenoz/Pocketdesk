@@ -880,7 +880,15 @@ fun RemoteScreen(
             RustCore.peerName(address)?.let { HostStore.saveClaimedName(context, address, it) }
             // Item 4: and the release it runs.
             HostStore.saveClaimedVersion(context, address, RustCore.peerVersion(address))
-            // UX1: its card's "Used just now".
+        }
+    }
+    // UX1: its card's "Used just now", once the session has started: the
+    // picture is in, not merely the link up. A computer that asks before
+    // each session connects first and sends no picture when its owner says no,
+    // so a refused session never stamps its card (review).
+    val started = streamStatus is StreamStatus.Up && !awaitingPicture
+    LaunchedEffect(started) {
+        if (started) {
             HostStore.markUsed(context, address)
             wasUp.set(true)
         }
