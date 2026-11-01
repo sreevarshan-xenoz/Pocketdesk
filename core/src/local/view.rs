@@ -666,7 +666,11 @@ mod tests {
                 button: 0,
                 pressed: true,
             },
-            InputPacket::MouseScroll { dx: -1, dy: 2 },
+            InputPacket::MouseScroll {
+                dx: -1,
+                dy: 2,
+                fine: Some((-130, 250)),
+            },
             InputPacket::KeyEvent {
                 key: 30,
                 pressed: false,

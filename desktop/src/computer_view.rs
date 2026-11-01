@@ -219,6 +219,9 @@ struct State {
     /// the bar that Settings has not heard yet.
     lock_on_close: bool,
     lock_saved: Option<bool>,
+    /// Settings' "Smooth scrolling" off: the wheel goes in whole notches
+    /// only (on, a touchpad's scroll goes in 120ths of a notch).
+    notches_only: bool,
     /// When "Hide what I do there" was last asked (PR #561 review): an
     /// ask still unanswered after [`ASKING_WAIT`] is given up here too.
     privacy_asked: Option<Instant>,
@@ -1293,6 +1296,12 @@ impl ComputerView {
         self.each(|state| state.lock_on_close = on);
     }
 
+    /// "Smooth scrolling" as Settings has it: an open window follows at
+    /// once.
+    pub fn set_smooth_scrolling(&self, on: bool) {
+        self.each(|state| state.notches_only = !on);
+    }
+
     /// The bar's "Lock it when I close the window", saved since the last
     /// call (PC8): Settings follows it.
     pub fn take_lock_saved(&self) -> Option<bool> {
@@ -1441,6 +1450,7 @@ impl ComputerView {
         state.hevc_setting = from.hevc_setting;
         state.hw_decode = from.hw_decode;
         state.lock_on_close = from.lock_on_close;
+        state.notches_only = from.notches_only;
         state.keys_by_position = from.keys_by_position;
         state.position_hint = from.position_hint;
         state.later = true;
@@ -2912,6 +2922,8 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
             // Keys by position switched, or a fresh input after a rejoin:
             // what is held goes first.
             let by_position = state.keys_by_position;
+            let smooth = !state.notches_only;
+            state.input.set_smooth_scrolling(smooth);
             let mut packets = state.input.set_by_position(by_position);
             packets.extend(match picture_rect {
                 Some(rect) if on => {

@@ -582,6 +582,8 @@
     <string name="texts_contacts_refused">Necesita acceso a los contactos: Android lo denegó. Permite Contactos en los ajustes de Android para Pocketdesk</string>
     <string name="texts_contacts_open_app_settings">Abrir los ajustes de Android para Pocketdesk</string>
     <string name="settings_capture_mouse">Usar un ratón conectado en el equipo</string>
+    <string name="settings_smooth_scrolling">Desplazamiento suave</string>
+    <string name="settings_smooth_scrolling_summary">Dos dedos en el panel táctil desplazan el equipo con la misma finura con que se mueven, no de muesca en muesca. Un equipo con un Pocketdesk más antiguo se desplaza por muescas de todos modos</string>
     <string name="settings_capture_mouse_summary">Durante una sesión, un ratón conectado a este teléfono (USB o Bluetooth) mueve el cursor del equipo y hace clic allí</string>
     <string name="send_clipboard_label">Enviar portapapeles</string>
     <string name="send_clipboard_no_computer">Primero empareja un equipo</string>
