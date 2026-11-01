@@ -741,6 +741,23 @@ Know before you rely on it:
 - `pkexec` uses polkit-1, so a broken `/etc/pam.d/polkit-1` does not stop `sudo` from fixing it, and the other way round.
 - To stop the phone approving without touching PAM: turn off "Approve with my phone" in Settings, or `sudo /usr/lib/pocketdesk/pocketdesk-pam-ask --unpin $USER`; the line then fails at once and the password prompt comes as before.
 
+### Watch Controls: A Wear OS Tile
+
+A Wear OS watch can press a few of the phone's own buttons: wake the computer, ring the phone, play or pause and skip the computer's music, press its deck buttons and say No to a question it asks. It is a small second app (a tile, a complication that opens a short list, and the list), and **nothing in it uses Google Play services or the Data Layer**: the watch talks to the phone app over Bluetooth, through the Bluetooth pairing the two already have, so it can go to F-Droid beside the phone app. It is off until you turn it on, and it is new and **not yet tried on a real watch** (see `docs/device-verification-checklist.md`, the Wear OS section).
+
+1. **Install the watch app.** Build it (`cd android && ./gradlew :wear:assembleRelease`, or take the debug build) and install it on the watch over adb (`adb connect <watch>:<port>` after turning on Wi-Fi debugging on the watch, then `adb install`). It is a separate APK from the phone's.
+2. **On the phone:** Settings → "Watch controls" → on. Android asks once for the "nearby devices" permission (Android 12 and later), which lets the app connect to a device already paired; there is no scan and no location. Choose which buttons the watch has. Wake, Ring, Music and Questions are on; Deck is off until you choose it, since a deck button can run keys or a task on the computer. The phone needs notification access, as its other background features do.
+3. **Pair the watch with the phone:** Settings → Watch controls → "Pair a watch" opens a two-minute window. On the watch, open Pocketdesk, choose the phone from the short list of devices the watch is already paired with, and type the six digits the watch shows on the phone. Three wrong codes close the window.
+4. **Add the tile** (hold the watch face, swipe to the end, add Pocketdesk), and the complication ("PD") if you want a shortcut to the list.
+
+**What the buttons do.** Each is the call the phone's own tiles and widgets make for you, so the computer sees your phone and nothing else, and each is held to what the computer already lets that phone do: Wake follows the phone's wake settings, the music needs Audio for the phone, a deck button needs Deck and follows its own rules. Ring plays the alarm sound on the phone for 30 seconds, with Stop on the phone, at most once a minute. The tile shows the buttons that are on; a question that is waiting adds "No: …" to it. Deck opens the list, which also shows the deck's buttons (at most eight) and the questions.
+
+**A watch can say No but never Yes.** A question that needs your fingerprint (any "Approve with my phone" request, and a plain question's Yes) is answered on the phone, as before: its key signs only after the phone's own fingerprint, which a watch's lock cannot stand in for. The list says so beside the question. A deck button and a No also ask the **watch's own lock**: a watch with no lock set, or locked, refuses them ("Set a watch lock to use this").
+
+**With no phone near.** The watch has no mode of its own, since every button goes through the phone's link to the computer. The tile says "The phone is not reachable" within about twelve seconds and keeps nothing to send later: a wake pressed out of range never goes out when you come back. Turning "Watch controls" off on the phone stops its Bluetooth service at once; "Forget" there (or on the watch) makes the key stop working.
+
+**What it costs.** The watch APK is about 1 MB (release, minified), and the phone app gains a few kilobytes and one permission. The phone keeps a Bluetooth service open while the setting is on (idle, no wake lock). Know before you rely on it: a watch that is paired, unlocked and on someone's wrist can wake the computer, ring the phone, control the music and say No to questions, and, with Deck on, press deck buttons (SECURITY.md, limit 84).
+
 ### Your Phone's Location for This Computer (GeoClue)
 
 Mozilla's location service shut down in 2024, so on Linux GeoClue (what night light, weather, the time zone and maps ask) often has no way to know where the computer is. Pocketdesk can give it your phone's place instead. It is off on both sides until you turn it on.
