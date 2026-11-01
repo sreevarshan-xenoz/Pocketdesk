@@ -63,6 +63,15 @@ object ScreenForApp {
             .setContentIntent(open)
             .setAutoCancel(true)
             .setTimeoutAfter(OFFER_MS)
+            // Its title names the app: on a locked screen only "Pocketdesk"
+            // shows (review).
+            .setVisibility(Notification.VISIBILITY_PRIVATE)
+            .setPublicVersion(
+                Notification.Builder(app, CHANNEL)
+                    .setSmallIcon(R.drawable.ic_stat_pocketdesk)
+                    .setContentTitle(app.getString(R.string.app_name))
+                    .build(),
+            )
             .build()
         runCatching { manager.notify(NOTIFICATION_ID, notification) }
             .onFailure { Log.w(TAG, "could not offer to show the screen", it) }
