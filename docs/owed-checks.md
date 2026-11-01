@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1138 open items.
+1146 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 43 |
-| Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 179 |
+| Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 17 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 185 |
 | A phone with a SIM | 39 |
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
 | A second computer | 154 |
 | A Linux desktop (the Azure VM serves for some) | 214 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 376 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -187,6 +187,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **166. Linked with the screen off (M1)**
 
 - After a reboot, the "Keeps the link" notification is back without opening the app.
+
+**257. A direct link on Windows: the Mobile Hotspot**
+
+- The server killed with a link on (`taskkill /F` on the server only, and only when the owner says so) and started again: its first start's log says it swept one, the hotspot is off, and the owner's settings are back. A record that could not be put back (the internet unplugged during the kill) stays and the next start retries it. (where: power)
 
 ## Needs the owner's OK on this box: input reaching Windows, or its display settings
 
@@ -587,6 +591,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **255. The phone's location for this computer's apps (GeoClue, Linux)**
 
 - A real session on the owner's desk (GNOME or KDE): night light or the time zone panel takes the phone's city; the server's log and `events.jsonl` hold no coordinates (search them for the first digits of the phone's true latitude: none). (where: owner)
+
+**257. A direct link on Windows: the Mobile Hotspot**
+
+- Read-only, on a Windows computer (`cargo test -p pocketdesk-core --features local direct_link::tests::this_computer -- --ignored --nocapture`): "PLAN mode=SecondInterface" with an internet connection; with the network cable and Wi-Fi off, "NO PLAN: NoConnectionProfile" and the Pair page says Mobile Hotspot needs an internet connection; with the owner's own hotspot on, "NO PLAN: HotspotInUse". Print nothing but the plan or the reason. (where: owner)
+- The Pair page's "Make a direct link" on a Windows computer with an internet connection and its own hotspot off: the status says `on` with an address in 192.168.137.0/24, Windows' Settings (Network & internet, Mobile hotspot) shows a name starting `pocketdesk-` and the hotspot on, and the Pair page shows the code. (where: owner)
+- The owner's settings come back: note the hotspot's name, passphrase and band in Windows' Settings first (outside the repo, never pasted anywhere); after "Turn off" the hotspot is off and its name, passphrase and band are as they were; with the hotspot on first, a link is refused (HotspotInUse), and after turning it off in Settings, made, ended, and turned back on by hand, the settings are the owner's own. (where: owner)
+- The OPPO scanning the Windows computer's code (a screenshot pushed by adb): Android asks once to join `pocketdesk-…`, the phone joins (WPA2: if Windows' hotspot is set to WPA3 only the phone cannot join, which the first run should report), pairs, and starts the session over it; `direct_link.json` says in use while the phone's session runs. (where: owner)
+- The idle timer and the longest life on a real Windows link (a 1-minute idle setting is enough): with no phone it ends after the setting, the hotspot off and the owner's settings back; with a phone's session it stays on; and turning the hotspot off in Windows' Settings while a link is on is not noticed (a known gap: the page keeps showing the code until the idle time ends the link, and the owner's settings then go back). (where: owner)
+- The band row: 5 GHz on a card that allows a hotspot on it makes a 5 GHz network; on one that does not, the link comes up on the card's own band and does not fail. A card that cannot host beside its own Wi-Fi connection (Windows drops the Wi-Fi uplink) is reported in the first run's words. (where: owner)
 
 ## A phone with a SIM
 
@@ -2758,3 +2771,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Show camera, then Stop, with a computer whose card had no time: its card then says "Used just now"; the same for Show screen. (where: OPPO + throwaway) Partly checked 2026-10-31: a camera session to B stamps the card at Ready and again as it ends (ended with `pocketdesk kick`, as ColorOS folds the low-importance cast notification out of adb's reach). Found: the card kept its old text while Home stayed resumed (fixed in this PR: `HostStore.usedStamps`). Show screen not run.
 - The same for "Play this phone's sound there" (it makes sound, so never in a script run). (where: by hand)
 - TalkBack on the card menu: the two headings are read as headings, Manage as collapsed and then expanded; on a window chip, the whole title and the "Show the full title" action. (where: by hand)
+
+**257. A direct link on Windows: the Mobile Hotspot**
+
+- The Settings rows on Windows: "Offer a direct link" off hides the card and a running link goes off within 5 s; the note names the Mobile Hotspot, not NetworkManager. (where: by hand)
