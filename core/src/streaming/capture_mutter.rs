@@ -434,6 +434,7 @@ pub async fn start_capture(
         stream,
         size,
     });
+    let (refused_tx, refused_rx) = tokio::sync::watch::channel(false);
     let registered = worker_input.as_ref().map(|_| {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         (super::portal_input::register(tx), rx)
@@ -448,10 +449,14 @@ pub async fn start_capture(
                     _ = closer.cancelled() => break,
                     event = rx.recv() => match event {
                         Some(event) => {
-                            if let Err(e) = input.apply(&mut rest, event).await
-                                && !std::mem::replace(&mut said, true)
-                            {
-                                warn!(error = %format!("{e:#}"), "Mutter input not taken");
+                            if let Err(e) = input.apply(&mut rest, event).await {
+                                let text = format!("{e:#}");
+                                if !std::mem::replace(&mut said, true) {
+                                    warn!(error = %text, "Mutter input not taken");
+                                }
+                                if super::portal_input::input_refused_text(&text) {
+                                    let _ = refused_tx.send(true);
+                                }
                             }
                         }
                         None => {
@@ -473,7 +478,12 @@ pub async fn start_capture(
         frame_tx,
         cancel.clone(),
     )?;
-    Ok(CaptureSession::new(config, cancel))
+    let session = CaptureSession::new(config, cancel);
+    Ok(if remote.is_some() {
+        session.with_input_refused(refused_rx)
+    } else {
+        session
+    })
 }
 
 /// The bus name an interface of the two session kinds is served by.

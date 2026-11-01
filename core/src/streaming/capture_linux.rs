@@ -449,6 +449,7 @@ async fn start_remote_desktop_capture(
     // The worker: the injector's events, in order, until the capture ends.
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let registered = crate::streaming::portal_input::register(tx);
+    let (refused_tx, refused_rx) = tokio::sync::watch::channel(false);
     let worker_cancel = cancel.clone();
     tokio::spawn(async move {
         let _registered = registered;
@@ -468,6 +469,11 @@ async fn start_remote_desktop_capture(
                             if !std::mem::replace(&mut said, true) {
                                 warn!(error = %e, "Portal input not taken");
                             }
+                            // A session closed to input (GNOME's "Allow
+                            // Remote Interaction" off): the phone is told.
+                            if crate::streaming::portal_input::input_refused_text(&e.to_string()) {
+                                let _ = refused_tx.send(true);
+                            }
                         }
                     }
                     // Only its own capture's end closes the session.
@@ -482,7 +488,7 @@ async fn start_remote_desktop_capture(
     });
 
     spawn_pipewire_capture(node_id, config.clone(), frame_tx, cancel.clone())?;
-    Ok(CaptureSession::new(config, cancel))
+    Ok(CaptureSession::new(config, cancel).with_input_refused(refused_rx))
 }
 
 /// Make the portal call that turns the wheel, if any. A smooth call says

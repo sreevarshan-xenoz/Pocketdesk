@@ -135,6 +135,51 @@ fn screen_feature_byte(input: bool, mic: bool, per_screen: bool) -> u8 {
     byte
 }
 
+/// The ready stream said again once a session's input is found refused (a
+/// GNOME dialog answered with "Allow Remote Interaction" off): the same
+/// header and feature byte as the first, with input and the pen gone, which
+/// a client takes over what the first said (it keeps the last).
+fn input_refused_ready(mic: bool, per_screen: bool) -> Vec<u8> {
+    let header = super::transport::PacketHeader {
+        sequence: 0,
+        stream_kind: super::transport::STREAM_KIND_READY,
+        is_keyframe: false,
+        timestamp_us: 0,
+    };
+    let mut said = header.as_bytes().to_vec();
+    said.push(screen_feature_byte(false, mic, per_screen));
+    said
+}
+
+/// Wait until the capture's input is found refused, then say so to the
+/// phone on a ready stream ([`input_refused_ready`]): the log said it
+/// already, and a phone whose taps do nothing needs to know why. Ends with
+/// the session.
+async fn tell_input_refused(
+    connection: SharedConnection,
+    mut refused: watch::Receiver<bool>,
+    mic: bool,
+    per_screen: bool,
+    cancel: CancellationToken,
+) {
+    while !*refused.borrow_and_update() {
+        tokio::select! {
+            _ = cancel.cancelled() => return,
+            changed = refused.changed() => if changed.is_err() { return },
+        }
+    }
+    warn!("This computer's session takes no input: telling the phone it is view-only");
+    match connection.open_uni().await {
+        Ok(mut ready) => {
+            if let Err(e) = ready.write_all(&input_refused_ready(mic, per_screen)).await {
+                debug!(error = %e, "Could not tell the phone its input is refused");
+            }
+            let _ = ready.finish();
+        }
+        Err(e) => debug!(error = %e, "Could not tell the phone its input is refused"),
+    }
+}
+
 /// What a remote's ready stream says this computer offers it (G4): a laser
 /// only for a phone whose input is taken, where the dot can be drawn.
 fn remote_feature_byte(input: bool, laser: bool, phone_sound: bool) -> u8 {
@@ -1091,6 +1136,18 @@ impl StreamingServer {
             .await
             .context("Failed to start screen capture")?;
             info!("Screen capture session started");
+            // A capture that carries input itself (GNOME's and KDE's portal,
+            // mutter) may find it refused only when the first event comes:
+            // the phone hears then.
+            if !force_view_only && let Some(refused) = session.input_refused() {
+                tokio::spawn(tell_input_refused(
+                    connection.clone(),
+                    refused,
+                    allow_mic,
+                    per_screen,
+                    cancel.clone(),
+                ));
+            }
             Some(session)
         };
 
@@ -3326,6 +3383,30 @@ mod tests {
             0,
             "said, and view-only"
         );
+    }
+
+    /// A session whose input is found refused says the ready stream again,
+    /// view-only, with everything else it said before.
+    #[test]
+    fn a_refused_session_says_ready_again_view_only_and_nothing_else_changed() {
+        use super::super::client::{
+            screen_features, screen_input_per_screen, screen_takes_input, screen_takes_mic,
+        };
+        use super::super::transport::{PacketHeader, STREAM_KIND_READY};
+        for (mic, per_screen) in [(true, true), (false, true), (true, false)] {
+            let said = input_refused_ready(mic, per_screen);
+            let header = PacketHeader::from_bytes(said[..18].try_into().unwrap()).unwrap();
+            assert_eq!(header.stream_kind, STREAM_KIND_READY);
+            let features = screen_features(&said[18..]);
+            assert_eq!(screen_takes_input(features), Some(false), "view-only");
+            assert_eq!(screen_takes_mic(features), Some(mic), "the mic as it was");
+            assert_eq!(
+                screen_input_per_screen(features),
+                Some(per_screen),
+                "the screen as it was"
+            );
+            assert_eq!(said.len(), 19, "a header and one byte, as the first");
+        }
     }
 
     /// PC4: a screen session hears which system this computer runs.

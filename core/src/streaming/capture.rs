@@ -23,13 +23,38 @@ use super::{StreamingConfig, VideoFrame};
 pub struct CaptureSession {
     config: StreamingConfig,
     cancel: CancellationToken,
+    /// Turns true once this session's input is found refused (the portal's
+    /// or mutter's "not allowed"); only a capture that carries input has it.
+    input_refused: Option<tokio::sync::watch::Receiver<bool>>,
 }
 
 impl CaptureSession {
     /// Create a new capture session.
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(crate) fn new(config: StreamingConfig, cancel: CancellationToken) -> Self {
-        Self { config, cancel }
+        Self {
+            config,
+            cancel,
+            input_refused: None,
+        }
+    }
+
+    /// Carry the signal that this session's input is refused.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub(crate) fn with_input_refused(
+        mut self,
+        refused: tokio::sync::watch::Receiver<bool>,
+    ) -> Self {
+        self.input_refused = Some(refused);
+        self
+    }
+
+    /// Whether this capture's input has been refused, as it happens: `None`
+    /// for a capture that carries no input of its own (the others inject
+    /// through uinput, the compositor or the OS). The streamer tells the
+    /// phone when it turns true.
+    pub fn input_refused(&self) -> Option<tokio::sync::watch::Receiver<bool>> {
+        self.input_refused.clone()
     }
 
     /// Get the capture configuration.
