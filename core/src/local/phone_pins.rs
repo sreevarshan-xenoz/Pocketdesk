@@ -55,9 +55,12 @@ pub fn arguments(phone: &str, app: &str) -> Option<String> {
 }
 
 /// `arg` as one argument of a `.desktop` file's `Exec` line (Desktop Entry
-/// Specification, "The Exec key"): double-quoted, with `"`, a backtick, `$`
-/// and `\` escaped, a backslash written as four (the string escape rule is
-/// applied before the quoting rule) and `%` doubled so that it is never a
+/// Specification, "The Exec key"), which is read in two layers: the file's
+/// string escapes first (`\\` is one backslash), then the quoting rule (in
+/// double quotes `\"`, `` \` ``, `\$` and `\\` stand for `"`, a backtick,
+/// `$` and a backslash). So in the file each of `"`, a backtick and `$`
+/// is written as a doubled backslash and the character (`\\"`, `` \\` ``,
+/// `\\$`), a backslash as four, and `%` is doubled so that it is never a
 /// field code. `None` for an argument with a control character, which would
 /// end the line.
 pub fn exec_quote(arg: &str) -> Option<String> {
@@ -67,10 +70,10 @@ pub fn exec_quote(arg: &str) -> Option<String> {
     let mut out = String::from("\"");
     for c in arg.chars() {
         match c {
-            '\\' => out.push_str("\\\\\\\\"),
-            '"' => out.push_str("\\\""),
-            '`' => out.push_str("\\`"),
-            '$' => out.push_str("\\$"),
+            '\\' => out.push_str(r"\\\\"),
+            '"' => out.push_str(r#"\\""#),
+            '`' => out.push_str(r"\\`"),
+            '$' => out.push_str(r"\\$"),
             '%' => out.push_str("%%"),
             c => out.push(c),
         }
@@ -441,6 +444,60 @@ mod tests {
         png
     }
 
+    /// An `Exec` line as a launcher reads it (Desktop Entry Specification):
+    /// the string escapes of the value first, then the arguments split at
+    /// unquoted spaces, a backslash in quotes escaping `"`, a backtick, `$`
+    /// and itself, and `%%` one percent sign.
+    fn read_exec(line: &str) -> Vec<String> {
+        let value = line.strip_prefix("Exec=").unwrap();
+        // Layer one: \s \n \t \r and \\.
+        let mut text = String::new();
+        let mut chars = value.chars();
+        while let Some(c) = chars.next() {
+            if c != '\\' {
+                text.push(c);
+                continue;
+            }
+            match chars.next() {
+                Some('\\') => text.push('\\'),
+                Some('s') => text.push(' '),
+                Some('n') => text.push('\n'),
+                Some('t') => text.push('\t'),
+                Some('r') => text.push('\r'),
+                Some(other) => {
+                    text.push('\\');
+                    text.push(other);
+                }
+                None => text.push('\\'),
+            }
+        }
+        // Layer two: quoting.
+        let mut args = Vec::new();
+        let mut current = String::new();
+        let mut quoted = false;
+        let mut chars = text.chars().peekable();
+        while let Some(c) = chars.next() {
+            match c {
+                '"' => quoted = !quoted,
+                '\\' if quoted => match chars.next() {
+                    Some(e) if "\"`$\\".contains(e) => current.push(e),
+                    other => panic!("bad escape in {line}: {other:?}"),
+                },
+                '%' if chars.peek() == Some(&'%') => {
+                    chars.next();
+                    current.push('%');
+                }
+                '%' => panic!("a field code in {line}"),
+                ' ' if !quoted => {
+                    args.push(std::mem::take(&mut current));
+                }
+                c => current.push(c),
+            }
+        }
+        args.push(current);
+        args
+    }
+
     fn args(list: &[&str]) -> Vec<OsString> {
         list.iter().map(OsString::from).collect()
     }
@@ -486,13 +543,37 @@ mod tests {
             exec_quote("/home/a b/pocketdesk app").as_deref(),
             Some("\"/home/a b/pocketdesk app\"")
         );
-        assert_eq!(exec_quote("a\"b").as_deref(), Some("\"a\\\"b\""));
-        assert_eq!(exec_quote("a$b`c").as_deref(), Some("\"a\\$b\\`c\""));
+        // In the file, each escape has its backslash doubled (the string
+        // layer takes one off, the quoting layer reads the rest).
+        assert_eq!(exec_quote("a\"b").as_deref(), Some(r#""a\\"b""#));
+        assert_eq!(exec_quote("a$b`c").as_deref(), Some(r#""a\\$b\\`c""#));
         assert_eq!(
             exec_quote("a\\b").as_deref(),
-            Some("\"a\\\\\\\\b\""),
+            Some(r#""a\\\\b""#),
             "a backslash is four"
         );
+        // And read as a launcher reads them, every argument comes back whole.
+        for arg in [
+            "/opt/a b/pocketdesk-app",
+            "/opt/q\"uote/app",
+            "/opt/back`tick/app",
+            "/opt/dollar$HOME/app",
+            "/opt/back\\slash/app",
+            "/opt/100%/app",
+            "/opt/all \"`$\\%/app",
+            "--open-phone-app",
+        ] {
+            let line = format!(
+                "Exec={} {}",
+                exec_quote(arg).unwrap(),
+                exec_quote("phone-1").unwrap()
+            );
+            assert_eq!(
+                read_exec(&line),
+                vec![arg.to_string(), "phone-1".to_string()],
+                "{line}"
+            );
+        }
         assert_eq!(exec_quote("100%").as_deref(), Some("\"100%%\""));
         assert_eq!(exec_quote("a\nb"), None, "a new line would end the line");
         assert_eq!(exec_quote("a\u{0}b"), None);
