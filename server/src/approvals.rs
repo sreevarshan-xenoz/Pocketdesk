@@ -11,6 +11,7 @@ use std::time::Duration;
 use pocketdesk_core::local::approval::{self, APPROVAL_TIMEOUT_SECS, ApprovalRequest, Verdict};
 use pocketdesk_core::local::paths::APPROVAL_DIR;
 use pocketdesk_core::local::pin::now_unix;
+use pocketdesk_core::protocol::kdeconnect::TrustStore;
 
 /// How often a held session looks for its answer.
 const POLL: Duration = Duration::from_millis(250);
@@ -132,16 +133,48 @@ fn publish(dir: &Path, list: &[ApprovalRequest]) {
 }
 
 fn notify(device_id: &str, peer: SocketAddr) {
-    let summary = "Pocketdesk: a phone wants to connect";
-    let body = format!(
-        "{device_id} from {}. Allow or deny it in the Pocketdesk app within {APPROVAL_TIMEOUT_SECS} s.",
-        peer_label(peer)
-    );
+    let device_id = device_id.to_string();
     tokio::task::spawn_blocking(move || {
-        if !crate::platform::notify(summary, &body, Duration::from_secs(APPROVAL_TIMEOUT_SECS)) {
+        let (computer, name) = who_it_is(&device_id);
+        let (summary, body) = prompt_words(computer, name.as_deref(), &device_id, peer);
+        if !crate::platform::notify(&summary, &body, Duration::from_secs(APPROVAL_TIMEOUT_SECS)) {
             tracing::info!("{summary} — {body}");
         }
     });
+}
+
+/// Whether `device_id` is one of the owner's computers, and the name it is
+/// shown by, read from the trust store. Neither when the store cannot be
+/// read: the prompt then names it by its id, as a phone.
+fn who_it_is(device_id: &str) -> (bool, Option<String>) {
+    let Ok(path) = crate::state::trust_store_path() else {
+        return (false, None);
+    };
+    match TrustStore::read(path) {
+        Ok(store) => (
+            store.is_computer(device_id),
+            store.name(device_id).map(str::to_string),
+        ),
+        Err(_) => (false, None),
+    }
+}
+
+/// The approval prompt's summary and body for a session from `device_id`:
+/// "a computer" or "a phone", and the device by `name`, else by its id.
+fn prompt_words(
+    computer: bool,
+    name: Option<&str>,
+    device_id: &str,
+    peer: SocketAddr,
+) -> (String, String) {
+    let kind = if computer { "a computer" } else { "a phone" };
+    let summary = format!("Pocketdesk: {kind} wants to connect");
+    let body = format!(
+        "{} from {}. Allow or deny it in the Pocketdesk app within {APPROVAL_TIMEOUT_SECS} s.",
+        name.unwrap_or(device_id),
+        peer_label(peer)
+    );
+    (summary, body)
 }
 
 #[cfg(test)]
@@ -184,6 +217,20 @@ mod tests {
             assert_eq!(got, verdict);
             assert!(approval::read_pending(&dir, now_unix()).is_empty());
         }
+    }
+
+    #[test]
+    fn the_prompt_says_computer_or_phone_and_names_the_device() {
+        let peer: SocketAddr = PEER.parse().unwrap();
+        let (summary, body) = prompt_words(true, Some("Desk computer"), "c0ffee", peer);
+        assert_eq!(summary, "Pocketdesk: a computer wants to connect");
+        assert!(
+            body.starts_with("Desk computer from 192.0.2.7:51000."),
+            "{body}"
+        );
+        let (summary, body) = prompt_words(false, None, "a1b2c3", peer);
+        assert_eq!(summary, "Pocketdesk: a phone wants to connect");
+        assert!(body.starts_with("a1b2c3 from 192.0.2.7:51000."), "{body}");
     }
 
     #[test]
