@@ -10,7 +10,7 @@
 //! minutes, and only its owner turning "Wake helper" off and on again on
 //! the phone (an offer marked `fresh`) undoes the removal.
 
-use std::io::{self, Write};
+use std::io;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -74,10 +74,8 @@ fn write(state_dir: &Path, file: &WakeHelperFile) -> io::Result<()> {
         std::process::id(),
         uuid::Uuid::new_v4().simple()
     ));
-    let mut out = std::fs::File::create(&tmp)?;
-    out.write_all(json.as_bytes())?;
-    out.sync_all()?;
-    drop(out);
+    // Owner-only (mode 0600 on Unix), as the file says it is.
+    crate::secure_fs::write_private(&tmp, json.as_bytes())?;
     crate::atomic_file::replace(&tmp, &path)
 }
 
@@ -284,6 +282,20 @@ mod tests {
             refused.last().unwrap(),
             &format!("phone-{}", MAX_REFUSED + 3)
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_file_is_written_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = dir("mode");
+        take_offer(&dir, "phone-1", &offer(KEY, true), 100).unwrap();
+        let mode = std::fs::metadata(dir.join(WAKE_HELPER_FILE))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
