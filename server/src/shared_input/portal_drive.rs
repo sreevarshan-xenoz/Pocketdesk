@@ -541,8 +541,11 @@ pub(super) fn drive<B: Backend>(
                 let screens = if zones_known.load(Ordering::SeqCst) {
                     None
                 } else {
+                    // The timeout made inside the runtime: its timer needs one.
                     runtime
-                        .block_on(tokio::time::timeout(SCREENS_WAIT, screens::current()))
+                        .block_on(async {
+                            tokio::time::timeout(SCREENS_WAIT, screens::current()).await
+                        })
                         .ok()
                 };
                 (config, files, fractional, screens)
