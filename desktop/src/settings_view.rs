@@ -256,6 +256,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Phones,
     ),
     (
+        "phone_apps_page",
+        "Show the Phone apps page",
+        Section::Phones,
+    ),
+    (
         "gamepad_controller",
         "The phone's gamepad as a game controller",
         Section::Phones,
@@ -772,6 +777,7 @@ pub fn applies_live(key: &str) -> bool {
             | "phone_live_updates"
             | "notification_pictures"
             | "cast_control"
+            | "phone_apps_page"
             | "gamepad_controller"
             | "downloads_folder"
             | "remember_screen_grant"
@@ -1885,6 +1891,16 @@ impl SettingsForm {
                     note(
                         ui,
                         "Only once the phone allows it: \"Let the computer control this phone\" in Pocketdesk's Settings on the phone.",
+                    );
+                });
+                row(ui, "phone_apps_page", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_apps_page,
+                        "list the Phone apps page, to open a phone's apps from here",
+                    );
+                    note(
+                        ui,
+                        "The page shows a linked phone's apps and opens one there, with its screen in a window here. On the phone it needs \"Let the computer open my apps\" on (off by default) and Pocketdesk's control service.",
                     );
                 });
                 // F6 part 2: a PipeWire camera, so Linux only.

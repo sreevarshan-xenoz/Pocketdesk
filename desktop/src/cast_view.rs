@@ -153,6 +153,21 @@ impl CastView {
         lock(&self.shared).dismissed = None;
     }
 
+    /// Bring the screen window to the front (Apps part 1: an app opened on
+    /// the phone): a closed one is shown again, and one that is open is
+    /// focused. Nothing happens while there is no cast to show.
+    pub fn raise(&self, ctx: &egui::Context) {
+        {
+            let mut state = lock(&self.shared);
+            if state.session_id.is_none() {
+                return;
+            }
+            state.dismissed = None;
+        }
+        ctx.send_viewport_cmd_to(viewport_id(), egui::ViewportCommand::Focus);
+        ctx.request_repaint();
+    }
+
     /// Call each pass: keeps the window open while there is a cast to show.
     /// `control` is the owner's Settings ("Control phones from their screen
     /// window", C8); `targets`, the phones files reach now (L2).
