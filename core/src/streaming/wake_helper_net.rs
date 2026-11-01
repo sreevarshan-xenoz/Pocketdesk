@@ -498,4 +498,35 @@ mod tests {
         assert_eq!(recorder.1.load(Ordering::SeqCst), 0);
         helper.stop().await;
     }
+
+    /// Live: a real magic packet leaves the helper, for something else on
+    /// this machine to listen for on UDP port 9 (the check in
+    /// `docs/development-setup.md` §4 prints only matched or not). The
+    /// helper's MAC is the documentation one.
+    #[tokio::test]
+    #[ignore = "sends a real broadcast on this machine's network"]
+    async fn live_a_real_magic_packet_leaves_the_helper() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let phone = SecretKey::generate();
+        let state = HelperState::new(Box::new(NetworkSender));
+        // The duty's address is this machine's own: a packet to it reaches a
+        // listener here without a firewall's broadcast rules in the way.
+        let mut live = duty(&[phone.public().to_string()]);
+        live.broadcast = Ipv4Addr::LOCALHOST;
+        state.duties.lock().unwrap().set(live);
+        *state.local.lock().unwrap() = vec![Ipv4Addr::LOCALHOST];
+        let helper = Helper::start(
+            SecretKey::generate(),
+            RelayMode::Disabled,
+            SocketAddr::from(([127, 0, 0, 1], 0)),
+            state,
+        )
+        .await
+        .expect("the helper binds");
+        assert_eq!(
+            wake(&helper, &phone, "computer-1").await.unwrap(),
+            Answer::Sent
+        );
+        helper.stop().await;
+    }
 }
