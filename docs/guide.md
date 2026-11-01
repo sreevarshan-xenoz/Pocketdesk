@@ -43,7 +43,7 @@ The desktop end runs on Linux and Windows; the phone end is the Android app. It 
 |---|---|---|
 | Screen capture | wlroots screencopy (Hyprland, Sway), the portal (GNOME, KDE; it asks at each session, or with Settings "Remember the screen-sharing grant" on, off by default, once until you revoke it, so sessions start with no one at the desk; on KDE Plasma 6 it can be [allowed ahead](#kde-plasma-no-dialog-at-all), so it never asks), X11 | Windows.Graphics.Capture, DXGI duplication |
 | Hardware encoding | VAAPI (in process), NVENC (through `ffmpeg`); software is libx264, or on Fedora's `ffmpeg-free` Cisco's OpenH264 (after 0.8.3) | NVENC, AMF, Quick Sync, Media Foundation (every encoder, software too, through `ffmpeg.exe` on `PATH`) |
-| Remote input | uinput (Wayland), else the compositor's virtual pointer and keyboard on wlroots (Sway, Hyprland) when uinput is root-only, or GNOME's and KDE's RemoteDesktop portal through the session's screen sharing (one grant for both; a remote without the screen gets no input there), XTEST (X11); text typed from the phone goes through the compositor's virtual keyboard on wlroots (Sway, Hyprland), so any character arrives on any layout, else as US-layout keys with Shift | `SendInput`: elevated windows need `install --elevated`; the UAC prompt and the lock screen are never reachable |
+| Remote input | uinput (Wayland), else the compositor's virtual pointer and keyboard on wlroots (Sway, Hyprland) when uinput is root-only, or GNOME's and KDE's RemoteDesktop portal through the session's screen sharing (one grant for both; a remote without the screen gets no input there; GNOME also has the off-by-default "Unattended on GNOME", mutter's own D-Bus with no dialog), XTEST (X11); text typed from the phone goes through the compositor's virtual keyboard on wlroots (Sway, Hyprland), so any character arrives on any layout, else as US-layout keys with Shift | `SendInput`: elevated windows need `install --elevated`; the UAC prompt and the lock screen are never reachable |
 | Clipboard: text and images, anywhere | `wl-clipboard` on Wayland, `xclip` on X11 | Win32 clipboard |
 | Files both ways, remote browsing (anywhere) | yes | yes |
 | Desktop sound on the phone | PipeWire | WASAPI loopback |
@@ -589,6 +589,36 @@ waits a minute at each session, or two where input goes through the portal
 (its dialog, then the screen's), and ends it ("No one answered the
 screen-sharing dialog"), and a dialog answered late leaves "The kept
 screen-sharing grant was not taken" in the server's log.
+
+### GNOME: Unattended, With No Dialog
+
+GNOME's screen-sharing dialog needs someone at the computer the first time.
+For a computer with no one at it, Settings → Connection has **Unattended on
+GNOME** (`gnome_unattended = true` in `config.toml`; off by default, GNOME
+only, read as each session starts). With it on, the server starts the screen,
+and the keyboard and mouse where uinput is not open to it, through GNOME's
+own screen-casting and remote-desktop service (`org.gnome.Mutter.ScreenCast`
+and `org.gnome.Mutter.RemoteDesktop`, the calls gnome-remote-desktop's
+headless mode makes), so no dialog shows and nothing is asked.
+
+**Before you do:** any program running as you can make the same calls, so
+this adds no power an attacker running as you lacked, but it removes the one
+place a person at the computer could say no (SECURITY.md, limit 75). A paired
+phone still needs your approval and its Control permission for input. While a
+phone is connected GNOME shows its screen-sharing indicator in the top bar,
+and the pointer is not drawn into the picture.
+
+If GNOME's service is missing or refuses, the server uses the screen-sharing
+portal instead, as with the switch off, and says so once in its log
+("Unattended GNOME capture through mutter did not start"). "Remember the
+screen-sharing grant" is not involved: nothing is stored. Typed accents reach
+GNOME only if the active layout has them, as through the portal. If a dialog
+you answered left "Allow Remote Interaction" off, the screen is shared and the
+keyboard and mouse are refused; the server logs "Portal input not taken" and
+says so on the session's ready stream (the status a session already carries
+for what the computer takes): another computer's window shows it view-only,
+and a phone is no longer offered the pen. The phone app has no banner for it
+yet.
 
 ### Away From Home: Your Own Relay
 
