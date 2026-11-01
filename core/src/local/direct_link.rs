@@ -1290,7 +1290,7 @@ mod tests {
             was_on,
             settings: HotspotSettings {
                 ssid: "home-hotspot".into(),
-                passphrase: "not-a-real-passphrase".into(),
+                passphrase: "k".repeat(16),
                 band: Some(TETHERING_5),
             },
         }
@@ -1321,7 +1321,7 @@ mod tests {
     fn debug_output_never_shows_the_owners_hotspot() {
         let text = format!("{:?} {:?}", hotspot(true), hotspot(false).settings);
         assert!(!text.contains("home-hotspot"), "{text}");
-        assert!(!text.contains("not-a-real"), "{text}");
+        assert!(!text.contains("kkkk"), "{text}");
     }
 
     #[test]
