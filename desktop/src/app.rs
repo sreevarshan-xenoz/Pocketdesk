@@ -402,7 +402,7 @@ pub const PAIR_ELSEWHERE: &str = "Pair a computer on the Pair page.";
 const WAKE_HELPER_NONE: &str = "None. On a spare phone paired as one of yours, turn on \"Wake helper for this home\" in its Settings and leave it on a charger on the home Wi-Fi: your other phones can then wake this computer from anywhere.";
 
 /// What the wake helper row says beside a helper.
-const WAKE_HELPER_ABOUT: &str = "It sends this computer's magic packet onto your home network when one of your other phones asks, at most once every 30 seconds per phone, and serves nothing else. Removing it stops that; it stays removed until its owner turns the switch off and on again on the phone.";
+const WAKE_HELPER_ABOUT: &str = "It sends this computer's magic packet onto your home network when one of your other phones asks, at most once every 30 seconds per phone, and serves nothing else. Removing it here is not a security control: it stops this computer using the phone as its helper, but the phone itself can still be switched on again by whoever holds it. To take its access away, unpair the phone.";
 /// Its button, and the fix where no computer is paired.
 pub const PAIR_A_COMPUTER: &str = "Pair a computer";
 
