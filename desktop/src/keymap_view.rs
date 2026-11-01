@@ -113,7 +113,8 @@ impl Keys {
     pub fn pace(&mut self, fingers: &mut Vec<ControlEvent>, now: Instant) {
         if !fingers.is_empty() {
             self.last_sent = now;
-        } else if self.runner.busy() && now.saturating_duration_since(self.last_sent) >= KEEP_ALIVE {
+        } else if self.runner.busy() && now.saturating_duration_since(self.last_sent) >= KEEP_ALIVE
+        {
             fingers.extend(self.runner.keep_alive());
             self.last_sent = now;
         }
