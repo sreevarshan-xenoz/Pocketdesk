@@ -434,7 +434,9 @@ impl AppsPage {
         let png =
             pocketdesk_core::local::phone_app_icons::kept(state_dir, phone, &app.id, app.version)
                 .and_then(|path| std::fs::read(path).ok())
-                .filter(|bytes| pocketdesk_core::local::notification_icons::icon_fits(bytes))
+                // Whatever the phone sent is decoded and written again, so only a
+                // picture this program made lands in a shortcut's icon file.
+                .and_then(|bytes| reencode_png(&bytes))
                 .or_else(own_icon_png)
                 .ok_or_else(|| std::io::Error::other("no icon"))?;
         phone_pins::pin(state_dir, &places, &exe, phone, &app.id, &app.name, &png).map(|_| ())
@@ -717,6 +719,35 @@ pub fn pinned_words(app: &str) -> String {
     }
 }
 
+/// `bytes` decoded as an icon (held to an icon's size by its header and the
+/// decoder's limits, as the page's textures are) and encoded again as a PNG:
+/// nothing but the picture survives. `None` when it is not a small PNG.
+fn reencode_png(bytes: &[u8]) -> Option<Vec<u8>> {
+    use image::ImageEncoder;
+    use pocketdesk_core::local::notification_icons as icons;
+    if !icons::icon_fits(bytes) {
+        return None;
+    }
+    let mut reader =
+        image::ImageReader::with_format(std::io::Cursor::new(bytes), image::ImageFormat::Png);
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(icons::MAX_ICON_SIDE);
+    limits.max_image_height = Some(icons::MAX_ICON_SIDE);
+    limits.max_alloc = Some(8 << 20);
+    reader.limits(limits);
+    let rgba = reader.decode().ok()?.to_rgba8();
+    let mut png = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut png)
+        .write_image(
+            rgba.as_raw(),
+            rgba.width(),
+            rgba.height(),
+            image::ExtendedColorType::Rgba8,
+        )
+        .ok()?;
+    Some(png)
+}
+
 /// Pocketdesk's own icon as a PNG, for an app whose icon the phone has not
 /// sent.
 fn own_icon_png() -> Option<Vec<u8>> {
@@ -881,6 +912,44 @@ mod tests {
 
     fn names(found: Vec<&PhoneApp>) -> Vec<&str> {
         found.into_iter().map(|a| a.name.as_str()).collect()
+    }
+
+    /// Apps part 2 review: a phone's icon is decoded and written again before
+    /// it reaches a shortcut's icon file, so anything riding in the file goes.
+    #[test]
+    fn a_phone_s_icon_is_written_again_before_it_is_kept() {
+        let own = own_icon_png().unwrap();
+        // A picture with something after it, or hidden in a chunk, comes out clean.
+        let mut dirty = own.clone();
+        dirty.extend_from_slice(b"MZ-not-a-picture-but-appended-bytes");
+        let clean = reencode_png(&dirty).unwrap();
+        assert!(clean.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(!clean.windows(5).any(|w| w == b"MZ-no"));
+        assert_eq!(&clean[12..16], b"IHDR");
+        assert_eq!(
+            reencode_png(&own).unwrap(),
+            clean,
+            "the same picture, the same file"
+        );
+        for bad in [&b""[..], b"not a png at all, no, none", &own[..40]] {
+            assert!(reencode_png(bad).is_none());
+        }
+        // Past an icon's size it is refused before anything decodes.
+        let big = {
+            use image::ImageEncoder;
+            let side = pocketdesk_core::local::notification_icons::MAX_ICON_SIDE + 1;
+            let mut png = Vec::new();
+            image::codecs::png::PngEncoder::new(&mut png)
+                .write_image(
+                    &vec![0u8; (side * side * 4) as usize],
+                    side,
+                    side,
+                    image::ExtendedColorType::Rgba8,
+                )
+                .unwrap();
+            png
+        };
+        assert!(reencode_png(&big).is_none());
     }
 
     /// P2: a search finds apps by name or id, every word, any case.
