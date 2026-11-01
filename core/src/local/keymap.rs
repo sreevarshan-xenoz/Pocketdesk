@@ -372,35 +372,53 @@ impl Keymap {
     }
 }
 
-/// Whether `package` is an Android package name this folder may name a file
-/// after: letters, digits, dots and underscores, at least one dot, no
-/// leading dot or `..`, at most 200 characters.
+/// Whether `package` is an Android package name (the phone's own rule,
+/// [`crate::protocol::phone_action::valid_app_id`]): dotted words of letters,
+/// digits and underscores, each starting with a letter, at least one dot.
 pub fn package_ok(package: &str) -> bool {
-    !package.is_empty()
-        && package.len() <= 200
-        && package.contains('.')
-        && !package.starts_with('.')
-        && !package.contains("..")
-        && package
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_')
+    crate::protocol::phone_action::valid_app_id(package)
 }
 
-/// The file of `package`'s keymap; `None` for a name that is not a package.
+/// The file of `package`'s keymap, `app.<package>.json`: the prefix keeps a
+/// package from ever being a Windows device name (`con.x.json`); `None` for
+/// a name that is not a package.
 pub fn path(state_dir: &Path, package: &str) -> Option<PathBuf> {
+    package_ok(package).then(|| {
+        state_dir
+            .join(KEYMAP_DIR)
+            .join(format!("app.{package}.json"))
+    })
+}
+
+/// Where a keymap was kept before the `app.` prefix: `<package>.json`.
+fn legacy_path(state_dir: &Path, package: &str) -> Option<PathBuf> {
     package_ok(package).then(|| state_dir.join(KEYMAP_DIR).join(format!("{package}.json")))
 }
 
-/// `package`'s saved keymap; `None` when there is none, it is too large or
-/// it is not sound (a hand-edited file never reaches the phone).
-pub fn load(state_dir: &Path, package: &str) -> Option<Keymap> {
-    let path = path(state_dir, package)?;
-    let size = std::fs::metadata(&path).ok()?.len();
+/// A keymap read from `path`, if the file is small and sound.
+fn read(path: &Path) -> Option<Keymap> {
+    let size = std::fs::metadata(path).ok()?.len();
     if size > FILE_MAX {
         return None;
     }
-    let map: Keymap = serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?;
+    let map: Keymap = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
     (map.version == VERSION && map.validate().is_ok()).then_some(map)
+}
+
+/// `package`'s saved keymap; `None` when there is none, it is too large or
+/// it is not sound (a hand-edited file never reaches the phone). A file
+/// from before the `app.` prefix is moved to its new name as it is read.
+pub fn load(state_dir: &Path, package: &str) -> Option<Keymap> {
+    let path = path(state_dir, package)?;
+    if path.exists() {
+        return read(&path);
+    }
+    let old = legacy_path(state_dir, package)?;
+    let map = read(&old)?;
+    if save(state_dir, package, &map).is_ok() {
+        let _ = std::fs::remove_file(&old);
+    }
+    Some(map)
 }
 
 /// Save `map` as `package`'s keymap (an empty one removes the file).
@@ -410,6 +428,10 @@ pub fn save(state_dir: &Path, package: &str, map: &Keymap) -> io::Result<()> {
         return Err(bad("not a package name".into()));
     };
     map.validate().map_err(bad)?;
+    // A file under the old name is superseded by this save.
+    if let Some(old) = legacy_path(state_dir, package) {
+        let _ = std::fs::remove_file(old);
+    }
     if map.bindings.is_empty() {
         return match std::fs::remove_file(&path) {
             Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
@@ -766,6 +788,42 @@ impl Runner {
         out
     }
 
+    /// A word to the phone that fingers are still held: each finger's move to
+    /// where it already is. It moves nothing there, but the phone lifts
+    /// fingers it has heard nothing about for two seconds, and a key held
+    /// down says nothing by itself. Empty when no finger is down.
+    pub fn keep_alive(&self) -> Vec<ControlEvent> {
+        let mut out = Vec::new();
+        for (live, binding) in self.live.iter().zip(&self.map.bindings) {
+            match (live, binding) {
+                (Live::Tap { pointer: p }, Binding::Tap { at, .. }) => {
+                    out.push(finger(*p, TouchAction::Move, *at));
+                }
+                (
+                    Live::Stick {
+                        pointer: Some(p),
+                        at,
+                        ..
+                    },
+                    _,
+                )
+                | (Live::Swipe { pointer: p, at, .. }, _) => {
+                    out.push(finger(*p, TouchAction::Move, *at));
+                }
+                (
+                    Live::Aim {
+                        pointer: Some(p),
+                        pos,
+                        ..
+                    },
+                    _,
+                ) => out.push(finger(*p, TouchAction::Move, self.frac_of(*pos))),
+                _ => {}
+            }
+        }
+        out
+    }
+
     /// Lift every finger (the window lost the focus, the lock or the
     /// keymap went off, the window closed), highest finger first.
     pub fn release_all(&mut self) -> Vec<ControlEvent> {
@@ -935,8 +993,17 @@ mod tests {
         assert_eq!(load(&dir, "org.example.game"), Some(m.clone()));
         assert_eq!(load(&dir, "org.example.other"), None);
         // One file per package, under keymaps/.
-        let file = dir.join(KEYMAP_DIR).join("org.example.game.json");
+        let file = dir.join(KEYMAP_DIR).join("app.org.example.game.json");
         assert!(file.is_file());
+        // A package that is a Windows device name or a reserved word has no such file name.
+        let con = path(&dir, "con.x").unwrap();
+        assert_eq!(con.file_name().unwrap(), "app.con.x.json");
+        let nul = path(&dir, "nul.exe").unwrap();
+        assert_eq!(nul.file_name().unwrap(), "app.nul.exe.json");
+        // Digits first, a trailing dot and the like are no package (the phone's own rule).
+        for bad in ["1a.b", "a.1b", "a.b.", "a._b"] {
+            assert!(path(&dir, bad).is_none(), "{bad}");
+        }
         // A name that could leave the folder is no package.
         for bad in [
             "",
@@ -981,6 +1048,51 @@ mod tests {
         assert!(!file.exists());
         save(&dir, "org.example.game", &Keymap::default()).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_under_the_old_name_is_moved_to_the_new_one() {
+        let dir = dir("legacy");
+        let folder = dir.join(KEYMAP_DIR);
+        std::fs::create_dir_all(&folder).unwrap();
+        let old = folder.join("org.example.game.json");
+        let m = map();
+        std::fs::write(&old, serde_json::to_vec(&m).unwrap()).unwrap();
+        assert_eq!(load(&dir, "org.example.game"), Some(m.clone()));
+        assert!(!old.exists(), "the old name is gone");
+        assert!(folder.join("app.org.example.game.json").is_file());
+        assert_eq!(load(&dir, "org.example.game"), Some(m.clone()));
+        // An old file that is not sound is left alone and not used; a save drops it.
+        let bad = folder.join("org.example.other.json");
+        std::fs::write(&bad, "{").unwrap();
+        assert_eq!(load(&dir, "org.example.other"), None);
+        assert!(bad.exists());
+        save(&dir, "org.example.other", &m).unwrap();
+        assert!(!bad.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_keep_alive_moves_every_held_finger_to_where_it_is() {
+        let now = Instant::now();
+        let mut run = Runner::new(map());
+        run.set_picture(1000.0, 1000.0);
+        assert!(run.keep_alive().is_empty(), "nothing held, nothing said");
+        run.key("W", true, now);
+        run.key("Space", true, now);
+        run.mouse(0.001, 0.0, now);
+        run.key("Q", true, now);
+        let alive = shape(&run.keep_alive());
+        assert_eq!(alive.len(), 4);
+        assert!(alive.iter().all(|e| e.1 == TouchAction::Move));
+        // The stick's finger, at its place after the W (up from the middle).
+        assert!(alive.contains(&(1, TouchAction::Move, 10000, 34000)));
+        assert!(alive.contains(&(2, TouchAction::Move, 60000, 50000)));
+        // And it says nothing the phone would act on twice: a stick is where it was.
+        let again = shape(&run.keep_alive());
+        assert_eq!(alive, again);
+        run.release_all();
+        assert!(run.keep_alive().is_empty());
     }
 
     #[test]
