@@ -54,6 +54,13 @@ struct Cast {
     asks: CastChain,
 }
 
+/// A camera cast (F6 part 2) and the camera it feeds.
+struct Webcam {
+    session_id: u64,
+    want: mpsc::Sender<()>,
+    worker: crate::phone_camera::Worker,
+}
+
 struct Viewer {
     session_id: u64,
     tx: mpsc::Sender<Message>,
@@ -82,6 +89,9 @@ pub async fn run(mut events: mpsc::Receiver<CastEvent>, listener: TcpListener, s
     let _ = std::fs::remove_file(state_dir.join(CAST_FILE));
     let mut cast: Option<Cast> = None;
     let mut viewer: Option<Viewer> = None;
+    // F6 part 2: a camera cast goes to a camera, not a viewer; beside a
+    // screen cast, never replacing it.
+    let mut webcam: Option<Webcam> = None;
     let (joined_tx, mut joined_rx) = mpsc::channel::<(u64, TcpStream)>(4);
     let pending = std::sync::Arc::new(tokio::sync::Semaphore::new(PENDING_VIEWERS));
     let mut heartbeat = tokio::time::interval(HEARTBEAT);
@@ -90,7 +100,18 @@ pub async fn run(mut events: mpsc::Receiver<CastEvent>, listener: TcpListener, s
             event = events.recv() => {
                 let Some(event) = event else { break };
                 match event {
-                    CastEvent::Start { session_id, device_id, want_keyframe, control } => {
+                    CastEvent::Start { session_id, device_id, want_keyframe, control: _, webcam: true } => {
+                        // The newest camera cast replaces an older one.
+                        webcam = None;
+                        match crate::phone_camera::Worker::start(device_id, want_keyframe.clone()) {
+                            Ok(worker) => {
+                                tracing::info!(session_id, "A phone's camera can be this computer's");
+                                webcam = Some(Webcam { session_id, want: want_keyframe, worker });
+                            }
+                            Err(e) => tracing::warn!(error = %e, "The phone's camera could not start"),
+                        }
+                    }
+                    CastEvent::Start { session_id, device_id, want_keyframe, control, webcam: false } => {
                         end(&mut cast, &mut viewer, &state_dir);
                         let mut token = [0u8; TOKEN_LEN];
                         rand::rngs::OsRng.fill_bytes(&mut token);
@@ -113,6 +134,25 @@ pub async fn run(mut events: mpsc::Receiver<CastEvent>, listener: TcpListener, s
                             config: None,
                             asks: CastChain::default(),
                         });
+                    }
+                    CastEvent::Payload { session_id, payload } if webcam.as_ref().is_some_and(|w| w.session_id == session_id) => {
+                        let Some(w) = webcam.as_ref() else { continue };
+                        let feed = match payload {
+                            CastPayload::Config { width, height } => {
+                                crate::phone_camera::Feed::Config { width, height }
+                            }
+                            CastPayload::Frame { keyframe, seq, data } => {
+                                crate::phone_camera::Feed::Frame { keyframe, seq, data }
+                            }
+                            // No control, and its sound is not the camera's.
+                            CastPayload::ControlState { .. } | CastPayload::Audio { .. } => continue,
+                        };
+                        let config = matches!(feed, crate::phone_camera::Feed::Config { .. });
+                        if !w.worker.send(feed) && config {
+                            // A size the camera missed would decode wrong:
+                            // the camera starts again with the next keyframe.
+                            let _ = w.want.try_send(());
+                        }
                     }
                     CastEvent::Payload { session_id, payload } => {
                         let Some(current) = cast.as_mut().filter(|c| c.session_id == session_id) else {
@@ -152,6 +192,10 @@ pub async fn run(mut events: mpsc::Receiver<CastEvent>, listener: TcpListener, s
                         }
                     }
                     CastEvent::End { session_id } => {
+                        if webcam.as_ref().is_some_and(|w| w.session_id == session_id) {
+                            // The node goes with the camera.
+                            webcam = None;
+                        }
                         if cast.as_ref().is_some_and(|c| c.session_id == session_id) {
                             end(&mut cast, &mut viewer, &state_dir);
                         }
@@ -200,6 +244,9 @@ pub async fn run(mut events: mpsc::Receiver<CastEvent>, listener: TcpListener, s
             }
             _ = heartbeat.tick() => {
                 // Its session ended without a word (the `End` was lost).
+                if webcam.as_ref().is_some_and(|w| w.want.is_closed()) {
+                    webcam = None;
+                }
                 if cast.as_ref().is_some_and(|c| c.want.is_closed()) {
                     end(&mut cast, &mut viewer, &state_dir);
                 }
@@ -353,6 +400,7 @@ mod tests {
                 device_id: Some("phone".into()),
                 want_keyframe: want_tx,
                 control: mpsc::channel(4).0,
+                webcam: false,
             })
             .await
             .unwrap();
@@ -448,6 +496,7 @@ mod tests {
                 device_id: None,
                 want_keyframe: want_tx,
                 control: control_tx,
+                webcam: false,
             })
             .await
             .unwrap();
@@ -547,6 +596,7 @@ mod tests {
                 device_id: None,
                 want_keyframe: want_tx,
                 control: mpsc::channel(4).0,
+                webcam: false,
             })
             .await
             .unwrap();
@@ -591,6 +641,7 @@ mod tests {
                 device_id: None,
                 want_keyframe: want_tx,
                 control: mpsc::channel(4).0,
+                webcam: false,
             })
             .await
             .unwrap();

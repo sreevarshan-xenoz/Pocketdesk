@@ -83,6 +83,18 @@ video_quality = "balanced"
 # Off: the window only shows.
 # cast_control = true
 
+# Linux: offer phones as this computer's camera. A phone with "Use its camera
+# as a webcam" on in the desktop app (Devices) and "Let the computer use
+# my camera" on in its Settings, asked from the Overview, is published as a
+# PipeWire camera ("Pocketdesk camera (<phone>)") that browsers, OBS and
+# video-call apps can open; V4L2-only apps reach it through pw-v4l2. No kernel
+# module. Off by default. The lens (back or front), the height (720 or 1080)
+# and the frame rate (15, 24 or 30) are what the phone is asked for.
+# phone_camera = false
+# phone_camera_lens = "back"
+# phone_camera_height = 720
+# phone_camera_fps = 30
+
 # On Linux, the phone's gamepad is a game controller (an Xbox 360 pad's
 # layout, through uinput) that games see. Off, or without uinput rights, it
 # types keys and moves the mouse instead.

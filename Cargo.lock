@@ -5733,6 +5733,7 @@ dependencies = [
  "libc",
  "n0-mainline",
  "notify",
+ "pipewire",
  "png",
  "pocketdesk-core",
  "quinn",

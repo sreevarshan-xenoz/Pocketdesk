@@ -65,6 +65,7 @@ pub mod packets;
 pub mod paused;
 pub mod peer_computers;
 pub mod pen;
+pub mod phone_camera;
 pub mod phone_sound;
 pub mod platform;
 pub mod plugins;

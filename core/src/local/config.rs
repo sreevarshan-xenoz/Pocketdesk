@@ -129,6 +129,20 @@ pub struct Config {
     /// phone allows it (C8); off, the window only shows.
     #[serde(default = "default_true")]
     pub cast_control: bool,
+    /// Offer phones as this computer's camera (F6 part 2, Linux): a phone
+    /// with the Webcam permission, asked from here, is published as a
+    /// PipeWire camera apps can open. Off by default: a camera from afar.
+    #[serde(default)]
+    pub phone_camera: bool,
+    /// The phone's camera asked for: `back` or `front`.
+    #[serde(default = "default_phone_camera_lens")]
+    pub phone_camera_lens: String,
+    /// The camera's picture height: 720 or 1080.
+    #[serde(default = "default_phone_camera_height")]
+    pub phone_camera_height: u32,
+    /// The camera's frames a second: 15, 24 or 30.
+    #[serde(default = "default_phone_camera_fps")]
+    pub phone_camera_fps: u32,
     /// On Linux, the phone's gamepad is a game controller (T7) where uinput
     /// may be used; off, or where it may not, it types keys and moves the
     /// mouse as before.
@@ -458,6 +472,18 @@ pub struct Config {
     pub version_hints: bool,
 }
 
+fn default_phone_camera_lens() -> String {
+    "back".to_string()
+}
+
+fn default_phone_camera_height() -> u32 {
+    720
+}
+
+fn default_phone_camera_fps() -> u32 {
+    30
+}
+
 fn default_computer_view_quality() -> String {
     "auto".to_string()
 }
@@ -621,6 +647,10 @@ impl Default for Config {
             notification_pictures: true,
             downloads_folder: String::new(),
             cast_control: true,
+            phone_camera: false,
+            phone_camera_lens: default_phone_camera_lens(),
+            phone_camera_height: default_phone_camera_height(),
+            phone_camera_fps: default_phone_camera_fps(),
             gamepad_controller: true,
             notifications_per_minute: default_notifications_per_minute(),
             sms_notify: true,
@@ -889,6 +919,10 @@ impl Config {
         "notification_pictures",
         "downloads_folder",
         "cast_control",
+        "phone_camera",
+        "phone_camera_lens",
+        "phone_camera_height",
+        "phone_camera_fps",
         "gamepad_controller",
         "notifications_per_minute",
         "sms_notify",

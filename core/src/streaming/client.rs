@@ -68,6 +68,13 @@ pub const SESSION_MODE_SOUND: u8 = 3;
 /// stream, whose byte says whether the sound is taken.
 pub const SESSION_MODE_PHONE_SOUND: u8 = 4;
 
+/// Marker for a cast that is for the computer's camera (F6 part 2): sent
+/// on its own stream after a [`SESSION_MODE_CAST`] mode, with no payload,
+/// so an older computer skips it and shows the camera in a window as
+/// before. The computer publishes the picture as a camera device instead,
+/// with the phone's Webcam permission and its owner's setting.
+pub const CAST_WEBCAM_MARKER: [u8; 2] = [0xFB, 0x01];
+
 /// A sound session's ready stream carries one byte of what the computer
 /// allows (N5 review): this bit marks the byte as said, so a computer that
 /// says nothing reads as not known.
@@ -199,6 +206,9 @@ pub enum SessionMode {
     Sound,
     /// The phone's sound on the computer, alone (M7).
     PhoneSound,
+    /// The phone's camera as the computer's camera (F6 part 2): a cast
+    /// that says [`CAST_WEBCAM_MARKER`] too.
+    Webcam,
 }
 
 impl SessionMode {
@@ -208,7 +218,7 @@ impl SessionMode {
         match self {
             SessionMode::Screen => None,
             SessionMode::InputOnly => Some(SESSION_MODE_INPUT_ONLY),
-            SessionMode::Cast => Some(SESSION_MODE_CAST),
+            SessionMode::Cast | SessionMode::Webcam => Some(SESSION_MODE_CAST),
             SessionMode::Sound => Some(SESSION_MODE_SOUND),
             SessionMode::PhoneSound => Some(SESSION_MODE_PHONE_SOUND),
         }
@@ -743,6 +753,20 @@ impl StreamingClient {
                 Err(e) => warn!(error = %e, "Failed to open the session mode stream"),
             }
         }
+        // F6 part 2: a camera cast says so on a stream of its own.
+        if mode == SessionMode::Webcam {
+            match connection.open_uni().await {
+                Ok(mut webcam_stream) => {
+                    if let Err(e) = webcam_stream.write_all(&CAST_WEBCAM_MARKER).await {
+                        warn!(error = %e, "Failed to say the cast is for the camera");
+                    }
+                    if let Err(e) = webcam_stream.finish() {
+                        warn!(error = %e, "Failed to finish the camera stream");
+                    }
+                }
+                Err(e) => warn!(error = %e, "Failed to open the camera stream"),
+            }
+        }
 
         // Advertise our decodable codec set (R4 C1). Absent = H.264-only.
         if let Some(caps) = codec_caps
@@ -775,7 +799,10 @@ impl StreamingClient {
             video_bytes: Arc::default(),
             remote: RemoteFlags {
                 input_only,
-                cast: matches!(mode, SessionMode::Cast | SessionMode::PhoneSound),
+                cast: matches!(
+                    mode,
+                    SessionMode::Cast | SessionMode::PhoneSound | SessionMode::Webcam
+                ),
                 phone_sound: mode == SessionMode::PhoneSound,
                 sound: mode == SessionMode::Sound,
                 ..Default::default()
@@ -1186,6 +1213,9 @@ mod remote_tests {
         assert!(SessionMode::Screen.gets_picture());
         assert!(!SessionMode::Cast.gets_picture());
         assert!(!SessionMode::Sound.gets_picture());
+        // F6 part 2: a camera cast is a cast, said with a marker after.
+        assert_eq!(SessionMode::Webcam.wire(), Some(SESSION_MODE_CAST));
+        assert!(!SessionMode::Webcam.gets_picture());
     }
 
     #[test]

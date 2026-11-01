@@ -80,10 +80,14 @@ pub enum Capability {
     /// are the owner's own. Tied to no packet type: the shared input has
     /// its own stream.
     SharedInput,
+    /// Be this computer's camera (F6 part 2): its camera cast published as
+    /// a camera device apps here can open, and this computer asking the
+    /// phone to start one. Off unless chosen: a camera seen from afar.
+    Webcam,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 25] = [
+    pub const ALL: [Capability; 26] = [
         Capability::Input,
         Capability::Clipboard,
         Capability::Files,
@@ -109,6 +113,7 @@ impl Capability {
         Capability::Ask,
         Capability::Notes,
         Capability::SharedInput,
+        Capability::Webcam,
     ];
 
     /// What a device may do when its owner never chose (spec P1): today's
@@ -116,7 +121,7 @@ impl Capability {
     /// hand out, and locking this computer when it leaves, which only the
     /// owner turns on (D9), a glance at the screen (BF2), and answering its
     /// questions (BF3), and another computer's keyboard and mouse moving
-    /// onto this one.
+    /// onto this one, and the phone's camera as this computer's (F6 part 2).
     pub fn default_allowed(self) -> bool {
         !matches!(
             self,
@@ -127,6 +132,7 @@ impl Capability {
                 | Capability::Ask
                 | Capability::Notes
                 | Capability::SharedInput
+                | Capability::Webcam
         )
     }
 }
@@ -214,6 +220,8 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         crate::protocol::ask::ASK_ANSWER => Capability::Ask,
         // A note added to the owner's notes file here (BF4).
         crate::protocol::note::NOTE => Capability::Notes,
+        // The computer asking the phone to be its camera (F6 part 2).
+        crate::protocol::phone_camera::START => Capability::Webcam,
         _ => return None,
     })
 }
@@ -271,6 +279,8 @@ pub struct DevicePermissions {
     pub notes: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shared_input: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webcam: Option<bool>,
     /// Hold each session until the owner approves it at the desktop (spec P5).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_first: bool,
@@ -310,6 +320,7 @@ impl DevicePermissions {
             Capability::Ask => &mut self.ask,
             Capability::Notes => &mut self.notes,
             Capability::SharedInput => &mut self.shared_input,
+            Capability::Webcam => &mut self.webcam,
         }
     }
 
@@ -340,6 +351,7 @@ impl DevicePermissions {
             Capability::Ask => self.ask,
             Capability::Notes => self.notes,
             Capability::SharedInput => self.shared_input,
+            Capability::Webcam => self.webcam,
         };
         value.unwrap_or(capability.default_allowed())
     }
@@ -530,6 +542,7 @@ mod tests {
                         | Capability::Ask
                         | Capability::Notes
                         | Capability::SharedInput
+                        | Capability::Webcam
                 ),
                 "{capability:?}"
             );
@@ -718,6 +731,21 @@ mod tests {
             serde_json::to_value(&chosen).unwrap(),
             serde_json::json!({ "ask": true })
         );
+    }
+
+    /// F6 part 2: being this computer's camera is its own permission, off
+    /// for every device until chosen, an entry from before it too.
+    #[test]
+    fn being_the_camera_is_off_until_chosen() {
+        assert_eq!(
+            capability_for(crate::protocol::phone_camera::START),
+            Some(Capability::Webcam)
+        );
+        assert!(!DevicePermissions::default().allows(Capability::Webcam));
+        assert!(!DevicePermissions::someone_else().allows(Capability::Webcam));
+        let stored: DevicePermissions = serde_json::from_str(r#"{"cast": true}"#).unwrap();
+        assert!(!stored.allows(Capability::Webcam));
+        assert!(stored.allows(Capability::Cast), "its screen still shows");
     }
 
     /// BF4 review: a guest or someone else's phone may send files, but not
