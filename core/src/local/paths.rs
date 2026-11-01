@@ -13,6 +13,12 @@ pub const TRUST_FILE: &str = "trusted_devices.json";
 pub const LIVE_FILE: &str = "live_sessions.json";
 /// The phone's cast the server holds now, for the desktop app (T10k).
 pub const CAST_FILE: &str = "cast.json";
+
+/// The file naming an app window of a phone's cast (Phone apps tier 2):
+/// `cast-window-<n>.json`, one per window.
+pub fn cast_window_file(window: u8) -> String {
+    format!("cast-window-{window}.json")
+}
 /// Another computer's screen the server shows now, for the desktop app (BK7).
 pub const VIEW_FILE: &str = "view.json";
 /// What Pocketdesk did, one event per line (ecosystem phase 1a).
@@ -494,7 +500,12 @@ pub fn is_temp_beside_file(name: &str) -> bool {
         .strip_prefix("view-")
         .and_then(|r| r.strip_suffix(".json"))
         .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
-    window || NAMES.contains(&name)
+    // Phone apps tier 2: an app window's `cast-window-<n>.json`.
+    let app_window = name
+        .strip_prefix("cast-window-")
+        .and_then(|r| r.strip_suffix(".json"))
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+    window || app_window || NAMES.contains(&name)
 }
 
 /// Sweep the temp files a crash left in the state and config folders (see
@@ -644,6 +655,7 @@ mod tests {
             "computers.json",
             "trusted_devices.json",
             "view-2.json",
+            "cast-window-2.json",
             "sms.json",
         ] {
             assert!(is_temp_beside_file(ok), "{ok}");
@@ -652,6 +664,8 @@ mod tests {
             "",
             "view-.json",
             "view-x.json",
+            "cast-window-.json",
+            "cast-window-x.json",
             "notes.txt",
             "crash.log",
             "certs",

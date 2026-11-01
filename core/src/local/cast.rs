@@ -6,13 +6,19 @@
 //! only the owner can read the token.
 //!
 //! A message is `[type u8][len u32 LE][payload]`.
+//!
+//! Phone apps tier 2: each app window of a phone is shown by a viewer of its
+//! own, with a file and a token of its own (`cast-window-<n>.json`, the
+//! same [`CastFile`] with its `window` set) on the same loopback port; its
+//! messages are the same ones ([`Message::ControlState`] says whether the
+//! phone takes touch and typing in that window).
 
 use std::io::{self, Read, Write};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::paths::CAST_FILE;
+use super::paths::{CAST_FILE, cast_window_file};
 
 /// Server → app: the cast's size, `[w u16 LE][h u16 LE]`, on every encoder start.
 pub const CONFIG: u8 = 1;
@@ -29,6 +35,9 @@ pub const WANT_KEYFRAME: u8 = 0x11;
 /// App → server: a batch of control events for the phone (C8,
 /// `streaming::cast_control`), at most [`MAX_CONTROL`] bytes.
 pub const CONTROL: u8 = 0x12;
+/// App → server, from an app window's viewer only (Phone apps tier 2): the
+/// owner closed the window, so the phone gives its display back.
+pub const CLOSE_WINDOW: u8 = 0x13;
 
 /// The longest control batch the app sends.
 pub const MAX_CONTROL: usize = 16 * 1024;
@@ -58,6 +67,7 @@ pub enum Message {
         on: bool,
     },
     Control(Vec<u8>),
+    CloseWindow,
 }
 
 impl Message {
@@ -86,6 +96,7 @@ impl Message {
             Message::WantKeyframe => (WANT_KEYFRAME, Vec::new()),
             Message::ControlState { on } => (CONTROL_STATE, vec![u8::from(*on)]),
             Message::Control(batch) => (CONTROL, batch.clone()),
+            Message::CloseWindow => (CLOSE_WINDOW, Vec::new()),
         };
         let mut out = Vec::with_capacity(5 + payload.len());
         out.push(kind);
@@ -126,6 +137,7 @@ impl Message {
                 on: payload[0] != 0,
             },
             CONTROL if len > 0 && len <= MAX_CONTROL => Message::Control(payload),
+            CLOSE_WINDOW if len == 0 => Message::CloseWindow,
             _ => return Err(bad()),
         })
     }
@@ -157,6 +169,10 @@ pub struct CastFile {
     pub port: u16,
     /// [`TOKEN_LEN`] bytes, as hex.
     pub token: String,
+    /// The app window this file is for (Phone apps tier 2); none for the
+    /// phone's own screen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<u8>,
 }
 
 impl CastFile {
@@ -183,25 +199,74 @@ pub fn read(state_dir: &Path) -> Option<CastFile> {
     serde_json::from_str(&raw).ok()
 }
 
-/// Say where the cast is (the server's side): owner-only, written whole.
-pub fn write(state_dir: &Path, cast: &CastFile) -> io::Result<()> {
-    let json = serde_json::to_string(cast).map_err(io::Error::other)?;
-    let path = state_dir.join(CAST_FILE);
-    let tmp = crate::atomic_file::temp_beside(&path);
-    std::fs::create_dir_all(state_dir)?;
-    crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    crate::atomic_file::replace(&tmp, &path)
+/// The file of `window` (Phone apps tier 2), if it is there and says it is
+/// that window's.
+pub fn read_window(state_dir: &Path, window: u8) -> Option<CastFile> {
+    if !crate::streaming::cast::valid_window(window) {
+        return None;
+    }
+    let raw = std::fs::read_to_string(state_dir.join(cast_window_file(window))).ok()?;
+    serde_json::from_str::<CastFile>(&raw)
+        .ok()
+        .filter(|f| f.window == Some(window))
 }
 
-/// The cast ended: forget it, if it is still the one with `session_id`.
-pub fn remove(state_dir: &Path, session_id: u64) -> io::Result<()> {
-    if read(state_dir).is_some_and(|c| c.session_id == session_id) {
-        match std::fs::remove_file(state_dir.join(CAST_FILE)) {
+/// Every app window's file (Phone apps tier 2), by window.
+pub fn windows(state_dir: &Path) -> Vec<CastFile> {
+    (1..=crate::streaming::cast::MAX_WINDOWS)
+        .filter_map(|window| read_window(state_dir, window))
+        .collect()
+}
+
+fn write_at(state_dir: &Path, path: &Path, cast: &CastFile) -> io::Result<()> {
+    let json = serde_json::to_string(cast).map_err(io::Error::other)?;
+    let tmp = crate::atomic_file::temp_beside(path);
+    std::fs::create_dir_all(state_dir)?;
+    crate::secure_fs::write_private(&tmp, json.as_bytes())?;
+    crate::atomic_file::replace(&tmp, path)
+}
+
+/// Say where the cast is (the server's side): owner-only, written whole.
+pub fn write(state_dir: &Path, cast: &CastFile) -> io::Result<()> {
+    write_at(state_dir, &state_dir.join(CAST_FILE), cast)
+}
+
+/// Say where an app window is (the server's side): the file is that of
+/// `cast.window`, which must be a window.
+pub fn write_window(state_dir: &Path, cast: &CastFile) -> io::Result<()> {
+    let window = cast
+        .window
+        .filter(|w| crate::streaming::cast::valid_window(*w))
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "not an app window"))?;
+    write_at(state_dir, &state_dir.join(cast_window_file(window)), cast)
+}
+
+fn remove_if(path: &Path, is_it: impl FnOnce() -> bool) -> io::Result<()> {
+    if is_it() {
+        match std::fs::remove_file(path) {
             Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
             _ => {}
         }
     }
     Ok(())
+}
+
+/// The cast ended: forget it, if it is still the one with `session_id`.
+pub fn remove(state_dir: &Path, session_id: u64) -> io::Result<()> {
+    remove_if(&state_dir.join(CAST_FILE), || {
+        read(state_dir).is_some_and(|c| c.session_id == session_id)
+    })
+}
+
+/// An app window ended: forget it, if its file is still the one with
+/// `session_id`.
+pub fn remove_window(state_dir: &Path, window: u8, session_id: u64) -> io::Result<()> {
+    if !crate::streaming::cast::valid_window(window) {
+        return Ok(());
+    }
+    remove_if(&state_dir.join(cast_window_file(window)), || {
+        read_window(state_dir, window).is_some_and(|c| c.session_id == session_id)
+    })
 }
 
 #[cfg(test)]
@@ -231,6 +296,7 @@ mod tests {
             Message::ControlState { on: true },
             Message::ControlState { on: false },
             Message::Control(vec![1, 2, 3]),
+            Message::CloseWindow,
         ];
         let mut wire = Vec::new();
         for m in &messages {
@@ -268,6 +334,7 @@ mod tests {
             device_id: "phone".into(),
             port: 1,
             token: token_hex(&token),
+            window: None,
         };
         assert_eq!(file.token_bytes().as_deref(), Some(&token[..]));
         let bad = CastFile {
@@ -286,6 +353,7 @@ mod tests {
             device_id: "phone".into(),
             port: 50000,
             token: token_hex(&[1u8; TOKEN_LEN]),
+            window: None,
         };
         write(&dir, &cast).unwrap();
         assert_eq!(read(&dir), Some(cast.clone()));
@@ -293,6 +361,53 @@ mod tests {
         assert!(read(&dir).is_some(), "another session's end leaves it");
         remove(&dir, 4).unwrap();
         assert_eq!(read(&dir), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phone apps tier 2: an app window has a file of its own, named for the
+    /// window, that the screen's file and another window's never answer for.
+    #[test]
+    fn an_app_window_has_a_file_of_its_own() {
+        let dir = std::env::temp_dir().join(format!("pd-cast-win-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let window = |n: u8, session_id: u64| CastFile {
+            session_id,
+            device_id: "phone".into(),
+            port: 50000,
+            token: token_hex(&[n; TOKEN_LEN]),
+            window: Some(n),
+        };
+        write_window(&dir, &window(2, 9)).unwrap();
+        write_window(&dir, &window(3, 9)).unwrap();
+        assert_eq!(read(&dir), None, "no screen file for a window");
+        assert_eq!(read_window(&dir, 2), Some(window(2, 9)));
+        assert_eq!(read_window(&dir, 1), None);
+        assert_eq!(windows(&dir), vec![window(2, 9), window(3, 9)]);
+        assert!(
+            write_window(&dir, &window(0, 9)).is_err(),
+            "not a window of the cap"
+        );
+        let mut screen = window(2, 9);
+        screen.window = None;
+        assert!(write_window(&dir, &screen).is_err(), "no window named");
+        remove_window(&dir, 2, 10).unwrap();
+        assert!(
+            read_window(&dir, 2).is_some(),
+            "another session's end leaves it"
+        );
+        remove_window(&dir, 2, 9).unwrap();
+        assert_eq!(read_window(&dir, 2), None);
+        assert!(read_window(&dir, 3).is_some(), "window 3 stays");
+        // A file that names another window than its own is not read.
+        std::fs::write(
+            dir.join(cast_window_file(1)),
+            serde_json::to_string(&window(4, 9)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(read_window(&dir, 1), None);
+        // An old reader's file (no window) reads as the screen's.
+        let old = r#"{"session_id":1,"device_id":"p","port":2,"token":""}"#;
+        assert_eq!(serde_json::from_str::<CastFile>(old).unwrap().window, None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

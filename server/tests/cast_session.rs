@@ -135,11 +135,13 @@ async fn a_cast_reaches_the_relay_and_its_keyframe_asks_reach_the_phone() {
         want_keyframe,
         control,
         webcam,
+        windows_only,
     } = next(&mut events).await
     else {
         panic!("the cast starts first");
     };
     assert!(!webcam, "a screen cast is not the camera");
+    assert!(!windows_only, "a screen cast shows the screen");
     assert_eq!(device_id.as_deref(), Some("cast-test"));
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     while !remote.ready.load(Ordering::Acquire) {
