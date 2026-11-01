@@ -337,10 +337,49 @@ pub fn pin(
     Ok(file_path)
 }
 
-/// Remove `file` if it is a file that sits directly in `folder`.
+/// Whether `name` is a file name this module makes, for the system it runs
+/// on (`windows`): a shortcut `<label> (phone).lnk` (or with a number after
+/// `(phone)`) and an icon `<16 hex digits>.ico`, or a `.desktop` file and a
+/// `.png` named `pocketdesk-phone-<16 hex digits>`.
+fn made_here(name: &str, windows: bool) -> bool {
+    let hash = |s: &str| s.len() == 16 && s.bytes().all(|b| b.is_ascii_hexdigit());
+    if windows {
+        if let Some(stem) = name.strip_suffix(".ico") {
+            return hash(stem);
+        }
+        let Some(stem) = name.strip_suffix(".lnk") else {
+            return false;
+        };
+        if stem.ends_with(SUFFIX) {
+            return stem.len() > SUFFIX.len();
+        }
+        // `<label> (phone) 2`
+        stem.rsplit_once(' ').is_some_and(|(head, n)| {
+            !n.is_empty()
+                && n.bytes().all(|b| b.is_ascii_digit())
+                && head.len() > SUFFIX.len()
+                && head.ends_with(SUFFIX)
+        })
+    } else {
+        let rest = name.strip_prefix("pocketdesk-phone-");
+        rest.and_then(|r| {
+            r.strip_suffix(".desktop")
+                .or_else(|| r.strip_suffix(".png"))
+        })
+        .is_some_and(hash)
+    }
+}
+
+/// Remove `file` if it is a file that sits directly in `folder` and is one
+/// this module makes ([`made_here`]): a registry that names anything else
+/// removes nothing.
 fn remove_if_in(file: &str, folder: &Path) {
     let path = Path::new(file);
-    if path.parent() == Some(folder) && path.is_file() {
+    let ours = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| made_here(n, cfg!(windows)));
+    if ours && path.parent() == Some(folder) && path.is_file() {
         let _ = std::fs::remove_file(path);
     }
 }
@@ -662,6 +701,53 @@ mod tests {
         assert_eq!(ico_from_png(&self::png(0)), None);
         assert_eq!(ico_from_png(b"not a png at all, not at all"), None);
         assert_eq!(ico_from_png(b""), None);
+    }
+
+    /// Unpin removes only files named as this module names them.
+    #[test]
+    fn only_files_named_as_pocketdesk_names_them_are_removed() {
+        for good in [
+            "My App (phone).lnk",
+            "My App (phone) 2.lnk",
+            "0123456789abcdef.ico",
+        ] {
+            assert!(made_here(good, true), "{good}");
+            assert!(!made_here(good, false), "{good}");
+        }
+        for good in [
+            "pocketdesk-phone-0123456789abcdef.desktop",
+            "pocketdesk-phone-0123456789ABCDEF.png",
+        ] {
+            assert!(made_here(good, false), "{good}");
+            assert!(!made_here(good, true), "{good}");
+        }
+        for bad in [
+            "Notes.lnk",
+            " (phone).lnk",
+            "My App (phone) x.lnk",
+            "(phone).lnk",
+            "My App (phone).txt",
+            "0123456789abcde.ico",
+            "0123456789abcdeg.ico",
+            "document.ico",
+            "pocketdesk-phone-0123.desktop",
+            "pocketdesk-phone-0123456789abcdef.txt",
+            "firefox.desktop",
+            "0123456789abcdef.png",
+            "",
+        ] {
+            assert!(!made_here(bad, true), "{bad}");
+            assert!(!made_here(bad, false), "{bad}");
+        }
+        // A registry pointing at another file in the folder removes nothing.
+        let root = dir("made-here");
+        let folder = root.join("f");
+        std::fs::create_dir_all(&folder).unwrap();
+        let other = folder.join("Other.txt");
+        std::fs::write(&other, "mine").unwrap();
+        remove_if_in(other.to_str().unwrap(), &folder);
+        assert!(other.is_file());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// Pin writes the shortcut and the icon and remembers them; Unpin removes
