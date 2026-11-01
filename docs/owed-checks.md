@@ -2,17 +2,17 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1104 open items.
+1109 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 39 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 174 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 178 |
 | A phone with a SIM | 39 |
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 151 |
+| A second computer | 152 |
 | A Linux desktop (the Azure VM serves for some) | 192 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
@@ -569,6 +569,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Pinning on a real phone with Key Attestation: `sudo pocketdesk-pam-ask --pin <user>` asks the phone, the fingerprint makes an attested key, the phone says it replaces the current key and shows a code, root asks for that code and pins only when it is typed right, reports the key attested (TEE or StrongBox), and the old key keeps approving until a request names the new one. (where: owner)
 - "Fingerprint only, not the PIN" on the phone: the prompt offers no PIN, and a fingerprint enrolled afterwards makes the phone say its key no longer works until it is made and pinned again. (where: owner)
 - `sudo` over ssh to the owner's desk with "Only from this desk" on asks for the password at once, and the phone is not asked. (where: owner)
+
+**253. Fit the screen to this window, on a Linux computer**
+
+- The desktop app on Windows with a window onto the laptop's real Hyprland session (the laptop paired from it, Input on): the bar's switch turns on, a new screen of the window's size appears in the laptop's `hyprctl monitors`, the picture follows a drag of the window's edge about half a second after it stops, and closing the window removes the screen (`hyprctl monitors` as before). (where: owner)
+- The same on a laptop with a real second monitor, and with two windows fitted (two `PD-` screens) while one is resized: the other's place does not move onto the laptop's own monitors (Hyprland's `auto-right` is set again for the resized one). (where: owner)
+- A host with "Phones may add a screen" off, or with Input off for the asking computer, says why on the window and shows the screen asked for. (where: owner)
+- A program started on the fitted screen by its own keys (the window drives the empty desktop: a workspace of it, a launcher) works as on any screen. (where: owner)
 
 ## A phone with a SIM
 
@@ -1128,6 +1135,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Windows driving the Linux laptop for real with this build (its hook loop has the same changes and builds on CI only): a 1 kHz mouse keeps up and feels smooth, clicks and drags land where the pointer is, keys typed during a fast move arrive in order, and the gaming lock still takes the hooks out within about half a second of a game coming to the front. (where: second computer)
 - The Linux portal driver for real (the owner's Hyprland driving another computer): the same feel check, and the edge still crosses after a screen is plugged in or rescaled. (where: second computer)
+
+**253. Fit the screen to this window, on a Linux computer**
+
+- A Windows computer as the other end: the window's switch is greyed with the reason once it says it runs Windows, and the switch turned on before that (Settings) is answered "only Sway and Hyprland" and shows the screen asked for. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 

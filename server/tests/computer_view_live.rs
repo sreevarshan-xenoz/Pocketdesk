@@ -193,6 +193,7 @@ fn a_computers_screen_is_shown_on_another_by_both_roads() {
             monitor: 0,
             hevc: false,
             window: 0,
+            fit: None,
         },
         pin::now_unix(),
     )
@@ -243,6 +244,7 @@ fn a_computers_screen_is_shown_on_another_by_both_roads() {
             monitor: 0,
             hevc: false,
             window: 0,
+            fit: None,
         },
         pin::now_unix(),
     )

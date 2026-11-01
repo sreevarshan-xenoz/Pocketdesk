@@ -17,6 +17,13 @@
 //! Adds run one at a time, from the check of what a phone has to the record
 //! of what it got, so the limits hold whatever a phone sends at once.
 //!
+//! A computer asks too (item 8 of the plan after 0.8.3: "Fit the screen to
+//! this window"): `fit` with the window's size makes the screen, or
+//! resizes the one it has, and `remove` takes it away. Each of its windows
+//! has a screen of its own (`slot`, 0 to 3), the four-screen limit shared
+//! with the phones'. The screen is an empty extra desktop: nothing is moved
+//! onto it.
+//!
 //! An output lasts while its phone has a session or link, and those a server
 //! that stopped left are swept by the next one in the same compositor
 //! (`virtual_screens.json`); on Hyprland the next one also removes any of its
@@ -41,6 +48,26 @@ const MAX_SCREENS: usize = 4;
 
 /// The file the outputs made are listed in, so a restart removes them.
 const STATE_FILE: &str = "virtual_screens.json";
+
+/// Screens one computer may ask for, one for each of its windows
+/// ([`pocketdesk_core::local::view::MAX_VIEWS`]).
+const MAX_SLOTS: u64 = pocketdesk_core::local::view::MAX_VIEWS as u64;
+
+/// The record's key for the screen of `device`'s window `slot`: the
+/// device's own id for a phone and a computer's first window, and `id#slot`
+/// for the others.
+pub fn screen_key(device: &str, slot: u8) -> String {
+    if slot == 0 {
+        device.to_string()
+    } else {
+        format!("{device}#{slot}")
+    }
+}
+
+/// The device a record's key (see [`screen_key`]) belongs to.
+fn key_owner(key: &str) -> &str {
+    key.split_once('#').map_or(key, |(device, _)| device)
+}
 
 /// The size a screen for a phone of `width`×`height` gets: its shape, the
 /// long side at most [`MAX_SIDE`], both sides even (encoders want it) and
@@ -408,6 +435,79 @@ fn create_sway(width: u32, height: u32) -> std::io::Result<(String, i32)> {
     Ok((name, x))
 }
 
+/// Give the output `name` (one this server made) the size `width`×`height`
+/// where it is, and wait up to 2 s for the compositor to show it; its `x`.
+fn resize(name: &str, width: u32, height: u32) -> std::io::Result<i32> {
+    let wait = std::time::Duration::from_secs(2);
+    match desk() {
+        Some(Desk::Hyprland) => {
+            let tag =
+                this_tag().ok_or_else(|| std::io::Error::other("no state folder to name it by"))?;
+            if !is_hypr_screen(name, &tag) {
+                return Err(std::io::Error::other("not a screen this computer makes"));
+            }
+            resize_hyprland(&hypr, name, width, height, wait)
+        }
+        Some(Desk::Sway) if is_virtual(name) => {
+            run(&format!("output {name} mode --custom {width}x{height}"))?;
+            wait_for_size(&outputs, name, width, height, wait)
+        }
+        _ => Err(std::io::Error::other("not a screen this computer makes")),
+    }
+}
+
+/// On Hyprland, through `request`: set the output's rule again at the new
+/// size (the same name; the next rule for a name replaces the last) and
+/// wait up to `wait` for the monitor list to show it at that size.
+fn resize_hyprland(
+    request: &dyn Fn(&str) -> std::io::Result<String>,
+    name: &str,
+    width: u32,
+    height: u32,
+    wait: std::time::Duration,
+) -> std::io::Result<i32> {
+    let rule = hypr_monitor_rule(name, width, height)
+        .ok_or_else(|| std::io::Error::other("not a screen this computer makes"))?;
+    hypr_ok(&request(&rule)?)?;
+    wait_for_size(
+        &|| request("j/monitors").and_then(|raw| hypr_outputs(&raw)),
+        name,
+        width,
+        height,
+        wait,
+    )
+}
+
+/// Poll `list` until it shows `name` at `width`×`height`, up to `wait`; its
+/// `x`. A list that cannot be read meanwhile is "not yet".
+fn wait_for_size(
+    list: &dyn Fn() -> std::io::Result<Vec<Output>>,
+    name: &str,
+    width: u32,
+    height: u32,
+    wait: std::time::Duration,
+) -> std::io::Result<i32> {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        let shown = list()
+            .ok()
+            .and_then(|all| all.into_iter().find(|o| o.name == name));
+        if let Some(o) = &shown
+            && u32::try_from(o.rect.width) == Ok(width)
+            && u32::try_from(o.rect.height) == Ok(height)
+        {
+            return Ok(o.rect.x);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(std::io::Error::other(match shown {
+                Some(_) => "the compositor did not give the screen its new size",
+                None => "the compositor no longer shows the screen",
+            }));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
 fn remove(name: &str) {
     let removed = match desk() {
         Some(Desk::Hyprland) if this_tag().is_some_and(|tag| is_hypr_screen(name, &tag)) => {
@@ -492,6 +592,8 @@ trait Host: Sync {
     fn cannot(&self) -> Option<&'static str>;
     fn outputs(&self) -> std::io::Result<Vec<Output>>;
     fn create(&self, width: u32, height: u32) -> std::io::Result<(String, i32)>;
+    /// Give the output `name` another size, where it is; its `x` after.
+    fn resize(&self, name: &str, width: u32, height: u32) -> std::io::Result<i32>;
     fn remove(&self, name: &str);
     fn capture_index(&self, name: &str, x: i32) -> Option<u32>;
     fn save(&self, made: &Made);
@@ -515,6 +617,9 @@ impl Host for Live {
     }
     fn create(&self, width: u32, height: u32) -> std::io::Result<(String, i32)> {
         create(width, height)
+    }
+    fn resize(&self, name: &str, width: u32, height: u32) -> std::io::Result<i32> {
+        resize(name, width, height)
     }
     fn remove(&self, name: &str) {
         remove(name)
@@ -672,7 +777,7 @@ pub async fn run_sweeper() {
             let phones: Vec<String> = made.phones.keys().cloned().collect();
             let mut gone = Vec::new();
             for phone in phones {
-                if live.contains(&phone) || recently_added(&phone) {
+                if live.iter().any(|d| d == key_owner(&phone)) || recently_added(&phone) {
                     missing.remove(&phone);
                     continue;
                 }
@@ -717,31 +822,91 @@ impl Plugin for VirtualScreenPlugin {
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
-        if packet.packet_type != PACKET {
+        // An answer (no action: another computer's to this one's ask, taken
+        // before the gate) is never answered, or two computers would pass
+        // errors back and forth.
+        if packet.packet_type != PACKET || !is_request(&packet.body) {
             return Ok(());
         }
-        let phone = sender.device_id().to_string();
-        let action = packet.body["action"].as_str().unwrap_or("").to_string();
-        // A side past u32 is no size, never a wrapped one.
-        let side = |key: &str| {
-            packet.body[key]
-                .as_u64()
-                .and_then(|v| u32::try_from(v).ok())
-                .unwrap_or(0)
-        };
-        let (width, height) = (side("width"), side("height"));
-        let reply = tokio::task::spawn_blocking(move || answer(&phone, &action, width, height))
-            .await
-            .unwrap_or_else(|_| serde_json::json!({ "error": "the computer failed to answer" }));
+        let reply = respond(sender.device_id(), &packet.body).await;
         sender
             .send_packet(&NetworkPacket::new(PACKET).with_body(reply))
             .await
     }
 }
 
-/// What a phone's request comes to: `{name, index}`, `{removed}` or `{error}`.
-fn answer(phone: &str, action: &str, width: u32, height: u32) -> serde_json::Value {
-    answer_with(screens(), &Live, phone, action, width, height)
+/// What a request this device's permissions refused is told (the Input
+/// switch for it is off), so it hears why and does not wait for an answer.
+pub async fn answer_denied(packet: &NetworkPacket, sender: &dyn DeviceSender) {
+    if packet.packet_type == PACKET && is_request(&packet.body) {
+        let reply = said_with(&packet.body, denied());
+        let _ = sender
+            .send_packet(&NetworkPacket::new(PACKET).with_body(reply))
+            .await;
+    }
+}
+
+/// The answer to a request from a device that may not ask: Input control is
+/// off for it here.
+pub fn denied() -> serde_json::Value {
+    serde_json::json!({
+        "error": "This computer's Devices page does not give you Input control, which adding a screen needs"
+    })
+}
+
+/// Whether a packet body asks for something (it names an action), and is
+/// not an answer.
+pub fn is_request(body: &serde_json::Value) -> bool {
+    body.get("action").is_some()
+}
+
+/// `answer` with the `id` of the `request` it answers, when it had one, so
+/// a computer with several asks out knows which this is.
+pub fn said_with(request: &serde_json::Value, mut answer: serde_json::Value) -> serde_json::Value {
+    if let Some(id) = request.get("id") {
+        answer["id"] = id.clone();
+    }
+    answer
+}
+
+/// The answer to the request `body` from the device `device` (a phone, or a
+/// computer on its link or its connection): `{name, index, width, height}`,
+/// `{removed}` or `{error}`, with the request's `id` said back.
+pub async fn respond(device: &str, body: &serde_json::Value) -> serde_json::Value {
+    let action = body["action"].as_str().unwrap_or("").to_string();
+    // A side past u32 is no size, never a wrapped one.
+    let side = |key: &str| {
+        body[key]
+            .as_u64()
+            .and_then(|v| u32::try_from(v).ok())
+            .unwrap_or(0)
+    };
+    let (width, height) = (side("width"), side("height"));
+    // A computer's window, 0 to 3; a phone says none. One past the last is
+    // no window.
+    let slot = match body.get("slot") {
+        None => Some(0),
+        Some(slot) => slot
+            .as_u64()
+            .filter(|s| *s < MAX_SLOTS)
+            .and_then(|s| u8::try_from(s).ok()),
+    };
+    let reply = match slot {
+        Some(slot) => {
+            let key = screen_key(device, slot);
+            tokio::task::spawn_blocking(move || answer(&key, &action, width, height))
+                .await
+                .unwrap_or_else(|_| serde_json::json!({ "error": "the computer failed to answer" }))
+        }
+        None => serde_json::json!({ "error": "not a window" }),
+    };
+    said_with(body, reply)
+}
+
+/// What a request for the screen `key` comes to: `{name, index, width,
+/// height}`, `{removed}` or `{error}`.
+fn answer(key: &str, action: &str, width: u32, height: u32) -> serde_json::Value {
+    answer_with(screens(), &Live, key, action, width, height)
 }
 
 fn answer_with(
@@ -754,8 +919,8 @@ fn answer_with(
 ) -> serde_json::Value {
     use serde_json::json;
     // Taking one's own screen back is always allowed.
-    if action == "add" && !ALLOWED.load(std::sync::atomic::Ordering::Relaxed) {
-        return json!({ "error": "This computer does not let phones add a screen (Settings, \"Phones may add a screen\")" });
+    if matches!(action, "add" | "fit") && !ALLOWED.load(std::sync::atomic::Ordering::Relaxed) {
+        return json!({ "error": "This computer does not let phones or other computers add a screen (Settings, \"Phones may add a screen\")" });
     }
     let made = || screens.made.lock().unwrap_or_else(|e| e.into_inner());
     match action {
@@ -769,7 +934,9 @@ fn answer_with(
             names.iter().for_each(|n| host.remove(n));
             json!({ "removed": names.len() })
         }
-        "add" => {
+        // `fit` (a computer's window) is `add` that also gives the screen it
+        // has the window's new size.
+        "add" | "fit" => {
             let Some((w, h)) = screen_size(width, height) else {
                 return json!({ "error": "not a screen size" });
             };
@@ -788,10 +955,31 @@ fn answer_with(
                     .outputs()
                     .ok()
                     .and_then(|all| all.into_iter().find(|o| o.name == name));
-                if let Some(output) = place
-                    && let Some(index) = host.capture_index(&name, output.rect.x)
-                {
-                    return json!({ "name": name, "index": index, "width": output.rect.width, "height": output.rect.height });
+                if let Some(mut output) = place {
+                    if action == "fit"
+                        && (output.rect.width, output.rect.height) != (w as i32, h as i32)
+                    {
+                        match host.resize(&name, w, h) {
+                            Ok(x) => {
+                                output.rect = Rect {
+                                    x,
+                                    y: output.rect.y,
+                                    width: w as i32,
+                                    height: h as i32,
+                                };
+                                tracing::info!("Resized the screen {name} to {w}x{h}");
+                            }
+                            Err(e) => {
+                                return json!({ "error": format!("Could not resize the screen: {e}") });
+                            }
+                        }
+                    }
+                    if let Some(index) = host.capture_index(&name, output.rect.x) {
+                        return json!({ "name": name, "index": index, "width": output.rect.width, "height": output.rect.height });
+                    }
+                    // Still there but not streamable: taken away, or nothing
+                    // would remove it once forgotten below (review).
+                    host.remove(&name);
                 }
                 // Gone from the compositor meanwhile: forget it and make another.
                 made().phones.remove(phone);
@@ -799,7 +987,7 @@ fn answer_with(
             // A few at most, whatever ids phones announce.
             let held = made().phones.values().map(Vec::len).sum::<usize>();
             if held >= MAX_SCREENS {
-                return json!({ "error": "The computer has as many phone screens as it takes" });
+                return json!({ "error": "The computer has as many extra screens as it takes" });
             }
             match host.create(w, h) {
                 Ok((name, x)) => {
@@ -816,7 +1004,7 @@ fn answer_with(
                         .lock()
                         .unwrap_or_else(|e| e.into_inner())
                         .insert(phone.to_string(), std::time::Instant::now());
-                    tracing::info!("Added a {w}x{h} screen {name} for a phone");
+                    tracing::info!("Added a {w}x{h} screen {name} for a device");
                     json!({ "name": name, "index": index, "width": w, "height": h })
                 }
                 Err(e) => json!({ "error": format!("Could not add a screen: {e}") }),
@@ -1130,6 +1318,8 @@ mod tests {
     struct FakeHost {
         outputs: Mutex<Vec<Output>>,
         made: std::sync::atomic::AtomicUsize,
+        /// The sizes `resize` was asked for.
+        resized: Mutex<Vec<(u32, u32)>>,
     }
 
     impl Host for FakeHost {
@@ -1139,16 +1329,26 @@ mod tests {
         fn outputs(&self) -> std::io::Result<Vec<Output>> {
             Ok(self.outputs.lock().unwrap().clone())
         }
-        fn create(&self, width: u32, _height: u32) -> std::io::Result<(String, i32)> {
+        fn create(&self, width: u32, height: u32) -> std::io::Result<(String, i32)> {
             std::thread::sleep(std::time::Duration::from_millis(30));
             let n = self.made.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
             let name = format!("PD-0a1b2c3d-{n}");
             let x = 1920 * n as i32;
-            self.outputs
-                .lock()
-                .unwrap()
-                .push(output(&name, x, width as i32));
+            let mut made = output(&name, x, width as i32);
+            made.rect.height = height as i32;
+            self.outputs.lock().unwrap().push(made);
             Ok((name, x))
+        }
+        fn resize(&self, name: &str, width: u32, height: u32) -> std::io::Result<i32> {
+            self.resized.lock().unwrap().push((width, height));
+            let mut all = self.outputs.lock().unwrap();
+            let o = all
+                .iter_mut()
+                .find(|o| o.name == name)
+                .ok_or_else(|| std::io::Error::other("gone"))?;
+            o.rect.width = width as i32;
+            o.rect.height = height as i32;
+            Ok(o.rect.x)
         }
         fn remove(&self, name: &str) {
             self.outputs.lock().unwrap().retain(|o| o.name != name);
@@ -1352,6 +1552,229 @@ mod tests {
         }
         assert_eq!(removed["removed"].as_u64(), Some(1));
         assert_eq!(after, before, "the monitor list is back as it was");
+    }
+
+    #[test]
+    fn a_computers_window_gets_a_screen_that_follows_its_size() {
+        let screens = Screens::new();
+        let host = FakeHost::default();
+        let first = answer_with(&screens, &host, "desk", "fit", 1280, 720);
+        assert_eq!(first["width"], 1280);
+        assert_eq!(first["height"], 720);
+        let name = first["name"].as_str().unwrap().to_string();
+        // The same size again is the same screen, left alone.
+        let again = answer_with(&screens, &host, "desk", "fit", 1280, 720);
+        assert_eq!(again["name"].as_str(), Some(name.as_str()));
+        assert!(host.resized.lock().unwrap().is_empty());
+        // Another size is the same screen, resized in place.
+        let bigger = answer_with(&screens, &host, "desk", "fit", 1600, 900);
+        assert_eq!(bigger["name"].as_str(), Some(name.as_str()));
+        assert_eq!(
+            (bigger["width"].as_u64(), bigger["height"].as_u64()),
+            (Some(1600), Some(900))
+        );
+        assert_eq!(*host.resized.lock().unwrap(), [(1600, 900)]);
+        assert_eq!(host.made.load(std::sync::atomic::Ordering::SeqCst), 1);
+        // The size is the host's to clamp: odd sides go even, a huge one is
+        // scaled to the limit, a tiny one raised.
+        let odd = answer_with(&screens, &host, "desk", "fit", 1601, 901);
+        assert_eq!(
+            (odd["width"].as_u64(), odd["height"].as_u64()),
+            (Some(1600), Some(900))
+        );
+        let huge = answer_with(&screens, &host, "desk", "fit", 5120, 2880);
+        assert_eq!(
+            (huge["width"].as_u64(), huge["height"].as_u64()),
+            (Some(2560), Some(1440))
+        );
+        let tiny = answer_with(&screens, &host, "desk", "fit", 100, 100);
+        assert_eq!(
+            (tiny["width"].as_u64(), tiny["height"].as_u64()),
+            (Some(320), Some(320))
+        );
+        assert!(
+            answer_with(&screens, &host, "desk", "fit", 0, 720)
+                .get("error")
+                .is_some()
+        );
+        // `add` (a phone's) never resizes a screen it already has.
+        let before = host.resized.lock().unwrap().len();
+        let kept = answer_with(&screens, &host, "desk", "add", 800, 600);
+        assert_eq!(kept["name"].as_str(), Some(name.as_str()));
+        assert_eq!(host.resized.lock().unwrap().len(), before);
+        // A resize the compositor refuses is told, not hidden.
+        host.outputs.lock().unwrap().clear();
+        let gone = answer_with(&screens, &host, "desk", "fit", 1000, 700);
+        assert_eq!(
+            host.made.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "made anew"
+        );
+        assert_eq!(gone["width"], 1000);
+    }
+
+    #[test]
+    fn a_refused_resize_is_said_and_the_screen_kept() {
+        struct Stubborn(FakeHost);
+        impl Host for Stubborn {
+            fn cannot(&self) -> Option<&'static str> {
+                None
+            }
+            fn outputs(&self) -> std::io::Result<Vec<Output>> {
+                self.0.outputs()
+            }
+            fn create(&self, w: u32, h: u32) -> std::io::Result<(String, i32)> {
+                self.0.create(w, h)
+            }
+            fn resize(&self, _: &str, _: u32, _: u32) -> std::io::Result<i32> {
+                Err(std::io::Error::other("Sway refused"))
+            }
+            fn remove(&self, name: &str) {
+                self.0.remove(name)
+            }
+            fn capture_index(&self, n: &str, x: i32) -> Option<u32> {
+                self.0.capture_index(n, x)
+            }
+            fn save(&self, m: &Made) {
+                self.0.save(m)
+            }
+        }
+        let screens = Screens::new();
+        let host = Stubborn(FakeHost::default());
+        let first = answer_with(&screens, &host, "desk", "fit", 1280, 720);
+        let said = answer_with(&screens, &host, "desk", "fit", 1600, 900);
+        assert!(
+            said["error"].as_str().unwrap().contains("Sway refused"),
+            "{said}"
+        );
+        assert_eq!(host.0.outputs.lock().unwrap().len(), 1, "the screen stays");
+        let still = answer_with(&screens, &host, "desk", "fit", 1280, 720);
+        assert_eq!(still["name"], first["name"]);
+    }
+
+    #[test]
+    fn each_window_of_a_computer_has_a_screen_within_the_shared_limit() {
+        let screens = Screens::new();
+        let host = FakeHost::default();
+        let mut names = Vec::new();
+        for slot in 0..4u8 {
+            let reply = answer_with(&screens, &host, &screen_key("desk", slot), "fit", 1280, 720);
+            names.push(reply["name"].as_str().unwrap().to_string());
+        }
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), 4, "a screen each");
+        // The limit is shared with the phones': a fifth is refused.
+        let fifth = answer_with(&screens, &host, "a-phone", "add", 1080, 2400);
+        assert!(
+            fifth["error"].as_str().unwrap().contains("as many"),
+            "{fifth}"
+        );
+        let other = answer_with(&screens, &host, &screen_key("laptop", 0), "fit", 1280, 720);
+        assert!(other.get("error").is_some(), "{other}");
+        // Removing one window's screen leaves the others, and frees a place.
+        let removed = answer_with(&screens, &host, &screen_key("desk", 2), "remove", 0, 0);
+        assert_eq!(removed["removed"], 1);
+        assert_eq!(host.outputs.lock().unwrap().len(), 3);
+        let again = answer_with(&screens, &host, &screen_key("laptop", 0), "fit", 1280, 720);
+        assert!(again.get("name").is_some(), "{again}");
+        // Removing what is not there removes nothing.
+        let none = answer_with(&screens, &host, &screen_key("desk", 2), "remove", 0, 0);
+        assert_eq!(none["removed"], 0);
+    }
+
+    #[test]
+    fn a_screens_key_names_its_device_and_window() {
+        assert_eq!(screen_key("desk", 0), "desk");
+        assert_eq!(screen_key("desk", 3), "desk#3");
+        assert_eq!(key_owner("desk"), "desk");
+        assert_eq!(key_owner("desk#3"), "desk");
+    }
+
+    #[tokio::test]
+    async fn a_request_names_a_window_and_its_answer_says_the_id() {
+        let ask =
+            serde_json::json!({ "action": "fit", "id": 7, "slot": 9, "width": 800, "height": 600 });
+        assert!(is_request(&ask));
+        let said = respond("desk", &ask).await;
+        assert_eq!(said["id"], 7, "{said}");
+        assert_eq!(said["error"], "not a window");
+        let not_a_number = serde_json::json!({ "action": "fit", "slot": "one" });
+        assert!(respond("desk", &not_a_number).await.get("error").is_some());
+        // An answer carries no action, so it is never one to answer.
+        assert!(!is_request(
+            &serde_json::json!({ "name": "PD-0a1b2c3d-1", "index": 1, "id": 7 })
+        ));
+        assert_eq!(
+            said_with(
+                &serde_json::json!({ "action": "remove" }),
+                serde_json::json!({ "removed": 0 })
+            ),
+            serde_json::json!({ "removed": 0 }),
+            "no id asked, none said"
+        );
+        assert!(denied()["error"].as_str().unwrap().contains("Input"));
+    }
+
+    #[test]
+    fn a_hyprland_screen_is_resized_by_its_rule_again() {
+        let fake = FakeHyprland::new(|req, n| {
+            Ok(match req {
+                "j/monitors" if n < 3 => ONLY_EDP,
+                "j/monitors" => SIZED,
+                _ => "ok",
+            }
+            .to_string())
+        });
+        let x = resize_hyprland(
+            &|r| fake.request(r),
+            "PD-0a1b2c3d-1",
+            1080,
+            2400,
+            std::time::Duration::from_millis(500),
+        )
+        .unwrap();
+        assert_eq!(x, 1920);
+        let sent = fake.sent();
+        assert!(sent[0].starts_with("eval hl.monitor"), "{sent:?}");
+        assert!(sent[0].contains("1080x2400@60"), "{sent:?}");
+        assert!(
+            !sent
+                .iter()
+                .any(|r| r.starts_with("output create") || r.starts_with("output remove")),
+            "a resize makes and removes nothing: {sent:?}"
+        );
+        // Not a name this server makes: nothing reaches the Lua.
+        let refused = FakeHyprland::new(|_, _| Ok("ok".into()));
+        assert!(
+            resize_hyprland(
+                &|r| refused.request(r),
+                "eDP-1",
+                1080,
+                2400,
+                std::time::Duration::ZERO
+            )
+            .is_err()
+        );
+        assert!(refused.sent().is_empty());
+        // A size the compositor never shows is an error, the screen untouched.
+        let never = FakeHyprland::new(|req, _| {
+            Ok(match req {
+                "j/monitors" => ONLY_EDP,
+                _ => "ok",
+            }
+            .to_string())
+        });
+        let err = resize_hyprland(
+            &|r| never.request(r),
+            "PD-0a1b2c3d-1",
+            1080,
+            2400,
+            std::time::Duration::from_millis(250),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("no longer shows"), "{err}");
+        assert!(!never.sent().iter().any(|r| r.starts_with("output")));
     }
 
     #[test]
