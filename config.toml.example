@@ -36,6 +36,13 @@ video_quality = "balanced"
 # (see SECURITY.md). Off, the portal asks at every session.
 # remember_screen_grant = false
 
+# GNOME only: start the screen and the keyboard and mouse through mutter's own
+# D-Bus API, which asks no one at this computer, instead of the screen-sharing
+# dialog (what gnome-remote-desktop's headless mode does). Any program running
+# as you can make the same calls, so it is off by default (see SECURITY.md).
+# If mutter's D-Bus is missing or refuses, the portal is used.
+# gnome_unattended = false
+
 # Reachable from the internet: phones away from home and your other computers
 # reach this computer, directly or through a relay, and the DHT keeps a record
 # of it. Off, no relay or DHT is contacted and no router port is mapped: phones

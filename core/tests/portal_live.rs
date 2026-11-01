@@ -9,6 +9,10 @@
 //! `PD_PORTAL_PROBE_NAMED` names the probe to the portal first as the server
 //! does ([`portal_grant::register_app`]; the desktop file must be installed).
 //!
+//! `PD_PORTAL_PROBE_MUTTER` switches "Unattended on GNOME" on (with
+//! `XDG_CURRENT_DESKTOP` naming GNOME): the capture goes through mutter's own
+//! D-Bus API, with no dialog.
+//!
 //! `PD_PORTAL_PROBE_ACTIONS` replaces the default input with a list, comma
 //! separated: `click:X:Y` (0 to 1 across the screen), `key:CODE` (evdev),
 //! `scroll:STEPS` (positive down), `hscroll:STEPS` (positive right), `fscroll:V120` and `hfscroll:V120` (a fine turn, 120 a notch), `wait:MS` and `snap:NAME` (the newest frame as a PPM, written only as
@@ -25,7 +29,9 @@ use std::time::{Duration, Instant};
 
 use pocketdesk_core::portal_grant;
 use pocketdesk_core::streaming::portal_input::{self, PortalEvent};
-use pocketdesk_core::streaming::{StreamingConfig, VideoFrame, capture_linux, latest_frame};
+use pocketdesk_core::streaming::{
+    StreamingConfig, VideoFrame, capture_linux, gnome_unattended, latest_frame,
+};
 use tokio_util::sync::CancellationToken;
 
 /// The newest frame as a binary PPM, reading BGRx.
@@ -81,6 +87,11 @@ async fn the_portal_shares_the_screen_and_takes_input() {
     }
     let input = std::env::var_os("PD_PORTAL_PROBE_INPUT").is_some();
     portal_input::want(input);
+    // "Unattended on GNOME": mutter's own D-Bus API, no dialog.
+    if std::env::var_os("PD_PORTAL_PROBE_MUTTER").is_some() {
+        gnome_unattended::set_enabled(true);
+        println!("ROUTE {:?}", gnome_unattended::session_route());
+    }
     println!("WHEEL {:?}", portal_input::session_wheel_style());
     println!(
         "TOKENS_BEFORE screen={} remote={}",
