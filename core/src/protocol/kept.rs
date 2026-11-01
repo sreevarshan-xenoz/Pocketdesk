@@ -128,6 +128,10 @@ pub struct Run {
     pub mirror: bool,
     /// Paths the phone deleted, each a list of names under the folder.
     pub gone: Vec<Vec<String>>,
+    /// Files of no bytes the phone has now, each a list of names under the
+    /// folder: a share cannot carry nothing, so they are told here, and
+    /// made (or emptied) there.
+    pub empty: Vec<Vec<String>>,
     /// The last packet of the run: how many files went and failed.
     pub end: Option<RunEnd>,
 }
@@ -152,17 +156,20 @@ pub fn run_of(body: &Value) -> Result<Run, String> {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    let gone = body
-        .get("gone")
-        .and_then(Value::as_array)
-        .map(|list| {
-            list.iter()
-                .take(MAX_GONE)
-                .filter_map(|p| names(Some(p)))
-                .filter(|p| relpath::path_problem(p).is_none())
-                .collect()
-        })
-        .unwrap_or_default();
+    let paths = |key: &str| -> Vec<Vec<String>> {
+        body.get(key)
+            .and_then(Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .take(MAX_GONE)
+                    .filter_map(|p| names(Some(p)))
+                    .filter(|p| relpath::path_problem(p).is_none())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let gone = paths("gone");
+    let empty = paths("empty");
     let count = |key: &str| body.get(key).and_then(Value::as_u64).unwrap_or(0);
     let end = (body.get("done").and_then(Value::as_bool) == Some(true)).then(|| RunEnd {
         sent: count("sent"),
@@ -173,6 +180,7 @@ pub fn run_of(body: &Value) -> Result<Run, String> {
         label,
         mirror: body.get("mirror").and_then(Value::as_bool) == Some(true),
         gone,
+        empty,
         end,
     })
 }
@@ -265,6 +273,16 @@ mod tests {
                 .len(),
             MAX_GONE
         );
+    }
+
+    #[test]
+    fn a_runs_empty_files_are_held_to_the_same_rules() {
+        let run = run_of(&json!({
+            "folderId": ID, "empty": [["a", "e.txt"], ["..", "x"], "bad", ["C:"], ["ok"]],
+        }))
+        .unwrap();
+        assert_eq!(run.empty, vec![vec!["a", "e.txt"], vec!["ok"]]);
+        assert!(run.gone.is_empty());
     }
 
     #[test]

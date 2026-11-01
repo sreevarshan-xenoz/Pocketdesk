@@ -81,7 +81,43 @@ struct KeptList {
     folders: Vec<KeptFolder>,
 }
 
-/// The kept folders. A missing or unreadable list is empty.
+/// Why the list could not be read: it is there and is not a list this
+/// version understands. A writer must not replace it (the records in it
+/// would be lost); [`read_checked`] keeps a copy beside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unreadable(pub String);
+
+/// The kept folders for a writer: none when there is no list, and an error
+/// when there is one that cannot be read, a copy of it kept beside it
+/// (`kept_folders.json.unreadable`, once) so nothing is lost, and the
+/// caller does not write over it.
+pub fn read_checked(state_dir: &Path) -> Result<Vec<KeptFolder>, Unreadable> {
+    let path = state_dir.join(KEPT_FOLDERS_FILE);
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => {
+            return Err(Unreadable(format!(
+                "the kept folders' list could not be read: {e}"
+            )));
+        }
+    };
+    match serde_json::from_str::<KeptList>(&raw) {
+        Ok(list) => Ok(list.folders),
+        Err(e) => {
+            let copy = state_dir.join(format!("{KEPT_FOLDERS_FILE}.unreadable"));
+            if !copy.exists() {
+                let _ = std::fs::copy(&path, &copy);
+            }
+            Err(Unreadable(format!(
+                "the kept folders' list is not readable ({e}); a copy was kept and nothing is changed until it is fixed"
+            )))
+        }
+    }
+}
+
+/// The kept folders. A missing or unreadable list is empty (for a reader;
+/// a writer uses [`read_checked`]).
 pub fn read(state_dir: &Path) -> Vec<KeptFolder> {
     std::fs::read_to_string(state_dir.join(KEPT_FOLDERS_FILE))
         .ok()
@@ -141,11 +177,27 @@ pub fn deletes_allowed(phone_mirrors: bool, computer_allows: bool) -> bool {
     phone_mirrors && computer_allows
 }
 
+/// A name as the disk may take it for another: lowercased, all of Unicode
+/// (Windows folds more than ASCII). Linux and Windows, the computers this
+/// runs on, do not normalise a name, so accents are not composed.
+pub fn fold(name: &str) -> String {
+    name.to_lowercase()
+}
+
 /// A name for a new child of a folder, close to `want`, that none of
 /// `taken` has: `want`, else `want (2)`, `want (3)`... Names are compared
 /// without regard to case, as the disk may.
 pub fn unique_name(taken: &[String], want: &str) -> String {
-    let has = |name: &str| taken.iter().any(|t| t.eq_ignore_ascii_case(name));
+    unique_name_where(taken, want, &|_| false)
+}
+
+/// [`unique_name`] that also passes over a name `on_disk` says is already
+/// there (a folder left by an earlier registry, or made by hand).
+pub fn unique_name_where(taken: &[String], want: &str, on_disk: &dyn Fn(&str) -> bool) -> String {
+    let has = |name: &str| {
+        let folded = fold(name);
+        taken.iter().any(|t| fold(t) == folded) || on_disk(name)
+    };
     if !has(want) {
         return want.to_string();
     }
@@ -250,6 +302,41 @@ mod tests {
         assert_eq!(unique_name(&taken, "Docs"), "Docs");
         assert_eq!(unique_name(&taken, "NOTES"), "NOTES (3)");
         assert_eq!(unique_name(&[], "Notes"), "Notes");
+    }
+
+    #[test]
+    fn a_name_is_free_only_in_every_case_and_on_the_disk() {
+        let taken = vec!["Straße".to_string(), "ÉCOLE".to_string()];
+        // Unicode case folds, not only ASCII.
+        assert_eq!(unique_name(&taken, "école"), "école (2)");
+        // A name already on the disk is passed over too.
+        let on_disk = |n: &str| n == "Docs";
+        assert_eq!(unique_name_where(&[], "Docs", &on_disk), "Docs (2)");
+        assert_eq!(unique_name_where(&[], "Other", &on_disk), "Other");
+        let both = |n: &str| n == "Docs" || n == "Docs (2)";
+        assert_eq!(unique_name_where(&[], "Docs", &both), "Docs (3)");
+    }
+
+    #[test]
+    fn an_unreadable_list_is_kept_and_never_written_over() {
+        let dir = temp_dir("unreadable");
+        assert_eq!(
+            read_checked(&dir),
+            Ok(Vec::new()),
+            "no list is an empty one"
+        );
+        let path = dir.join(KEPT_FOLDERS_FILE);
+        std::fs::write(&path, "{ not a list").unwrap();
+        let err = read_checked(&dir).unwrap_err();
+        assert!(err.0.contains("not readable"), "{err:?}");
+        // The records in it are copied, once, and the file is as it was.
+        let copy = dir.join(format!("{KEPT_FOLDERS_FILE}.unreadable"));
+        assert_eq!(std::fs::read_to_string(&copy).unwrap(), "{ not a list");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ not a list");
+        assert!(read_checked(&dir).is_err(), "still refused");
+        std::fs::write(&path, r#"{"folders":[]}"#).unwrap();
+        assert_eq!(read_checked(&dir), Ok(Vec::new()));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
