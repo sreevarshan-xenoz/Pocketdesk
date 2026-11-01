@@ -194,6 +194,12 @@ pub struct Config {
     /// on the phone's own screen as before.
     #[serde(default = "default_true")]
     pub phone_app_windows: bool,
+    /// Keys to taps (needs Phone apps tier 2's windows): a phone app's window
+    /// can be played from this computer's keyboard and mouse, with a keymap
+    /// of the owner's own drawn per app. Off by default: it sends several
+    /// fingers at once to a phone, and some online games flag injected input.
+    #[serde(default)]
+    pub phone_app_keymaps: bool,
     /// Offer phones as this computer's camera (F6 part 2, Linux): a phone
     /// with the Webcam permission, asked from here, is published as a
     /// PipeWire camera apps can open. Off by default: a camera from afar.
@@ -803,6 +809,7 @@ impl Default for Config {
             phone_apps_pin: true,
             phone_drop_share: true,
             phone_app_windows: true,
+            phone_app_keymaps: false,
             phone_camera: false,
             phone_camera_lens: default_phone_camera_lens(),
             phone_camera_height: default_phone_camera_height(),
@@ -1098,6 +1105,7 @@ impl Config {
         "phone_apps_pin",
         "phone_drop_share",
         "phone_app_windows",
+        "phone_app_keymaps",
         "phone_camera",
         "phone_camera_lens",
         "phone_camera_height",

@@ -1130,7 +1130,7 @@ impl PocketdeskApp {
                 .map(|window| (name, window))
         });
         if let Ok((name, Some(id))) = &started {
-            self.phone_windows.reserve(*id, name);
+            self.phone_windows.reserve(*id, name, app);
         }
         let started = started.map(|(name, _)| name);
         self.notice = match started {
@@ -1636,8 +1636,8 @@ impl PocketdeskApp {
                         .show(ui, &self.state_dir, &self.snapshot.devices, now_unix());
                 // Phone apps tier 2: the window an open asked for is held, and
                 // one the phone did not make is let go.
-                if let Some((id, name)) = self.apps_page.take_asked_window() {
-                    self.phone_windows.reserve(id, &name);
+                if let Some((id, name, package)) = self.apps_page.take_asked_window() {
+                    self.phone_windows.reserve(id, &name, &package);
                 }
                 if let Some(id) = self.apps_page.take_released_window() {
                     self.phone_windows.release(id);
@@ -4671,6 +4671,7 @@ impl eframe::App for PocketdeskApp {
                 self.config.as_ref().is_none_or(|c| c.cast_control),
                 model::send_target_ids(&self.snapshot),
                 self.config.as_ref().is_none_or(|c| c.phone_drop_share),
+                self.config.as_ref().is_some_and(|c| c.phone_app_keymaps),
             );
         // Phone apps tier 2: a window for each app the phone shows in one.
         self.phone_windows.tick(ctx, &self.state_dir);
@@ -4678,6 +4679,7 @@ impl eframe::App for PocketdeskApp {
             ctx,
             &self.snapshot.devices,
             self.config.as_ref().is_none_or(|c| c.cast_control),
+            self.config.as_ref().is_some_and(|c| c.phone_app_keymaps),
         );
         if self.phone_windows.busy() {
             ctx.request_repaint_after(Duration::from_millis(500));

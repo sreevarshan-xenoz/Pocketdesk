@@ -18,6 +18,7 @@ mod direct_link_view;
 mod fonts;
 mod input_options;
 mod kdeconnect_view;
+mod keymap_view;
 mod keys;
 mod logs_view;
 mod messages_view;

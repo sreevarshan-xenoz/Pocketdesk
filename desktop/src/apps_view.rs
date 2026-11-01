@@ -352,7 +352,7 @@ pub struct AppsPage {
     windows_mode: WindowsMode,
     /// A window asked for by an open this pass: its id and the app's name,
     /// until the app takes it.
-    asked_window: Option<(u8, String)>,
+    asked_window: Option<(u8, String, String)>,
     /// A window the phone did not make, until the app takes it.
     released_window: Option<u8>,
 }
@@ -386,7 +386,7 @@ impl AppsPage {
 
     /// A window an open asked for: its id and the app's name (Phone apps
     /// tier 2), for the app to hold the id.
-    pub fn take_asked_window(&mut self) -> Option<(u8, String)> {
+    pub fn take_asked_window(&mut self) -> Option<(u8, String, String)> {
         self.asked_window.take()
     }
 
@@ -462,7 +462,7 @@ impl AppsPage {
                     crate::phone_windows::Asked::Screen => None,
                 };
                 if let Some(id) = window {
-                    self.asked_window = Some((id, app.name.clone()));
+                    self.asked_window = Some((id, app.name.clone(), app.id.clone()));
                     // Held at once, so a second open this pass asks another.
                     self.used_windows.push(id);
                 }
