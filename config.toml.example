@@ -113,6 +113,11 @@ video_quality = "balanced"
 # pinned keep working.
 # phone_apps_pin = true
 
+# A file dropped on a phone's screen window is also shared into the app in
+# front on the phone, when that app takes it (the phone's "Let the computer
+# open my apps" must be on, off by default). Off: a dropped file is only sent.
+# phone_drop_share = true
+
 # Linux: offer phones as this computer's camera. A phone with "Use its camera
 # as a webcam" on in the desktop app (Devices) and "Let the computer use
 # my camera" on in its Settings, asked from the Overview, is published as a

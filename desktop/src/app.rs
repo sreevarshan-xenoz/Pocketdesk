@@ -2175,6 +2175,7 @@ impl PocketdeskApp {
                     PhoneAction::Apps => format!("Asked {who} for its apps."),
                     PhoneAction::Open => format!("Asked {who} to open an app."),
                     PhoneAction::Contacts => format!("Asked {who} for its contacts."),
+                    PhoneAction::Share => format!("Asked {who} to share a file."),
                 }),
                 Err(e) => Err(format!("Could not ask {who}: {e}")),
             },
@@ -4636,6 +4637,7 @@ impl eframe::App for PocketdeskApp {
                 &self.snapshot.devices,
                 self.config.as_ref().is_none_or(|c| c.cast_control),
                 model::send_target_ids(&self.snapshot),
+                self.config.as_ref().is_none_or(|c| c.phone_drop_share),
             );
         // BK7: another computer's screen, while its window is open.
         if let Some(view) = &self.computer_view {

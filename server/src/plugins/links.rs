@@ -274,6 +274,13 @@ pub async fn run_phone_actions() {
                 (pocketdesk_core::protocol::phone_action::PhoneAction::Open, Some(app)) => {
                     open_body(app, ask.screen)
                 }
+                // Apps part 2: the file being sent, to be shared into the app in front.
+                (pocketdesk_core::protocol::phone_action::PhoneAction::Share, _) => {
+                    let (Some(name), Some(size)) = (ask.name.as_deref(), ask.size) else {
+                        continue;
+                    };
+                    pocketdesk_core::protocol::phone_action::share_body(name, size)
+                }
                 (_, app) => body(action, app),
             };
             let packet = NetworkPacket::new(PHONE_ACTION).with_body(ask_body);

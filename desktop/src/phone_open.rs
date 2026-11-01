@@ -251,6 +251,7 @@ mod tests {
             AppReport {
                 about: "open".into(),
                 app: Some(app.into()),
+                name: None,
                 result,
             },
             at,

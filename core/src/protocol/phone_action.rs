@@ -245,11 +245,20 @@ pub enum AppResult {
     TooMany,
     /// Android refused it.
     Failed,
+    /// Apps part 2: the file dropped on the phone's screen window was
+    /// shared into the app in front.
+    Shared,
+    /// Apps part 2: no app in front that the phone could tell (or none it
+    /// lists), so the file stays in Downloads.
+    NoApp,
+    /// Apps part 2: the app in front takes no file of that type, so the
+    /// file stays in Downloads.
+    CannotTake,
 }
 
 impl AppResult {
     /// Every result.
-    pub const ALL: [AppResult; 12] = [
+    pub const ALL: [AppResult; 15] = [
         AppResult::Opened,
         AppResult::NeedsScreen,
         AppResult::ControlOff,
@@ -262,6 +271,9 @@ impl AppResult {
         AppResult::NotFound,
         AppResult::TooMany,
         AppResult::Failed,
+        AppResult::Shared,
+        AppResult::NoApp,
+        AppResult::CannotTake,
     ];
 
     /// The word the packet carries.
@@ -279,6 +291,9 @@ impl AppResult {
             AppResult::NotFound => "not_found",
             AppResult::TooMany => "too_many",
             AppResult::Failed => "failed",
+            AppResult::Shared => "shared",
+            AppResult::NoApp => "no_app",
+            AppResult::CannotTake => "cannot_take",
         }
     }
 
@@ -289,12 +304,16 @@ impl AppResult {
 }
 
 /// How an ask went, as a phone says it ([`PHONE_APP_OPENED`]): which ask
-/// (`apps` or `open`), the app an open named, and the result.
+/// (`apps`, `open` or `share`), the app an open named (or a share went to),
+/// the file a share was for, and the result.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AppReport {
     pub about: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app: Option<String>,
+    /// The file a `share` was about (Apps part 2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub result: AppResult,
 }
 
@@ -309,13 +328,20 @@ impl AppReport {
             .and_then(|a| a.as_str())
             .filter(|a| valid_app_id(a))
             .map(str::to_string);
-        match (about, &app) {
-            ("open", Some(_)) | ("apps", None) => {}
+        // A share names the file it was for, as the computer sent it.
+        let name = body
+            .get("name")
+            .and_then(|n| n.as_str())
+            .filter(|n| valid_share_name(n))
+            .map(str::to_string);
+        match (about, &app, &name) {
+            ("open", Some(_), None) | ("apps", None, None) | ("share", _, Some(_)) => {}
             _ => return None,
         }
         Some(AppReport {
             about: about.to_string(),
             app,
+            name,
             result,
         })
     }
@@ -339,15 +365,19 @@ pub enum PhoneAction {
     Open,
     /// List the contacts, names and numbers only (P10).
     Contacts,
+    /// Share the file being sent into the app in front on the phone (Apps
+    /// part 2), the file's name and size beside the action.
+    Share,
 }
 
 impl PhoneAction {
-    pub const ALL: [PhoneAction; 5] = [
+    pub const ALL: [PhoneAction; 6] = [
         PhoneAction::Screenshot,
         PhoneAction::Lock,
         PhoneAction::Apps,
         PhoneAction::Open,
         PhoneAction::Contacts,
+        PhoneAction::Share,
     ];
 
     /// The word the packet and the request files carry.
@@ -358,6 +388,7 @@ impl PhoneAction {
             PhoneAction::Apps => "apps",
             PhoneAction::Open => "open",
             PhoneAction::Contacts => "contacts",
+            PhoneAction::Share => "share",
         }
     }
 
@@ -365,6 +396,25 @@ impl PhoneAction {
     pub fn parse(word: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|a| a.as_str() == word)
     }
+}
+
+/// The longest file name a share names, in characters.
+pub const MAX_SHARE_NAME: usize = 255;
+
+/// Whether `name` can be the name of a file a share is for: one line, no
+/// path, at most [`MAX_SHARE_NAME`] characters.
+pub fn valid_share_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.chars().count() <= MAX_SHARE_NAME
+        && !name
+            .chars()
+            .any(|c| c.is_control() || c == '/' || c == '\\')
+}
+
+/// The packet's body for a `share` ask: the file being sent (its name and
+/// size in bytes), which the phone matches to the file that arrives.
+pub fn share_body(name: &str, size: u64) -> serde_json::Value {
+    json!({ "action": PhoneAction::Share.as_str(), "name": name, "size": size })
 }
 
 /// The packet's body for `action`, with the app `open` opens.
@@ -392,6 +442,45 @@ mod tests {
         );
         assert_eq!(PhoneAction::parse("Lock"), None);
         assert_eq!(PhoneAction::parse("unlock"), None);
+    }
+
+    /// Apps part 2: a share names its file, and a report of one says so.
+    #[test]
+    fn a_share_names_its_file_and_its_report_does_too() {
+        assert!(valid_share_name("photo 1.png"));
+        assert!(!valid_share_name(""));
+        assert!(!valid_share_name("a/b"));
+        assert!(!valid_share_name("a\\b"));
+        assert!(!valid_share_name("a\nb"));
+        assert!(!valid_share_name(&"x".repeat(MAX_SHARE_NAME + 1)));
+        let ask = share_body("a.png", 10);
+        assert_eq!(ask["action"], "share");
+        assert_eq!(ask["name"], "a.png");
+        assert_eq!(ask["size"], 10);
+        assert_eq!(PhoneAction::parse("share"), Some(PhoneAction::Share));
+        let report = AppReport::from_body(&json!({
+            "about": "share", "app": "org.example.notes", "name": "a.png", "result": "shared"
+        }))
+        .unwrap();
+        assert_eq!(report.result, AppResult::Shared);
+        assert_eq!(report.name.as_deref(), Some("a.png"));
+        assert_eq!(report.app.as_deref(), Some("org.example.notes"));
+        // An app is not needed (none in front); a file name is.
+        assert!(
+            AppReport::from_body(&json!({
+                "about": "share", "name": "a.png", "result": "no_app"
+            }))
+            .is_some()
+        );
+        for bad in [
+            json!({"about": "share", "result": "shared"}),
+            json!({"about": "share", "name": "../a", "result": "shared"}),
+            json!({"about": "share", "name": "a.png", "result": "nope"}),
+            json!({"about": "open", "app": "org.example.notes", "name": "a.png", "result": "opened"}),
+            json!({"about": "apps", "name": "a.png", "result": "opened"}),
+        ] {
+            assert_eq!(AppReport::from_body(&bad), None, "{bad}");
+        }
     }
 
     /// Apps part 2: a notification's key names its app only in Android's form.
@@ -485,6 +574,7 @@ mod tests {
             let report = AppReport {
                 about: "open".into(),
                 app: Some("org.example.app".into()),
+                name: None,
                 result,
             };
             assert_eq!(AppReport::from_body(&report.to_body()), Some(report));

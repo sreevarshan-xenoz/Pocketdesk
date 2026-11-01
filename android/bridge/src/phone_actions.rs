@@ -46,6 +46,23 @@ pub(crate) fn receive(body: &serde_json::Value, host: &str, port: u16) {
             tracing::warn!("An ask to open an app was dropped: no app named");
             return;
         }
+        // Apps part 2: a share names the file being sent, by name and size.
+        (PhoneAction::Share, _) => {
+            let name = body.get("name").and_then(|v| v.as_str());
+            let size = body.get("size").and_then(|v| v.as_u64());
+            match (name, size) {
+                (Some(name), Some(size))
+                    if pocketdesk_core::protocol::phone_action::valid_share_name(name) =>
+                {
+                    ask["name"] = serde_json::Value::from(name);
+                    ask["size"] = serde_json::Value::from(size);
+                }
+                _ => {
+                    tracing::warn!("An ask to share a file was dropped: no file named");
+                    return;
+                }
+            }
+        }
         // Apps part 1: the icons the computer keeps (id and version), so
         // only the rest are sent.
         (PhoneAction::Apps, _) => {
@@ -107,6 +124,33 @@ mod tests {
             serde_json::json!([{ "host": "192.0.2.7", "port": 1716, "action": "lock" }])
         );
         assert_eq!(take_json(), "[]");
+    }
+
+    /// Apps part 2: a share names the file being sent, by name and size, or is dropped.
+    #[tokio::test]
+    async fn a_share_ask_names_its_file() {
+        let _globals = crate::api::TRANSFER_TEST_LOCK.lock().await;
+        forget();
+        receive(
+            &serde_json::json!({ "action": "share", "name": "a.png", "size": 12 }),
+            "192.0.2.7",
+            1716,
+        );
+        for bad in [
+            serde_json::json!({ "action": "share" }),
+            serde_json::json!({ "action": "share", "name": "a.png" }),
+            serde_json::json!({ "action": "share", "name": "../a.png", "size": 1 }),
+            serde_json::json!({ "action": "share", "name": "a.png", "size": "1" }),
+        ] {
+            receive(&bad, "192.0.2.7", 1716);
+        }
+        let waiting: serde_json::Value = serde_json::from_str(&take_json()).unwrap();
+        assert_eq!(
+            waiting,
+            serde_json::json!([
+                { "host": "192.0.2.7", "port": 1716, "action": "share", "name": "a.png", "size": 12 },
+            ])
+        );
     }
 
     /// Apps part 1: an open may want the screen, and a list ask carries the

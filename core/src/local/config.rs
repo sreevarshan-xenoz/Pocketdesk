@@ -181,6 +181,12 @@ pub struct Config {
     /// no pin; shortcuts already pinned keep working.
     #[serde(default = "default_true")]
     pub phone_apps_pin: bool,
+    /// A file dropped on a phone's screen window is also shared into the app
+    /// in front on the phone, when that app takes it (Apps part 2). Off, a
+    /// dropped file is only sent. The phone's own switch ("Let the computer
+    /// open my apps", off by default) decides whether it ever is.
+    #[serde(default = "default_true")]
+    pub phone_drop_share: bool,
     /// Offer phones as this computer's camera (F6 part 2, Linux): a phone
     /// with the Webcam permission, asked from here, is published as a
     /// PipeWire camera apps can open. Off by default: a camera from afar.
@@ -788,6 +794,7 @@ impl Default for Config {
             cast_control: true,
             phone_apps_page: true,
             phone_apps_pin: true,
+            phone_drop_share: true,
             phone_camera: false,
             phone_camera_lens: default_phone_camera_lens(),
             phone_camera_height: default_phone_camera_height(),
@@ -1081,6 +1088,7 @@ impl Config {
         "cast_control",
         "phone_apps_page",
         "phone_apps_pin",
+        "phone_drop_share",
         "phone_camera",
         "phone_camera_lens",
         "phone_camera_height",

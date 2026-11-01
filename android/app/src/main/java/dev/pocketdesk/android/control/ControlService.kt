@@ -68,6 +68,19 @@ class ControlService : AccessibilityService() {
         Log.i(TAG, "watching copies: $on")
     }
 
+    /**
+     * The package of the window in front, read once now (Apps part 2: the
+     * app a file dropped on the phone's screen window is shared into): only
+     * its package name, never its contents. Null when Android gives none.
+     */
+    fun foregroundPackage(): String? = runCatching {
+        val root = rootInActiveWindow
+        val pkg = root?.packageName?.toString()
+        @Suppress("DEPRECATION")
+        root?.recycle()
+        pkg
+    }.getOrNull()
+
     /** Hands-free: the screen-sharing question being accepted now, if any. */
     private var consent: ConsentPress? = null
     private var consentPackage: String? = null

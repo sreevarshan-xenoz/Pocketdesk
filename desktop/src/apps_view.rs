@@ -941,6 +941,7 @@ mod tests {
             report: AppReport {
                 about: about.into(),
                 app: app.map(str::to_string),
+                name: None,
                 result,
             },
             at,
