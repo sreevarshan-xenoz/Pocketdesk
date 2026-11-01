@@ -27,6 +27,10 @@ use crate::protocol::wake_helper::{
 /// How long a requester has to send its line, and a helper to answer.
 const STEP: Duration = Duration::from_secs(5);
 
+/// How long a handshake may take before it is dropped. Short, so half-open
+/// handshakes cannot hold the few slots ([`AT_ONCE`]) for long.
+const HANDSHAKE: Duration = Duration::from_secs(2);
+
 /// How long the helper waits for the requester to take the answer and close.
 const LINGER: Duration = Duration::from_secs(3);
 
@@ -109,6 +113,14 @@ impl HelperState {
             }
             Decision::Send { mac, broadcast } => {
                 let local = self.local.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                // The duty names the home network's broadcast address: a
+                // helper taken to another Wi-Fi never sends the home
+                // computer's MAC there.
+                if broadcast != Ipv4Addr::BROADCAST && !local.contains(&broadcast) {
+                    self.count(|s| s.refused += 1);
+                    tracing::info!("Wake helper: not on the computer's network, nothing sent");
+                    return Some(Answer::Failed);
+                }
                 let to = targets(broadcast, &local);
                 let state = Arc::clone(self);
                 let reached = tokio::task::spawn_blocking(move || state.sender.send(mac, &to))
@@ -171,7 +183,7 @@ impl Helper {
                         let Ok(accepting) = incoming.accept() else {
                             return;
                         };
-                        let Ok(Ok(conn)) = tokio::time::timeout(STEP, accepting).await else {
+                        let Ok(Ok(conn)) = tokio::time::timeout(HANDSHAKE, accepting).await else {
                             return;
                         };
                         serve_one(conn, &state).await;
@@ -445,6 +457,34 @@ mod tests {
         assert!(!matches!(answer, Ok(Answer::Sent)), "{answer:?}");
         assert_eq!(recorder.1.load(Ordering::SeqCst), 1);
         helper.stop().await;
+    }
+
+    #[tokio::test]
+    async fn a_helper_on_another_network_sends_nothing() {
+        let recorder = Recorder::default();
+        let phone = SecretKey::generate();
+        let helper = helper(&recorder, &[phone.public().to_string()]).await;
+        // Taken to another Wi-Fi: its own networks are not the computer's.
+        *helper.state().local.lock().unwrap() = vec![Ipv4Addr::new(198, 51, 100, 255)];
+        assert_eq!(
+            wake(&helper, &phone, "computer-1").await.unwrap(),
+            Answer::Failed
+        );
+        assert_eq!(recorder.1.load(Ordering::SeqCst), 0, "nothing was sent");
+        // Not told of any network yet: the same.
+        helper.state().local.lock().unwrap().clear();
+        assert_eq!(
+            wake(&helper, &phone, "computer-1").await.unwrap(),
+            Answer::Failed
+        );
+        assert_eq!(recorder.1.load(Ordering::SeqCst), 0);
+        helper.stop().await;
+    }
+
+    #[test]
+    fn a_handshake_gets_two_seconds() {
+        assert!(HANDSHAKE <= Duration::from_secs(2));
+        assert!(HANDSHAKE < STEP);
     }
 
     #[tokio::test]
