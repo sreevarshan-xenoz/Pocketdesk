@@ -151,7 +151,15 @@ impl FixSource for Fixes {
                     cache.keep(given, precision, Instant::now());
                     return Some(given);
                 }
-                Err(reason) => tracing::info!("Phone location: no fix ({reason})"),
+                Err(reason) => {
+                    tracing::info!("Phone location: no fix ({reason})");
+                    // The owner turned it off on the phone: nothing it gave
+                    // before is handed on, however recent (review).
+                    if reason == TURNED_OFF {
+                        cache.clear();
+                        return None;
+                    }
+                }
             }
         }
         cache.stale(precision, Instant::now())
@@ -169,9 +177,8 @@ fn pending() -> &'static Mutex<Option<Pending>> {
     PENDING.get_or_init(Default::default)
 }
 
-/// The phone to ask among `clients`: a connected one of the owner's (paired,
-/// not a computer by `is_phone`), the one `chosen` names, or the first when
-/// none is named.
+/// The phone to ask among `clients`: a connected one of the owner's own
+/// (by `is_phone`), the one `chosen` names, or the first when none is named.
 pub fn choose_phone<'a>(
     clients: &'a [Arc<dyn DeviceSender>],
     chosen: &str,
@@ -183,11 +190,14 @@ pub fn choose_phone<'a>(
         .find(|c| chosen.is_empty() || c.device_id() == chosen)
 }
 
+/// The phone's own switch is off: what it gave before goes too (review).
+const TURNED_OFF: &str = "its Give my computer my location is off";
+
 /// Why a phone's answer was no fix, in words of this computer's own: what
 /// the phone says is held to a few known reasons.
 fn refusal(body: &Value) -> String {
     match body.get("error").and_then(Value::as_str) {
-        Some("off") => "its Give my computer my location is off",
+        Some("off") => TURNED_OFF,
         Some("permission") => "it has no location permission",
         Some("background") => "it needs Pocketdesk open, or location allowed all the time",
         Some("unavailable") => "it found no place",
@@ -217,6 +227,16 @@ fn deliver(device_id: &str, body: &Value) -> bool {
     waiting.answer.send(result).is_ok()
 }
 
+/// Whether `device_id` is one of the owner's own phones: never a guest's,
+/// someone else's or a time-limited one, whose place is not this
+/// computer's (review).
+fn is_owner_phone(device_id: &str) -> bool {
+    crate::state::trust_store_path()
+        .ok()
+        .and_then(|path| pocketdesk_core::protocol::kdeconnect::TrustStore::read(path).ok())
+        .is_some_and(|store| store.is_owner_phone(device_id))
+}
+
 /// Asks the linked phone.
 pub struct PhoneAsker;
 
@@ -225,11 +245,7 @@ impl Asker for PhoneAsker {
     async fn ask(&self, precision: Precision) -> std::result::Result<(String, Fix), String> {
         let chosen = crate::events::current_config().phone_location_phone;
         let clients = crate::state::clone_clients().await;
-        let is_phone = |id: &str| {
-            crate::plugins::pair::is_paired_device(id)
-                && !crate::plugins::pair::is_computer_device(id)
-        };
-        let phone = choose_phone(&clients, &chosen, &is_phone).ok_or("no phone is linked")?;
+        let phone = choose_phone(&clients, &chosen, &is_owner_phone).ok_or("no phone is linked")?;
         let (answer, answered) = tokio::sync::oneshot::channel();
         *pending().lock().unwrap_or_else(|e| e.into_inner()) = Some(Pending {
             device_id: phone.device_id().to_string(),
@@ -270,11 +286,10 @@ impl Plugin for PhoneLocationPlugin {
         if packet.packet_type != FIX {
             return Ok(());
         }
-        // A paired phone's, and only the one asked: a fix nobody asked for
-        // is dropped unread, never kept.
+        // One of the owner's phones, and only the one asked: a fix nobody
+        // asked for is dropped unread, never kept.
         let device = sender.device_id();
-        if !crate::plugins::pair::is_paired_device(device)
-            || crate::plugins::pair::is_computer_device(device)
+        if !is_owner_phone(device)
             || !offered()
             || !deliver(device, &packet.body)
         {
