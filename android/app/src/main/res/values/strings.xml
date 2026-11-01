@@ -563,6 +563,12 @@
     <string name="approve_signs">Yes signs this request with this phone\'s key; the computer checks it. If you did not ask for it, answer No.</string>
     <string name="approve_pin">Allow this phone to approve sudo on %1$s for %2$s?</string>
     <string name="approve_pin_signs">Yes makes this phone\'s approval key, which the computer\'s root checks with Google\'s attestation before it pins it. Only say Yes if you just ran the pin command on that computer.</string>
+    <string name="approve_pin_replaces">This replaces your current approval key for %1$s. The current key keeps working until root finishes the pin on the computer.</string>
+    <string name="approve_pin_code_title">Type this code at the computer</string>
+    <string name="approve_pin_code_help">The pin command on the computer asks for it. If it asks for a code you did not see here, or you did not run it, do not type anything: answer it with Ctrl+C.</string>
+    <string name="approve_pin_done">Done</string>
+    <string name="approve_not_pinned">This phone\'s key is not the one the computer pinned. Pin it again: sudo /usr/lib/pocketdesk/pocketdesk-pam-ask --pin YOUR-USER</string>
+    <string name="settings_approve_waiting">On. A new key waits for the computer\'s pin, code %1$s; the current key keeps working until the pin is done</string>
     <string name="approve_command">Runs</string>
     <string name="approve_requester">Asked by</string>
     <string name="approve_action">polkit action</string>

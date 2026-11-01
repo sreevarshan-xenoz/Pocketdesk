@@ -554,6 +554,12 @@
     <string name="approve_signs">ஆம் என்பது இந்தக் கோரிக்கையை இந்த ஃபோனின் சாவியால் கையொப்பமிடும்; கணினி அதைச் சரிபார்க்கும். நீங்கள் கேட்கவில்லை என்றால், இல்லை என்று பதிலளிக்கவும்.</string>
     <string name="approve_pin">%2$s க்காக %1$s இல் sudo ஐ அனுமதிக்க இந்த ஃபோனை அனுமதிக்கவா?</string>
     <string name="approve_pin_signs">ஆம் என்பது இந்த ஃபோனின் அனுமதிச் சாவியை உருவாக்கும்; கணினியின் root அதைப் பொருத்தும் முன் Google சான்றளிப்பால் சரிபார்க்கும். அந்தக் கணினியில் பொருத்தும் கட்டளையை இப்போதுதான் இயக்கியிருந்தால் மட்டும் ஆம் என்று சொல்லவும்.</string>
+    <string name="approve_pin_replaces">இது %1$s க்கான உங்கள் தற்போதைய அனுமதிச் சாவியை மாற்றும். கணினியில் root பொருத்துவதை முடிக்கும் வரை தற்போதைய சாவி வேலை செய்யும்.</string>
+    <string name="approve_pin_code_title">இந்தக் குறியீட்டைக் கணினியில் தட்டச்சு செய்யவும்</string>
+    <string name="approve_pin_code_help">கணினியில் பொருத்தும் கட்டளை இதைக் கேட்கும். இங்கே பார்க்காத குறியீட்டைக் கேட்டாலோ, நீங்கள் அதை இயக்கவில்லை என்றாலோ, எதையும் தட்டச்சு செய்ய வேண்டாம்: Ctrl+C அழுத்தவும்.</string>
+    <string name="approve_pin_done">முடிந்தது</string>
+    <string name="approve_not_pinned">இந்த ஃபோனின் சாவி கணினி பொருத்திய சாவி அல்ல. மீண்டும் பொருத்தவும்: sudo /usr/lib/pocketdesk/pocketdesk-pam-ask --pin உங்கள்-பயனர்</string>
+    <string name="settings_approve_waiting">இயக்கத்தில். புதிய சாவி கணினி பொருத்தக் காத்திருக்கிறது, குறியீடு %1$s; அதுவரை தற்போதைய சாவி வேலை செய்யும்</string>
     <string name="approve_command">இயக்குவது</string>
     <string name="approve_requester">கேட்டவர்</string>
     <string name="approve_action">polkit செயல்</string>

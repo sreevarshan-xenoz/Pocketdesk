@@ -34,7 +34,7 @@ class ApproveRuleTest {
     ): String = JSONObject()
         .put("id", id).put("kind", kind).put("service", service).put("user", user)
         .put("requester", requester).put("action", "").put("command", command)
-        .put("tty", tty).put("origin", origin).put("computer", computer).put("nonce", nonce)
+        .put("tty", tty).put("origin", origin).put("pinned", "cd".repeat(32)).put("computer", computer).put("nonce", nonce)
         .put("issued_unix", issued).put("expires_unix", expires)
         .toString()
 
@@ -44,7 +44,7 @@ class ApproveRuleTest {
         val a = ApproveRule.parse(json())!!
         val expected = "21:pocketdesk-approve-v2\n3:a-1\n5:admin\n4:sudo\n5:alice\n5:alice\n0:\n" +
             "25:/usr/bin/sudo pacman -Syu\n10:/dev/pts/3\n34:sudo(812) < bash(700) < kitty(650)\n" +
-            "64:$computer\n64:$nonce\n4:1000\n4:1020\n3:yes\n"
+            "64:${"cd".repeat(32)}\n64:$computer\n64:$nonce\n4:1000\n4:1020\n3:yes\n"
         assertArrayEquals(expected.toByteArray(Charsets.UTF_8), ApproveRule.message(a))
         // Lengths count UTF-8 bytes, as Rust's do: each escape bracket is three.
         val escaped = a.copy(command = "a⟨U+202E⟩b")
@@ -64,6 +64,10 @@ class ApproveRuleTest {
         assertNull(ApproveRule.parse(json(command = "rm a‮b")))
         assertNull(ApproveRule.parse(json(origin = "kit‮ty(1)")))
         assertNotNull(ApproveRule.parse(json(command = "x".repeat(4000))))
+        assertTrue(ApproveRule.isShownText("rm '\u27E8SPx3000\u27E9' -rf /", 100))
+        assertFalse("three spaces left as spaces", ApproveRule.isShownText("a   b", 100))
+        assertFalse(ApproveRule.isShownText("\u27E8SPx2\u27E9", 100))
+        assertTrue(ApproveRule.isShownText("a  b", 100))
     }
 
     @Test
@@ -118,6 +122,10 @@ class ApproveRuleTest {
         assertTrue(JSONObject(ApproveRule.keyBody(null, false)).isNull("public_key"))
         // All of the SHA-256, in sixteen groups of four.
         assertEquals(79, ApproveRule.fingerprint(pair.public.encoded).length)
+        // The pin's code is the fingerprint's last eight hex digits.
+        val fp = ApproveRule.fingerprint(pair.public.encoded).replace(" ", "")
+        assertEquals(fp.takeLast(8).chunked(4).joinToString(" "), ApproveRule.code(pair.public.encoded))
+        assertEquals(listOf("cd".repeat(32)), ApproveRule.pinnedKeys(a))
         val pin = JSONObject(ApproveRule.pinAnswer("p-1", listOf(byteArrayOf(1), byteArrayOf(2)))!!)
         assertEquals(2, pin.getJSONArray("attestation").length())
         assertNull(ApproveRule.pinAnswer("p-1", emptyList()))

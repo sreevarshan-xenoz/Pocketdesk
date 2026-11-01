@@ -49,7 +49,7 @@ object Asks {
                 val parsed = ApproveRule.parse(ask.approve)
                 val approve = ApproveRule.decide(
                     Prefs.approveRequests(context),
-                    ApproveKey.exists(),
+                    ApproveKey.exists(context),
                     parsed?.pin == true,
                     ask.expiresUnix,
                     now,

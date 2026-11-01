@@ -32,9 +32,11 @@ import kotlinx.coroutines.withContext
 fun ApproveSetting() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var on by remember { mutableStateOf(Prefs.approveRequests(context) && ApproveKey.exists()) }
+    var on by remember { mutableStateOf(Prefs.approveRequests(context) && ApproveKey.exists(context)) }
     var biometricOnly by remember { mutableStateOf(Prefs.approveBiometricOnly(context)) }
-    var fingerprint by remember { mutableStateOf(ApproveKey.publicKey()?.let(ApproveRule::fingerprint)) }
+    var fingerprint by remember { mutableStateOf(ApproveKey.publicKey(ApproveKey.current(context))?.let(ApproveRule::fingerprint)) }
+    // A pin's new key, until a request names it as pinned.
+    val waiting = remember { ApproveKey.publicKey(ApproveKey.spare(context))?.let(ApproveRule::code) }
     var said by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
 
@@ -53,6 +55,7 @@ fun ApproveSetting() {
     val summary = when {
         !ApproveKey.supported -> stringResource(R.string.approve_needs_android_11)
         said != null -> said
+        on && waiting != null -> stringResource(R.string.settings_approve_waiting, waiting)
         on && fingerprint != null -> stringResource(R.string.settings_approve_on, fingerprint!!)
         else -> stringResource(R.string.settings_approve_summary)
     }
@@ -82,7 +85,7 @@ private class SetUp(val problem: String?, val fingerprint: String?)
 private fun setUp(context: Context, on: Boolean, biometricOnly: Boolean): SetUp {
     val host = HostStore.lastHost(context)
     if (!on) {
-        ApproveKey.delete()
+        ApproveKey.deleteAll(context)
         Prefs.setApproveRequests(context, false)
         host?.let {
             RustCore.sendPhonePacket(it.address, it.controlPort, ApproveRule.KEY_PACKET, ApproveRule.keyBody(null, false))
@@ -96,7 +99,9 @@ private fun setUp(context: Context, on: Boolean, biometricOnly: Boolean): SetUp 
     if (!context.getSystemService(KeyguardManager::class.java).isDeviceSecure) {
         return SetUp(context.getString(R.string.ask_needs_lock), null)
     }
-    val key = runCatching { ApproveKey.create(biometricOnly) }.getOrElse {
+    // A new key in place of both: unpinned until root pins again.
+    ApproveKey.deleteAll(context)
+    val key = runCatching { ApproveKey.create(ApproveKey.current(context), biometricOnly) }.getOrElse {
         // Fingerprint only with no fingerprint enrolled, for one.
         return SetUp(context.getString(R.string.settings_approve_no_key_made), null)
     }
@@ -107,7 +112,7 @@ private fun setUp(context: Context, on: Boolean, biometricOnly: Boolean): SetUp 
         ApproveRule.keyBody(key, biometricOnly),
     )
     if (sent.isFailure) {
-        ApproveKey.delete()
+        ApproveKey.deleteAll(context)
         return SetUp(context.getString(R.string.ask_not_sent, context.plainErrorText(sent.exceptionOrNull()?.message)), null)
     }
     Prefs.setApproveRequests(context, true)

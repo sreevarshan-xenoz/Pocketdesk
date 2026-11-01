@@ -62,6 +62,9 @@ import kotlinx.coroutines.withContext
 class AskActivity : ComponentActivity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var said by mutableStateOf<String?>(null)
+    // A pin's code, shown once the new key's answer went (review I5).
+    private var pinCode by mutableStateOf<String?>(null)
+    @Volatile private var pendingCode: String? = null
     // Asking for the lock or sending: the buttons wait (BF3 review: a
     // double tap on Yes opened two prompts).
     private var sending by mutableStateOf(false)
@@ -134,7 +137,11 @@ class AskActivity : ComponentActivity() {
                             line(R.string.approve_tty, asked.tty)
                             line(R.string.approve_origin, asked.origin)
                             Text(
-                                stringResource(if (asked.pin) R.string.approve_pin_signs else R.string.approve_signs),
+                                if (asked.pin) {
+                                    stringResource(R.string.approve_pin_replaces, computer) + " " + stringResource(R.string.approve_pin_signs)
+                                } else {
+                                    stringResource(R.string.approve_signs)
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -144,6 +151,11 @@ class AskActivity : ComponentActivity() {
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        pinCode?.let {
+                            Text(stringResource(R.string.approve_pin_code_title), style = MaterialTheme.typography.titleMedium)
+                            Text(it, style = MaterialTheme.typography.displaySmall, fontFamily = FontFamily.Monospace)
+                            Text(stringResource(R.string.approve_pin_code_help), style = MaterialTheme.typography.bodySmall)
+                        }
                         said?.let {
                             Text(
                                 it,
@@ -151,7 +163,9 @@ class AskActivity : ComponentActivity() {
                                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                             )
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (pinCode != null) {
+                            Button(onClick = { finish() }) { Text(stringResource(R.string.approve_pin_done)) }
+                        } else Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             OutlinedButton(onClick = { answer(yes = false) }, enabled = !sending) {
                                 Text(stringResource(R.string.ask_no))
                             }
@@ -231,7 +245,14 @@ class AskActivity : ComponentActivity() {
             return
         }
         if (asked.pin) return pinKey(asked)
-        val signature = ApproveKey.signature().getOrElse {
+        // The key the computer pinned: a new one waiting for its pin takes
+        // over once a request names it (review N13).
+        val alias = ApproveKey.pick(this, ApproveRule.pinnedKeys(asked)) ?: run {
+            said = getString(R.string.approve_not_pinned)
+            Log.i(TAG, "an approval was not signed: this phone's key is not the pinned one")
+            return
+        }
+        val signature = ApproveKey.signature(alias).getOrElse {
             val problem = (it as? ApproveKey.ProblemException)?.problem
             said = getString(
                 if (problem == ApproveKey.Problem.Invalidated) R.string.approve_invalidated else R.string.approve_no_key,
@@ -315,10 +336,14 @@ class AskActivity : ComponentActivity() {
                     scope.launch {
                         val body = withContext(Dispatchers.Default) {
                             runCatching {
-                                val key = ApproveKey.create(biometricOnly, ApproveRule.pinChallenge(asked))
+                                // Beside the current key, which stays until a request
+                                // names this one as pinned (review N13).
+                                val spare = ApproveKey.spare(this@AskActivity)
+                                val key = ApproveKey.create(spare, biometricOnly, ApproveRule.pinChallenge(asked))
+                                pendingCode = ApproveRule.code(key)
                                 // Settings lists the new key too.
                                 RustCore.sendPhonePacket(host, port, ApproveRule.KEY_PACKET, ApproveRule.keyBody(key, biometricOnly))
-                                ApproveRule.pinAnswer(asked.id, ApproveKey.chain())
+                                ApproveRule.pinAnswer(asked.id, ApproveKey.chain(spare))
                             }.getOrNull()
                         }
                         if (body == null) {
@@ -326,7 +351,7 @@ class AskActivity : ComponentActivity() {
                             said = getString(R.string.settings_approve_no_key_made)
                             return@launch
                         }
-                        sendBody(body, yes = true)
+                        sendBody(body, yes = true, stay = true)
                     }
                 }
 
@@ -343,7 +368,7 @@ class AskActivity : ComponentActivity() {
         sendBody(body, yes)
     }
 
-    private fun sendBody(body: String, yes: Boolean) {
+    private fun sendBody(body: String, yes: Boolean, stay: Boolean = false) {
         // A prompt can outlive the question (BF3 review).
         if (expired()) {
             sending = false
@@ -359,7 +384,7 @@ class AskActivity : ComponentActivity() {
                 // For the device checks; never the question.
                 Log.i(TAG, "answered ${if (yes) "yes" else "no"}")
                 Toast.makeText(this@AskActivity, getString(R.string.ask_sent), Toast.LENGTH_SHORT).show()
-                finish()
+                if (stay) pinCode = pendingCode else finish()
             }.onFailure {
                 said = getString(R.string.ask_not_sent, plainErrorText(it.message))
             }

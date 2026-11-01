@@ -560,6 +560,12 @@
     <string name="approve_signs">Sí firma esta solicitud con la clave de este teléfono; el equipo la comprueba. Si no la pediste, responde No.</string>
     <string name="approve_pin">¿Permitir que este teléfono apruebe sudo en %1$s para %2$s?</string>
     <string name="approve_pin_signs">Sí crea la clave de aprobación de este teléfono, que root comprueba en el equipo con la atestación de Google antes de fijarla. Di Sí solo si acabas de ejecutar el comando para fijarla en ese equipo.</string>
+    <string name="approve_pin_replaces">Esto reemplaza tu clave de aprobación actual para %1$s. La clave actual sigue funcionando hasta que root termine de fijarla en el equipo.</string>
+    <string name="approve_pin_code_title">Escribe este código en el equipo</string>
+    <string name="approve_pin_code_help">El comando para fijarla en el equipo lo pide. Si pide un código que no viste aquí, o no lo ejecutaste, no escribas nada: cancélalo con Ctrl+C.</string>
+    <string name="approve_pin_done">Listo</string>
+    <string name="approve_not_pinned">La clave de este teléfono no es la que el equipo fijó. Fíjala de nuevo: sudo /usr/lib/pocketdesk/pocketdesk-pam-ask --pin TU-USUARIO</string>
+    <string name="settings_approve_waiting">Activado. Una clave nueva espera a que el equipo la fije, código %1$s; la clave actual sigue funcionando hasta entonces</string>
     <string name="approve_command">Ejecuta</string>
     <string name="approve_requester">Lo pide</string>
     <string name="approve_action">Acción de polkit</string>

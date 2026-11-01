@@ -40,6 +40,8 @@ object ApproveRule {
         val command: String,
         val tty: String,
         val origin: String,
+        /** The pinned keys' SHA-256, lowercase hex, comma-separated. */
+        val pinned: String,
         val computer: String,
         val nonce: String,
         val issuedUnix: Long,
@@ -54,11 +56,14 @@ object ApproveRule {
     private val ID = Regex("^[A-Za-z0-9-]{1,64}$")
     private val NAME = Regex("^[A-Za-z0-9._][A-Za-z0-9._-]{0,31}$")
     private val HEX64 = Regex("^[0-9a-f]{64}$")
-    private val ESCAPE = Regex("^⟨U\\+[0-9A-F]{4,6}⟩")
+    private val ESCAPE = Regex("^⟨(U\\+[0-9A-F]{4,6}|SPx[1-9][0-9]{0,5})⟩")
+    private const val SPACE_RUN = 3
 
     /** Whether [text] is what the computer's escaping makes: printable ASCII and `⟨U+XXXX⟩`. */
     fun isShownText(text: String, max: Int): Boolean {
         if (text.codePointCount(0, text.length) > max) return false
+        // A run of spaces arrives as its count (SPx3000 in brackets), never as spaces.
+        if (text.contains(" ".repeat(SPACE_RUN))) return false
         var i = 0
         while (i < text.length) {
             val c = text[i]
@@ -67,6 +72,7 @@ object ApproveRule {
                 continue
             }
             val m = ESCAPE.find(text.substring(i)) ?: return false
+            if (m.value.contains("SPx") && m.value.filter { it.isDigit() }.toInt() < SPACE_RUN) return false
             i += m.value.length
         }
         return true
@@ -87,6 +93,7 @@ object ApproveRule {
                 command = o.optString("command", ""),
                 tty = o.optString("tty", ""),
                 origin = o.optString("origin", ""),
+                pinned = o.optString("pinned", ""),
                 computer = o.getString("computer"),
                 nonce = o.getString("nonce"),
                 issuedUnix = o.getLong("issued_unix"),
@@ -101,6 +108,7 @@ object ApproveRule {
                 isShownText(a.command, MAX_COMMAND) &&
                 isShownText(a.tty, MAX_TTY) &&
                 isShownText(a.origin, MAX_ORIGIN) &&
+                (a.pinned.isEmpty() || a.pinned.split(",").let { k -> k.size <= 8 && k.all { HEX64.matches(it) } }) &&
                 HEX64.matches(a.computer) && HEX64.matches(a.nonce) &&
                 a.expiresUnix > a.issuedUnix && a.expiresUnix - a.issuedUnix <= 60
             if (ok) a else null
@@ -123,6 +131,7 @@ object ApproveRule {
             a.command,
             a.tty,
             a.origin,
+            a.pinned,
             a.computer,
             a.nonce,
             a.issuedUnix.toString(),
@@ -181,6 +190,16 @@ object ApproveRule {
             .joinToString("") { "%02x".format(it) }
             .chunked(4)
             .joinToString(" ")
+
+    /** The pinned keys a request names. */
+    fun pinnedKeys(a: Approval): List<String> = if (a.pinned.isEmpty()) emptyList() else a.pinned.split(",")
+
+    /**
+     * The code root types at the pin for a key: the last eight hex digits
+     * of its SHA-256, in two fours (review I5: it binds the pinned key to
+     * this phone).
+     */
+    fun code(spki: ByteArray): String = fingerprint(spki).replace(" ", "").takeLast(8).chunked(4).joinToString(" ")
 
     enum class Decision { Offer, Off, NoKey, Expired }
 
