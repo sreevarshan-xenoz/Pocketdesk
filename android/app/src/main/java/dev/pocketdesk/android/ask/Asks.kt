@@ -46,13 +46,15 @@ object Asks {
             // Approve with my phone: only with its own switch on and a key
             // to sign with.
             if (ask.approve != null) {
+                val parsed = ApproveRule.parse(ask.approve)
                 val approve = ApproveRule.decide(
                     Prefs.approveRequests(context),
                     ApproveKey.exists(),
+                    parsed?.pin == true,
                     ask.expiresUnix,
                     now,
                 )
-                if (approve != ApproveRule.Decision.Offer || ApproveRule.parse(ask.approve) == null) {
+                if (approve != ApproveRule.Decision.Offer || parsed == null) {
                     Log.i(TAG, "an approval request was not offered: $approve")
                     continue
                 }

@@ -15,8 +15,9 @@ import java.security.spec.ECGenParameterSpec
 
 /**
  * Approve with my phone: this phone's signing key, in the Android Keystore.
- * Made when the owner turns "Approve my computer's requests" on, never
- * leaves the Keystore, and signs only after the fingerprint (or, unless
+ * Made when the owner turns "Approve my computer's requests" on, and made
+ * again, attested, when root pins it on the computer; never leaves the
+ * Keystore, and signs only after the fingerprint (or, unless
  * "Fingerprint only" is on, the screen lock) for that one use. A new
  * fingerprint enrolled on the phone invalidates it, so the owner turns the
  * switch off and on and pins again on the computer.
@@ -46,7 +47,7 @@ object ApproveKey {
      * StrongBox where the phone has one. Its public key.
      */
     @RequiresApi(Build.VERSION_CODES.R)
-    fun create(biometricOnly: Boolean): ByteArray {
+    fun create(biometricOnly: Boolean, challenge: ByteArray? = null): ByteArray {
         delete()
         val auth = if (biometricOnly) {
             KeyProperties.AUTH_BIOMETRIC_STRONG
@@ -61,6 +62,9 @@ object ApproveKey {
             .setUserAuthenticationParameters(0, auth)
             .setInvalidatedByBiometricEnrollment(true)
             .setIsStrongBoxBacked(strongBox)
+            // A pin's challenge: the key's attestation chain then proves to
+            // root, up to Google's roots, that it is this key, in hardware.
+            .apply { if (challenge != null) setAttestationChallenge(challenge) }
             .build()
         val generator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, STORE)
         val pair = try {
@@ -73,6 +77,10 @@ object ApproveKey {
         Log.i(TAG, "an approval key was made")
         return pair.public.encoded
     }
+
+    /** The key's certificate chain, leaf first: its attestation, when made with a challenge. */
+    fun chain(): List<ByteArray> =
+        runCatching { store().getCertificateChain(ALIAS)?.map { it.encoded } }.getOrNull().orEmpty()
 
     fun delete() {
         runCatching { if (store().containsAlias(ALIAS)) store().deleteEntry(ALIAS) }

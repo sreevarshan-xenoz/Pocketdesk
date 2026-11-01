@@ -17,11 +17,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -97,7 +100,8 @@ class AskActivity : ComponentActivity() {
             PocketdeskTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     Column(
-                        modifier = Modifier.padding(24.dp),
+                        // Scrolls: a long command is shown whole.
+                        modifier = Modifier.verticalScroll(rememberScrollState()).padding(24.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
                         Text(stringResource(R.string.ask_from_computer, computer), style = MaterialTheme.typography.titleMedium)
@@ -107,18 +111,30 @@ class AskActivity : ComponentActivity() {
                             // What the signature covers, as the computer
                             // sent it: never the free words of the question.
                             Text(
-                                if (asked.unlock) {
-                                    stringResource(R.string.approve_unlock, asked.user)
-                                } else {
-                                    stringResource(R.string.approve_admin, asked.service, asked.user)
+                                when {
+                                    asked.pin -> stringResource(R.string.approve_pin, computer, asked.user)
+                                    asked.unlock -> stringResource(R.string.approve_unlock, asked.user)
+                                    else -> stringResource(R.string.approve_admin, asked.service, asked.user)
                                 },
                                 style = MaterialTheme.typography.headlineSmall,
                             )
-                            if (asked.command.isNotEmpty()) {
-                                Text(asked.command, fontFamily = FontFamily.Monospace)
+                            // Every field is shown whole, in the computer's
+                            // printable form (hidden characters as ⟨U+XXXX⟩).
+                            @Composable
+                            fun line(label: Int, value: String) {
+                                if (value.isEmpty()) return
+                                Text(stringResource(label), style = MaterialTheme.typography.labelMedium)
+                                Text(value, fontFamily = FontFamily.Monospace)
                             }
+                            line(R.string.approve_command, asked.command)
+                            if (asked.requester.isNotEmpty() && asked.requester != asked.user) {
+                                line(R.string.approve_requester, asked.requester)
+                            }
+                            line(R.string.approve_action, asked.action)
+                            line(R.string.approve_tty, asked.tty)
+                            line(R.string.approve_origin, asked.origin)
                             Text(
-                                stringResource(R.string.approve_signs),
+                                stringResource(if (asked.pin) R.string.approve_pin_signs else R.string.approve_signs),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -214,6 +230,7 @@ class AskActivity : ComponentActivity() {
             said = getString(R.string.approve_needs_android_11)
             return
         }
+        if (asked.pin) return pinKey(asked)
         val signature = ApproveKey.signature().getOrElse {
             val problem = (it as? ApproveKey.ProblemException)?.problem
             said = getString(
@@ -256,6 +273,61 @@ class AskActivity : ComponentActivity() {
                         return
                     }
                     sendBody(ApproveRule.signedAnswer(asked.id, signed) ?: return finish(), yes = true)
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    sending = false
+                    said = getString(R.string.ask_not_confirmed)
+                }
+            },
+        )
+    }
+
+    /**
+     * Root pins this phone: after the fingerprint (or lock), make the key
+     * with the pin's challenge and answer with its attestation chain, which
+     * root checks up to Google's roots.
+     */
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
+    private fun pinKey(asked: ApproveRule.Approval) {
+        val biometricOnly = Prefs.approveBiometricOnly(this)
+        sending = true
+        val signal = CancellationSignal().also { prompt = it }
+        val builder = BiometricPrompt.Builder(this)
+            .setTitle(getString(R.string.ask_confirm_title))
+            .setDescription(getString(R.string.approve_pin, HostStore.shownName(this, host), asked.user))
+        if (biometricOnly) {
+            builder.setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+                .setNegativeButton(getString(R.string.ask_no), mainExecutor) { _, _ ->
+                    sending = false
+                    said = getString(R.string.ask_not_confirmed)
+                }
+        } else {
+            builder.setAllowedAuthenticators(
+                BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL,
+            )
+        }
+        builder.build().authenticate(
+            signal,
+            mainExecutor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    scope.launch {
+                        val body = withContext(Dispatchers.Default) {
+                            runCatching {
+                                val key = ApproveKey.create(biometricOnly, ApproveRule.pinChallenge(asked))
+                                // Settings lists the new key too.
+                                RustCore.sendPhonePacket(host, port, ApproveRule.KEY_PACKET, ApproveRule.keyBody(key, biometricOnly))
+                                ApproveRule.pinAnswer(asked.id, ApproveKey.chain())
+                            }.getOrNull()
+                        }
+                        if (body == null) {
+                            sending = false
+                            said = getString(R.string.settings_approve_no_key_made)
+                            return@launch
+                        }
+                        sendBody(body, yes = true)
+                    }
                 }
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
