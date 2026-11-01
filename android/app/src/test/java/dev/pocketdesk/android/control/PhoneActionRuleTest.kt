@@ -19,7 +19,11 @@ class PhoneActionRuleTest {
         withinBudget: Boolean = true,
         appsOn: Boolean = true,
         listed: Boolean = true,
-    ) = PhoneActionRule.decide(action, on, own, service, sdk, locked, awake, screenshots, withinBudget, appsOn, listed)
+        secureLock: Boolean = true,
+    ) = PhoneActionRule.decide(
+        action, on, own, service, sdk, locked, awake, screenshots, withinBudget, appsOn, listed,
+        secureLock = secureLock,
+    )
 
     @Test
     fun `an action reads back from its word, and nothing else does`() {
@@ -64,8 +68,26 @@ class PhoneActionRuleTest {
         assertEquals(Decision.OFF, decide(action = Action.OPEN, appsOn = false))
         assertEquals("\"Tap to open\" then", Decision.DO, decide(action = Action.OPEN, service = false))
         assertEquals(Decision.NOT_LISTED, decide(action = Action.OPEN, listed = false))
-        assertEquals(Decision.LOCKED, decide(action = Action.OPEN, locked = true))
-        assertEquals(Decision.ASLEEP, decide(action = Action.OPEN, awake = false))
+        // Without the service nothing can wake the phone or swipe its lock away.
+        assertEquals(Decision.LOCKED, decide(action = Action.OPEN, locked = true, service = false, secureLock = false))
+        assertEquals(Decision.ASLEEP, decide(action = Action.OPEN, awake = false, service = false))
+    }
+
+    /** Hands-free: a lock that guards nothing is passed through the service, a secure one never. */
+    @Test
+    fun `an open passes a lock that guards nothing and never a secure one`() {
+        // A secure lock (or one not known to be anything else) is refused, awake or not.
+        assertEquals(Decision.LOCKED_SECURE, decide(action = Action.OPEN, locked = true))
+        assertEquals(Decision.LOCKED_SECURE, decide(action = Action.OPEN, locked = true, awake = false))
+        // A swipe-only or trusted lock, with the service: done (it is dismissed first).
+        assertEquals(Decision.DO, decide(action = Action.OPEN, locked = true, secureLock = false))
+        assertEquals(Decision.DO, decide(action = Action.OPEN, locked = true, awake = false, secureLock = false))
+        // A screen that is only off is woken, with the service.
+        assertEquals(Decision.DO, decide(action = Action.OPEN, awake = false))
+        // The switch and the computer are still checked first, and the list still needs an unlocked phone.
+        assertEquals(Decision.OFF, decide(action = Action.OPEN, locked = true, appsOn = false))
+        assertEquals(Decision.NOT_OWN, decide(action = Action.OPEN, locked = true, own = false))
+        assertEquals(Decision.LOCKED, decide(action = Action.APPS, locked = true, secureLock = false))
     }
 
     /** P10: the contacts go with their switch and Android's leave, to the own computer, never locked or not. */

@@ -736,6 +736,7 @@
     <string name="cast_connecting">Conectando con %1$s…</string>
     <string name="cast_waiting">Esperando a que %1$s lo permita…</string>
     <string name="cast_showing">La pantalla de este teléfono se muestra en %1$s</string>
+    <string name="cast_paused">En pausa: tu pantalla se comparte de nuevo, sin nueva pregunta, cuando %1$s lo pida. Termina en %2$d min, o toca Detener</string>
     <string name="cast_stop">Detener</string>
     <string name="cast_stopped">La pantalla de este teléfono ya no se muestra</string>
     <string name="cast_failed">No se pudo mostrar la pantalla en %1$s: %2$s</string>
@@ -1125,6 +1126,10 @@
     <string name="settings_phone_apps">Permitir que el equipo abra mis apps</string>
     <string name="settings_phone_apps_summary_off">El equipo puede ver la lista de apps de este teléfono (solo sus nombres e iconos) y abrir la que elijas allí, con el teléfono desbloqueado y la pantalla encendida</string>
     <string name="settings_phone_apps_summary_on">Activado: el equipo puede ver la lista de apps de este teléfono (solo sus nombres e iconos) y abrir una con el teléfono desbloqueado y la pantalla encendida: al momento con «Control de Pocketdesk» activado, si no como «Toca para abrir»</string>
+    <string name="settings_auto_accept">Aceptar compartir la pantalla para mis equipos</string>
+    <string name="settings_auto_accept_summary_off">Cuando tu propio equipo abre una de tus apps y Android pregunta si compartir esta pantalla, Pocketdesk puede pulsar Iniciar por ti, sin tocar nada. Necesita «Permitir que el equipo abra mis apps» y el control de Pocketdesk, pulsa solo esa pregunta, solo justo después de que Pocketdesk la muestre, y solo para tu propio equipo. Tu PIN o patrón nunca se toca y un bloqueo activo nunca se salta. Si Android oculta el botón, recibes la notificación de un toque como antes. También mantiene en pausa tu pantalla compartida diez minutos cuando el equipo se va, para que su próxima apertura no pida nada nuevo; desactivarlo lo termina al instante Actívalo solo para un equipo en el que confíes por completo: cualquier programa que se ejecute en él puede pedirlo, y en un teléfono sin PIN, patrón ni huella, la pantalla se comparte entonces sin ningún toque.</string>
+    <string name="settings_auto_accept_summary_on">Activado: Pocketdesk pulsa la pregunta de Android para compartir la pantalla cuando tu propio equipo abre una app, solo justo después de mostrarla. No se pulsa nada más y un bloqueo activo nunca se salta. Si no se alcanza el botón, una notificación pide un toque. Una pantalla que el equipo dejó queda en pausa diez minutos y termina al instante si esto o el interruptor de apps se desactiva Actívalo solo para un equipo en el que confíes por completo: cualquier programa que se ejecute en él puede pedirlo, y en un teléfono sin PIN, patrón ni huella, la pantalla se comparte entonces sin ningún toque.</string>
+    <string name="settings_auto_accept_summary_needs_apps">Casi: activa también «Permitir que el equipo abra mis apps», pues esto solo responde la pregunta que llega con una apertura</string>
     <string name="settings_phone_actions">Permitir que el equipo haga capturas y bloquee este teléfono</string>
     <string name="settings_phone_actions_summary_off">Captura del teléfono y Bloquear el teléfono del equipo lo hacen aquí: la captura llega al equipo como la envía \"Enviar capturas nuevas\" (actívalo también), nunca de la pantalla de bloqueo. Usa el servicio de accesibilidad \"Control de Pocketdesk\"</string>
     <string name="settings_phone_actions_summary_needs_access">Casi: Pocketdesk necesita acceso a las notificaciones para esperar lo que pide el equipo</string>
@@ -1207,4 +1212,36 @@
     <string name="there_refused_off">El dueño del equipo desactivó quitar dispositivos a distancia. Quítalo en el equipo: Dispositivos, Desemparejar.</string>
     <string name="there_refused_busy">Demasiadas solicitudes en un minuto. Espera un minuto e inténtalo de nuevo.</string>
     <string name="there_refused_failed">El equipo no pudo hacerlo. Inténtalo de nuevo.</string>
+    <!-- Folders kept on my computer -->
+    <string name="kept_title">Carpetas guardadas en mi equipo</string>
+    <string name="kept_summary">Las carpetas que elijas aquí se copian solas a tu equipo, en un solo sentido. Solo se envía lo nuevo o lo que cambió, y no se lee nada más del teléfono.</string>
+    <string name="kept_empty">Aún no se guarda ninguna carpeta. Añade una: Android te pide elegirla y la app solo recibe esa carpeta.</string>
+    <string name="kept_add">Añadir una carpeta</string>
+    <string name="kept_not_kept">Android no conserva el acceso a esa carpeta</string>
+    <string name="kept_remove">Quitar</string>
+    <string name="kept_remove_named">Dejar de guardar %1$s</string>
+    <string name="kept_status_never">Aún sin ejecutar</string>
+    <string name="kept_status_run">Última vez %1$s: %2$d enviados, %3$d fallidos</string>
+    <string name="kept_access_lost">Android ya no da acceso a %1$s a esta app: añádela de nuevo</string>
+    <string name="kept_schedule">Cuándo</string>
+    <string name="kept_schedule_summary">Por defecto solo con Wi-Fi y cargando, así que nunca gasta datos móviles ni batería. Android decide la hora exacta y puede retrasarlo con el teléfono en reposo.</string>
+    <string name="kept_mode_charging">Wi-Fi y cargando</string>
+    <string name="kept_mode_every">Cada pocas horas</string>
+    <string name="kept_hours">%1$d h</string>
+    <string name="kept_every_summary">Cada cuánto, con Wi-Fi (cargando o no)</string>
+    <string name="kept_computer">Guardarlas en</string>
+    <string name="kept_computer_own">El equipo de este teléfono (%1$s)</string>
+    <string name="kept_computer_summary">Toca para cambiar entre tus equipos. Otro equipo empieza de cero.</string>
+    <string name="kept_mirror">Reflejar borrados</string>
+    <string name="kept_mirror_summary">Desactivado: un archivo que borras aquí se queda en el equipo. Activado: también se borra allí, solo si ese equipo lo permite en sus ajustes y solo archivos que este teléfono guardó.</string>
+    <string name="kept_run_now">Ejecutar ahora</string>
+    <string name="kept_run_now_summary">Copiar lo nuevo, diga lo que diga el horario</string>
+    <string name="kept_no_computer">No hay un equipo emparejado para guardar carpetas</string>
+    <string name="kept_run_started">Guardando carpetas…</string>
+    <string name="kept_unreachable">El equipo no respondió: las carpetas esperan a la próxima vez</string>
+    <string name="kept_old_computer">Este equipo aún no puede guardar carpetas: actualiza Pocketdesk en él</string>
+    <string name="kept_full">Las carpetas guardadas del equipo están llenas: sube el límite allí o libera espacio</string>
+    <string name="kept_refused">El equipo no guarda carpetas de este teléfono: revisa sus ajustes</string>
+    <string name="kept_held_many">Borrados retenidos: casi todos los archivos han desaparecido a la vez, parece una tarjeta ausente</string>
+    <string name="kept_held_part">Borrados retenidos: no se pudo leer parte de la carpeta</string>
 </resources>

@@ -1323,8 +1323,8 @@ pub fn take_sms_requests() -> String {
 /// The packets the app may send through [`send_phone_packet`]: its texts
 /// and the results of the replies it sent (N5b), its battery (T8b), and
 /// what it plays (T8d), its folders' listings (T10g), its recent photos
-/// (C7) and which of its features are on (L7).
-const PHONE_PACKETS: [&str; 17] = [
+/// (C7), which of its features are on (L7), and the runs of its kept folders.
+const PHONE_PACKETS: [&str; 19] = [
     // P2: its apps that open, answering the computer's ask; P10: its contacts.
     pocketdesk_core::protocol::phone_action::PHONE_APPS,
     // Apps part 1: those apps' icons, and how an ask for them or an open went.
@@ -1351,6 +1351,12 @@ const PHONE_PACKETS: [&str; 17] = [
     pocketdesk_core::protocol::ask::ASK_ANSWER,
     // Approve with my phone: its approval key, given or taken back.
     pocketdesk_core::protocol::approve::APPROVE_KEY,
+    // A run of a folder this phone keeps on the computer: its start, its
+    // deletions and its end.
+    pocketdesk_core::protocol::kept::KEEP_RUN,
+    // Phone location: its answer to the computer's ask, a place or why not
+    // (it was missing, so no answer ever went: device batch 2026-11-01).
+    pocketdesk_core::protocol::phone_location::FIX,
 ];
 
 /// Send one of [`PHONE_PACKETS`] with `body` (a JSON object) to the desktop.
@@ -1551,6 +1557,21 @@ async fn request_answer(
 
 #[cfg(test)]
 mod reply_tests {
+    /// Every answer the phone gives to a computer's ask is a packet it may
+    /// send: the location's was missing, so none ever went (device batch
+    /// 2026-11-01).
+    #[test]
+    fn the_phones_answers_are_packets_it_may_send() {
+        for answer in [
+            pocketdesk_core::protocol::phone_location::FIX,
+            pocketdesk_core::protocol::phone_action::PHONE_APPS,
+            pocketdesk_core::protocol::phone_action::PHONE_APP_OPENED,
+            pocketdesk_core::protocol::ask::ASK_ANSWER,
+        ] {
+            assert!(super::PHONE_PACKETS.contains(&answer), "{answer}");
+        }
+    }
+
     /// U3: the phone's name is the app's, cleaned, and a placeholder until
     /// it says.
     #[test]
@@ -2082,6 +2103,10 @@ pub struct ShareTags {
     pub drive: Option<String>,
     /// The file's modified time, ms since 1970 (K1); none to send none.
     pub modified: Option<u64>,
+    /// A file of a folder this phone keeps on the computer: with the
+    /// [`FolderPart`] (its folder's stable id, name and path), it replaces
+    /// its older copy there, in that folder's own place.
+    pub keep: bool,
 }
 
 /// A file's source id (T6a): 32 hex digits naming the file at its source,
@@ -2141,6 +2166,31 @@ pub async fn send_file_fd(
     Err("file descriptors are only passed on Android".to_string())
 }
 
+/// What a share request says beside its file: the file's source id (T6a),
+/// where it sits in a folder send (T6b), the drive fetch it answers (D8),
+/// its modified time (K1), and that it belongs to a folder the phone keeps
+/// on the computer.
+fn tag_body(body: &mut serde_json::Value, source: Option<&str>, tags: &ShareTags) {
+    if let Some(source) = source {
+        body["sourceId"] = serde_json::json!(source);
+    }
+    if let Some(part) = &tags.folder {
+        body["folderId"] = serde_json::json!(part.folder_id);
+        body["folder"] = serde_json::json!(part.folder);
+        body["path"] = serde_json::json!(part.path);
+    }
+    if let Some(drive) = &tags.drive {
+        body["drive"] = serde_json::json!(drive);
+    }
+    // Only with its folder fields: a kept file has nowhere to go without.
+    if tags.keep && tags.folder.is_some() {
+        body["keep"] = serde_json::json!(true);
+    }
+    if let Some(ms) = tags.modified {
+        body[pocketdesk_core::protocol::file_time::FIELD] = serde_json::json!(ms);
+    }
+}
+
 /// Offer `file_size` bytes from `file` to the desktop as `filename`, and send
 /// them when it connects back with the key: from where the desktop's partial
 /// copy of the same `source` ends, if it kept one (T6a).
@@ -2169,20 +2219,7 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
         "filename": filename,
         "payloadTransferInfo": crate::link::transfer_info(&arrival, &key),
     });
-    if let Some(source) = &source {
-        body["sourceId"] = serde_json::json!(source);
-    }
-    if let Some(part) = &tags.folder {
-        body["folderId"] = serde_json::json!(part.folder_id);
-        body["folder"] = serde_json::json!(part.folder);
-        body["path"] = serde_json::json!(part.path);
-    }
-    if let Some(drive) = &tags.drive {
-        body["drive"] = serde_json::json!(drive);
-    }
-    if let Some(ms) = tags.modified {
-        body[pocketdesk_core::protocol::file_time::FIELD] = serde_json::json!(ms);
-    }
+    tag_body(&mut body, source.as_deref(), &tags);
     let request = NetworkPacket::new("kdeconnect.share.request")
         .with_body(body)
         .with_payload_size(file_size);
@@ -5009,6 +5046,7 @@ mod pin_certificate_tests {
                 name: Some("Study PC".to_string()),
                 sends: None,
                 version: None,
+                takes: None,
             },
         );
         let forgot = super::forget_peer_certificate("192.0.2.80".to_string());
@@ -5779,5 +5817,62 @@ mod internet_road_tests {
             "the phone's identity: {phone}"
         );
         desktop.close().await;
+    }
+}
+
+#[cfg(test)]
+mod share_tag_tests {
+    use super::{FolderPart, ShareTags, tag_body};
+    use serde_json::json;
+
+    fn part() -> FolderPart {
+        FolderPart {
+            folder_id: "0123456789abcdef0123456789abcdef".to_string(),
+            folder: "Notes".to_string(),
+            path: vec!["a".to_string(), "b.txt".to_string()],
+        }
+    }
+
+    #[test]
+    fn a_plain_share_carries_no_folder_and_no_keep() {
+        let mut body = json!({"filename": "a.txt"});
+        tag_body(&mut body, Some("s"), &ShareTags::default());
+        assert_eq!(body, json!({"filename": "a.txt", "sourceId": "s"}));
+    }
+
+    #[test]
+    fn a_kept_file_says_keep_beside_its_folder_fields() {
+        let mut body = json!({"filename": "b.txt"});
+        let tags = ShareTags {
+            folder: Some(part()),
+            keep: true,
+            modified: Some(1_780_000_000_000),
+            ..Default::default()
+        };
+        tag_body(&mut body, None, &tags);
+        assert_eq!(body["keep"], json!(true));
+        assert_eq!(body["folderId"], json!("0123456789abcdef0123456789abcdef"));
+        assert_eq!(body["folder"], json!("Notes"));
+        assert_eq!(body["path"], json!(["a", "b.txt"]));
+        assert!(body.get("sourceId").is_none());
+    }
+
+    #[test]
+    fn keep_without_its_folder_is_not_sent_and_a_folder_send_is_not_a_keep() {
+        let mut body = json!({});
+        let tags = ShareTags {
+            keep: true,
+            ..Default::default()
+        };
+        tag_body(&mut body, None, &tags);
+        assert!(body.get("keep").is_none(), "nowhere to go without a folder");
+        let mut body = json!({});
+        let tags = ShareTags {
+            folder: Some(part()),
+            ..Default::default()
+        };
+        tag_body(&mut body, None, &tags);
+        assert!(body.get("keep").is_none());
+        assert!(body.get("folderId").is_some());
     }
 }

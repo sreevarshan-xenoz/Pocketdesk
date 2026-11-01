@@ -173,9 +173,23 @@ pub struct PeerClaims {
     /// The Pocketdesk release it says it runs, cleaned; `None` from one
     /// that does not say (older, or KDE Connect).
     pub version: Option<String>,
+    /// The packet types it says it takes (`incomingCapabilities`); `None`
+    /// when it sent no identity.
+    pub takes: Option<Vec<String>>,
 }
 
 impl PeerClaims {
+    /// Whether it says it keeps a phone's folders (the phone's "Folders
+    /// kept on my computer"): a computer that takes a kept folder's run
+    /// does. An older one would take a kept folder's files as a folder
+    /// send, and pile a new copy into Downloads at every run. `None` when
+    /// it sent no identity to say either way.
+    pub fn takes_kept(&self) -> Option<bool> {
+        self.takes
+            .as_ref()
+            .map(|takes| takes.iter().any(|t| t == crate::protocol::kept::KEEP_RUN))
+    }
+
     /// Whether it says it answers a phone notification that asks (C3):
     /// `None` when it sent no identity to say either way.
     pub fn acks_notifications(&self) -> Option<bool> {
@@ -225,10 +239,22 @@ fn identity_claims(line: &str) -> PeerClaims {
         .get(crate::version::IDENTITY_FIELD)
         .and_then(|v| v.as_str())
         .and_then(crate::version::clean_version);
+    let takes = packet
+        .body
+        .get("incomingCapabilities")
+        .and_then(|v| v.as_array())
+        .map(|types| {
+            types
+                .iter()
+                .filter_map(|t| t.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
     PeerClaims {
         name,
         sends: Some(sends),
         version,
+        takes: Some(takes),
     }
 }
 
@@ -426,6 +452,24 @@ where
 mod tests {
     use super::*;
     use tokio::io::AsyncReadExt;
+
+    #[test]
+    fn a_computer_that_takes_a_kept_folders_run_says_it_keeps_folders() {
+        let line = |takes: &str| {
+            format!(
+                "{{\"type\":\"kdeconnect.identity\",\"body\":{{\"deviceName\":\"Desk\",\"incomingCapabilities\":[{takes}]}}}}"
+            )
+        };
+        let keeps = identity_claims(&line(
+            "\"kdeconnect.share.request\",\"kdeconnect.pocketdesk.keep_run\"",
+        ));
+        assert_eq!(keeps.takes_kept(), Some(true));
+        let older = identity_claims(&line("\"kdeconnect.share.request\""));
+        assert_eq!(older.takes_kept(), Some(false));
+        // No identity: nothing is said either way.
+        assert_eq!(identity_claims("not an identity").takes_kept(), None);
+        assert_eq!(PeerClaims::default().takes_kept(), None);
+    }
 
     #[tokio::test]
     async fn the_handshake_runs_on_any_stream() {

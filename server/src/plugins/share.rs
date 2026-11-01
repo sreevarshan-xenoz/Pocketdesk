@@ -482,6 +482,12 @@ fn chosen_folder(chosen: &str, protected: &[PathBuf]) -> Option<PathBuf> {
     }
 }
 
+/// `chosen` as a folder that can take kept folders (the kept-folders root):
+/// the same rules as for received files.
+pub(crate) fn chosen_folder_for(chosen: &str) -> Option<PathBuf> {
+    chosen_folder(chosen, &protected_dirs())
+}
+
 /// The server's own folders, which received files never go into.
 fn protected_dirs() -> Vec<PathBuf> {
     [
@@ -529,6 +535,7 @@ impl Plugin for SharePlugin {
             FETCH,
             FOLDER_FETCH,
             crate::offers::DECLINE,
+            pocketdesk_core::protocol::kept::KEEP_RUN,
         ]
     }
 
@@ -548,6 +555,23 @@ impl Plugin for SharePlugin {
         }
         if packet.packet_type == FOLDER_FETCH {
             handle_folder_fetch(packet, sender).await;
+            return Ok(());
+        }
+        if packet.packet_type == pocketdesk_core::protocol::kept::KEEP_RUN {
+            // A run's deletions and end (a phone's kept folder): disk work,
+            // off the reactor.
+            let device = sender.device_id().to_string();
+            let body = packet.body.clone();
+            let config = crate::events::current_config();
+            let done = tokio::task::spawn_blocking(move || {
+                crate::kept_folders::run(&device, &body, &config)
+            })
+            .await;
+            match done {
+                Ok(Err(why)) => tracing::warn!("A kept-folder run was not taken: {why}"),
+                Err(e) => tracing::warn!("A kept-folder run failed: {e}"),
+                Ok(Ok(())) => {}
+            }
             return Ok(());
         }
         if packet.packet_type == crate::offers::DECLINE {
@@ -672,11 +696,36 @@ impl Plugin for SharePlugin {
                 // A file of a folder send (T6b) goes to its place under the
                 // send's own new folder; its path was checked part by part.
                 // Made only now, so a share refused above leaves no folder.
-                let folder_name = folder_of(body).map(|(_, folder, _)| folder);
-                let folder = folder_of(body).filter(|_| drive.is_none());
-                let (dir, name, top) = match folder {
-                    None => (dir, name.clone(), None),
-                    Some((folder_id, folder, path)) => {
+                // A file of a folder a phone keeps here (never one the drive
+                // asked for) goes where the kept folder says, replacing its
+                // older copy; every check is made before anything is made.
+                let kept = match pocketdesk_core::protocol::kept::kept_file(body) {
+                    None => None,
+                    Some(_) if drive.is_some() => {
+                        return refused("a kept folder is not a drive fetch".into()).await;
+                    }
+                    Some(Err(reason)) => return refused(reason).await,
+                    Some(Ok(file)) => {
+                        match crate::kept_folders::accept(
+                            sender.device_id(),
+                            &file,
+                            size,
+                            &crate::events::current_config(),
+                        ) {
+                            Ok(accepted) => Some(accepted),
+                            Err(reason) => return refused(reason).await,
+                        }
+                    }
+                };
+                let folder_name = match &kept {
+                    Some(k) => Some(k.label.clone()),
+                    None => folder_of(body).map(|(_, folder, _)| folder),
+                };
+                let folder = folder_of(body).filter(|_| drive.is_none() && kept.is_none());
+                let (dir, name, top) = match (&kept, folder) {
+                    (Some(k), _) => (k.dir.clone(), k.name.clone(), None),
+                    (None, None) => (dir, name.clone(), None),
+                    (None, Some((folder_id, folder, path))) => {
                         match folder_tops().place(
                             &dir,
                             sender.device_id(),
@@ -718,14 +767,24 @@ impl Plugin for SharePlugin {
                                 progress,
                                 on_saved: {
                                     let from = from.clone();
-                                    Box::new(move |path: &Path| match &drive {
+                                    let kept = kept.clone();
+                                    Box::new(move |path: &Path| match (&drive, &kept) {
                                         // Not received as a share is: no
                                         // notification, list or event.
-                                        Some(id) => crate::drive::live::arrived(id, path),
-                                        None => on_received(path, size, &from, top.as_deref()),
+                                        (Some(id), _) => crate::drive::live::arrived(id, path),
+                                        // Counted in its kept folder: a
+                                        // folder of thousands is not a
+                                        // thousand notifications.
+                                        (None, Some(k)) => {
+                                            crate::kept_folders::placed(&from, k, size)
+                                        }
+                                        (None, None) => {
+                                            on_received(path, size, &from, top.as_deref())
+                                        }
                                     })
                                 },
                                 modified,
+                                replace: kept.as_ref().map(|k| k.top.as_path()),
                             },
                         )
                         .await
@@ -1645,6 +1704,10 @@ struct Incoming<'a> {
     /// The date the file was last changed where it came from (K1), set
     /// once it is in place; none keeps the arrival's.
     modified: Option<std::time::SystemTime>,
+    /// A kept folder's file replaces its older copy of the same name, and
+    /// is checked to land inside this folder (the kept folder itself); any
+    /// other file never overwrites one (`name (1)`).
+    replace: Option<&'a Path>,
 }
 
 /// Reach the phone by `route` and receive one file with the resumable
@@ -1665,6 +1728,7 @@ async fn receive_file(route: Route, key: &str, incoming: Incoming<'_>) -> Result
         progress,
         on_saved,
         modified,
+        replace,
     } = incoming;
     if size == 0 || size > MAX_FILE_BYTES {
         return Err(io_error(
@@ -1770,9 +1834,13 @@ async fn receive_file(route: Route, key: &str, incoming: Incoming<'_>) -> Result
                 let records = Store::new(store.dir().to_path_buf());
                 let device = device.to_string();
                 let source = source.clone();
+                let replace = replace.map(Path::to_path_buf);
                 async move {
                     let _in_use = in_use_guard;
-                    let placed = place(&part_path, &dir, &name, modified).await;
+                    let placed = match &replace {
+                        Some(top) => place_replacing(&part_path, &dir, &name, modified, top).await,
+                        None => place(&part_path, &dir, &name, modified).await,
+                    };
                     records.remove(&device, &source);
                     let _ = std::fs::remove_file(&part_path);
                     if let Ok(path) = &placed {
@@ -1844,6 +1912,7 @@ pub(crate) async fn receive_offered(
                 on_received(path, size, &announced, top.as_deref())
             }),
             modified: received_date(offer),
+            replace: None,
         },
     )
     .await
@@ -1921,6 +1990,72 @@ pub(crate) async fn place(
         set_date(&final_path, at);
     }
     Ok(final_path)
+}
+
+/// Move the finished `part` to `dir/name`, replacing the file of that name
+/// (a kept folder is a mirror, not a pile of copies), and return where it
+/// went. A rename replaces on both Linux and Windows; across volumes the
+/// bytes are copied beside the file first and renamed over it, so the old
+/// copy is never left half written. A folder at the place is refused, and so
+/// is a folder that no longer lies inside `top` (the kept folder): its real
+/// path is read again right before the move, since a link could have been
+/// put in the way since the file was accepted, and the folder is not made
+/// again here, so nothing is made through one.
+pub(crate) async fn place_replacing(
+    part: &Path,
+    dir: &Path,
+    name: &str,
+    modified: Option<std::time::SystemTime>,
+    top: &Path,
+) -> Result<PathBuf> {
+    let real_dir = tokio::fs::canonicalize(dir)
+        .await
+        .map_err(|e| io_error("place", format!("the file's folder is not there: {e}")))?;
+    let real_top = tokio::fs::canonicalize(top)
+        .await
+        .map_err(|e| io_error("place", format!("the kept folder is not there: {e}")))?;
+    if !real_dir.starts_with(&real_top) {
+        return Err(io_error(
+            "place",
+            "the file's folder leads out of the kept folder",
+        ));
+    }
+    let final_path = real_dir.join(name);
+    if tokio::fs::symlink_metadata(&final_path)
+        .await
+        .is_ok_and(|m| !m.is_file())
+    {
+        return Err(io_error(
+            "place",
+            "a folder or a link is where the file goes",
+        ));
+    }
+    if tokio::fs::rename(part, &final_path).await.is_err() {
+        // Another volume: a name of its own beside the file, short whatever
+        // the file's name is.
+        let beside = dir.join(format!(".pd-{}.part", uuid::Uuid::new_v4().simple()));
+        let copied = tokio::fs::copy(part, &beside)
+            .await
+            .map_err(|e| io_error("copy", e));
+        let moved = match copied {
+            Ok(_) => tokio::fs::rename(&beside, &final_path)
+                .await
+                .map_err(|e| io_error("replace", e)),
+            Err(e) => Err(e),
+        };
+        if let Err(e) = moved {
+            let _ = tokio::fs::remove_file(&beside).await;
+            return Err(e);
+        }
+    }
+    mark_of_the_web(&final_path);
+    if let Some(at) = modified {
+        set_date(&final_path, at);
+    }
+    // Written through the real path (checked above), but named as the
+    // caller knows it: on Windows the real one has the verbatim prefix
+    // and the long user name, which the owner would see in messages.
+    Ok(dir.join(name))
 }
 
 /// Connect to the phone at `from`, receive `size` bytes (at most `max`)
@@ -2048,6 +2183,78 @@ mod tests {
             .duration_since(std::fs::metadata(&undated).unwrap().modified().unwrap())
             .unwrap_or_default();
         assert!(age.as_secs() < 60, "its own date: now");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A kept folder is a mirror: the file replaces its older copy, takes
+    /// its date, and never lands on a folder.
+    #[tokio::test]
+    async fn a_kept_file_replaces_its_older_copy_and_never_a_folder() {
+        let dir = std::env::temp_dir().join(format!("pd-kept-replace-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("in")).unwrap();
+        let june = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_780_000_000);
+        std::fs::write(dir.join("in").join("a.txt"), b"old").unwrap();
+        let part = dir.join("a.part");
+        std::fs::write(&part, b"newer bytes").unwrap();
+        let placed = place_replacing(&part, &dir.join("in"), "a.txt", Some(june), &dir)
+            .await
+            .unwrap();
+        assert_eq!(
+            placed,
+            dir.join("in").join("a.txt"),
+            "the same name, no (1)"
+        );
+        assert_eq!(std::fs::read(&placed).unwrap(), b"newer bytes");
+        assert_eq!(
+            std::fs::metadata(&placed).unwrap().modified().unwrap(),
+            june
+        );
+        assert!(!part.exists(), "the part was moved");
+        // The ordinary place keeps both.
+        let part = dir.join("b.part");
+        std::fs::write(&part, b"third").unwrap();
+        let other = place(&part, &dir.join("in"), "a.txt", None).await.unwrap();
+        assert_eq!(other, dir.join("in").join("a (1).txt"));
+        // A folder where the file goes is refused, and the part is left.
+        std::fs::create_dir_all(dir.join("in").join("d")).unwrap();
+        let part = dir.join("c.part");
+        std::fs::write(&part, b"x").unwrap();
+        assert!(
+            place_replacing(&part, &dir.join("in"), "d", None, &dir)
+                .await
+                .is_err()
+        );
+        assert!(dir.join("in").join("d").is_dir());
+        // A folder that stopped being inside the kept folder since the file
+        // was accepted (a link put there meanwhile) gets nothing, and none is
+        // made through it.
+        #[cfg(unix)]
+        {
+            let outside = temp_dir("kept-replace-out");
+            std::os::unix::fs::symlink(&outside, dir.join("in").join("swapped")).unwrap();
+            let part = dir.join("d.part");
+            std::fs::write(&part, b"escape").unwrap();
+            let err = place_replacing(
+                &part,
+                &dir.join("in").join("swapped"),
+                "x.bin",
+                None,
+                &dir.join("in"),
+            )
+            .await;
+            assert!(err.is_err());
+            assert!(!outside.join("x.bin").exists());
+            // A folder that is gone is not made again here.
+            let gone = dir.join("in").join("gone");
+            assert!(
+                place_replacing(&part, &gone, "x.bin", None, &dir.join("in"))
+                    .await
+                    .is_err()
+            );
+            assert!(!gone.exists());
+            let _ = std::fs::remove_dir_all(&outside);
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2481,6 +2688,7 @@ mod tests {
             progress: Box::new(|_| {}),
             on_saved: Box::new(|_| {}),
             modified: None,
+            replace: None,
         }
     }
 
@@ -3323,5 +3531,263 @@ mod tests {
         }));
         plugin.handle_packet(&packet, &phone).await.unwrap();
         assert_eq!(refusal(&phone).map(|(k, _)| k), Some(KEY.to_string()));
+    }
+
+    /// An owner phone on a link by the internet road, in memory: a stub for
+    /// the phone's side of kept folders (no real phone, no real network).
+    struct LinkPhone {
+        id: String,
+        link: std::sync::Arc<dyn OpenLinkStream>,
+        sent: std::sync::Mutex<Vec<NetworkPacket>>,
+    }
+
+    #[async_trait::async_trait]
+    impl DeviceSender for LinkPhone {
+        fn device_id(&self) -> &str {
+            &self.id
+        }
+        fn connection_id(&self) -> &str {
+            "conn"
+        }
+        fn peer_key(&self) -> Option<pocketdesk_core::streaming::PeerKey> {
+            Some(pocketdesk_core::streaming::PeerKey::Tls(
+                certs().1.cert_fingerprint(),
+            ))
+        }
+        fn link_streams(&self) -> Option<std::sync::Arc<dyn OpenLinkStream>> {
+            Some(self.link.clone())
+        }
+        async fn send_packet(&self, packet: &NetworkPacket) -> Result<()> {
+            self.sent.lock().unwrap().push(packet.clone());
+            Ok(())
+        }
+    }
+
+    /// Send one file of a kept folder through the real share handler, the
+    /// phone's side a stub on the link; the streams back for the next file.
+    async fn send_kept(
+        plugin: &SharePlugin,
+        phone: &LinkPhone,
+        streams: PhoneStreams,
+        folder: &str,
+        path: &[&str],
+        data: &[u8],
+    ) -> PhoneStreams {
+        let size = data.len() as u64;
+        let source = uuid::Uuid::new_v4().simple().to_string();
+        let packet = NetworkPacket::new("kdeconnect.share.request")
+            .with_body(serde_json::json!({
+                "filename": path.last().unwrap(),
+                "keep": true,
+                "folderId": folder,
+                "folder": "Notes",
+                "path": path,
+                "sourceId": source,
+                "payloadTransferInfo": { "key": KEY },
+            }))
+            .with_payload_size(size);
+        let sending = phone_sending_on_link(streams, data.to_vec(), size);
+        plugin.handle_packet(&packet, phone).await.unwrap();
+        let (streams, sent) = tokio::time::timeout(Duration::from_secs(30), sending)
+            .await
+            .expect("the file went in time")
+            .unwrap();
+        sent.expect("the transfer");
+        streams
+    }
+
+    /// The files of a generated test folder: seeded bytes, so both sides
+    /// can be recomputed, and names that are made up.
+    fn generated(seed: u32) -> Vec<(Vec<&'static str>, Vec<u8>)> {
+        let make = |n: u32, len: usize| -> Vec<u8> {
+            (0..len as u32)
+                .map(|i| (i.wrapping_mul(31).wrapping_add(n.wrapping_mul(seed))) as u8)
+                .collect()
+        };
+        vec![
+            (vec!["one.bin"], make(1, 40_000)),
+            (vec!["docs", "two.bin"], make(2, 150_000)),
+            (vec!["docs", "deep", "three.bin"], make(3, 5)),
+            (vec!["four.bin"], make(4, 300_000)),
+            (vec![".nomedia-like", "five.bin"], make(5, 1_000)),
+        ]
+    }
+
+    /// The live check of kept folders, in-process: an owner phone stub sends a
+    /// generated folder through the real share handler and the real transfer
+    /// (the whole-file SHA-256 on both ends), then changes one file and adds
+    /// another, and a stranger and a hostile path are refused. Counts and
+    /// hashes only.
+    #[tokio::test]
+    async fn a_kept_folder_arrives_changes_and_is_counted_end_to_end() {
+        use sha2::{Digest, Sha256};
+        let state = crate::state::use_test_dirs();
+        let root = temp_dir("kept-live-root");
+        // The config the server reads: the folders go under this test's own
+        // root, never the owner's Documents.
+        let config_file = pocketdesk_core::local::paths::config_dir()
+            .unwrap()
+            .join(pocketdesk_core::local::paths::CONFIG_FILE);
+        std::fs::create_dir_all(config_file.parent().unwrap()).unwrap();
+        std::fs::write(
+            &config_file,
+            format!("kept_folders_root = {:?}\n", root.display().to_string()),
+        )
+        .unwrap();
+        let config = crate::events::current_config();
+        assert_eq!(config.kept_folders_root, root.display().to_string());
+
+        // The owner's phone, paired as one with its key bound.
+        let id = "kept-live-phone";
+        pocketdesk_core::protocol::kdeconnect::TrustStore::update(
+            crate::state::trust_store_path().unwrap(),
+            |s| s.trust_phone(id, true),
+        )
+        .unwrap();
+        let key: String = certs()
+            .1
+            .cert_fingerprint()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        pocketdesk_core::local::device_keys::bind_first(&state, id, &key).unwrap();
+
+        let folder = "c".repeat(32);
+        let plugin = SharePlugin::new();
+        let (link, mut streams) = fake_link();
+        let phone = LinkPhone {
+            id: id.to_string(),
+            link,
+            sent: Default::default(),
+        };
+        let files = generated(7);
+        let total: usize = files.iter().map(|(_, d)| d.len()).sum();
+        for (path, data) in &files {
+            streams = send_kept(&plugin, &phone, streams, &folder, path, data).await;
+        }
+        // The run's end: the computer counts the folder again.
+        let end = |sent: u64| {
+            NetworkPacket::new(pocketdesk_core::protocol::kept::KEEP_RUN).with_body(
+                serde_json::json!({
+                    "folderId": folder, "folder": "Notes", "mirror": false,
+                    "done": true, "sent": sent, "failed": 0,
+                }),
+            )
+        };
+        plugin.handle_packet(&end(5), &phone).await.unwrap();
+        let kept = pocketdesk_core::local::kept_folders::read(&state)
+            .into_iter()
+            .find(|f| f.device_id == id)
+            .expect("the folder is recorded");
+        let top = PathBuf::from(&kept.path);
+        assert!(top.starts_with(&root), "under the test's root: {top:?}");
+        let mut hashes = 0;
+        for (path, data) in &files {
+            let at = path.iter().fold(top.clone(), |dir, part| dir.join(part));
+            let there = std::fs::read(&at).unwrap();
+            assert_eq!(
+                Sha256::digest(&there),
+                Sha256::digest(data),
+                "the SHA-256 of {path:?}"
+            );
+            hashes += 1;
+        }
+        assert_eq!((kept.files, kept.bytes), (5, total as u64));
+        assert_eq!((kept.last_sent, kept.last_failed), (5, 0));
+        eprintln!("kept folder: {hashes} of 5 files match by SHA-256, {total} bytes");
+
+        // Change one file and add one: only those two go, the changed one
+        // replacing its older copy, no `(1)` beside it.
+        let changed: Vec<u8> = (0..60_000u32).map(|i| (i * 7) as u8).collect();
+        let added: Vec<u8> = (0..2_000u32).map(|i| (i * 3) as u8).collect();
+        streams = send_kept(
+            &plugin,
+            &phone,
+            streams,
+            &folder,
+            &["docs", "two.bin"],
+            &changed,
+        )
+        .await;
+        let _ = send_kept(&plugin, &phone, streams, &folder, &["six.bin"], &added).await;
+        plugin.handle_packet(&end(2), &phone).await.unwrap();
+        let after = pocketdesk_core::local::kept_folders::read(&state)
+            .into_iter()
+            .find(|f| f.device_id == id)
+            .unwrap();
+        assert_eq!(
+            Sha256::digest(std::fs::read(top.join("docs").join("two.bin")).unwrap()),
+            Sha256::digest(&changed)
+        );
+        assert!(!top.join("docs").join("two (1).bin").exists());
+        assert_eq!(after.files, 6);
+        assert_eq!(
+            after.bytes,
+            (total - files[1].1.len() + changed.len() + added.len()) as u64
+        );
+        assert_eq!(after.last_sent, 2);
+
+        // With deletions not allowed here, a phone that mirrors them deletes
+        // nothing: the file stays and the folder says one was kept.
+        let gone = NetworkPacket::new(pocketdesk_core::protocol::kept::KEEP_RUN).with_body(
+            serde_json::json!({
+                "folderId": folder, "folder": "Notes", "mirror": true,
+                "gone": [["six.bin"]],
+            }),
+        );
+        plugin.handle_packet(&gone, &phone).await.unwrap();
+        assert!(top.join("six.bin").exists(), "kept: deletions are off here");
+        let skipped = pocketdesk_core::local::kept_folders::read(&state)
+            .into_iter()
+            .find(|f| f.device_id == id)
+            .unwrap();
+        assert_eq!(skipped.deletes_skipped, 1);
+
+        // A hostile path is refused and makes nothing outside the folder.
+        let hostile = NetworkPacket::new("kdeconnect.share.request")
+            .with_body(serde_json::json!({
+                "filename": "x", "keep": true, "folderId": folder, "folder": "Notes",
+                "path": ["..", "..", "escaped.bin"],
+                "payloadTransferInfo": { "key": KEY },
+            }))
+            .with_payload_size(10);
+        plugin.handle_packet(&hostile, &phone).await.unwrap();
+        let refused = phone.sent.lock().unwrap().iter().any(|p| {
+            p.packet_type == FETCH_REFUSED
+                && p.body["reason"]
+                    .as_str()
+                    .is_some_and(|r| r.contains("place in the folder"))
+        });
+        assert!(refused, "a path that climbs is refused");
+        assert!(!root.join("escaped.bin").exists());
+        assert!(!root.parent().unwrap().join("escaped.bin").exists());
+
+        // A phone that is not one of the owner's is refused outright.
+        let stranger = LinkPhone {
+            id: "kept-live-stranger".to_string(),
+            link: fake_link().0,
+            sent: Default::default(),
+        };
+        let ask = NetworkPacket::new("kdeconnect.share.request")
+            .with_body(serde_json::json!({
+                "filename": "a.bin", "keep": true, "folderId": "d".repeat(32),
+                "folder": "Mine", "path": ["a.bin"],
+                "payloadTransferInfo": { "key": KEY },
+            }))
+            .with_payload_size(10);
+        plugin.handle_packet(&ask, &stranger).await.unwrap();
+        let said = stranger.sent.lock().unwrap().iter().find_map(|p| {
+            (p.packet_type == FETCH_REFUSED).then(|| p.body["reason"].as_str().unwrap().to_string())
+        });
+        assert_eq!(
+            said.as_deref(),
+            Some(pocketdesk_core::protocol::kept::NOT_OWNER)
+        );
+        assert!(
+            pocketdesk_core::local::kept_folders::read(&state)
+                .iter()
+                .all(|f| f.device_id != "kept-live-stranger")
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

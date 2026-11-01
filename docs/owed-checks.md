@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1153 open items.
+1183 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 43 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 62 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 17 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 188 |
-| A phone with a SIM | 39 |
+| A phone with a SIM | 40 |
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
 | A second computer | 155 |
 | A Linux desktop (the Azure VM serves for some) | 212 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 64 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 380 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 66 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 388 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -142,6 +142,34 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The same with the computer on Exact and the phone's "Exact location" on (accuracy of tens of metres, GPS), and with only one of the two on (the phone still gives the city). (where: here) Not run 2026-11-01: blocked by the two bugs above (no answer reaches the computer, and no fix was to be had).
 - The phone in the pocket with the screen off: with "Allow all the time" the ask is answered; without it the phone answers `background` and the computer logs "no fix" and tries again a minute later; with Pocketdesk open it is answered. (where: here) Partly checked 2026-11-01 (the phone's own decisions, from its log; the answers themselves did not arrive, see the first item): with "Give my computer my location" on, only the approximate-location permission (no "Allow all the time") and location services off, an ask with Pocketdesk not on screen was decided `background`; with Pocketdesk open the same ask was decided `unavailable`. A real fix with the screen off, and with "Allow all the time", was not seen.
 - The switch off on the phone answers `off` at once (no wait of 30 s); location permission taken away in Android settings answers `permission`; location turned off for the phone answers `unavailable`. (where: here) Partly checked 2026-11-01: the switch off was decided `off` within 1.0 s of the computer's ask (the phone's log), and location services off was decided `unavailable` (Pocketdesk open); but neither answer reached the computer (the first item's bug 1), so the computer waited the full 30 s. `permission` was not tried: revoking a runtime permission by adb ends the app's process, and Pocketdesk's control service must not be cut off.
+
+**258. Open any phone app from the computer (Phone apps page, Apps part 1)**
+
+- The page lists the apps with their icons within a few seconds of opening, Pocketdesk itself left out; opening it again sends no icons (the phone's log says "0 of 0 app icons" or none), and after one app is updated (or its icon file deleted from the throwaway state folder) only that one comes. (where: OPPO)
+- "Let the computer open my apps" off on the phone: the page says the phone keeps its apps to itself and names the setting; turned on, "Ask again" lists them. A computer that is not the phone's own gets no word from it at all. (where: OPPO)
+
+**259. Hands-free apps: a paused share, the screen-sharing question accepted, a lock swiped away**
+
+- The window-state event of the question names the activity Pocketdesk's intent names (`ConsentPress` presses nothing before it): the log shows "pressed" only after it; a second system dialog raised by another app at the same time is not pressed; a button whose words are not a known confirm word (set the phone to a language not in the list) is not pressed and the page says a tap is needed. (where: OPPO)
+- The question was raised for the entire screen on Android 14 and later, with no one-app choice (the question has no chooser); and if the OEM's question has a chooser, entire screen was picked before Start, and a chooser reading as one app was never confirmed. (where: OPPO)
+- Nothing else is ever pressed: with the opt-in on, open a second system dialog (a permission question) during the five seconds, and with no open asked at all, raise Android's screen-sharing question from another app; neither is touched, and with the opt-in off nothing is pressed even for an open. (where: OPPO)
+- The pause is kept only with the apps switch and the opt-in on and for the phone's own computer: turn either off while paused and the notification goes and the projection is given back within about two seconds (the status bar's sharing indicator goes); unpairing the computer does the same. Whether the OPPO also ends a paused projection when the phone locks (the guide and SECURITY do not rely on it). (where: OPPO)
+- A swipe-only lock (set the lock to "Swipe" in Android's settings), screen off: an open from the Phone apps page wakes the screen, swipes the lock away and opens the app; the log (`KeyguardDismiss`) says "the lock screen was dismissed". With the lock set to a PIN: the page says the phone has a lock Pocketdesk never bypasses and names Extend Unlock / Smart Lock / Trusted devices, the phone stays locked, and the screen is not woken by the ask; a lock set to a PIN a moment after an open is asked is given up on within about 2.5 seconds. (where: OPPO)
+- Extend Unlock: with a trusted device or place keeping the phone unlocked behind a lock screen that still shows, an open swipes it away and opens the app; with the trust gone (PIN needed), it is refused as above. (where: OPPO)
+
+**260. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
+
+- Add a folder: "Add a folder" opens Android's folder picker; no permission dialog about all files or storage appears, and the app lists the folder with "Not run yet". Adding the same folder twice makes one row. (where: OPPO)
+- "Run now": the files land under `<root>/<phone>/<folder>/` with the same paths; the Files page's Kept folders row shows the same count and total bytes as the test folder, and a hash of each file there equals the phone's (generate the files from a seed so both sides can be recomputed). (where: OPPO)
+- Run again with nothing changed: nothing is sent (no transfer notification stays in the shade, the phone's log says 0 sent). Change one file, add one, run: only those two go, the changed one replacing its older copy (no `(1)` copy), and its date is the phone's. (where: OPPO)
+- Kill mid-file: with the 200 MB file part way (turn Wi-Fi off, or force-stop the app), then run again: the transfer continues from where it stopped (the server's log says "Continued ... from N of M bytes") and the final file's hash is the phone's. (where: OPPO)
+- Mirror deletions off (the default): delete a file on the phone, run: it stays on the computer. With the phone's switch on and the computer's `kept_folders_allow_delete` off: it stays, and the Files page says one file was kept although deleted. With both on: it is deleted on the computer, and the folder it leaves empty goes too. (where: OPPO)
+- The guards: with both switches on, hide the phone's storage from the app (revoke the folder's access in Android's settings) and run: nothing is deleted on the computer, and the row says the access is gone; remove 30 of 40 files at once, or empty the whole folder, and run: the deletions are held and the row says so; with the phone's guard bypassed by hand (a computer-side check: a run that names 5 of 6 files, sent by a stub), the computer refuses it and the Files page says so. (where: OPPO)
+- An emptied file: empty one file on the phone (keep its name) and run: the computer's copy is emptied (size 0), not left with its old content, and a file that is empty on the phone from the start is made empty there. (where: OPPO)
+- The size cap: set "Size cap for kept folders" to 1 GB and keep more than that: the run stops with the notice on the phone ("the computer's kept folders are full"), the Files page row shows the problem, and one desktop notification came, not one per file. Raising the cap and running again finishes it. (where: OPPO)
+- A phone that is not one of this computer's owner phones (a guest's pairing) is refused ("Kept folders take only the owner's own phones") and nothing is made on the computer. With "Phones may keep folders here" off, every run is refused with its reason on the phone. (where: OPPO)
+- Names: a file named with a colon, a Windows device name (`NUL.txt`), a hidden file and a trailing-dot name on the phone are left out (the phone's log counts them) and the run goes on. A folder renamed on the phone keeps its place on the computer. (where: OPPO)
+- Remove a folder in Settings: its row goes, the computer's copy stays, and Android no longer lists the folder in its granted folders for the app (`adb shell dumpsys package` shows no persisted grant for it) unless Folders the computer may open still shares it. (where: OPPO)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -719,6 +747,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **203. The phone's contacts on the computer (P10)**
 
 - Texts turned off on Devices and the phone unpaired: the list forgotten.
+
+**260. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
+
+- The schedule: the job is queued with its constraints (`adb shell dumpsys jobscheduler` lists the app's WorkManager job needing an unmetered network and charging; with "Every few hours" the charging need goes); on mobile data with Wi-Fi off, nothing runs; plugged in on Wi-Fi it runs within the period, and on ColorOS 14 the transfer service's notification shows during the run and goes when it ends (or the run waits for the app to be opened or the notification listener's next look, which the log says). (where: OPPO)
 
 ## A second phone
 
@@ -1931,7 +1963,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **258. Open any phone app from the computer (Phone apps page, Apps part 1)**
 
+- Whether a background start by the control service itself works on the OPPO (ColorOS 14) and, if it can, on a phone with Android 15 or 16: the app starts from the service's own context with the phone's screen on another app. If it only appears behind, the fallback (N3's opt-in) is the next thing to try. (where: other hardware)
 - Whether a background start by the control service itself works on the OPPO (ColorOS 14) and, if it can, on a phone with Android 15 or 16: the app starts from the service's own context with the phone's screen on another app. If it only appears behind, the fallback (N3's opt-in) is the next thing to try. (where: other hardware) Partly checked 2026-11-01 on the OPPO (ColorOS 14, Android 14): yes — with Calculator in front and the cast shown, an open of Settings from the control service's own context brought Settings to the front (`opened`). Android 15 or 16 hardware was not available.
+
+**260. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
+
+- A computer that is too old (a throwaway built from before this change): the phone says the computer cannot keep folders yet and sends nothing; no copies appear in that computer's Downloads. (where: other hardware)
 
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 
@@ -2784,7 +2821,21 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **258. Open any phone app from the computer (Phone apps page, Apps part 1)**
 
+- A click on an app with the control service on and a screen already shown (Show the screen from the phone's Cast first): the app is in front on the phone within a second or two, the screen window here comes up in front, and Android showed no consent question. (where: OPPO)
+- A click with no screen shown yet: the page says to tap the notification; the phone shows "Tap to show your screen and open …", its tap brings Android's one screen-capture question, and after Start the app opens and the window here shows it. A second app then opens with no question and no notification (the one consent serves the connection). With Android 14's "single app" choice picked in the question: what the window shows (the app chosen, not what is opened after) is noted, nothing depends on it. (where: OPPO)
+- The control service off: a click is answered `control_off`, the page says to turn on Pocketdesk control in Android's Accessibility settings, and nothing is asked of the phone's owner by itself. (where: OPPO)
+- The phone locked (a secure lock) and asleep: "locked" and "unlock the phone once", then the same click works after the unlock. A swipe-only lock is dismissed by Hands-free (see section 259), not answered "locked". (where: OPPO)
 - A click with no screen shown yet: the page says to tap the notification; the phone shows "Tap to show your screen and open …", its tap brings Android's one screen-capture question, and after Start the app opens and the window here shows it. A second app then opens with no question and no notification (the one consent serves the connection). With Android 14's "single app" choice picked in the question: what the window shows (the app chosen, not what is opened after) is noted, nothing depends on it. (where: OPPO) Partly checked 2026-11-01 (the OPPO): with no screen shown, the open was answered `needs_screen` and the phone posted "Tap to show your screen and open Settings"; its tap brought Android's one screen-capture question ("Start recording or casting with Pocketdesk?", Cancel and "Start now" only: ColorOS 14's question has no single-app choice, so that part has nothing to note), and after "Start now" Settings opened (`opened`); a second open (Calculator) then opened with no question and no notification. The window here was not looked at.
 - The control service off: a click is answered `control_off`, the page says to turn on Pocketdesk control in Android's Accessibility settings, and nothing is asked of the phone's owner by itself. (where: OPPO) Partly checked 2026-11-01 (the OPPO, Pocketdesk control found off in Accessibility settings): an open asked of the phone was answered `control_off` at once. Found: beside it the phone also posted a "Tap to open: Settings" notification (the P2 fallback, `PhoneActions.open` for the plain, no-screen ask, for ten minutes) — by design in the code, but the item's "nothing is asked of the phone's owner by itself" is true only of dialogs, not of that notification; decide which the item means. The page's wording is desktop UI, not looked at.
 - The phone locked (a secure lock) and asleep: "locked" and "unlock the phone once", then the same click works after the unlock. A swipe-only lock is also answered "locked" (it is not dismissed). (where: OPPO) Partly checked 2026-11-01 (the OPPO has a swipe-only lock, no secure lock to try): asleep with the lock screen up, awake with the lock screen up, an open was answered `locked` both times (the swipe lock was not dismissed); after swiping it away the same open was `opened`. A secure lock and its "unlock the phone once" wording were not tried.
 - The page by hand on Windows and on Linux: the search narrows as it is typed, "Opened from here" shows the last apps in the order opened, the phone's name picker with two phones, the layout in a narrow window, and Settings' "Show the Phone apps page" off takes the page out of the list. (where: by hand)
+
+**259. Hands-free apps: a paused share, the screen-sharing question accepted, a lock swiped away**
+
+- Whether ColorOS 14 on the OPPO exposes the screen-sharing question's confirm button to the control service: with "Accept screen sharing for my computers" and "Let the computer open my apps" on and no cast running, a click on an app on the Phone apps page opens the app with no tap; the phone's log (`ConsentPress`) says "pressed after N looks" and nothing of the screen's words. If the question is hidden from accessibility or worded differently, the log says "not_found" and the page says "Tap needed on the phone": that is the expected fallback, and what the OPPO does goes in the results. (where: OPPO)
+- Pause and resume: show an app's screen, close the window on the computer, and the phone's notification says "Paused" with Stop and minutes left; the status bar still shows Android's own sharing indicator. Click an app again within ten minutes: the window comes back and the app opens with no question and no tap, and the encoder started again (the picture is live). A different computer's open (or a second pairing) gets a new question, and the old pause is gone. Stop ends it; after ten minutes it ends by itself; locking the phone ends it (Android stops the projection), and the next open then asks as before. (where: OPPO)
+- The desktop pages by hand: "Tap needed on the phone" appears in the accent colour with the message, and "locked_secure" shows the Extend Unlock sentence, on Windows and on Linux. (where: by hand)
+
+**260. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
+
+- The Files page's Kept folders section and the three Settings rows on the desktop (the folder box with Choose folder, the cap, the deletion switch) by hand on Windows and on Linux, light and dark, and in a narrow window; the Show in folder button opens the folder. (where: by hand)

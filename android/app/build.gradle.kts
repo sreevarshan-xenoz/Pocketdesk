@@ -92,6 +92,10 @@ dependencies {
     // pulls in Play services and Firebase components, sends Google usage
     // data, and keeps the app out of F-Droid (T3).
     implementation("io.github.zxing-cpp:android:3.1.1")
+    // The schedule of the folders kept on the computer: a job that waits for
+    // its constraints (an unmetered network, charging). No permission of its
+    // own, and no Google services (Apache-2.0).
+    implementation("androidx.work:work-runtime:2.10.0")
     // On-device check that the scanner reads the desktop app's code.
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

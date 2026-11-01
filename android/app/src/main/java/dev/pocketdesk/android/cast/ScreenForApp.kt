@@ -28,6 +28,9 @@ object ScreenForApp {
     const val EXTRA_CONTROL_PORT = "dev.pocketdesk.android.extra.SCREEN_APP_CONTROL_PORT"
     const val EXTRA_APP = "dev.pocketdesk.android.extra.SCREEN_APP_PACKAGE"
 
+    /** Hands-free: Pocketdesk started the window itself, to accept the question by itself. */
+    const val EXTRA_AUTO = "dev.pocketdesk.android.extra.SCREEN_APP_AUTO"
+
     /** How long the offer waits: an ask a few minutes old is not wanted any more. */
     private const val OFFER_MS = 2 * 60_000L
 

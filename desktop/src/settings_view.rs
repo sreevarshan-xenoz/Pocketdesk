@@ -249,6 +249,26 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "Received files land in",
         Section::Phones,
     ),
+    (
+        "kept_folders",
+        "Phones may keep folders here",
+        Section::Phones,
+    ),
+    (
+        "kept_folders_root",
+        "Folders phones keep here",
+        Section::Phones,
+    ),
+    (
+        "kept_folders_cap_gb",
+        "Size cap for kept folders",
+        Section::Phones,
+    ),
+    (
+        "kept_folders_allow_delete",
+        "Kept folders may mirror deletions",
+        Section::Phones,
+    ),
     ("notes_file", "Notes from phones go in", Section::Phones),
     (
         "cast_control",
@@ -780,6 +800,11 @@ pub fn applies_live(key: &str) -> bool {
             | "phone_apps_page"
             | "gamepad_controller"
             | "downloads_folder"
+            // Read by the server at each kept file and each run's end.
+            | "kept_folders"
+            | "kept_folders_root"
+            | "kept_folders_cap_gb"
+            | "kept_folders_allow_delete"
             | "remember_screen_grant"
             | "gnome_unattended"
             // Read as each link is asked for, and each tick of one that is on.
@@ -886,6 +911,8 @@ pub struct SettingsForm {
     home_assistant: Option<(std::time::Instant, Option<ha::Status>)>,
     /// A folder being picked for received files (C2).
     picking_downloads: Option<std::thread::JoinHandle<Option<std::path::PathBuf>>>,
+    /// A folder being picked for the folders phones keep here.
+    picking_kept: Option<std::thread::JoinHandle<Option<std::path::PathBuf>>>,
     /// A file being picked for notes from phones (BF4).
     picking_notes: Option<std::thread::JoinHandle<Option<std::path::PathBuf>>>,
     /// Approve with my phone's set-up and Test.
@@ -924,6 +951,7 @@ impl SettingsForm {
             wake: pocketdesk_core::local::wake::wake_facts(None),
             home_assistant: None,
             picking_downloads: None,
+            picking_kept: None,
             picking_notes: None,
             approve: Default::default(),
             phones: Vec::new(),
@@ -1853,6 +1881,67 @@ impl SettingsForm {
                     note(
                         ui,
                         "Files from phones, other computers and KDE Connect devices. A folder that is gone means Downloads.",
+                    );
+                });
+                row(ui, "kept_folders", |ui| {
+                    ui.checkbox(
+                        &mut e.kept_folders,
+                        "your phones may keep folders here, on their own",
+                    );
+                    note(
+                        ui,
+                        "Only your own phones, and only the folders you pick on the phone (Settings, Folders kept on my computer). Each phone's folder lands in its own folder below the one chosen next.",
+                    );
+                });
+                // A folder picked for kept folders fills the box.
+                if self.picking_kept.as_ref().is_some_and(|h| h.is_finished())
+                    && let Some(Ok(Some(path))) = self.picking_kept.take().map(|h| h.join())
+                {
+                    e.kept_folders_root = path.display().to_string();
+                }
+                let picking = &mut self.picking_kept;
+                row(ui, "kept_folders_root", |ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut e.kept_folders_root)
+                            .hint_text("Documents/Pocketdesk phones")
+                            .desired_width(320.0),
+                    );
+                    if crate::pick_file::AVAILABLE
+                        && ui
+                            .add_enabled(picking.is_none(), egui::Button::new("Choose folder..."))
+                            .clicked()
+                    {
+                        *picking = Some(crate::pick_file::spawn(true));
+                    }
+                    if !e.kept_folders_root.trim().is_empty()
+                        && ui.button("Use the default").clicked()
+                    {
+                        e.kept_folders_root.clear();
+                    }
+                    note(
+                        ui,
+                        "A folder that is not there, or is Pocketdesk's own, means the default. Files already kept stay where they are if you change it.",
+                    );
+                });
+                row(ui, "kept_folders_cap_gb", |ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut e.kept_folders_cap_gb)
+                            .range(0..=100_000)
+                            .suffix(" GB"),
+                    );
+                    note(
+                        ui,
+                        "All kept folders together. A file that would pass it is refused and the Files page says so; 0 means no limit.",
+                    );
+                });
+                row(ui, "kept_folders_allow_delete", |ui| {
+                    ui.checkbox(
+                        &mut e.kept_folders_allow_delete,
+                        "a phone that mirrors deletions may delete here what it deleted",
+                    );
+                    note(
+                        ui,
+                        "Off, nothing is ever deleted from a kept folder. On, only plain files inside that phone's own folder here, and only ones it names; this and the phone's own Mirror deletions switch must both be on.",
                     );
                 });
                 // BF4: a file picked for notes from phones fills the box.
