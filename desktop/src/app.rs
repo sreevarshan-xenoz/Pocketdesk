@@ -1197,7 +1197,17 @@ impl PocketdeskApp {
         };
         let waiting = self.snapshot.approvals.len();
         let mut verdict = None;
-        egui::Window::new("A phone wants to connect")
+        let computer = self
+            .snapshot
+            .devices
+            .iter()
+            .any(|d| d.id == request.device_id && d.computer);
+        let title = if computer {
+            "A computer wants to connect"
+        } else {
+            "A phone wants to connect"
+        };
+        egui::Window::new(title)
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
