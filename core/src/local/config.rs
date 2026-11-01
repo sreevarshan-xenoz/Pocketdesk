@@ -253,9 +253,14 @@ pub struct Config {
     /// How long a request waits for the phone, 5 to 60 seconds.
     #[serde(default = "default_phone_approves_timeout")]
     pub phone_approves_timeout_secs: u64,
-    /// The lock screen too (hyprlock, swaylock, KDE's, GNOME's). Off.
+    /// The lock screen too (hyprlock, swaylock, KDE's). Off.
     #[serde(default)]
     pub phone_approves_lock_screen: bool,
+    /// polkit too: its own switch, off even with the feature on, as PAM is
+    /// told neither polkit's action nor (reliably) who asked, and the
+    /// socket-activated agent has no ancestry to judge ssh by.
+    #[serde(default)]
+    pub phone_approves_polkit: bool,
     /// Only from this desk: refuse a request from an ssh session. On.
     #[serde(default = "default_true")]
     pub phone_approves_local_only: bool,
@@ -675,6 +680,7 @@ impl Default for Config {
             phone_approves: false,
             phone_approves_timeout_secs: default_phone_approves_timeout(),
             phone_approves_lock_screen: false,
+            phone_approves_polkit: false,
             phone_approves_local_only: true,
             phone_approves_phones: Vec::new(),
             tell_in_use: true,
@@ -946,6 +952,7 @@ impl Config {
         "phone_approves",
         "phone_approves_timeout_secs",
         "phone_approves_lock_screen",
+        "phone_approves_polkit",
         "phone_approves_local_only",
         "phone_approves_phones",
         "tell_in_use",

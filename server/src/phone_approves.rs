@@ -44,24 +44,25 @@ pub fn p256_point(public_key_b64: &str) -> Option<Vec<u8>> {
     (point.len() == 65 && point[0] == 0x04).then(|| point.to_vec())
 }
 
-/// What both apps show to compare a key: the first 16 hex digits of the
-/// SHA-256 of its SubjectPublicKeyInfo, in groups of four.
+/// What both apps show to compare a key: [`spki_fingerprint`] of it.
 pub fn key_fingerprint(public_key_b64: &str) -> Option<String> {
     let der = base64::engine::general_purpose::STANDARD
         .decode(public_key_b64)
         .ok()?;
-    let hash = ring::digest::digest(&ring::digest::SHA256, &der);
-    let hex: String = hash.as_ref()[..8]
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
-    Some(
-        hex.as_bytes()
-            .chunks(4)
-            .map(|c| String::from_utf8_lossy(c).into_owned())
-            .collect::<Vec<_>>()
-            .join(" "),
-    )
+    Some(spki_fingerprint(&der))
+}
+
+/// The full SHA-256 of a SubjectPublicKeyInfo, in groups of four hex
+/// digits: what both apps show, all of it (review I1: 64 bits could be
+/// ground to look alike).
+pub fn spki_fingerprint(der: &[u8]) -> String {
+    let hash = ring::digest::digest(&ring::digest::SHA256, der);
+    let hex: String = hash.as_ref().iter().map(|b| format!("{b:02x}")).collect();
+    hex.as_bytes()
+        .chunks(4)
+        .map(|c| String::from_utf8_lossy(c).into_owned())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Why an answer is not an approval.
@@ -254,6 +255,7 @@ pub fn heard(
     id: &str,
     answer: Answer,
     signature: Option<String>,
+    attestation: Option<Vec<String>>,
     now: u64,
 ) -> bool {
     let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
@@ -268,6 +270,7 @@ pub fn heard(
         device_id: device.to_string(),
         answer,
         signature,
+        attestation,
     };
     match files::set_status(dir, id, &status) {
         Ok(()) => true,
@@ -303,6 +306,7 @@ pub fn key_heard(dir: &Path, device: &str, body: &serde_json::Value, now: u64) {
                 biometric_only,
                 fingerprint,
                 added_unix: now,
+                attested: None,
             })
         }
         Some(KeyMessage::Clear) => None,
@@ -357,6 +361,7 @@ pub(crate) mod tests {
                 biometric_only: false,
                 fingerprint: key_fingerprint(&self.spki_b64()).unwrap(),
                 added_unix: 1,
+                attested: Some("tee".to_string()),
             }
         }
 
@@ -375,7 +380,11 @@ pub(crate) mod tests {
             kind: Kind::Admin,
             service: "sudo".to_string(),
             user: "alice".to_string(),
-            command: "sudo pacman -Syu".to_string(),
+            requester: "alice".to_string(),
+            action: String::new(),
+            command: "/usr/bin/sudo pacman -Syu".to_string(),
+            tty: "/dev/pts/3".to_string(),
+            origin: "sudo(812) < bash(700)".to_string(),
             computer: "ab".repeat(32),
             nonce: nonce_byte.repeat(32),
             issued_unix: 1_000,
@@ -525,8 +534,8 @@ pub(crate) mod tests {
             None
         );
         let fp = key_fingerprint(&phone.spki_b64()).unwrap();
-        assert_eq!(fp.len(), 19);
-        assert_eq!(fp.split(' ').count(), 4);
+        assert_eq!(fp.len(), 79, "all 256 bits");
+        assert_eq!(fp.split(" ").count(), 16);
     }
 
     #[test]
@@ -549,16 +558,24 @@ pub(crate) mod tests {
         );
         assert!(is_pending("srv-1"));
         assert!(
-            !heard(&dir, "phone-b", "srv-1", Answer::Yes, None, 1_005),
+            !heard(&dir, "phone-b", "srv-1", Answer::Yes, None, None, 1_005),
             "not asked"
         );
         assert!(
-            !heard(&dir, "phone-a", "srv-1", Answer::Yes, None, 1_020),
+            !heard(&dir, "phone-a", "srv-1", Answer::Yes, None, None, 1_020),
             "late"
         );
-        assert!(heard(&dir, "phone-a", "srv-1", Answer::No, None, 1_005));
+        assert!(heard(
+            &dir,
+            "phone-a",
+            "srv-1",
+            Answer::No,
+            None,
+            None,
+            1_005
+        ));
         assert!(
-            !heard(&dir, "phone-a", "srv-1", Answer::Yes, None, 1_005),
+            !heard(&dir, "phone-a", "srv-1", Answer::Yes, None, None, 1_005),
             "once"
         );
         assert_eq!(
@@ -566,7 +583,8 @@ pub(crate) mod tests {
             Some(Status::Answered {
                 device_id: "phone-a".to_string(),
                 answer: Answer::No,
-                signature: None
+                signature: None,
+                attestation: None,
             })
         );
         let _ = std::fs::remove_dir_all(&dir);

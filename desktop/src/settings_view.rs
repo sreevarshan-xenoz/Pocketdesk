@@ -190,6 +190,7 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "The lock screen too",
         Section::Phones,
     ),
+    ("phone_approves_polkit", "polkit too", Section::Phones),
     (
         "phone_approves_local_only",
         "Only from this desk, not ssh",
@@ -570,6 +571,7 @@ pub(crate) fn drawn_here(key: &str) -> bool {
         // Approve with my phone: Linux's PAM.
         "phone_approves"
         | "phone_approves_lock_screen"
+        | "phone_approves_polkit"
         | "phone_approves_local_only"
         | "phone_approves_timeout_secs"
         | "phone_approves_phones" => cfg!(target_os = "linux"),
@@ -738,6 +740,7 @@ pub fn applies_live(key: &str) -> bool {
             // Read by the PAM helper and the server at each request.
             | "phone_approves"
             | "phone_approves_lock_screen"
+            | "phone_approves_polkit"
             | "phone_approves_local_only"
             | "phone_approves_timeout_secs"
             | "phone_approves_phones"

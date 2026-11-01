@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use super::asks::{take_files, write};
 use super::paths::{APPROVE_DIR, APPROVE_KEYS_FILE, APPROVE_STATUS_DIR};
-use crate::protocol::approve::{Approval, MAX_TIMEOUT_SECS};
+use crate::protocol::approve::{Approval, Kind, MAX_TIMEOUT_SECS, PIN_TIMEOUT_SECS};
 use crate::protocol::ask::{Answer, is_ask_id};
 
 /// One request for the server: the approval, and the phones (device ids)
@@ -44,6 +44,9 @@ pub enum Status {
         answer: Answer,
         /// base64 DER, for a Yes.
         signature: Option<String>,
+        /// A pin request's Key Attestation chain, leaf first (base64 DER).
+        #[serde(default)]
+        attestation: Option<Vec<String>>,
     },
 }
 
@@ -55,10 +58,15 @@ pub struct PhoneKey {
     pub public_key: String,
     /// Takes the fingerprint only, not the PIN.
     pub biometric_only: bool,
-    /// What the phone shows to compare: the first 16 hex digits of the
-    /// key's SHA-256, in groups of four.
+    /// What both apps show to compare: the key's whole SHA-256, in groups
+    /// of four hex digits.
     pub fingerprint: String,
     pub added_unix: u64,
+    /// Where the phone's Key Attestation says the key lives (`tee`,
+    /// `strongbox`), as root checked it at pin; `None` for a key pinned
+    /// without attestation, or one only the phone gave.
+    #[serde(default)]
+    pub attested: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -80,9 +88,14 @@ pub fn take_all(state_dir: &Path, now_unix: u64) -> Vec<Request> {
         .filter_map(|(stem, raw)| {
             let request = serde_json::from_str::<Request>(&raw).ok()?;
             let a = &request.approval;
+            let longest = if a.kind == Kind::Pin {
+                PIN_TIMEOUT_SECS
+            } else {
+                MAX_TIMEOUT_SECS
+            };
             let fresh = a.issued_unix <= now_unix + 5
                 && now_unix < a.expires_unix
-                && a.expires_unix.saturating_sub(a.issued_unix) <= MAX_TIMEOUT_SECS;
+                && a.expires_unix.saturating_sub(a.issued_unix) <= longest;
             (fresh && a.id == stem && is_ask_id(&a.id)).then_some(request)
         })
         .collect()
@@ -164,7 +177,11 @@ mod tests {
             kind: Kind::Unlock,
             service: "hyprlock".to_string(),
             user: "alice".to_string(),
+            requester: String::new(),
+            action: String::new(),
             command: String::new(),
+            tty: String::new(),
+            origin: String::new(),
             computer: "ab".repeat(32),
             nonce: "01".repeat(32),
             issued_unix: issued,
@@ -203,6 +220,7 @@ mod tests {
             device_id: "phone-a".to_string(),
             answer: Answer::Yes,
             signature: Some("MEUC".to_string()),
+            attestation: None,
         };
         set_status(&dir, "r-1", &said).unwrap();
         assert_eq!(status(&dir, "r-1"), Some(said));
@@ -221,6 +239,7 @@ mod tests {
             biometric_only: false,
             fingerprint: "0000 0000 0000 0000".to_string(),
             added_unix: 1,
+            attested: None,
         };
         assert!(set_key(&dir, "phone-a", Some(key("A"))).unwrap());
         assert!(!set_key(&dir, "phone-a", Some(key("A"))).unwrap(), "same");

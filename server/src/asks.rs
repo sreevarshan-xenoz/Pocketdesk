@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use pocketdesk_core::error::Result;
 use pocketdesk_core::local::asks::{self, AskRequest};
-use pocketdesk_core::protocol::approve::{APPROVE_KEY, signature_of};
+use pocketdesk_core::protocol::approve::{APPROVE_KEY, attestation_of, signature_of};
 use pocketdesk_core::protocol::ask::{ASK, ASK_ANSWER, Answer, answer_of, ask_body};
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin, TrustStore};
 use pocketdesk_core::protocol::permissions::Capability;
@@ -254,12 +254,14 @@ impl Plugin for AskPlugin {
         // signature, which the helper checks.
         if crate::phone_approves::is_pending(&id) {
             let signature = signature_of(&packet.body);
+            let attestation = attestation_of(&packet.body);
             if crate::phone_approves::heard(
                 &dir,
                 sender.device_id(),
                 &id,
                 answer,
                 signature,
+                attestation,
                 now_unix(),
             ) {
                 tracing::info!("A phone answered an approval request: {}", answer.word());

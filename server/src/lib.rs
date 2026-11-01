@@ -23,6 +23,8 @@ pub(crate) mod drive;
 pub mod driving;
 pub mod events;
 // The fuzz targets' entry points (`fuzz/`), only under `cargo fuzz`.
+#[cfg(target_os = "linux")]
+pub mod attestation;
 #[cfg(fuzzing)]
 pub mod fuzzing;
 pub mod gamepad_pad;
