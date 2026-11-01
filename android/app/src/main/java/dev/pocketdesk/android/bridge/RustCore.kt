@@ -203,6 +203,8 @@ object RustCore {
     private external fun nativeTakePhoneFileRequests(): String
     private external fun nativeTakePhotoRequests(): String
 
+    private external fun nativeTakeLocationRequests(): String
+
     private external fun nativeTakeQuiet(): String
     private external fun nativeDeclineOffer(address: String, port: Int, id: String, reason: String): String
     private external fun nativeFetchFolder(address: String, port: Int, path: String): String
@@ -1076,6 +1078,9 @@ object RustCore {
 
     /** The computer's requests for this phone's recent photos since the last call (C7), as a JSON array. */
     fun takePhotoRequests(): String = envelope(nativeTakePhotoRequests()).getOrDefault("[]")
+
+    /** The computer's asks for this phone's location since the last call (GeoClue): `[{host, port, precision}]`. */
+    fun takeLocationRequests(): String = envelope(nativeTakeLocationRequests()).getOrDefault("[]")
 
     /** D2: the computer's newest mute since the last call, as `{host, port, minutes}`, or "null". */
     fun takeQuiet(): String = envelope(nativeTakeQuiet()).getOrDefault("null")

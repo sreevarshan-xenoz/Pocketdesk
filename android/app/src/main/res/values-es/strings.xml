@@ -1029,6 +1029,14 @@
     <string name="settings_webcam_summary">Tu equipo puede pedir usar este teléfono como su cámara (Linux). Se te pregunta cada vez en una notificación, y la cámara solo se abre al tocarla, con su propia notificación visible mientras está en uso.</string>
     <string name="settings_webcam_needs_camera">Necesita el permiso de cámara: actívalo de nuevo para concederlo</string>
     <string name="settings_webcam_needs_access">Necesita acceso a las notificaciones para oír la petición del equipo</string>
+    <string name="settings_location">Dar mi ubicación a mi equipo</string>
+    <string name="settings_location_summary">Las aplicaciones de tu equipo (el tiempo, la luz nocturna, la zona horaria, los mapas) pueden preguntar dónde está este teléfono, mediante GeoClue en Linux. Tu equipo pregunta como mucho cada diez minutos y recibe solo la ciudad, redondeada a unos 1 km. No se guarda nada ni se escribe en ningún registro.</string>
+    <string name="settings_location_needs_permission">Necesita el permiso de ubicación: actívalo de nuevo para concederlo</string>
+    <string name="settings_location_needs_access">Necesita acceso a las notificaciones para oír la petición del equipo</string>
+    <string name="settings_location_exact">Ubicación exacta</string>
+    <string name="settings_location_exact_summary">Deja que el equipo sepa dónde está este teléfono con exactitud, no solo la ciudad, cuando sus ajustes piden la exacta. Pide la ubicación precisa.</string>
+    <string name="settings_location_background">Responder con Pocketdesk cerrado</string>
+    <string name="settings_location_background_summary">Android no muestra la ubicación a una aplicación que no está en pantalla. Para responder con el teléfono en el bolsillo, abre los ajustes de ubicación de la aplicación y elige Permitir todo el tiempo.</string>
     <string name="webcam_channel">Peticiones de cámara</string>
     <string name="webcam_channel_description">Cuando tu equipo pide usar este teléfono como su cámara</string>
     <string name="webcam_ask_title">%1$s quiere usar tu cámara</string>

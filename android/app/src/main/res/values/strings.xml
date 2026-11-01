@@ -1084,6 +1084,14 @@
     <string name="settings_webcam_summary">Your computer may ask to use this phone as its camera (Linux). You are asked each time in a notification, and the camera opens only when you tap it, with its own notification showing while it is in use.</string>
     <string name="settings_webcam_needs_camera">Needs the camera permission: turn it on again to allow it</string>
     <string name="settings_webcam_needs_access">Needs notification access to hear the computer\'s ask</string>
+    <string name="settings_location">Give my computer my location</string>
+    <string name="settings_location_summary">Your computer\'s apps (weather, night light, time zone, maps) may ask where this phone is, through GeoClue on Linux. Your computer asks at most every ten minutes and gets only the city, rounded to about 1 km. Nothing is stored or written to a log.</string>
+    <string name="settings_location_needs_permission">Needs the location permission: turn it on again to allow it</string>
+    <string name="settings_location_needs_access">Needs notification access to hear the computer\'s ask</string>
+    <string name="settings_location_exact">Exact location</string>
+    <string name="settings_location_exact_summary">Let the computer have where this phone is exactly, not just the city, when its settings ask for exact. Asks for precise location.</string>
+    <string name="settings_location_background">Answer while Pocketdesk is closed</string>
+    <string name="settings_location_background_summary">Android shows no location to an app that is not on screen. To answer with the phone in your pocket, open the app\'s location settings and choose Allow all the time.</string>
     <string name="webcam_channel">Camera asks</string>
     <string name="webcam_channel_description">When your computer asks to use this phone as its camera</string>
     <string name="webcam_ask_title">%1$s wants to use your camera</string>
