@@ -45,8 +45,10 @@ class WatchClient(
      */
     fun pair(code: String, name: String): ByteArray {
         val challenge = challenge ?: throw IOException("not opened")
-        WatchWire.write(output, WatchPairing.pairFrame(code, challenge, name))
+        // A key pair for this pairing only: its secret never leaves this call.
+        val ephemeral = WatchPairing.newEphemeral()
+        WatchWire.write(output, WatchPairing.pairFrame(code, challenge, name, ephemeral))
         val frame = WatchWire.read(input) ?: throw IOException("the phone hung up")
-        return WatchPairing.readAnswer(code, challenge, frame) ?: throw IOException("the phone refused")
+        return WatchPairing.readAnswer(code, challenge, ephemeral, frame) ?: throw IOException("the phone refused")
     }
 }

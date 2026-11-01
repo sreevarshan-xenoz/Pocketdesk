@@ -51,7 +51,9 @@ object WatchLinkServer {
     private val limits = WatchLimits({ android.os.SystemClock.elapsedRealtime() })
     private val watchdog = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "watch-link-idle").apply { isDaemon = true } }
     private val connections = AtomicInteger(0)
-    private val pairLock = Any()
+
+    /** The sockets open now, so stopping the service or forgetting the watch ends them, not only the next one. */
+    private val open: MutableSet<BluetoothSocket> = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
 
     @Volatile
     private var server: BluetoothServerSocket? = null
@@ -101,12 +103,14 @@ object WatchLinkServer {
                         runCatching { client.close() }
                         continue
                     }
+                    open += client
                     thread(name = "watch-link-conn") {
                         try {
                             handle(app, client)
                         } catch (e: Exception) {
                             Log.i(TAG, "a watch connection ended: ${e.javaClass.simpleName}")
                         } finally {
+                            open -= client
                             runCatching { client.close() }
                             connections.decrementAndGet()
                         }
@@ -132,7 +136,13 @@ object WatchLinkServer {
         pairing.close()
         runCatching { server?.close() }
         server = null
+        closeAll()
         Log.i(TAG, "the watch service stopped")
+    }
+
+    /** End every connection open now: the watch was forgotten, or the service stopped. */
+    fun closeAll() {
+        for (socket in open.toList()) runCatching { socket.close() }
     }
 
     private fun handle(app: Context, client: BluetoothSocket) {
@@ -176,35 +186,48 @@ object WatchLinkServer {
         }
     }
 
-    /** The watch's pair frame: wait for the code the owner types on the phone, judge it, hand the key over masked. */
+    /**
+     * The watch's pair frame: wait for the code the owner types on the phone,
+     * judge it against this connection's own proof, hand the key over masked
+     * by the digits and an ECDH secret. One waiting connection per Bluetooth
+     * address, and a wrong code counts against that address only.
+     */
     private fun pair(app: Context, client: BluetoothSocket, challenge: ByteArray, first: ByteArray, address: String) {
         val frame = WatchPairing.readPairFrame(first)
-        if (frame == null) {
+        if (frame == null || !pairing.enter(address)) {
             WatchWire.write(client.outputStream, WatchPairing.refused())
             return
         }
-        // One pairing at a time.
-        synchronized(pairLock) {
+        try {
             while (pairing.isOpen) {
                 val code = pairing.typed()
                 if (code == null) {
                     Thread.sleep(200)
                     continue
                 }
-                val right = WatchWire.same(WatchPairing.proof(code, challenge, frame.name), frame.proof)
-                pairing.judged(right)
-                if (!right) {
+                val right = WatchWire.same(WatchPairing.proof(code, challenge, frame.name, frame.publicKey), frame.proof)
+                val mine = WatchPairing.newEphemeral()
+                val secret = if (right) WatchPairing.agree(mine, frame.publicKey) else null
+                if (secret == null) {
+                    // A wrong code, or a proof that fits with a key that is not one: counted against this address.
+                    pairing.judged(address, right = false)
                     Log.i(TAG, "a pairing code was wrong")
                     WatchWire.write(client.outputStream, WatchPairing.refused())
                     return
                 }
                 val key = WatchPairing.newKey()
                 WatchStore.save(app, key, address, frame.name)
-                WatchWire.write(client.outputStream, WatchPairing.accepted(WatchPairing.mask(code, challenge, key)))
+                pairing.judged(address, right = true)
+                WatchWire.write(
+                    client.outputStream,
+                    WatchPairing.accepted(mine.public.encoded, WatchPairing.mask(code, challenge, secret, key)),
+                )
                 Log.i(TAG, "a watch was paired")
                 return
             }
             WatchWire.write(client.outputStream, WatchPairing.refused())
+        } finally {
+            pairing.release(address)
         }
     }
 

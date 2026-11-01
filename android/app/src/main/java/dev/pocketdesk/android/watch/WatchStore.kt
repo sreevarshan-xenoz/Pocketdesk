@@ -41,5 +41,7 @@ object WatchStore {
     /** Forget the watch: its key goes, so nothing it holds fits any more. */
     fun forget(ctx: Context) {
         prefs(ctx).edit { clear() }
+        // A connection already open was made with the key that is gone.
+        WatchLinkServer.closeAll()
     }
 }

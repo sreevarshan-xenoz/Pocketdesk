@@ -155,6 +155,13 @@ class WatchOut {
         bytes.write(raw)
     }
 
+    /** A blob: its length (u8, at most 255) and the bytes. */
+    fun blob(b: ByteArray) = apply {
+        require(b.size <= 255)
+        bytes.write(b.size)
+        bytes.write(b)
+    }
+
     fun bytes(): ByteArray = bytes.toByteArray()
 }
 
@@ -177,6 +184,14 @@ class WatchIn(private val b: ByteArray) {
         val s = String(b, at, n, Charsets.UTF_8)
         at += n
         return s
+    }
+
+    fun blob(): ByteArray {
+        val n = u8()
+        if (at + n > b.size) throw Malformed()
+        val out = b.copyOfRange(at, at + n)
+        at += n
+        return out
     }
 
     /** Fails unless the whole body was read. */

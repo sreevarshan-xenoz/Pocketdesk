@@ -146,9 +146,15 @@ class WatchClientTest {
             return Phone(WatchWire.hello(challenge, paired = false)) { frame ->
                 val pair = WatchPairing.readPairFrame(frame)!!
                 val code = window.typed()!!
-                val right = WatchWire.same(WatchPairing.proof(code, challenge, pair.name), pair.proof)
-                window.judged(right)
-                if (right) WatchPairing.accepted(WatchPairing.mask(code, challenge, key)) else WatchPairing.refused()
+                val right = WatchWire.same(WatchPairing.proof(code, challenge, pair.name, pair.publicKey), pair.proof)
+                window.judged("watch", right)
+                if (right) {
+                    val mine = WatchPairing.newEphemeral()
+                    val secret = WatchPairing.agree(mine, pair.publicKey)!!
+                    WatchPairing.accepted(mine.public.encoded, WatchPairing.mask(code, challenge, secret, key))
+                } else {
+                    WatchPairing.refused()
+                }
             }
         }
 
