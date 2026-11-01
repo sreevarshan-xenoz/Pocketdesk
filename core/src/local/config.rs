@@ -187,6 +187,13 @@ pub struct Config {
     /// open my apps", off by default) decides whether it ever is.
     #[serde(default = "default_true")]
     pub phone_drop_share: bool,
+    /// Open a phone's app in a window of its own, several at once, when the
+    /// phone says it can (Phone apps tier 2: the phone's "Separate windows
+    /// (Shizuku)", off by default there and shown only with Shizuku
+    /// running). Off, or with a phone that does not offer it, an app opens
+    /// on the phone's own screen as before.
+    #[serde(default = "default_true")]
+    pub phone_app_windows: bool,
     /// Offer phones as this computer's camera (F6 part 2, Linux): a phone
     /// with the Webcam permission, asked from here, is published as a
     /// PipeWire camera apps can open. Off by default: a camera from afar.
@@ -795,6 +802,7 @@ impl Default for Config {
             phone_apps_page: true,
             phone_apps_pin: true,
             phone_drop_share: true,
+            phone_app_windows: true,
             phone_camera: false,
             phone_camera_lens: default_phone_camera_lens(),
             phone_camera_height: default_phone_camera_height(),
@@ -1089,6 +1097,7 @@ impl Config {
         "phone_apps_page",
         "phone_apps_pin",
         "phone_drop_share",
+        "phone_app_windows",
         "phone_camera",
         "phone_camera_lens",
         "phone_camera_height",

@@ -17,6 +17,8 @@ use pocketdesk_core::protocol::phone_action::{AppResult, PhoneAction};
 
 use crate::apps_view::{Known, Opening, Status, status};
 use crate::model::Device;
+#[cfg(test)]
+use crate::phone_windows::Route;
 
 /// How long a wait for the phone's owner (one tap, or the screen question)
 /// is watched before it is given up on.
@@ -56,11 +58,22 @@ pub fn check(
         })
 }
 
+/// What an open is for: the phone (its id and the name shown for it) and the
+/// app (its package name and the name shown for it).
+pub struct OpenAsk<'a> {
+    pub phone: &'a str,
+    pub who: &'a str,
+    pub app: &'a str,
+    pub name: &'a str,
+}
+
 /// One open being watched.
 struct Pending {
     phone: String,
     who: String,
     open: Opening,
+    /// How the open is made, kept for the ask that follows a new list.
+    route: crate::phone_windows::Route,
     /// The first ask of the open, to give up on a long wait by.
     first_at: u64,
     /// The phone did not know the app, so its list was asked for again and
@@ -77,8 +90,12 @@ struct Pending {
 pub struct Done {
     /// The one line to say, if any.
     pub notice: Option<crate::notice::Notice>,
-    /// The app opened: the phone's screen window should come up.
+    /// The app opened: the phone's screen window should come up (not for an
+    /// app window, which comes up by itself).
     pub raise: bool,
+    /// An app window that was asked for and will not come (the phone could
+    /// not make it): free again.
+    pub released: Option<u8>,
 }
 
 /// The opens being watched (one at a time: a new one replaces the last).
@@ -89,33 +106,38 @@ pub struct OpenWatch {
 
 impl OpenWatch {
     /// Ask `phone` to open `app` (called `name`) with its screen shown here.
+    ///
+    /// With a phone that offers windows (Phone apps tier 2) and this
+    /// computer's switch on, `route` makes it an app window and the id is
+    /// returned, for the caller to hold.
     pub fn start(
         &mut self,
         state_dir: &Path,
-        phone: &str,
-        who: &str,
-        app: &str,
-        name: &str,
+        ask: &OpenAsk<'_>,
+        route: &crate::phone_windows::Route,
         now: u64,
-    ) -> Result<(), String> {
-        pocketdesk_core::local::phone_actions::request_open_with_screen(
-            state_dir, phone, app, true, now,
-        )
-        .map_err(|e| format!("Could not ask the phone: {e}"))?;
+    ) -> Result<Option<u8>, String> {
+        let window =
+            match crate::phone_windows::ask_open(state_dir, ask.phone, ask.app, route, now)? {
+                crate::phone_windows::Asked::Window(id) => Some(id),
+                crate::phone_windows::Asked::Screen => None,
+            };
         self.pending = Some(Pending {
-            phone: phone.to_string(),
-            who: who.to_string(),
+            phone: ask.phone.to_string(),
+            who: ask.who.to_string(),
             open: Opening {
-                app: app.to_string(),
-                name: name.to_string(),
+                app: ask.app.to_string(),
+                name: ask.name.to_string(),
                 asked_at: now,
+                window,
             },
+            route: route.clone(),
             first_at: now,
             relisted: false,
             retry_at: None,
             said: None,
         });
-        Ok(())
+        Ok(window)
     }
 
     /// Whether an open is being watched.
@@ -134,21 +156,19 @@ impl OpenWatch {
                 return Done::default();
             }
             p.retry_at = None;
-            if pocketdesk_core::local::phone_actions::request_open_with_screen(
-                state_dir,
-                &p.phone,
-                &p.open.app,
-                true,
-                now,
-            )
-            .is_err()
-            {
+            let asked =
+                crate::phone_windows::ask_open(state_dir, &p.phone, &p.open.app, &p.route, now);
+            let Ok(asked) = asked else {
                 self.pending = None;
                 return Done {
                     notice: crate::notice::Notice::error("Could not ask the phone."),
-                    raise: false,
+                    ..Done::default()
                 };
-            }
+            };
+            p.open.window = match asked {
+                crate::phone_windows::Asked::Window(id) => Some(id),
+                crate::phone_windows::Asked::Screen => None,
+            };
             p.open.asked_at = now;
             return Done::default();
         }
@@ -168,10 +188,34 @@ impl OpenWatch {
         match status {
             Status::Opened(name) => {
                 let _ = store::note_open(state_dir, &p.phone, &p.open.app, now);
+                // An app window comes up by itself.
+                let window = p.open.window.is_some();
                 self.pending = None;
                 Done {
                     notice: crate::notice::Notice::done(format!("Opened {name} on {who}.")),
-                    raise: true,
+                    raise: !window,
+                    ..Done::default()
+                }
+            }
+            // The phone could not make a window: the app opens the ordinary way.
+            Status::OpenRefused(AppResult::WindowsUnavailable, _) if p.open.window.is_some() => {
+                let released = p.open.window;
+                p.route = p.route.screen_only();
+                let asked =
+                    crate::phone_windows::ask_open(state_dir, &p.phone, &p.open.app, &p.route, now);
+                if asked.is_err() {
+                    self.pending = None;
+                    return Done {
+                        notice: crate::notice::Notice::error("Could not ask the phone."),
+                        released,
+                        ..Done::default()
+                    };
+                }
+                p.open.window = None;
+                p.open.asked_at = now;
+                Done {
+                    released,
+                    ..Done::default()
                 }
             }
             // The phone's list is asked for again once, and the open after it.
@@ -202,15 +246,18 @@ impl OpenWatch {
                 p.said = Some(word);
                 Done {
                     notice: crate::notice::Notice::working(status.message(&who)),
-                    raise: false,
+                    ..Done::default()
                 }
             }
             Status::Opening(_) => Done::default(),
             other => {
+                // A window asked for and refused (the phone's limit) is free again.
+                let released = p.open.window;
                 self.pending = None;
                 Done {
                     notice: crate::notice::Notice::error(other.message(&who)),
-                    raise: false,
+                    released,
+                    ..Done::default()
                 }
             }
         }
@@ -241,6 +288,7 @@ mod tests {
                 })
                 .collect(),
             at: 1,
+            windows: Default::default(),
         }
     }
 
@@ -252,6 +300,7 @@ mod tests {
                 about: "open".into(),
                 app: Some(app.into()),
                 name: None,
+                window: None,
                 result,
             },
             at,
@@ -259,6 +308,13 @@ mod tests {
         )
         .unwrap();
     }
+
+    const ASK: OpenAsk<'static> = OpenAsk {
+        phone: "phone-1",
+        who: "My phone",
+        app: "org.example.app",
+        name: "Example",
+    };
 
     fn asks(
         dir: &Path,
@@ -313,16 +369,7 @@ mod tests {
         let mut watch = OpenWatch::default();
         assert!(!watch.waiting());
         assert!(watch.tick(&dir, 100).notice.is_none());
-        watch
-            .start(
-                &dir,
-                "phone-1",
-                "My phone",
-                "org.example.app",
-                "Example",
-                100,
-            )
-            .unwrap();
+        watch.start(&dir, &ASK, &Route::default(), 100).unwrap();
         assert_eq!(asks(&dir, 100).len(), 1);
         assert!(watch.waiting());
         // Nothing yet: still waiting.
@@ -347,16 +394,7 @@ mod tests {
         assert!(!watch.waiting());
         assert_eq!(store::read_recent(&dir)["phone-1"]["org.example.app"], 104);
         // A refusal says why and ends the watch.
-        watch
-            .start(
-                &dir,
-                "phone-1",
-                "My phone",
-                "org.example.app",
-                "Example",
-                200,
-            )
-            .unwrap();
+        watch.start(&dir, &ASK, &Route::default(), 200).unwrap();
         said(
             &dir,
             "phone-1",
@@ -369,16 +407,7 @@ mod tests {
         assert!(refused.notice.unwrap().text.contains("never bypasses"));
         assert!(!watch.waiting());
         // No answer in time is said too.
-        watch
-            .start(
-                &dir,
-                "phone-1",
-                "My phone",
-                "org.example.app",
-                "Example",
-                300,
-            )
-            .unwrap();
+        watch.start(&dir, &ASK, &Route::default(), 300).unwrap();
         let late = watch.tick(&dir, 300 + 60);
         assert!(late.notice.unwrap().text.contains("did not answer"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -389,16 +418,7 @@ mod tests {
     fn a_forgotten_list_is_asked_for_and_the_open_follows_once() {
         let dir = dir("relist");
         let mut watch = OpenWatch::default();
-        watch
-            .start(
-                &dir,
-                "phone-1",
-                "My phone",
-                "org.example.app",
-                "Example",
-                100,
-            )
-            .unwrap();
+        watch.start(&dir, &ASK, &Route::default(), 100).unwrap();
         asks(&dir, 100);
         said(
             &dir,

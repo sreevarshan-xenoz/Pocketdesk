@@ -211,6 +211,118 @@ pub fn open_body(app: &str, screen: bool) -> serde_json::Value {
     open
 }
 
+/// Phone apps tier 2: the size an app window is asked at, and the id of the
+/// window it is, in an `open` ask's `window` object. Left out, the open is
+/// the ordinary one (the app on the phone's own screen).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WindowAsk {
+    /// 1 to [`crate::streaming::cast::MAX_WINDOWS`].
+    pub id: u8,
+    /// The window's picture, in pixels.
+    pub width: u16,
+    pub height: u16,
+    /// The density the app lays out at, in dots per inch.
+    pub dpi: u16,
+}
+
+/// The smallest and largest side a window may be asked at, in pixels.
+pub const MIN_WINDOW_SIDE: u16 = 240;
+pub const MAX_WINDOW_SIDE: u16 = 3840;
+/// The lowest and highest density a window may be asked at.
+pub const MIN_WINDOW_DPI: u16 = 120;
+pub const MAX_WINDOW_DPI: u16 = 640;
+
+impl WindowAsk {
+    /// A window of the usual phone shape: 720 by 1280 pixels at 320 dpi,
+    /// which lays an app out as on a 360 dp wide phone.
+    pub fn standard(id: u8) -> WindowAsk {
+        WindowAsk {
+            id,
+            width: 720,
+            height: 1280,
+            dpi: 320,
+        }
+    }
+
+    /// Whether the id is one a phone may use and the size and density are
+    /// within bounds.
+    pub fn is_sound(&self) -> bool {
+        crate::streaming::cast::valid_window(self.id)
+            && (MIN_WINDOW_SIDE..=MAX_WINDOW_SIDE).contains(&self.width)
+            && (MIN_WINDOW_SIDE..=MAX_WINDOW_SIDE).contains(&self.height)
+            && (MIN_WINDOW_DPI..=MAX_WINDOW_DPI).contains(&self.dpi)
+    }
+
+    /// The ask in an `open` body's `window`, if it has a sound one.
+    pub fn from_body(body: &serde_json::Value) -> Option<WindowAsk> {
+        serde_json::from_value::<WindowAsk>(body.get("window")?.clone())
+            .ok()
+            .filter(WindowAsk::is_sound)
+    }
+}
+
+/// The packet's body for an `open` ask that wants the app in a window of
+/// its own (Phone apps tier 2) and no screen of the phone's shown.
+pub fn open_window_body(app: &str, window: &WindowAsk) -> serde_json::Value {
+    let mut open = body(PhoneAction::Open, Some(app));
+    open["window"] = serde_json::to_value(window).unwrap_or_else(|_| json!({}));
+    open
+}
+
+/// What a phone says, in its list of apps, of opening them in windows of
+/// their own (Phone apps tier 2): `windows {on, max}`. Absent from a phone
+/// before it, and from one with the switch off or no Shizuku running, it
+/// means the phone does not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct WindowsMode {
+    pub on: bool,
+    #[serde(default)]
+    pub max: u8,
+}
+
+impl WindowsMode {
+    /// How many windows the phone takes at once: at most the cap, none when
+    /// it is off.
+    pub fn limit(&self) -> u8 {
+        if self.on {
+            self.max.min(crate::streaming::cast::MAX_WINDOWS)
+        } else {
+            0
+        }
+    }
+}
+
+/// The mode in a [`PHONE_APPS`] body, or off when it says none.
+pub fn parse_windows_mode(body: &serde_json::Value) -> WindowsMode {
+    body.get("windows")
+        .and_then(|w| serde_json::from_value::<WindowsMode>(w.clone()).ok())
+        .unwrap_or_default()
+}
+
+/// How an open goes from this computer (Phone apps tier 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenMode {
+    /// In app window `n`, the phone's screen left alone.
+    Window(u8),
+    /// As before: the app on the phone's own screen, shown here.
+    Screen,
+    /// The phone takes no more windows; this open waits for one to close.
+    AtLimit,
+}
+
+/// How an open is made: in a window when the phone said it takes windows
+/// and `setting` (this computer's own switch) is on, with the lowest id of
+/// those the phone takes that is not in `used`; else as before.
+pub fn open_mode(mode: Option<WindowsMode>, setting: bool, used: &[u8]) -> OpenMode {
+    let limit = mode.map_or(0, |m| m.limit());
+    if !setting || limit == 0 {
+        return OpenMode::Screen;
+    }
+    (1..=limit)
+        .find(|id| !used.contains(id))
+        .map_or(OpenMode::AtLimit, OpenMode::Window)
+}
+
 /// What came of an ask the phone answers with [`PHONE_APP_OPENED`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -254,11 +366,17 @@ pub enum AppResult {
     /// Apps part 2: the app in front takes no file of that type, so the
     /// file stays in Downloads.
     CannotTake,
+    /// Tier 2: the phone cannot open an app in a window of its own now (the
+    /// switch is off, Shizuku is not running or has not allowed it, or
+    /// Android refused a display); the computer opens it the ordinary way.
+    WindowsUnavailable,
+    /// Tier 2: the phone already has as many windows open as it takes.
+    WindowLimit,
 }
 
 impl AppResult {
     /// Every result.
-    pub const ALL: [AppResult; 15] = [
+    pub const ALL: [AppResult; 17] = [
         AppResult::Opened,
         AppResult::NeedsScreen,
         AppResult::ControlOff,
@@ -274,6 +392,8 @@ impl AppResult {
         AppResult::Shared,
         AppResult::NoApp,
         AppResult::CannotTake,
+        AppResult::WindowsUnavailable,
+        AppResult::WindowLimit,
     ];
 
     /// The word the packet carries.
@@ -294,6 +414,8 @@ impl AppResult {
             AppResult::Shared => "shared",
             AppResult::NoApp => "no_app",
             AppResult::CannotTake => "cannot_take",
+            AppResult::WindowsUnavailable => "windows_unavailable",
+            AppResult::WindowLimit => "window_limit",
         }
     }
 
@@ -314,6 +436,9 @@ pub struct AppReport {
     /// The file a `share` was about (Apps part 2).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Tier 2: the app window an `open` was for, when it was for one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<u8>,
     pub result: AppResult,
 }
 
@@ -338,10 +463,17 @@ impl AppReport {
             ("open", Some(_), None) | ("apps", None, None) | ("share", _, Some(_)) => {}
             _ => return None,
         }
+        // Only an open is for a window, and one that is a window's id.
+        let window = body
+            .get("window")
+            .and_then(|w| w.as_u64())
+            .and_then(|w| u8::try_from(w).ok())
+            .filter(|w| about == "open" && crate::streaming::cast::valid_window(*w));
         Some(AppReport {
             about: about.to_string(),
             app,
             name,
+            window,
             result,
         })
     }
@@ -575,6 +707,7 @@ mod tests {
                 about: "open".into(),
                 app: Some("org.example.app".into()),
                 name: None,
+                window: None,
                 result,
             };
             assert_eq!(AppReport::from_body(&report.to_body()), Some(report));
@@ -629,5 +762,144 @@ mod tests {
             "each once, no codes"
         );
         assert_eq!(contacts[1].numbers.len(), MAX_NUMBERS);
+    }
+
+    /// Phone apps tier 2: an open for a window carries a sound window, and one
+    /// that is not is not read.
+    #[test]
+    fn an_open_for_a_window_carries_a_sound_window() {
+        let ask = WindowAsk::standard(3);
+        let body = open_window_body("org.example.app", &ask);
+        assert_eq!(body["action"], "open");
+        assert_eq!(body["app"], "org.example.app");
+        assert!(body.get("screen").is_none(), "no screen of the phone's");
+        assert_eq!(WindowAsk::from_body(&body), Some(ask));
+        // The ordinary open names none.
+        assert_eq!(
+            WindowAsk::from_body(&open_body("org.example.app", true)),
+            None
+        );
+        for bad in [
+            WindowAsk { id: 0, ..ask },
+            WindowAsk {
+                id: crate::streaming::cast::MAX_WINDOWS + 1,
+                ..ask
+            },
+            WindowAsk {
+                width: MIN_WINDOW_SIDE - 1,
+                ..ask
+            },
+            WindowAsk {
+                height: MAX_WINDOW_SIDE + 1,
+                ..ask
+            },
+            WindowAsk {
+                dpi: MIN_WINDOW_DPI - 1,
+                ..ask
+            },
+            WindowAsk {
+                dpi: MAX_WINDOW_DPI + 1,
+                ..ask
+            },
+        ] {
+            assert!(!bad.is_sound(), "{bad:?}");
+            assert_eq!(
+                WindowAsk::from_body(&open_window_body("org.example.app", &bad)),
+                None
+            );
+        }
+        assert_eq!(WindowAsk::from_body(&json!({"window": "big"})), None);
+        assert_eq!(WindowAsk::from_body(&json!({"window": {"id": 1}})), None);
+    }
+
+    /// Phone apps tier 2: the phone's word on windows is read as it is said,
+    /// and a phone that says none takes none.
+    #[test]
+    fn the_phone_says_whether_it_takes_windows() {
+        let on = json!({"apps": [], "windows": {"on": true, "max": 4}});
+        assert_eq!(parse_windows_mode(&on), WindowsMode { on: true, max: 4 });
+        assert_eq!(parse_windows_mode(&on).limit(), 4);
+        let more = json!({"windows": {"on": true, "max": 200}});
+        assert_eq!(
+            parse_windows_mode(&more).limit(),
+            crate::streaming::cast::MAX_WINDOWS,
+            "never past the cap"
+        );
+        let off = json!({"windows": {"on": false, "max": 4}});
+        assert_eq!(parse_windows_mode(&off).limit(), 0);
+        assert_eq!(
+            parse_windows_mode(&json!({"apps": []})),
+            WindowsMode::default()
+        );
+        assert_eq!(
+            parse_windows_mode(&json!({"windows": 7})),
+            WindowsMode::default()
+        );
+        assert_eq!(
+            parse_windows_mode(&json!({"windows": {"on": true}})).limit(),
+            0
+        );
+    }
+
+    /// Phone apps tier 2: the mode an open goes in follows the phone's word, this
+    /// computer's own switch, and the windows already open.
+    #[test]
+    fn an_open_goes_in_a_window_only_when_both_say_so() {
+        let phone = Some(WindowsMode { on: true, max: 4 });
+        assert_eq!(open_mode(phone, true, &[]), OpenMode::Window(1));
+        assert_eq!(open_mode(phone, true, &[1, 2]), OpenMode::Window(3));
+        assert_eq!(
+            open_mode(phone, true, &[1, 3]),
+            OpenMode::Window(2),
+            "the lowest free"
+        );
+        assert_eq!(open_mode(phone, true, &[1, 2, 3, 4]), OpenMode::AtLimit);
+        let two = Some(WindowsMode { on: true, max: 2 });
+        assert_eq!(
+            open_mode(two, true, &[1, 2]),
+            OpenMode::AtLimit,
+            "the phone's own limit"
+        );
+        assert_eq!(
+            open_mode(phone, false, &[]),
+            OpenMode::Screen,
+            "this computer's switch is off"
+        );
+        assert_eq!(
+            open_mode(None, true, &[]),
+            OpenMode::Screen,
+            "a phone before windows"
+        );
+        let off = Some(WindowsMode { on: false, max: 4 });
+        assert_eq!(
+            open_mode(off, true, &[]),
+            OpenMode::Screen,
+            "the phone's switch is off"
+        );
+    }
+
+    /// Phone apps tier 2: a report of an open names its window, only an open does,
+    /// and the two new words read back.
+    #[test]
+    fn a_report_names_the_window_of_an_open() {
+        let report = AppReport {
+            about: "open".into(),
+            app: Some("org.example.app".into()),
+            name: None,
+            window: Some(2),
+            result: AppResult::WindowLimit,
+        };
+        assert_eq!(AppReport::from_body(&report.to_body()), Some(report));
+        for word in ["windows_unavailable", "window_limit"] {
+            assert!(AppResult::parse(word).is_some(), "{word}");
+        }
+        let past =
+            json!({"about": "open", "app": "org.example.app", "window": 9, "result": "opened"});
+        assert_eq!(AppReport::from_body(&past).unwrap().window, None);
+        let apps = json!({"about": "apps", "window": 2, "result": "off"});
+        assert_eq!(AppReport::from_body(&apps).unwrap().window, None);
+        // An older computer's report names none.
+        let old = json!({"about": "open", "app": "org.example.app", "result": "opened"});
+        assert_eq!(AppReport::from_body(&old).unwrap().window, None);
     }
 }

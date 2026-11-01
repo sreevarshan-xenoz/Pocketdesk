@@ -14,7 +14,7 @@ use eframe::egui::{self, RichText};
 use pocketdesk_core::local::phone_apps::{self as store, Outcome};
 use pocketdesk_core::local::phone_pins;
 use pocketdesk_core::protocol::permissions::Capability;
-use pocketdesk_core::protocol::phone_action::{AppResult, PhoneAction, PhoneApp};
+use pocketdesk_core::protocol::phone_action::{AppResult, PhoneAction, PhoneApp, WindowsMode};
 
 use crate::model::Device;
 
@@ -40,6 +40,8 @@ pub struct Opening {
     pub app: String,
     pub name: String,
     pub asked_at: u64,
+    /// The app window asked for (Phone apps tier 2), if it was for one.
+    pub window: Option<u8>,
 }
 
 /// What the page says of where things stand, and how to go on.
@@ -213,6 +215,12 @@ impl Status {
                 AppResult::TooMany => {
                     format!("{who} was asked too often. Wait a minute, then open {app} again.")
                 }
+                AppResult::WindowLimit => format!(
+                    "{who} already shows as many app windows as it takes: close one, then open {app} again."
+                ),
+                AppResult::WindowsUnavailable => format!(
+                    "{who} could not make a window for {app} (its \u{201c}Separate windows (Shizuku)\u{201d} is off, or Shizuku is not running there)."
+                ),
                 _ => format!("Android would not open {app} on {who}."),
             },
         }
@@ -334,6 +342,19 @@ pub struct AppsPage {
     raise: Option<String>,
     /// What the page said happened, until the app takes it.
     notice: Option<crate::notice::Notice>,
+    /// Settings: open apps in windows of their own when the phone offers
+    /// it (Phone apps tier 2). Set by the app before each pass.
+    pub windows_setting: bool,
+    /// The app windows in use (shown, or asked for), set by the app before
+    /// each pass.
+    pub used_windows: Vec<u8>,
+    /// What the phone shown said of windows with its list.
+    windows_mode: WindowsMode,
+    /// A window asked for by an open this pass: its id and the app's name,
+    /// until the app takes it.
+    asked_window: Option<(u8, String)>,
+    /// A window the phone did not make, until the app takes it.
+    released_window: Option<u8>,
 }
 
 impl AppsPage {
@@ -352,6 +373,7 @@ impl AppsPage {
         self.outcome = None;
         self.opening = None;
         self.acted = None;
+        self.windows_mode = WindowsMode::default();
         self.icons.clear();
         self.pinned.clear();
         self.read_at = None;
@@ -360,6 +382,27 @@ impl AppsPage {
     /// What the page said happened, for the app's one notice.
     pub fn take_notice(&mut self) -> Option<crate::notice::Notice> {
         self.notice.take()
+    }
+
+    /// A window an open asked for: its id and the app's name (Phone apps
+    /// tier 2), for the app to hold the id.
+    pub fn take_asked_window(&mut self) -> Option<(u8, String)> {
+        self.asked_window.take()
+    }
+
+    /// A window the phone did not make, which is free again.
+    pub fn take_released_window(&mut self) -> Option<u8> {
+        self.released_window.take()
+    }
+
+    /// How an open goes now, from what the phone said and this computer's
+    /// switch.
+    fn route(&self) -> crate::phone_windows::Route {
+        crate::phone_windows::Route {
+            mode: self.windows_mode,
+            setting: self.windows_setting,
+            used: self.used_windows.clone(),
+        }
     }
 
     /// Read what the phone said, once a second.
@@ -371,6 +414,7 @@ impl AppsPage {
         if let Some(list) = store::read(state_dir).remove(phone) {
             self.apps = list.apps;
             self.listed_at = Some(list.at);
+            self.windows_mode = list.windows;
         }
         self.outcome = store::read_results(state_dir).remove(phone);
         self.recents = store::read_recent(state_dir)
@@ -396,20 +440,41 @@ impl AppsPage {
         }
     }
 
-    /// Ask the phone to open `app` and show its screen here.
+    /// Ask the phone to open `app`: in a window of its own when the phone
+    /// offers it and this computer's switch is on (Phone apps tier 2), else
+    /// on its screen, shown here.
     fn open(&mut self, state_dir: &Path, phone: &str, app: &PhoneApp, now: u64) {
-        match pocketdesk_core::local::phone_actions::request_open_with_screen(
-            state_dir, phone, &app.id, true, now,
-        ) {
-            Ok(_) => {
+        self.open_by(state_dir, phone, app, now, &self.route());
+    }
+
+    fn open_by(
+        &mut self,
+        state_dir: &Path,
+        phone: &str,
+        app: &PhoneApp,
+        now: u64,
+        route: &crate::phone_windows::Route,
+    ) {
+        match crate::phone_windows::ask_open(state_dir, phone, &app.id, route, now) {
+            Ok(asked) => {
+                let window = match asked {
+                    crate::phone_windows::Asked::Window(id) => Some(id),
+                    crate::phone_windows::Asked::Screen => None,
+                };
+                if let Some(id) = window {
+                    self.asked_window = Some((id, app.name.clone()));
+                    // Held at once, so a second open this pass asks another.
+                    self.used_windows.push(id);
+                }
                 self.opening = Some(Opening {
                     app: app.id.clone(),
                     name: app.name.clone(),
                     asked_at: now,
+                    window,
                 });
             }
             Err(e) => {
-                self.notice = crate::notice::Notice::error(format!("Could not ask the phone: {e}"));
+                self.notice = crate::notice::Notice::error(e);
             }
         }
     }
@@ -477,9 +542,26 @@ impl AppsPage {
             AppResult::Opened => {
                 let _ = store::note_open(state_dir, phone, &open.app, now);
                 self.recents.insert(open.app.clone(), now);
-                self.raise = Some(phone.to_string());
+                // An app window comes up by itself; the phone's screen window
+                // is brought up only for an app on the phone's screen.
+                if open.window.is_none() {
+                    self.raise = Some(phone.to_string());
+                }
             }
             AppResult::NotListed => self.ask(state_dir, phone, now),
+            // The phone could not make a window (its switch went off, Shizuku
+            // stopped, Android refused a display): the app opens the ordinary
+            // way, and the phone's word is not asked about again.
+            AppResult::WindowsUnavailable | AppResult::WindowLimit if open.window.is_some() => {
+                self.released_window = open.window;
+                if outcome.report.result == AppResult::WindowsUnavailable {
+                    self.windows_mode = WindowsMode::default();
+                    let route = self.route();
+                    if let Some(app) = self.apps.iter().find(|a| a.id == open.app).cloned() {
+                        self.open_by(state_dir, phone, &app, now, &route);
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -557,6 +639,16 @@ impl AppsPage {
         let allowed = device.is_some_and(|d| d.permissions.allows(Capability::PhoneActions));
         let linked = device.is_some_and(|d| d.linked);
         ui.ctx().request_repaint_after(READ_EVERY);
+        // Phone apps tier 2: how an app opens, in a window or on the phone.
+        ui.label(
+            RichText::new(crate::phone_windows::mode_words(
+                self.windows_mode,
+                self.windows_setting,
+                self.used_windows.len(),
+            ))
+            .small()
+            .color(crate::theme::muted(ui)),
+        );
         self.refresh(state_dir, &phone);
         self.act_on_result(state_dir, &phone, now);
         // Asked as the page first shows for a phone that can be asked.
@@ -1011,6 +1103,7 @@ mod tests {
                 about: about.into(),
                 app: app.map(str::to_string),
                 name: None,
+                window: None,
                 result,
             },
             at,
@@ -1032,6 +1125,7 @@ mod tests {
 
     fn opening() -> Opening {
         Opening {
+            window: None,
             app: "org.example.app".into(),
             name: "Example".into(),
             asked_at: 100,

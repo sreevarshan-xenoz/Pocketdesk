@@ -12,7 +12,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::protocol::phone_action::{AppReport, AppResult, PhoneApp};
+use crate::protocol::phone_action::{AppReport, AppResult, PhoneApp, WindowsMode};
 
 use super::paths::{PHONE_APP_RESULTS_FILE, PHONE_APPS_RECENT_FILE};
 
@@ -27,6 +27,10 @@ pub const MAX_RECENT: usize = 50;
 pub struct AppList {
     pub apps: Vec<PhoneApp>,
     pub at: u64,
+    /// Whether the phone opens apps in windows of their own (Phone apps
+    /// tier 2), as it said with this list; off from a phone that says none.
+    #[serde(default)]
+    pub windows: WindowsMode,
 }
 
 /// Every phone's list; none when the file is missing or unreadable.
@@ -52,9 +56,22 @@ pub fn keep(
     at: u64,
     keep: &dyn Fn(&str) -> bool,
 ) -> io::Result<()> {
+    keep_with_windows(state_dir, device_id, apps, at, WindowsMode::default(), keep)
+}
+
+/// [`keep`], with what the phone said of opening apps in windows of their
+/// own (Phone apps tier 2).
+pub fn keep_with_windows(
+    state_dir: &Path,
+    device_id: &str,
+    apps: Vec<PhoneApp>,
+    at: u64,
+    windows: WindowsMode,
+    keep: &dyn Fn(&str) -> bool,
+) -> io::Result<()> {
     let mut all = read(state_dir);
     all.retain(|id, _| keep(id));
-    all.insert(device_id.to_string(), AppList { apps, at });
+    all.insert(device_id.to_string(), AppList { apps, at, windows });
     let json = serde_json::to_string(&all).map_err(io::Error::other)?;
     write_json(&state_dir.join(PHONE_APPS_FILE), &json)
 }
@@ -165,9 +182,36 @@ mod tests {
             all["phone-a"],
             AppList {
                 apps: vec![app],
-                at: 2
+                at: 2,
+                windows: WindowsMode::default()
             }
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phone apps tier 2: what the phone said of windows is kept with its list,
+    /// and a list kept before it reads as the phone taking none.
+    #[test]
+    fn a_phone_s_word_on_windows_is_kept_with_its_list() {
+        let dir = dir("windows");
+        keep_with_windows(
+            &dir,
+            "phone-a",
+            Vec::new(),
+            3,
+            WindowsMode { on: true, max: 4 },
+            &|_| true,
+        )
+        .unwrap();
+        assert_eq!(read(&dir)["phone-a"].windows.limit(), 4);
+        keep(&dir, "phone-a", Vec::new(), 4, &|_| true).unwrap();
+        assert_eq!(
+            read(&dir)["phone-a"].windows.limit(),
+            0,
+            "a newer list says none"
+        );
+        std::fs::write(dir.join(PHONE_APPS_FILE), r#"{"p":{"apps":[],"at":4}}"#).unwrap();
+        assert_eq!(read(&dir)["p"].windows, WindowsMode::default());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -193,6 +237,7 @@ mod tests {
             about: "open".into(),
             app: Some("org.example.app".into()),
             name: None,
+            window: None,
             result: AppResult::Locked,
         };
         keep_result(&dir, "old", report.clone(), 1, &|_| true).unwrap();

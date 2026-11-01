@@ -271,8 +271,15 @@ pub async fn run_phone_actions() {
                 (pocketdesk_core::protocol::phone_action::PhoneAction::Apps, _) => apps_body(
                     &pocketdesk_core::local::phone_app_icons::have(&dir, &ask.device_id),
                 ),
+                // Phone apps tier 2: an open for a window of its own asks for no
+                // screen of the phone's.
                 (pocketdesk_core::protocol::phone_action::PhoneAction::Open, Some(app)) => {
-                    open_body(app, ask.screen)
+                    match &ask.window {
+                        Some(window) => {
+                            pocketdesk_core::protocol::phone_action::open_window_body(app, window)
+                        }
+                        None => open_body(app, ask.screen),
+                    }
                 }
                 // Apps part 2: the file being sent, to be shared into the app in front.
                 (pocketdesk_core::protocol::phone_action::PhoneAction::Share, _) => {

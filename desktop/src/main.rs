@@ -30,6 +30,7 @@ mod nv12;
 mod pair_view;
 mod phone_files_view;
 mod phone_open;
+mod phone_windows;
 mod photos_view;
 mod pick_file;
 mod restart;

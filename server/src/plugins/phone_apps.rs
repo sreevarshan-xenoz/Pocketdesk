@@ -83,17 +83,21 @@ impl Plugin for PhoneAppsPlugin {
         };
         if kind == PHONE_APPS {
             let apps = parse_apps(&packet.body);
+            // Phone apps tier 2: whether the phone opens apps in windows of
+            // its own, as it said with this list.
+            let windows = pocketdesk_core::protocol::phone_action::parse_windows_mode(&packet.body);
             let count = apps.len();
             // Off the runtime: a read and a write of a small file.
             let kept = tokio::task::spawn_blocking(move || {
                 let _one = WRITING.lock().unwrap_or_else(|e| e.into_inner());
                 let versions = apps.iter().map(|a| (a.id.clone(), a.version)).collect();
                 pocketdesk_core::local::phone_app_icons::forget_unlisted(&dir, &device, &versions);
-                pocketdesk_core::local::phone_apps::keep(
+                pocketdesk_core::local::phone_apps::keep_with_windows(
                     &dir,
                     &device,
                     apps,
                     pocketdesk_core::local::pin::now_unix(),
+                    windows,
                     &|id| crate::plugins::pair::is_paired_device(id),
                 )
             })

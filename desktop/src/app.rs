@@ -512,6 +512,8 @@ pub struct PocketdeskApp {
     /// A phone's app asked for by a pinned shortcut or a notification, and
     /// the phone's word on it (Apps part 2).
     phone_open: crate::phone_open::OpenWatch,
+    /// Phone apps tier 2: each app opened in a window of its own.
+    phone_windows: crate::phone_windows::Windows,
     /// A "Choose file…" dialog that is open.
     picking: Option<std::thread::JoinHandle<Option<PathBuf>>>,
     /// The Diagnostics tab (F10).
@@ -615,6 +617,7 @@ impl PocketdeskApp {
             overview_link_focus: false,
             apps_page: Default::default(),
             phone_open: Default::default(),
+            phone_windows: Default::default(),
             picking: None,
             diagnostics: Default::default(),
             messages: Default::default(),
@@ -1109,11 +1112,27 @@ impl PocketdeskApp {
         let who = crate::model::device_label(&self.snapshot.devices, phone);
         let list = pocketdesk_core::local::phone_apps::read(&self.state_dir).remove(phone);
         let device = self.snapshot.devices.iter().find(|d| d.id == phone);
+        // Phone apps tier 2: in a window of its own when the phone offers it.
+        let route = crate::phone_windows::Route {
+            mode: list.as_ref().map(|l| l.windows).unwrap_or_default(),
+            setting: self.config.as_ref().is_none_or(|c| c.phone_app_windows),
+            used: self.phone_windows.used(),
+        };
         let started = crate::phone_open::check(device, list.as_ref(), app, &who).and_then(|name| {
+            let ask = crate::phone_open::OpenAsk {
+                phone,
+                who: &who,
+                app,
+                name: &name,
+            };
             self.phone_open
-                .start(&self.state_dir, phone, &who, app, &name, now_unix())
-                .map(|()| name)
+                .start(&self.state_dir, &ask, &route, now_unix())
+                .map(|window| (name, window))
         });
+        if let Ok((name, Some(id))) = &started {
+            self.phone_windows.reserve(*id, name);
+        }
+        let started = started.map(|(name, _)| name);
         self.notice = match started {
             Ok(name) => {
                 crate::notice::Notice::working(format!("Asking {who} to open {name}\u{2026}"))
@@ -1129,6 +1148,9 @@ impl PocketdeskApp {
             return;
         }
         let done = self.phone_open.tick(&self.state_dir, now_unix());
+        if let Some(id) = done.released {
+            self.phone_windows.release(id);
+        }
         if let Some(notice) = done.notice {
             self.notice = Some(notice);
         }
@@ -1606,9 +1628,20 @@ impl PocketdeskApp {
             Tab::Apps => {
                 let ctx = ui.ctx().clone();
                 self.apps_page.pins_off = self.config.as_ref().is_some_and(|c| !c.phone_apps_pin);
+                self.apps_page.windows_setting =
+                    self.config.as_ref().is_none_or(|c| c.phone_app_windows);
+                self.apps_page.used_windows = self.phone_windows.used();
                 let action =
                     self.apps_page
                         .show(ui, &self.state_dir, &self.snapshot.devices, now_unix());
+                // Phone apps tier 2: the window an open asked for is held, and
+                // one the phone did not make is let go.
+                if let Some((id, name)) = self.apps_page.take_asked_window() {
+                    self.phone_windows.reserve(id, &name);
+                }
+                if let Some(id) = self.apps_page.take_released_window() {
+                    self.phone_windows.release(id);
+                }
                 match action {
                     Some(crate::apps_view::Action::Go(tab)) => self.switch_to(tab),
                     // An app opened: the phone's screen window, brought up.
@@ -4639,6 +4672,16 @@ impl eframe::App for PocketdeskApp {
                 model::send_target_ids(&self.snapshot),
                 self.config.as_ref().is_none_or(|c| c.phone_drop_share),
             );
+        // Phone apps tier 2: a window for each app the phone shows in one.
+        self.phone_windows.tick(ctx, &self.state_dir);
+        self.phone_windows.show(
+            ctx,
+            &self.snapshot.devices,
+            self.config.as_ref().is_none_or(|c| c.cast_control),
+        );
+        if self.phone_windows.busy() {
+            ctx.request_repaint_after(Duration::from_millis(500));
+        }
         // BK7: another computer's screen, while its window is open.
         if let Some(view) = &self.computer_view {
             view.show(ctx);
