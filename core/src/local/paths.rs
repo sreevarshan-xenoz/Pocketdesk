@@ -131,6 +131,12 @@ pub const PERMISSION_PROFILES_FILE: &str = "permission_profiles.json";
 pub const PAUSE_FILE: &str = "pause.json";
 /// The icons and pictures phones' notifications bring (K3).
 pub const NOTIFICATION_ICONS_DIR: &str = "notification_icons";
+/// The icons of the phones' apps (Apps part 1), a folder for each phone, owner-only.
+pub const PHONE_APP_ICONS_DIR: &str = "phone_app_icons";
+/// Each phone's last word on an apps list or an open (Apps part 1), written by the server.
+pub const PHONE_APP_RESULTS_FILE: &str = "phone_app_results.json";
+/// The apps this computer opened on each phone, last first (Apps part 1), written by the desktop app.
+pub const PHONE_APPS_RECENT_FILE: &str = "phone_apps_recent.json";
 /// Each phone's last media report (T8d), written by the server.
 pub const PHONE_MEDIA_FILE: &str = "phone_media.json";
 /// The phones' ongoing updates shown here (N4), owner-only.
