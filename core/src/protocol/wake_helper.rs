@@ -85,11 +85,13 @@ pub fn key_form(key: &str) -> String {
     key.to_ascii_lowercase()
 }
 
-/// A relay URL as the packets carry it: short, printable ASCII, `http` or
-/// `https`. (iroh reads it again before it is used.)
+/// A relay URL as the packets carry it: short, printable ASCII, `https`
+/// only (the helper runs on n0's relays, and a plain `http` one is no road
+/// an owner phone should be sent down). iroh reads it again before it is
+/// used.
 fn relay_reads(url: &str) -> bool {
     url.len() <= MAX_FIELD
-        && (url.starts_with("https://") || url.starts_with("http://"))
+        && url.starts_with("https://")
         && url.bytes().all(|b| b.is_ascii_graphic())
 }
 
@@ -205,6 +207,13 @@ pub enum DutyMessage {
     Refused {
         computer: String,
     },
+    /// The computer cannot give this helper a duty now (it is on no network
+    /// of the computer's, or only on a tunnel): the helper drops what it
+    /// held for that computer, so a requester revoked meanwhile is not left
+    /// served. A later duty replaces this.
+    Withdrawn {
+        computer: String,
+    },
 }
 
 impl DutyMessage {
@@ -217,6 +226,9 @@ impl DutyMessage {
                 "requesters": d.requesters,
             }),
             DutyMessage::Refused { computer } => json!({ "computer": computer, "refused": true }),
+            DutyMessage::Withdrawn { computer } => {
+                json!({ "computer": computer, "withdrawn": true })
+            }
         }
     }
 
@@ -229,6 +241,11 @@ impl DutyMessage {
         }
         if body.get("refused").and_then(Value::as_bool) == Some(true) {
             return Some(DutyMessage::Refused {
+                computer: computer.to_string(),
+            });
+        }
+        if body.get("withdrawn").and_then(Value::as_bool) == Some(true) {
+            return Some(DutyMessage::Withdrawn {
                 computer: computer.to_string(),
             });
         }
@@ -636,7 +653,9 @@ mod tests {
         let many = json!({ "on": true, "iroh": KEY_A, "relays": vec!["https://a/"; 5] });
         assert!(Offer::parse(&many).is_none(), "too many relays");
         let odd = json!({ "on": true, "iroh": KEY_A, "relays": ["ftp://x/"] });
-        assert!(Offer::parse(&odd).is_none(), "not an http relay");
+        assert!(Offer::parse(&odd).is_none(), "not an https relay");
+        let plain = json!({ "on": true, "iroh": KEY_A, "relays": ["http://relay.example.com/"] });
+        assert!(Offer::parse(&plain).is_none(), "plain http is refused");
         let upper = Offer::parse(&json!({ "on": true, "iroh": KEY_A.to_uppercase() })).unwrap();
         assert_eq!(upper.iroh, KEY_A, "keys compare in one spelling");
     }
@@ -649,6 +668,10 @@ mod tests {
             computer: "computer-1".to_string(),
         };
         assert_eq!(DutyMessage::parse(&refused.body()), Some(refused));
+        let withdrawn = DutyMessage::Withdrawn {
+            computer: "computer-1".to_string(),
+        };
+        assert_eq!(DutyMessage::parse(&withdrawn.body()), Some(withdrawn));
         let mut body = DutyMessage::Duty(duty("computer-1", &[KEY_A])).body();
         body["mac"] = "00:00:00:00:00:00".into();
         assert!(DutyMessage::parse(&body).is_none(), "an all-zero MAC");

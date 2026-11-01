@@ -45,6 +45,11 @@ use serde_json::Value;
 /// How often what each phone was told is checked against what is true now.
 const TICK: Duration = Duration::from_secs(15);
 
+/// What each phone was told is told again this often even when it did not
+/// change: the helper drops a duty it has not heard for a week, and a
+/// connection can outlive that.
+const REFRESH: Duration = Duration::from_secs(60 * 60);
+
 /// At most this many offers a minute are taken from one phone: it offers on
 /// start, on a change and every few minutes, so more is not an offer.
 const OFFERS_PER_MINUTE: usize = 6;
@@ -170,14 +175,33 @@ pub(crate) fn packet_for(
     let helper = snap.helper.as_ref();
     if helper.is_some_and(|h| h.device_id == device) {
         let helper = helper?;
-        let peer = match peer? {
-            IpAddr::V4(v4) => v4,
-            IpAddr::V6(v6) => v6.to_ipv4_mapped()?,
+        // No duty can be worked out (the helper is on none of this
+        // computer's networks, or only a tunnel): it is told so, so what it
+        // held, requesters included, is dropped rather than left to serve
+        // a phone that was revoked meanwhile.
+        let withdrawn = || {
+            let message = DutyMessage::Withdrawn {
+                computer: snap.me.clone(),
+            };
+            Some(NetworkPacket::new(DUTY).with_body(message.body()))
         };
-        let facts = facts_for_peer(&adapters(), peer)?;
+        let peer = match peer {
+            Some(IpAddr::V4(v4)) => Some(v4),
+            Some(IpAddr::V6(v6)) => v6.to_ipv4_mapped(),
+            None => None,
+        };
+        let Some(peer) = peer else {
+            return withdrawn();
+        };
+        let Some(facts) = facts_for_peer(&adapters(), peer) else {
+            return withdrawn();
+        };
+        let Some(mac) = parse_mac(&facts.mac) else {
+            return withdrawn();
+        };
         let duty = Duty {
             computer: snap.me.clone(),
-            mac: parse_mac(&facts.mac)?,
+            mac,
             broadcast: facts.broadcast,
             requesters: requesters(snap, &helper.device_id),
         };
@@ -210,7 +234,7 @@ fn peer_ip(sender: &dyn DeviceSender) -> Option<IpAddr> {
 
 /// Daemon task: keep each owner phone, and the helper, told what is true.
 pub async fn run_watcher() {
-    let mut told: HashMap<String, u64> = HashMap::new();
+    let mut told: HashMap<String, (u64, Instant)> = HashMap::new();
     loop {
         tokio::select! {
             () = NUDGE.notified() => {}
@@ -221,7 +245,7 @@ pub async fn run_watcher() {
 }
 
 /// One pass: tell each connection what changed since it was last told.
-pub(crate) async fn tick(told: &mut HashMap<String, u64>) {
+pub(crate) async fn tick(told: &mut HashMap<String, (u64, Instant)>) {
     let clients = crate::state::clone_clients().await;
     let live: HashSet<String> = clients
         .iter()
@@ -260,11 +284,15 @@ pub(crate) async fn tick(told: &mut HashMap<String, u64>) {
             continue;
         };
         let hash = hash_of(&packet.body);
-        if told.get(client.connection_id()) == Some(&hash) {
+        let now = Instant::now();
+        if told
+            .get(client.connection_id())
+            .is_some_and(|(told_hash, at)| *told_hash == hash && now.duration_since(*at) < REFRESH)
+        {
             continue;
         }
         if client.send_packet(&packet).await.is_ok() {
-            told.insert(client.connection_id().to_string(), hash);
+            told.insert(client.connection_id().to_string(), (hash, now));
         }
     }
 }
@@ -463,23 +491,40 @@ mod tests {
         assert_eq!(duty.requesters, vec![OWNER_KEY.to_string()]);
     }
 
+    /// A helper that is on none of this computer's networks (the internet,
+    /// a tunnel) has no broadcast to be given: it is told its duty is
+    /// withdrawn, so the requesters it held are dropped, and never a duty.
     #[test]
-    fn a_helper_off_the_computers_networks_is_told_no_duty() {
-        // Over the internet, or from a tunnel: no network of this computer's
-        // holds it, so there is no broadcast to give.
-        for peer in ["203.0.113.9", "100.64.0.9", "127.0.0.1"] {
-            assert!(
-                packet_for(
-                    &snap(),
-                    "helper-phone",
-                    Some(peer.parse().unwrap()),
-                    &adapters
-                )
-                .is_none(),
-                "{peer}"
-            );
+    fn a_helper_off_the_computers_networks_has_its_duty_withdrawn() {
+        let withdrawn = |peer: Option<&str>| {
+            let packet = packet_for(
+                &snap(),
+                "helper-phone",
+                peer.map(|p| p.parse().unwrap()),
+                &adapters,
+            )
+            .expect("it is told something");
+            assert_eq!(packet.packet_type, DUTY);
+            matches!(
+                DutyMessage::parse(&packet.body),
+                Some(DutyMessage::Withdrawn { computer }) if computer == "computer-1"
+            )
+        };
+        for peer in ["203.0.113.9", "198.51.100.9", "127.0.0.1"] {
+            assert!(withdrawn(Some(peer)), "{peer}");
         }
-        assert!(packet_for(&snap(), "helper-phone", None, &adapters).is_none());
+        assert!(withdrawn(None));
+        // Nothing of the withdrawal carries a MAC, an address or a key.
+        let packet = packet_for(&snap(), "helper-phone", None, &adapters).unwrap();
+        assert_eq!(
+            packet.body,
+            serde_json::json!({ "computer": "computer-1", "withdrawn": true })
+        );
+    }
+
+    #[test]
+    fn a_duty_is_told_again_in_the_hour_so_the_helper_does_not_drop_it() {
+        assert!(REFRESH <= Duration::from_secs(60 * 60));
     }
 
     #[test]

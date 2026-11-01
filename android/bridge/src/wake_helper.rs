@@ -232,6 +232,23 @@ mod tests {
     }
 
     #[test]
+    fn a_withdrawn_duty_reaches_the_app_and_is_no_duty() {
+        let _globals = crate::api::TRANSFER_TEST_LOCK.blocking_lock();
+        take_json();
+        let withdrawn = json!({ "computer": "computer-1", "withdrawn": true });
+        receive(DUTY, &withdrawn, "192.0.2.7", 1716);
+        let taken: Vec<Value> = serde_json::from_str(&take_json()).unwrap();
+        assert_eq!(taken.len(), 1);
+        assert_eq!(taken[0]["body"]["withdrawn"], true);
+        // Set among the duties it holds nothing: a requester the helper held
+        // is dropped with the rest.
+        let list = json!([duty_body("computer-1")]);
+        assert_eq!(set_duties(&list.to_string()), Ok(1));
+        assert_eq!(set_duties(&json!([withdrawn]).to_string()), Ok(0));
+        assert!(!STATE.duties.lock().unwrap().knows(KEY));
+    }
+
+    #[test]
     fn a_body_that_does_not_read_never_reaches_the_app() {
         let _globals = crate::api::TRANSFER_TEST_LOCK.blocking_lock();
         take_json();
