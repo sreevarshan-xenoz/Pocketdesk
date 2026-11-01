@@ -255,17 +255,19 @@ mod tests {
 
     #[test]
     fn a_phone_on_the_computers_network_is_woken_on_that_adapter() {
-        let adapters = [wifi(), ethernet(), tunnel()];
-        let facts = facts_for_peer(&adapters, Ipv4Addr::new(192, 168, 1, 77)).unwrap();
+        let mut home = ethernet();
+        home.ipv4 = vec![(Ipv4Addr::new(192, 0, 2, 20), 24)];
+        let adapters = [wifi(), home, tunnel()];
+        let facts = facts_for_peer(&adapters, Ipv4Addr::new(192, 0, 2, 77)).unwrap();
         assert_eq!(facts.adapter, "Ethernet");
-        assert_eq!(facts.broadcast, Ipv4Addr::new(192, 168, 1, 255));
+        assert_eq!(facts.broadcast, Ipv4Addr::new(192, 0, 2, 255));
         // The internet, a tunnel's own network and a stranger's are none.
         assert_eq!(
             facts_for_peer(&adapters, Ipv4Addr::new(203, 0, 113, 5)),
             None
         );
         assert_eq!(
-            facts_for_peer(&adapters, Ipv4Addr::new(100, 64, 0, 3)),
+            facts_for_peer(&adapters, Ipv4Addr::new(198, 51, 100, 3)),
             None
         );
         assert_eq!(facts_for_peer(&adapters, Ipv4Addr::LOCALHOST), None);
