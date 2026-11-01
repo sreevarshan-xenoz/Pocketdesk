@@ -46,6 +46,12 @@ object AppOpenRule {
         /** The screen is not shown there yet: offer it once, then start. */
         SHOW_SCREEN_FIRST,
 
+        /**
+         * Hands-free: the screen share was paused when this computer left:
+         * resume it with the consent already given, then start.
+         */
+        RESUME,
+
         /** Pocketdesk's control service is off, and the computer asked for it. */
         CONTROL_OFF,
 
@@ -57,13 +63,15 @@ object AppOpenRule {
      * How an open that [PhoneActionRule] allowed goes. [screenWanted]: the
      * computer asked for the phone's screen too; [service]: the control
      * service is bound; [casting]: the screen is already shown to that
-     * computer, so it is reused and no new consent is asked.
+     * computer, so it is reused and no new consent is asked; [paused]: a
+     * share paused for that very computer is kept, so it resumes the same way.
      */
-    fun plan(screenWanted: Boolean, service: Boolean, casting: Boolean): Plan = when {
+    fun plan(screenWanted: Boolean, service: Boolean, casting: Boolean, paused: Boolean = false): Plan = when {
         !screenWanted -> Plan.TAP
         !service -> Plan.CONTROL_OFF
-        !casting -> Plan.SHOW_SCREEN_FIRST
-        else -> Plan.START
+        casting -> Plan.START
+        paused -> Plan.RESUME
+        else -> Plan.SHOW_SCREEN_FIRST
     }
 
     /** The body of the report to the computer: `{about, app?, result}`. */

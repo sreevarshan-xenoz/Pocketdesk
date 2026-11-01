@@ -736,6 +736,7 @@
     <string name="cast_connecting">Conectando con %1$s…</string>
     <string name="cast_waiting">Esperando a que %1$s lo permita…</string>
     <string name="cast_showing">La pantalla de este teléfono se muestra en %1$s</string>
+    <string name="cast_paused">En pausa: tu pantalla se comparte de nuevo, sin nueva pregunta, cuando %1$s lo pida. Termina en %2$d min, o toca Detener</string>
     <string name="cast_stop">Detener</string>
     <string name="cast_stopped">La pantalla de este teléfono ya no se muestra</string>
     <string name="cast_failed">No se pudo mostrar la pantalla en %1$s: %2$s</string>

@@ -88,6 +88,31 @@ class CastService : Service() {
         var screenTo: String? = null
             private set
 
+        /**
+         * The computer whose screen share is paused, null when none
+         * (Hands-free): the owner's consent and the projection are kept for
+         * [CastPauseRule.PAUSE_MS], with nothing captured, so that computer's
+         * next ask resumes with no new question. Never for another computer.
+         */
+        @Volatile
+        var pausedFor: String? = null
+            private set
+
+        @Volatile
+        private var current: CastService? = null
+
+        /**
+         * Resume the paused screen share to [address] (Hands-free), when
+         * [CastPauseRule.mayResume] says so: true when a resume was begun
+         * (the cast is up when [screenTo] names the computer), false when
+         * nothing is paused for it or it may not.
+         */
+        fun resume(context: Context, address: String, port: Int): Boolean {
+            val service = current ?: return false
+            val own = dev.pocketdesk.android.notify.PhoneLink.target(context)?.address == address
+            return service.resumeFor(address, port, Prefs.appsFromComputer(context), own)
+        }
+
         /** Whether the camera is the computer's camera now (F6 part 2). */
         @Volatile
         var webcamRunning: Boolean = false
@@ -188,11 +213,37 @@ class CastService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        current = this
+    }
+
+    /** Hands-free: the screen share is paused, its projection and display kept. */
+    @Volatile
+    private var paused = false
+    private var pausedAt = 0L
+
+    /** A resumed session not yet admitted: its failure pauses again instead of ending the cast. */
+    @Volatile
+    private var resuming = false
+
+    /** Ends a pause that ran out. */
+    private val pauseExpiry = Runnable {
+        if (paused && !finished) {
+            Log.i(TAG, "The paused screen share ran out: the capture is given back")
+            finish()
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             finish()
             return START_NOT_STICKY
         }
+        // A new consent while one is kept paused (for another computer, or the
+        // owner asked again): the old projection is given back first, and the
+        // new one starts as any cast does.
+        if (intent?.action == ACTION_START && paused && !finished) dropPause()
         // One cast at a time: a second start while one runs is ignored.
         if (intent?.action != ACTION_START || started || finished) {
             if (!started) stopSelf()
@@ -264,7 +315,12 @@ class CastService : Service() {
         started = true
         taken.registerCallback(
             object : MediaProjection.Callback() {
-                override fun onStop() = finish()
+                // Android ended it (the status bar's stop, or a lock): a
+                // paused cast ends with it. A projection given back on
+                // purpose (a dropped pause) is no longer this service's.
+                override fun onStop() {
+                    if (projection === taken) finish()
+                }
             },
             main,
         )
@@ -321,7 +377,7 @@ class CastService : Service() {
             }
         if (finished) return
         connected.exceptionOrNull()?.let {
-            fail(failed(plainErrorText(it.message)))
+            failOrPause(failed(plainErrorText(it.message)))
             return
         }
         update(getString(R.string.cast_waiting, shown))
@@ -337,7 +393,7 @@ class CastService : Service() {
             val replaced = cast == "none" && state != State.Connecting
             state = RemoteSession.next(state, cast, closed.takeUnless { replaced })
             if (state == State.Waiting && SystemClock.elapsedRealtime() - since > WAIT_MS) {
-                fail(failed(getString(R.string.cast_no_answer)))
+                failOrPause(failed(getString(R.string.cast_no_answer)))
                 return
             }
             // M7: the sound alone ended by itself (the capture or the
@@ -351,8 +407,20 @@ class CastService : Service() {
                     return fail(getString(if (soundAlone) R.string.phone_sound_too_old else R.string.cast_too_old, shown))
                 State.Down -> {
                     if (replaced) return finish()
+                    // Hands-free: the computer left a screen it was showing:
+                    // keep the owner's consent for a while instead of ending.
+                    if (CastPauseRule.pauses(
+                            screen = !camera && !soundAlone,
+                            shown = showing,
+                            appsOn = Prefs.appsFromComputer(this),
+                            ownComputer = dev.pocketdesk.android.notify.PhoneLink.target(this)?.address == address,
+                            closed = closed,
+                        )
+                    ) {
+                        return pause()
+                    }
                     if (!showing || closed != null && closed != "session ended") {
-                        return fail(failed(reasonText(closed)))
+                        return failOrPause(failed(reasonText(closed)))
                     }
                     return finish()
                 }
@@ -373,6 +441,7 @@ class CastService : Service() {
                         update(getString(R.string.phone_sound_playing, shown))
                     } else if (!showing) {
                         showing = true
+                        resuming = false
                         main.post(::startPicture)
                         startSound(castState)
                         update(
@@ -441,6 +510,14 @@ class CastService : Service() {
             return fail(getString(R.string.cast_failed, shown, plainErrorText(it.message)))
         }
         encoder = started
+        // Resumed after a pause: the display the first consent made is still
+        // here, so it is drawn into the new encoder (a second display from
+        // one projection is refused on Android 14).
+        display?.let { kept ->
+            kept.resize(width, height, dpi)
+            kept.surface = started.surface
+            return
+        }
         display =
             runCatching {
                 projection.createVirtualDisplay(
@@ -501,6 +578,111 @@ class CastService : Service() {
         Thread { old.release() }.start()
     }
 
+    /**
+     * Hands-free: the computer left a screen it was showing. The encoder, the
+     * computer's session, the phone's sound and control stop and the virtual
+     * display is detached from its surface, so nothing is captured; the
+     * projection and the display stay, and the notification stays up (with
+     * Stop), for [CastPauseRule.PAUSE_MS] at most. Called from the session's
+     * own thread.
+     */
+    private fun pause() {
+        if (finished || paused) return
+        Log.i(TAG, "The computer left: the screen share is paused for up to ${CastPauseRule.PAUSE_MS / 60_000L} minutes")
+        castingTo = null
+        screenTo = null
+        val capture = sound
+        sound = null
+        val runner = control
+        control = null
+        main.post {
+            if (finished) return@post
+            val coding = encoder
+            encoder = null
+            runner?.stop()
+            // Detached: the display draws into nothing, the projection stays.
+            runCatching { display?.surface = null }
+            paused = true
+            pausedAt = SystemClock.elapsedRealtime()
+            showPaused()
+            main.removeCallbacks(pauseExpiry)
+            main.postDelayed(pauseExpiry, CastPauseRule.PAUSE_MS)
+            Thread {
+                capture?.stop()
+                coding?.release()
+                runCatching { RustCore.stopCast() }
+                // Resumable only once the old session is gone.
+                if (!finished && paused) pausedFor = address
+            }.start()
+        }
+    }
+
+    /** The notification of a paused share: it says so, and when it ends, with Stop. */
+    private fun showPaused() {
+        val minutes = CastPauseRule.minutesLeft(pausedAt, SystemClock.elapsedRealtime())
+        update(getString(R.string.cast_paused, shown, minutes))
+    }
+
+    /**
+     * Resume a paused screen share to [to] (Hands-free), from any thread, if
+     * the rule says so. The same projection and display serve: no consent.
+     */
+    private fun resumeFor(to: String, port: Int, appsOn: Boolean, own: Boolean): Boolean {
+        val ok = CastPauseRule.mayResume(pausedFor, to, pausedAt, SystemClock.elapsedRealtime(), appsOn, own)
+        if (!ok || finished || !paused) return false
+        main.post {
+            if (finished || !paused || pausedFor != to) return@post
+            paused = false
+            pausedFor = null
+            resuming = true
+            main.removeCallbacks(pauseExpiry)
+            address = to
+            castingTo = to
+            screenTo = to
+            update(getString(R.string.cast_connecting, shown))
+            Thread({ run(port) }, "cast-session").start()
+        }
+        return true
+    }
+
+    /** A pause ended on purpose (a new consent came): the old projection is given back. */
+    private fun dropPause() {
+        main.removeCallbacks(pauseExpiry)
+        val shownDisplay = display
+        val taken = projection
+        display = null
+        projection = null
+        paused = false
+        pausedFor = null
+        started = false
+        shownDisplay?.release()
+        Thread { runCatching { taken?.stop() } }.start()
+    }
+
+    /** A failure before the computer admitted the cast: a resumed one pauses again, as long as time is left. */
+    private fun failOrPause(message: String) {
+        if (resuming && !finished && !CastPauseRule.expired(pausedAt, SystemClock.elapsedRealtime())) {
+            Log.i(TAG, "The resume did not reach the computer ($message): the pause goes on")
+            resuming = false
+            castingTo = null
+            screenTo = null
+            val remaining = CastPauseRule.PAUSE_MS - (SystemClock.elapsedRealtime() - pausedAt)
+            main.post {
+                if (finished) return@post
+                paused = true
+                showPaused()
+                main.removeCallbacks(pauseExpiry)
+                main.postDelayed(pauseExpiry, remaining.coerceAtLeast(0L))
+                Thread {
+                    runCatching { RustCore.stopCast() }
+                    if (!finished && paused) pausedFor = address
+                }.start()
+            }
+            return
+        }
+        fail(message)
+    }
+
     private fun fail(message: String) {
         Log.i(TAG, "The cast stopped: $message")
         if (!finished) {
@@ -516,6 +698,9 @@ class CastService : Service() {
         finished = true
         castingTo = null
         screenTo = null
+        pausedFor = null
+        paused = false
+        main.removeCallbacks(pauseExpiry)
         webcamRunning = false
         if (reached) HostStore.markUsed(this, address)
         // Its sound first, off the main thread (its stop waits for its
@@ -545,6 +730,7 @@ class CastService : Service() {
     }
 
     override fun onDestroy() {
+        if (current === this) current = null
         control?.stop()
         finish()
         super.onDestroy()

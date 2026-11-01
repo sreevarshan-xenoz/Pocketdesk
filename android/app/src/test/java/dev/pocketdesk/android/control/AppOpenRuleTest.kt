@@ -94,6 +94,18 @@ class AppOpenRuleTest {
     }
 
     @Test
+    fun `a share paused for the computer resumes, with no new consent`() {
+        // Paused for that computer and the screen wanted: resume.
+        assertEquals(AppOpenRule.Plan.RESUME, AppOpenRule.plan(true, service = true, casting = false, paused = true))
+        // A share that is up is reused first; with no service nothing resumes; without the screen asked for it is as before.
+        assertEquals(AppOpenRule.Plan.START, AppOpenRule.plan(true, service = true, casting = true, paused = true))
+        assertEquals(AppOpenRule.Plan.CONTROL_OFF, AppOpenRule.plan(true, service = false, casting = false, paused = true))
+        assertEquals(AppOpenRule.Plan.TAP, AppOpenRule.plan(false, service = true, casting = false, paused = true))
+        // Nothing paused: asked once, as before.
+        assertEquals(AppOpenRule.Plan.SHOW_SCREEN_FIRST, AppOpenRule.plan(true, service = true, casting = false, paused = false))
+    }
+
+    @Test
     fun `the report names the ask, the app for an open, and the result`() {
         val open = AppOpenRule.report("open", "org.example.app", AppOpenRule.LOCKED)
         assertEquals("open", open.getString("about"))

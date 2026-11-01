@@ -51,6 +51,13 @@ class ScreenForAppActivity : ComponentActivity() {
             finish()
             return
         }
+        if (CastService.resume(this, address, port)) {
+            // Paused when this computer left, kept for a while: resumed with
+            // the consent already given (Hands-free); no new question.
+            PhoneActions.openWhenShown(applicationContext, pkg, address, controlPort)
+            finish()
+            return
+        }
         if (CastService.castingTo != null) {
             // Another cast (the camera, or sound alone) runs: one at a time.
             finish()

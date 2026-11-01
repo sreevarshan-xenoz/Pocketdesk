@@ -739,6 +739,7 @@
     <string name="cast_connecting">Connecting to %1$s…</string>
     <string name="cast_waiting">Waiting for %1$s to allow it…</string>
     <string name="cast_showing">This phone\'s screen is shown on %1$s</string>
+    <string name="cast_paused">Paused: your screen is shared again, with no new question, when %1$s asks. Ends in %2$d min, or tap Stop</string>
     <string name="cast_stop">Stop</string>
     <string name="cast_stopped">This phone\'s screen is no longer shown</string>
     <string name="cast_failed">Could not show the screen on %1$s: %2$s</string>

@@ -730,6 +730,7 @@
     <string name="cast_connecting">%1$s உடன் இணைக்கிறது…</string>
     <string name="cast_waiting">%1$s அனுமதிக்கக் காத்திருக்கிறது…</string>
     <string name="cast_showing">இந்தத் தொலைபேசியின் திரை %1$s இல் காட்டப்படுகிறது</string>
+    <string name="cast_paused">இடைநிறுத்தம்: %1$s கேட்கும்போது புதிய கேள்வி இல்லாமல் உங்கள் திரை மீண்டும் பகிரப்படும். %2$d நிமிடத்தில் முடியும், அல்லது நிறுத்து எனத் தட்டவும்</string>
     <string name="cast_stop">நிறுத்து</string>
     <string name="cast_stopped">இந்தத் தொலைபேசியின் திரை இனி காட்டப்படவில்லை</string>
     <string name="cast_failed">%1$s இல் திரையைக் காட்ட முடியவில்லை: %2$s</string>

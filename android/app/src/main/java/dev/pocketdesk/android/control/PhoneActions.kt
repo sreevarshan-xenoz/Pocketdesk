@@ -250,7 +250,8 @@ object PhoneActions {
     private fun openAsked(context: Context, ask: RustCore.PhoneActionAsk, own: HostStore.Host?, service: Boolean) {
         if (own == null) return
         val casting = dev.pocketdesk.android.cast.CastService.screenTo == own.address
-        val result = when (AppOpenRule.plan(ask.screen, service, casting)) {
+        val paused = dev.pocketdesk.android.cast.CastService.pausedFor == own.address
+        val result = when (AppOpenRule.plan(ask.screen, service, casting, paused)) {
             AppOpenRule.Plan.TAP -> {
                 // As P2: at once with the service, else "Tap to open".
                 val done = open(context, ask.app, ask.host, service)
@@ -264,17 +265,30 @@ object PhoneActions {
             }
             AppOpenRule.Plan.CONTROL_OFF -> AppOpenRule.CONTROL_OFF
             // One consent for the connection: the owner is asked once, by a tap, and the app opens after.
-            AppOpenRule.Plan.SHOW_SCREEN_FIRST -> {
-                val pm = context.packageManager
-                val label = runCatching { pm.getApplicationLabel(pm.getApplicationInfo(ask.app, 0)).toString() }
-                    .getOrDefault(ask.app)
-                dev.pocketdesk.android.cast.ScreenForApp.offer(context, own, ask.app, label)
-                AppOpenRule.NEEDS_SCREEN
-            }
+            AppOpenRule.Plan.SHOW_SCREEN_FIRST -> showScreenFirst(context, ask, own)
             // The cast already shown is reused: no new consent.
             AppOpenRule.Plan.START -> launchFromService(context, ask.app)
+            // Hands-free: the share paused when this computer left resumes with the consent already
+            // given; the app opens when it is up (and the computer is told then). Not resumable now
+            // (it ran out, or the switch went off): asked for as if none was kept.
+            AppOpenRule.Plan.RESUME ->
+                if (dev.pocketdesk.android.cast.CastService.resume(context, own.address, own.port)) {
+                    openWhenShown(context.applicationContext, ask.app, own.address, own.controlPort)
+                    null
+                } else {
+                    showScreenFirst(context, ask, own)
+                }
         }
-        Thread { report(own.address, own.controlPort, "open", ask.app, result) }.start()
+        if (result != null) Thread { report(own.address, own.controlPort, "open", ask.app, result) }.start()
+    }
+
+    /** The owner is asked once, at the phone, for the screen; the computer is told so. */
+    private fun showScreenFirst(context: Context, ask: RustCore.PhoneActionAsk, own: HostStore.Host): String {
+        val pm = context.packageManager
+        val label = runCatching { pm.getApplicationLabel(pm.getApplicationInfo(ask.app, 0)).toString() }
+            .getOrDefault(ask.app)
+        dev.pocketdesk.android.cast.ScreenForApp.offer(context, own, ask.app, label)
+        return AppOpenRule.NEEDS_SCREEN
     }
 
     /** Take the asks waiting; [own] is the computer the phone works with. */
