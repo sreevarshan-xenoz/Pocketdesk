@@ -243,6 +243,13 @@ Notes:
   `-Ppocketdesk.abis=arm64-v8a,x86_64` to Gradle.
 - `./gradlew connectedDebugAndroidTest` uninstalls the app when it ends, which wipes
   the phone's pairings. Add `-Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true`.
+- The Wear OS app (`android/wear`: a tile, a complication and a short list) is its own
+  APK, installed on a watch over adb, never inside the phone's. `./gradlew assembleDebug`
+  builds it too; alone, `./gradlew :wear:assembleRelease` (about 1 MB). It needs no
+  bridge and no Rust. Its wire with the phone is the `watchlink` module, and
+  `./gradlew testDebugUnitTest` runs the tests of every module (CI does too). No Wear
+  OS emulator image is installed on this box: the real-watch checks are checklist
+  section 264.
 
 ### 5b. Device checks by script (N1)
 
