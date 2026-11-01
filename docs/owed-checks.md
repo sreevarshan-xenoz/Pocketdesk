@@ -148,7 +148,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The page lists the apps with their icons within a few seconds of opening, Pocketdesk itself left out; opening it again sends no icons (the phone's log says "0 of 0 app icons" or none), and after one app is updated (or its icon file deleted from the throwaway state folder) only that one comes. (where: OPPO)
 - "Let the computer open my apps" off on the phone: the page says the phone keeps its apps to itself and names the setting; turned on, "Ask again" lists them. A computer that is not the phone's own gets no word from it at all. (where: OPPO)
 
-**259. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
+**260. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
 
 - Add a folder: "Add a folder" opens Android's folder picker; no permission dialog about all files or storage appears, and the app lists the folder with "Not run yet". Adding the same folder twice makes one row. (where: OPPO)
 - "Run now": the files land under `<root>/<phone>/<folder>/` with the same paths; the Files page's Kept folders row shows the same count and total bytes as the test folder, and a hash of each file there equals the phone's (generate the files from a seed so both sides can be recomputed). (where: OPPO)
@@ -739,7 +739,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Texts turned off on Devices and the phone unpaired: the list forgotten.
 
-**259. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
+**260. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
 
 - The schedule: the job is queued with its constraints (`adb shell dumpsys jobscheduler` lists the app's WorkManager job needing an unmetered network and charging; with "Every few hours" the charging need goes); on mobile data with Wi-Fi off, nothing runs; plugged in on Wi-Fi it runs within the period, and on ColorOS 14 the transfer service's notification shows during the run and goes when it ends (or the run waits for the app to be opened or the notification listener's next look, which the log says). (where: OPPO)
 
@@ -1957,7 +1957,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Whether a background start by the control service itself works on the OPPO (ColorOS 14) and, if it can, on a phone with Android 15 or 16: the app starts from the service's own context with the phone's screen on another app. If it only appears behind, the fallback (N3's opt-in) is the next thing to try. (where: other hardware)
 
-**259. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
+**260. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
 
 - A computer that is too old (a throwaway built from before this change): the phone says the computer cannot keep folders yet and sends nothing; no copies appear in that computer's Downloads. (where: other hardware)
 
@@ -2818,6 +2818,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The phone locked (a secure lock) and asleep: "locked" and "unlock the phone once", then the same click works after the unlock. A swipe-only lock is also answered "locked" (it is not dismissed). (where: OPPO)
 - The page by hand on Windows and on Linux: the search narrows as it is typed, "Opened from here" shows the last apps in the order opened, the phone's name picker with two phones, the layout in a narrow window, and Settings' "Show the Phone apps page" off takes the page out of the list. (where: by hand)
 
-**259. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
+**260. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)**
 
 - The Files page's Kept folders section and the three Settings rows on the desktop (the folder box with Choose folder, the cap, the deletion switch) by hand on Windows and on Linux, light and dark, and in a narrow window; the Show in folder button opens the folder. (where: by hand)

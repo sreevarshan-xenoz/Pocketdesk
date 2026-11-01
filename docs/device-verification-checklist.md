@@ -3515,7 +3515,7 @@ Built 2026-11-01 over P2 (§194). The Phone apps page lists a linked phone's lau
 - [ ] Whether a background start by the control service itself works on the OPPO (ColorOS 14) and, if it can, on a phone with Android 15 or 16: the app starts from the service's own context with the phone's screen on another app. If it only appears behind, the fallback (N3's opt-in) is the next thing to try. (where: other hardware)
 - [ ] The page by hand on Windows and on Linux: the search narrows as it is typed, "Opened from here" shows the last apps in the order opened, the phone's name picker with two phones, the layout in a narrow window, and Settings' "Show the Phone apps page" off takes the page out of the list. (where: by hand)
 
-## 259. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)
+## 260. Phone folders kept on the computer, by themselves (Settings, Folders kept on my computer)
 
 A phone folder picked with Android's folder picker is copied one way to the computer on a schedule: new and changed files only, resumable and whole-file checked, into `<root>/<phone>/<folder>/` on the computer, deletions never unless two switches say so, all of it under a size cap. Run each of these against a throwaway server (a fresh state and config folder, `kept_folders_root` inside it) with a generated test folder on the phone (a few dozen small files and one of about 200 MB, names made up); read counts and hashes only, never file names or contents. Everything here is unverified on a device.
 
