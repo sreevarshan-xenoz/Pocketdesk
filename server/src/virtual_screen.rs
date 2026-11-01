@@ -893,14 +893,32 @@ pub async fn respond(device: &str, body: &serde_json::Value) -> serde_json::Valu
     };
     let reply = match slot {
         Some(slot) => {
-            let key = screen_key(device, slot);
-            tokio::task::spawn_blocking(move || answer(&key, &action, width, height))
+            let device = device.to_string();
+            tokio::task::spawn_blocking(move || {
+                let key = screen_key(&device, own_slot(slot, is_computer(&device)));
+                answer(&key, &action, width, height)
+            })
                 .await
                 .unwrap_or_else(|_| serde_json::json!({ "error": "the computer failed to answer" }))
         }
         None => serde_json::json!({ "error": "not a window" }),
     };
     said_with(body, reply)
+}
+
+/// The window a request is for: a computer's own `slot`, but always 0 for
+/// a phone, which has one screen and must not hold four (#609 review).
+fn own_slot(slot: u8, computer: bool) -> u8 {
+    if computer { slot } else { 0 }
+}
+
+/// Whether `device` is one of the owner's computers in the trust store; a
+/// store that cannot be read counts it a phone.
+fn is_computer(device: &str) -> bool {
+    crate::state::trust_store_path()
+        .ok()
+        .and_then(|path| pocketdesk_core::protocol::kdeconnect::TrustStore::read(path).ok())
+        .is_some_and(|store| store.is_computer(device))
 }
 
 /// What a request for the screen `key` comes to: `{name, index, width,
@@ -1017,6 +1035,13 @@ fn answer_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_phone_has_one_screen_whatever_slot_it_says() {
+        assert_eq!(own_slot(3, false), 0);
+        assert_eq!(own_slot(3, true), 3);
+        assert_eq!(own_slot(0, true), 0);
+    }
 
     fn output(name: &str, x: i32, width: i32) -> Output {
         Output {
