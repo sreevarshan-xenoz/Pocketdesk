@@ -18,6 +18,7 @@ pub mod computer_wake;
 pub mod config;
 pub mod conn_budget;
 pub mod crash_report;
+pub mod direct_link;
 pub mod done;
 pub(crate) mod drive;
 pub mod driving;
