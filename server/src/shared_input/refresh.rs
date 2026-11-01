@@ -31,8 +31,9 @@ const JOIN_WAIT: Duration = Duration::from_millis(300);
 /// read waits to be taken, stamped with when its read started.
 pub struct Refresher<T> {
     newest: Arc<Mutex<Option<(T, Instant)>>>,
-    /// When the last read that came back started (or when the reader
-    /// started, before the first).
+    /// When the last read came back (or when the reader started, before
+    /// the first): timed from its end, so steady slow reads (2.5 s on a
+    /// slow disk) never read as stale between them (as PR #595 learned).
     last: Arc<Mutex<Instant>>,
     /// Read again now ([`Refresher::ask`]); dropped, the thread ends after
     /// the read under way.
@@ -63,14 +64,23 @@ impl<T: Send + 'static> Refresher<T> {
                     let started = Instant::now();
                     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(&mut read)) {
                         Ok(value) => {
+                            // The value first: a loop that finds the reads
+                            // fresh again finds this read waiting.
                             *into.lock().unwrap_or_else(|e| e.into_inner()) =
                                 Some((value, started));
-                            *last_into.lock().unwrap_or_else(|e| e.into_inner()) = started;
+                            *last_into.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();
                         }
-                        Err(_) => tracing::warn!(
-                            reader = thread_name,
-                            "Shared input: a read for the driver failed; trying again"
-                        ),
+                        Err(panic) => {
+                            let why = panic
+                                .downcast_ref::<&str>()
+                                .map(|s| (*s).to_string())
+                                .or_else(|| panic.downcast_ref::<String>().cloned())
+                                .unwrap_or_else(|| "no message".to_string());
+                            tracing::warn!(
+                                reader = thread_name,
+                                "Shared input: a read for the driver failed ({why}); trying again"
+                            );
+                        }
                     }
                     match asked.recv_timeout(every) {
                         Ok(()) | Err(RecvTimeoutError::Timeout) => {
@@ -111,8 +121,8 @@ impl<T> Refresher<T> {
         }
     }
 
-    /// Whether a read that started within `within` came back (or the
-    /// reader started that recently).
+    /// Whether a read came back within `within` (or the reader started that
+    /// recently).
     pub fn fresh(&self, within: Duration) -> bool {
         self.last
             .lock()
@@ -130,14 +140,29 @@ impl<T> Refresher<T> {
 /// Whether what `reads` brings is too old to let through what only the
 /// driver checks: no reader, or no read back within [`STALE_AFTER`].
 pub fn stale<T>(reads: Option<&Refresher<T>>) -> bool {
-    reads.is_none_or(|reads| !reads.fresh(STALE_AFTER))
+    stale_after(reads, STALE_AFTER)
+}
+
+fn stale_after<T>(reads: Option<&Refresher<T>>, after: Duration) -> bool {
+    reads.is_none_or(|reads| !reads.fresh(after))
 }
 
 /// A loop's view of its reads: what came back since the last turn, and
 /// whether they went stale or fresh again (said once in the log each way).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Freshness {
     stale: bool,
+    /// [`STALE_AFTER`] (shorter in tests).
+    after: Duration,
+}
+
+impl Default for Freshness {
+    fn default() -> Freshness {
+        Freshness {
+            stale: false,
+            after: STALE_AFTER,
+        }
+    }
 }
 
 impl Freshness {
@@ -146,8 +171,12 @@ impl Freshness {
     /// came back, and whether anything changed that wants laying out now
     /// (a read, or the reads going stale or fresh).
     pub fn turn<T>(&mut self, reads: Option<&Refresher<T>>) -> (Option<T>, bool) {
+        // Staleness first, then the read: a reader that just came back
+        // stored its value before marking itself fresh, so reads found fresh
+        // here are taken in this same turn and the gates never reopen on
+        // the old read.
+        let stale_now = stale_after(reads, self.after);
         let read = reads.and_then(Refresher::take).map(|(value, _)| value);
-        let stale_now = stale(reads);
         let flipped = stale_now != self.stale;
         if flipped {
             self.stale = stale_now;
@@ -297,6 +326,64 @@ mod tests {
         assert_eq!(fresh.turn::<u32>(None), (None, true));
         assert!(fresh.stale());
         assert_eq!(fresh.turn::<u32>(None), (None, false));
+    }
+
+    /// Steady slow reads (2.5 s against a 5 s limit, scaled down here by
+    /// ten: 250 ms reads every 200 ms against 500 ms) never read as stale
+    /// between them: freshness counts from a read's end (review R2).
+    #[test]
+    fn steady_slow_reads_stay_fresh() {
+        let refresher = Refresher::start("test-refresh", Duration::from_millis(200), || {
+            std::thread::sleep(Duration::from_millis(250));
+        })
+        .unwrap();
+        wait_for(&refresher);
+        let until = Instant::now() + Duration::from_millis(1500);
+        while Instant::now() < until {
+            assert!(
+                refresher.fresh(Duration::from_millis(500)),
+                "between steady reads"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// Coming back from stale, the turn that finds the reads fresh again
+    /// also takes the read that made them fresh: no turn reopens the gates
+    /// on the old read (review R1).
+    #[test]
+    fn the_turn_that_turns_fresh_takes_the_new_read() {
+        let (release, hold) = mpsc::channel::<()>();
+        let hold = Mutex::new(hold);
+        let mut first = true;
+        let refresher = Refresher::start("test-refresh", Duration::from_millis(5), move || {
+            if std::mem::take(&mut first) {
+                // The first read hangs until the test lets it go.
+                let _ = hold.lock().unwrap().recv();
+            }
+            7u32
+        })
+        .unwrap();
+        let mut fresh = Freshness {
+            stale: false,
+            after: Duration::from_millis(50),
+        };
+        std::thread::sleep(Duration::from_millis(60));
+        assert_eq!(fresh.turn(Some(&refresher)), (None, true), "stale");
+        assert!(fresh.stale());
+        drop(release);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            assert!(Instant::now() < deadline);
+            let (read, changed) = fresh.turn(Some(&refresher));
+            if !fresh.stale() {
+                assert!(changed);
+                assert_eq!(read, Some(7), "the read that made them fresh, in that turn");
+                break;
+            }
+            assert!(read.is_none(), "nothing came back yet");
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
 
     /// A read that panics is logged and the next goes on: the reader does
