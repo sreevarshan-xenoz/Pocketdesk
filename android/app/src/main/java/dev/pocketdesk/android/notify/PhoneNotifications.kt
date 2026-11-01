@@ -368,6 +368,9 @@ class PhoneNotificationListener : NotificationListenerService() {
             {
                 runCatching { screenshots.tick() }.onFailure { Log.w("PhoneNotifications", "screenshots failed", it) }
                 runCatching { cameraUploads.tick() }.onFailure { Log.w("PhoneNotifications", "camera photos failed", it) }
+                // A run of the kept folders the schedule called while Android would not start it.
+                runCatching { dev.pocketdesk.android.files.KeptFolders.startIfDue(applicationContext) }
+                    .onFailure { Log.w("PhoneNotifications", "kept folders failed", it) }
             },
             2,
             2,

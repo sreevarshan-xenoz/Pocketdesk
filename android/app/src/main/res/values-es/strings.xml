@@ -1205,4 +1205,36 @@
     <string name="there_refused_off">El dueño del equipo desactivó quitar dispositivos a distancia. Quítalo en el equipo: Dispositivos, Desemparejar.</string>
     <string name="there_refused_busy">Demasiadas solicitudes en un minuto. Espera un minuto e inténtalo de nuevo.</string>
     <string name="there_refused_failed">El equipo no pudo hacerlo. Inténtalo de nuevo.</string>
+    <!-- Folders kept on my computer -->
+    <string name="kept_title">Carpetas guardadas en mi equipo</string>
+    <string name="kept_summary">Las carpetas que elijas aquí se copian solas a tu equipo, en un solo sentido. Solo se envía lo nuevo o lo que cambió, y no se lee nada más del teléfono.</string>
+    <string name="kept_empty">Aún no se guarda ninguna carpeta. Añade una: Android te pide elegirla y la app solo recibe esa carpeta.</string>
+    <string name="kept_add">Añadir una carpeta</string>
+    <string name="kept_not_kept">Android no conserva el acceso a esa carpeta</string>
+    <string name="kept_remove">Quitar</string>
+    <string name="kept_remove_named">Dejar de guardar %1$s</string>
+    <string name="kept_status_never">Aún sin ejecutar</string>
+    <string name="kept_status_run">Última vez %1$s: %2$d enviados, %3$d fallidos</string>
+    <string name="kept_access_lost">Android ya no da acceso a %1$s a esta app: añádela de nuevo</string>
+    <string name="kept_schedule">Cuándo</string>
+    <string name="kept_schedule_summary">Por defecto solo con Wi-Fi y cargando, así que nunca gasta datos móviles ni batería. Android decide la hora exacta y puede retrasarlo con el teléfono en reposo.</string>
+    <string name="kept_mode_charging">Wi-Fi y cargando</string>
+    <string name="kept_mode_every">Cada pocas horas</string>
+    <string name="kept_hours">%1$d h</string>
+    <string name="kept_every_summary">Cada cuánto, con Wi-Fi (cargando o no)</string>
+    <string name="kept_computer">Guardarlas en</string>
+    <string name="kept_computer_own">El equipo de este teléfono (%1$s)</string>
+    <string name="kept_computer_summary">Toca para cambiar entre tus equipos. Otro equipo empieza de cero.</string>
+    <string name="kept_mirror">Reflejar borrados</string>
+    <string name="kept_mirror_summary">Desactivado: un archivo que borras aquí se queda en el equipo. Activado: también se borra allí, solo si ese equipo lo permite en sus ajustes y solo archivos que este teléfono guardó.</string>
+    <string name="kept_run_now">Ejecutar ahora</string>
+    <string name="kept_run_now_summary">Copiar lo nuevo, diga lo que diga el horario</string>
+    <string name="kept_no_computer">No hay un equipo emparejado para guardar carpetas</string>
+    <string name="kept_run_started">Guardando carpetas…</string>
+    <string name="kept_unreachable">El equipo no respondió: las carpetas esperan a la próxima vez</string>
+    <string name="kept_old_computer">Este equipo aún no puede guardar carpetas: actualiza Pocketdesk en él</string>
+    <string name="kept_full">Las carpetas guardadas del equipo están llenas: sube el límite allí o libera espacio</string>
+    <string name="kept_refused">El equipo no guarda carpetas de este teléfono: revisa sus ajustes</string>
+    <string name="kept_held_many">Borrados retenidos: casi todos los archivos han desaparecido a la vez, parece una tarjeta ausente</string>
+    <string name="kept_held_part">Borrados retenidos: no se pudo leer parte de la carpeta</string>
 </resources>
