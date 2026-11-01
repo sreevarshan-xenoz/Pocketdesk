@@ -90,8 +90,8 @@ object RustCore {
     private external fun nativeConnectSound(address: String, port: Int): String
     private external fun nativeConnectSoundWan(address: String, identityJson: String): String
     private external fun nativeRemoteState(): String
-    private external fun nativeConnectCast(address: String, port: Int, soundAlone: Boolean): String
-    private external fun nativeConnectCastWan(address: String, identityJson: String, soundAlone: Boolean): String
+    private external fun nativeConnectCast(address: String, port: Int, soundAlone: Boolean, webcam: Boolean): String
+    private external fun nativeConnectCastWan(address: String, identityJson: String, soundAlone: Boolean, webcam: Boolean): String
     private external fun nativeCastConfig(width: Int, height: Int): Int
     private external fun nativeCastFrame(
         buffer: java.nio.ByteBuffer,
@@ -635,14 +635,15 @@ object RustCore {
 
     /**
      * Show this phone's screen on the computer at [address] (T10k): a cast
-     * session on the LAN; with [soundAlone], its sound and nothing else (M7).
+     * session on the LAN; with [soundAlone], its sound and nothing else (M7);
+     * with [webcam], the camera's picture as the computer's camera (F6 part 2).
      */
-    fun connectCast(address: String, port: Int, soundAlone: Boolean = false): Result<Unit> =
-        envelope(nativeConnectCast(address, port, soundAlone)).map { }
+    fun connectCast(address: String, port: Int, soundAlone: Boolean = false, webcam: Boolean = false): Result<Unit> =
+        envelope(nativeConnectCast(address, port, soundAlone, webcam)).map { }
 
     /** [connectCast] over the iroh WAN path, with the desktop's cached endpoint identity. */
-    fun connectCastWan(address: String, identityJson: String, soundAlone: Boolean = false): Result<Unit> =
-        envelope(nativeConnectCastWan(address, identityJson, soundAlone)).map { }
+    fun connectCastWan(address: String, identityJson: String, soundAlone: Boolean = false, webcam: Boolean = false): Result<Unit> =
+        envelope(nativeConnectCastWan(address, identityJson, soundAlone, webcam)).map { }
 
     /**
      * The cast's encoder (re)started at [width]×[height]; waits up to 2 s for

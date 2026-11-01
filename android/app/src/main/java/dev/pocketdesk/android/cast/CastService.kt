@@ -52,6 +52,10 @@ class CastService : Service() {
         const val EXTRA_RESULT_DATA = "resultData"
         const val EXTRA_CAMERA = "camera"
         const val EXTRA_SOUND_ALONE = "soundAlone"
+        const val EXTRA_WEBCAM = "webcam"
+        const val EXTRA_FRONT = "front"
+        const val EXTRA_HEIGHT = "height"
+        const val EXTRA_FPS = "fps"
 
         private const val TAG = "CastService"
         private const val CHANNEL_ID = "pocketdesk-cast"
@@ -80,6 +84,27 @@ class CastService : Service() {
                     .putExtra(EXTRA_ADDRESS, address)
                     .putExtra(EXTRA_PORT, port)
                     .putExtra(EXTRA_CAMERA, true),
+            )
+        }
+
+        /**
+         * Be the camera of the computer at [address] (F6 part 2), as it
+         * asked: only from [WebcamActivity], opened by a tap on the ask, and
+         * only with the camera permission. The camera is open only while
+         * this service's notification shows.
+         */
+        fun startWebcam(context: Context, address: String, port: Int, ask: WebcamAsk.Ask) {
+            if (context.checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) return
+            context.startForegroundService(
+                Intent(context, CastService::class.java)
+                    .setAction(ACTION_START)
+                    .putExtra(EXTRA_ADDRESS, address)
+                    .putExtra(EXTRA_PORT, port)
+                    .putExtra(EXTRA_CAMERA, true)
+                    .putExtra(EXTRA_WEBCAM, true)
+                    .putExtra(EXTRA_FRONT, ask.front)
+                    .putExtra(EXTRA_HEIGHT, ask.height)
+                    .putExtra(EXTRA_FPS, ask.fps),
             )
         }
 
@@ -113,6 +138,10 @@ class CastService : Service() {
     private var camera = false
     private var feed: CameraFeed? = null
 
+    /** F6 part 2: the camera as the computer's camera, and what it asked for. */
+    private var webcam = false
+    private var webcamAsk = WebcamAsk.Ask(front = false, height = 1080, fps = 0)
+
     /** M7: the phone's sound alone, no picture. */
     private var soundAlone = false
     private var started = false
@@ -140,6 +169,14 @@ class CastService : Service() {
         // F6: the back camera, not the screen: no projection, a camera service.
         if (intent.getBooleanExtra(EXTRA_CAMERA, false)) {
             camera = true
+            webcam = intent.getBooleanExtra(EXTRA_WEBCAM, false)
+            if (webcam) {
+                webcamAsk = WebcamAsk.Ask(
+                    intent.getBooleanExtra(EXTRA_FRONT, false),
+                    intent.getIntExtra(EXTRA_HEIGHT, 720),
+                    intent.getIntExtra(EXTRA_FPS, 30),
+                )
+            }
             started = true
             createChannel()
             val notification = notification(getString(R.string.cast_connecting, shown))
@@ -241,10 +278,10 @@ class CastService : Service() {
     /** The session: connect, wait to be admitted, show, and watch it. */
     private fun run(port: Int) {
         val connected =
-            RustCore.connectCast(address, port, soundAlone).recoverCatching { lan ->
+            RustCore.connectCast(address, port, soundAlone, webcam).recoverCatching { lan ->
                 if (finished) throw lan
                 val identity = HostStore.wanIdentity(this, address) ?: throw lan
-                RustCore.connectCastWan(address, identity, soundAlone).getOrThrow()
+                RustCore.connectCastWan(address, identity, soundAlone, webcam).getOrThrow()
             }
         if (finished) return
         connected.exceptionOrNull()?.let {
@@ -302,7 +339,16 @@ class CastService : Service() {
                         showing = true
                         main.post(::startPicture)
                         startSound(castState)
-                        update(getString(if (camera) R.string.cast_showing_camera else R.string.cast_showing, shown))
+                        update(
+                            getString(
+                                when {
+                                    webcam -> R.string.cast_showing_webcam
+                                    camera -> R.string.cast_showing_camera
+                                    else -> R.string.cast_showing
+                                },
+                                shown,
+                            ),
+                        )
                         // C8: the computer may control the phone while its screen is shown.
                         if (!camera) control = dev.pocketdesk.android.control.ControlRunner(this) { on ->
                             if (!finished) {
@@ -326,6 +372,8 @@ class CastService : Service() {
             closed == null -> getString(R.string.cast_lost)
             closed.contains("phone sound not allowed") -> getString(R.string.phone_sound_not_allowed)
             closed.contains("phone sound not played here") -> getString(R.string.phone_sound_not_played)
+            closed.contains("phone camera not allowed") -> getString(R.string.webcam_not_allowed)
+            closed.contains("phone camera not offered here") -> getString(R.string.webcam_not_offered)
             closed.contains("phone screen not allowed") -> getString(R.string.cast_not_allowed)
             closed.contains("phone screen not shown here") -> getString(R.string.cast_not_shown_here)
             // The computer's own ends, as the session's card says them (S2 review).
@@ -376,7 +424,9 @@ class CastService : Service() {
     /** F6: the back camera into a new encoder at the camera's size. */
     private fun startCamera() {
         if (finished || encoder != null) return
-        val made = CameraFeed(this) { fail(getString(R.string.cast_camera_lost)) }
+        val made = CameraFeed(this, webcamAsk.front, webcamAsk.height, webcamAsk.fps) {
+            fail(getString(R.string.cast_camera_lost))
+        }
         val (width, height) = made.size() ?: run {
             made.close()
             return fail(getString(R.string.cast_no_camera))

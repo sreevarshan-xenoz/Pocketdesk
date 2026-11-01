@@ -250,6 +250,15 @@
             android:taskAffinity=""
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
+        <!-- F6 part 2: opened by a tap on the computer's camera ask; starts the
+             camera in the cast service, with its notification, and closes. -->
+        <activity
+            android:name=".cast.WebcamActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <!-- M10: reads a copy just made, once in focus, and closes. -->
         <activity
             android:name=".clip.CopyReadActivity"

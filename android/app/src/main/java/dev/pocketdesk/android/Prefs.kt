@@ -82,6 +82,7 @@ object Prefs {
     private const val KEY_GAMEPAD_CONTROLLER = "gamepad_controller"
     private const val KEY_DECK_COLUMNS = "deck_columns"
     private const val KEY_CAMERA_ASKS = "camera_asks"
+    private const val KEY_WEBCAM = "webcam"
     private const val KEY_CAMERA_CLIPBOARD = "camera_clipboard"
 
     /** The trackpad speed slider's range and default (F3). */
@@ -854,6 +855,18 @@ object Prefs {
 
     fun setCameraAsks(ctx: Context, on: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_CAMERA_ASKS, on) }
+        bump()
+    }
+
+    /**
+     * F6 part 2: the computer may ask this phone to be its camera, offered
+     * in a notification; the camera opens only on a tap, and only while
+     * the cast's notification shows. Off by default.
+     */
+    fun webcam(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_WEBCAM, false)
+
+    fun setWebcam(ctx: Context, on: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_WEBCAM, on) }
         bump()
     }
 

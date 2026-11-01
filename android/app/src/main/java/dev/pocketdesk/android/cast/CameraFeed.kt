@@ -16,8 +16,16 @@ import android.view.Surface
  * The phone's back camera as the cast's picture (F6): Camera2 draws into
  * the cast encoder's surface, as the virtual display does for the screen.
  * The frames are the sensor's, landscape: the phone is held on its side.
+ * As the computer's camera (F6 part 2), the lens, the picture's height and
+ * the frame rate are what the computer asked for.
  */
-class CameraFeed(private val ctx: Context, private val onLost: () -> Unit) {
+class CameraFeed(
+    private val ctx: Context,
+    private val front: Boolean = false,
+    private val maxHeight: Int = 1080,
+    private val fps: Int = 0,
+    private val onLost: () -> Unit,
+) {
     private val manager = ctx.getSystemService(CameraManager::class.java)
     private val thread = HandlerThread("cast-camera").apply { start() }
     private val handler = Handler(thread.looper)
@@ -26,12 +34,13 @@ class CameraFeed(private val ctx: Context, private val onLost: () -> Unit) {
     private var session: CameraCaptureSession? = null
     private var closed = false
 
-    /** The back camera's id, or the first one when there is no back camera. */
+    /** The back (or front) camera's id, or the first one when there is no such camera. */
     private fun cameraId(): String? {
         val ids = runCatching { manager.cameraIdList.toList() }.getOrDefault(emptyList())
+        val facing = if (front) CameraCharacteristics.LENS_FACING_FRONT else CameraCharacteristics.LENS_FACING_BACK
         return ids.firstOrNull { id ->
             runCatching { manager.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING) }
-                .getOrNull() == CameraCharacteristics.LENS_FACING_BACK
+                .getOrNull() == facing
         } ?: ids.firstOrNull()
     }
 
@@ -42,13 +51,24 @@ class CameraFeed(private val ctx: Context, private val onLost: () -> Unit) {
             manager.getCameraCharacteristics(id).get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         }.getOrNull() ?: return null
         val sizes = map.getOutputSizes(MediaCodec::class.java)?.map { it.width to it.height }.orEmpty()
-        return choose(sizes)
+        return choose(sizes, maxHeight * 16 / 9, maxHeight)
+    }
+
+    /** The frame-rate range to ask the camera for, or null to leave it its own. */
+    private fun fpsRange(id: String): android.util.Range<Int>? {
+        if (fps <= 0) return null
+        val ranges = runCatching {
+            manager.getCameraCharacteristics(id).get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+        }.getOrNull() ?: return null
+        val (low, high) = chooseFps(ranges.map { it.lower to it.upper }, fps) ?: return null
+        return android.util.Range(low, high)
     }
 
     /** Open the camera drawing into [surface]; false when there is none to open. */
     @SuppressLint("MissingPermission") // The service starts only with the camera permission.
     fun open(surface: Surface): Boolean {
         val id = cameraId() ?: return false
+        val range = fpsRange(id)
         return runCatching {
             manager.openCamera(
                 id,
@@ -62,7 +82,7 @@ class CameraFeed(private val ctx: Context, private val onLost: () -> Unit) {
                             camera.close()
                             return
                         }
-                        startSession(camera, surface)
+                        startSession(camera, surface, range)
                     }
 
                     override fun onDisconnected(camera: CameraDevice) {
@@ -81,7 +101,7 @@ class CameraFeed(private val ctx: Context, private val onLost: () -> Unit) {
     }
 
     @Suppress("DEPRECATION") // The executor form needs API 28; this one serves 26 and up.
-    private fun startSession(camera: CameraDevice, surface: Surface) {
+    private fun startSession(camera: CameraDevice, surface: Surface, range: android.util.Range<Int>?) {
         runCatching {
             camera.createCaptureSession(
                 listOf(surface),
@@ -97,7 +117,10 @@ class CameraFeed(private val ctx: Context, private val onLost: () -> Unit) {
                         }
                         // The camera may close meanwhile: its request then throws (F6 review).
                         runCatching {
-                            val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply { addTarget(surface) }
+                            val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
+                                addTarget(surface)
+                                if (range != null) set(android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, range)
+                            }
                             configured.setRepeatingRequest(request.build(), null, handler)
                         }.onFailure { lost("the camera would not start") }
                     }
@@ -132,15 +155,28 @@ class CameraFeed(private val ctx: Context, private val onLost: () -> Unit) {
         private const val TAG = "CameraFeed"
 
         /**
-         * The largest of [sizes] within 1920 by 1080, a 16:9 one first; the
-         * smallest offered when none fits.
+         * The largest of [sizes] within [maxWidth] by [maxHeight] (1920 by
+         * 1080), a 16:9 one first; the smallest offered when none fits.
          */
-        fun choose(sizes: List<Pair<Int, Int>>): Pair<Int, Int>? {
+        fun choose(sizes: List<Pair<Int, Int>>, maxWidth: Int = 1920, maxHeight: Int = 1080): Pair<Int, Int>? {
             if (sizes.isEmpty()) return null
-            val fits = sizes.filter { (w, h) -> w <= 1920 && h <= 1080 }
+            val fits = sizes.filter { (w, h) -> w <= maxWidth && h <= maxHeight }
             if (fits.isEmpty()) return sizes.minBy { (w, h) -> w.toLong() * h }
             val wide = fits.filter { (w, h) -> w * 9 == h * 16 }
             return (wide.ifEmpty { fits }).maxBy { (w, h) -> w.toLong() * h }
+        }
+
+        /**
+         * The camera's frame-rate range for [fps] (F6 part 2): a steady one
+         * at it if offered, else the narrowest that reaches it, else the
+         * one whose top is nearest; null when none is offered.
+         */
+        fun chooseFps(ranges: List<Pair<Int, Int>>, fps: Int): Pair<Int, Int>? {
+            if (ranges.isEmpty()) return null
+            ranges.firstOrNull { (low, high) -> low == fps && high == fps }?.let { return it }
+            val reaching = ranges.filter { (low, high) -> high == fps && low <= fps }
+            if (reaching.isNotEmpty()) return reaching.maxBy { (low, _) -> low }
+            return ranges.minWith(compareBy({ (_, high) -> kotlin.math.abs(high - fps) }, { (low, high) -> high - low }))
         }
     }
 }
