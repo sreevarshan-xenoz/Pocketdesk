@@ -205,10 +205,31 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!--
+            Phone apps tier 2 (separate windows) runs its cast, with no screen of the
+            phone's, as special use: nothing is captured of the phone's own screen.
+        -->
         <service
             android:name=".cast.CastService"
             android:exported="false"
-            android:foregroundServiceType="mediaProjection|camera" />
+            android:foregroundServiceType="mediaProjection|camera|specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Shows phone apps in windows of their own on the paired computer, only when the owner turned on separate windows (Shizuku) and the computer asked for one" />
+        </service>
+
+        <!--
+            Phone apps tier 2: how Shizuku, when the owner runs it, hands this app its
+            binder. Exported with Shizuku's own permission, as its documentation
+            asks; nothing else reads it.
+        -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
         <!-- C8: control from the computer during a cast; only Android binds it. -->
         <service

@@ -50,9 +50,25 @@ class ControlRunner(private val context: Context, private val onState: (Boolean)
             val wait = if (service?.waiting() == true) BUSY_WAIT_MS else IDLE_WAIT_MS
             val json = RustCore.castControlTake(wait)
             service?.tick()
-            if (json == null || !on || service == null) continue
+            if (json == null) continue
+            // Phone apps tier 2: a batch for an app window goes to that window,
+            // whatever the phone's own screen control says (it has its own switch).
+            if (windows(json)) continue
+            if (!on || service == null) continue
             perform(service, json)
         }
+    }
+
+    /** Hand a batch for app windows to them; whether it was one. */
+    private fun windows(json: String): Boolean {
+        val batch = try {
+            JSONObject(json)
+        } catch (e: org.json.JSONException) {
+            return false
+        }
+        val events = dev.pocketdesk.android.windows.WindowInput.forWindows(batch) ?: return false
+        dev.pocketdesk.android.cast.CastService.windowInput(context, events)
+        return true
     }
 
     private fun perform(service: ControlService, json: String) {

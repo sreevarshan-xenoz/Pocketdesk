@@ -18,11 +18,17 @@ import java.nio.ByteBuffer
  * [CastPlan.KEYFRAME_INTERVAL_S], when the computer asks, and after the
  * link dropped a frame. [onEnded] runs (on its thread) when the cast
  * session is gone.
+ *
+ * With a [window] (1 to 4, Phone apps tier 2) the picture is that app
+ * window's, sent as that window's own stream of the same cast; [input] says
+ * the phone takes the computer's touch and typing there.
  */
 class CastEncoder(
     val width: Int,
     val height: Int,
     private val onEnded: () -> Unit,
+    private val window: Int = 0,
+    private val input: Boolean = false,
 ) {
     private val codec: MediaCodec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
     val surface: Surface
@@ -79,11 +85,11 @@ class CastEncoder(
         var seq = 0L
         try {
             // The computer is told the size before any frame of it.
-            var told = RustCore.castConfig(width, height)
-            while (running && told == CastPlan.FULL) told = RustCore.castConfig(width, height)
+            var told = sendConfig()
+            while (running && told == CastPlan.FULL) told = sendConfig()
             if (told == CastPlan.NO_CAST) return end()
             while (running) {
-                if (RustCore.castKeyframeWanted()) requestKeyframe()
+                if (keyframeWanted()) requestKeyframe()
                 val index = codec.dequeueOutputBuffer(info, DEQUEUE_TIMEOUT_US)
                 if (index < 0) continue
                 val buffer = codec.getOutputBuffer(index)
@@ -103,9 +109,9 @@ class CastEncoder(
                                 whole.put(sets)
                                 buffer.limit(info.offset + info.size).position(info.offset)
                                 whole.put(buffer)
-                                RustCore.castFrame(whole, 0, whole.position(), true, seq)
+                                sendFrame(whole, 0, whole.position(), true, seq)
                             } else {
-                                RustCore.castFrame(buffer, info.offset, info.size, keyframe, seq)
+                                sendFrame(buffer, info.offset, info.size, keyframe, seq)
                             }
                         seq++
                         if (CastPlan.wantsKeyframe(result)) requestKeyframe()
@@ -126,6 +132,20 @@ class CastEncoder(
             }
         }
     }
+
+    /** The size, to the screen's stream or the window's. */
+    private fun sendConfig(): Int =
+        if (window > 0) RustCore.castWindowConfig(window, width, height, input) else RustCore.castConfig(width, height)
+
+    private fun sendFrame(buffer: ByteBuffer, offset: Int, size: Int, keyframe: Boolean, seq: Long): Int =
+        if (window > 0) {
+            RustCore.castWindowFrame(window, buffer, offset, size, keyframe, seq)
+        } else {
+            RustCore.castFrame(buffer, offset, size, keyframe, seq)
+        }
+
+    private fun keyframeWanted(): Boolean =
+        if (window > 0) RustCore.castWindowKeyframeWanted(window) else RustCore.castKeyframeWanted()
 
     private fun end() {
         if (running) {
