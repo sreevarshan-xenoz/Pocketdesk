@@ -28,9 +28,8 @@ class WindowCast(private val context: Context, private val onEmpty: () -> Unit) 
         val width: Int,
         val height: Int,
     ) {
-        /** When the touch now down went down (a gesture's first event's time). */
-        @Volatile
-        var downTime = 0L
+        /** The fingers down in this window now (one gesture, however many fingers). */
+        val fingers = PointerTracker()
     }
 
     private val windows = java.util.concurrent.ConcurrentHashMap<Int, Window>()
@@ -119,12 +118,8 @@ class WindowCast(private val context: Context, private val onEmpty: () -> Unit) 
         val host = runCatching { ShizukuBridge.currentHost() }.getOrNull() ?: return
         runCatching {
             when (event) {
-                is WindowInput.Event.Touch -> {
-                    if (event.action == WindowInput.ACTION_DOWN) window.downTime = SystemClock.uptimeMillis()
-                    val x = WindowInput.pixel(event.x, window.width)
-                    val y = WindowInput.pixel(event.y, window.height)
-                    host.injectTouch(window.displayId, event.action, x, y, window.downTime)
-                }
+                is WindowInput.Event.Touch -> finger(host, window, 0, event.action, event.x, event.y)
+                is WindowInput.Event.Pointer -> finger(host, window, event.pointer, event.action, event.x, event.y)
                 is WindowInput.Event.Scroll -> host.injectScroll(
                     window.displayId,
                     WindowInput.pixel(event.x, window.width),
@@ -136,6 +131,21 @@ class WindowCast(private val context: Context, private val onEmpty: () -> Unit) 
                 WindowInput.Event.Close -> Unit
             }
         }.onFailure { Log.w(TAG, "input to window $id failed", it) }
+    }
+
+    /** One finger's change in [window], injected with every finger then down (one gesture). */
+    private fun finger(host: IWindowHost, window: Window, pointer: Int, action: Int, x: Int, y: Int) {
+        val frame = synchronized(window.fingers) {
+            window.fingers.apply(pointer, action, x, y, SystemClock.uptimeMillis())
+        } ?: return
+        host.injectPointers(
+            window.displayId,
+            frame.action,
+            frame.ids,
+            FloatArray(frame.ids.size) { WindowInput.pixel(frame.xs[it], window.width) },
+            FloatArray(frame.ids.size) { WindowInput.pixel(frame.ys[it], window.height) },
+            frame.downTime,
+        )
     }
 
     /** Close window [id]: its display is given back (the app on it ends), its encoder freed, the computer told. */

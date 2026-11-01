@@ -14,7 +14,12 @@
 //! - `7` window: `window u8` (Phone apps tier 2): the events after it, up to
 //!   the next window event, are for that app window, not the phone's screen;
 //! - `8` close: the app window named before it is closed and its display
-//!   given back (a batch of a window event and this, nothing else).
+//!   given back (a batch of a window event and this, nothing else);
+//! - `9` pointer (keys to taps): `pointer u8` (0 to 9) `+ action u8` (as a
+//!   touch) `+ x u16 LE + y u16 LE`: one finger of several at once, for the
+//!   app window named before it. A touch is the finger `0`. A peer that
+//!   does not know this event drops the whole batch, so a sender keeps
+//!   these to batches of their own.
 //!
 //! Points are fractions of the picture, 0 to 65535 on each axis, so the
 //! phone maps them to its own screen whatever size it encodes at.
@@ -24,6 +29,8 @@
 pub const MAX_EVENTS: usize = 64;
 /// Most text in one event, in bytes.
 pub const MAX_TEXT: usize = 1024;
+/// Most fingers at once: a [`ControlEvent::Pointer`]'s id is below this.
+pub const MAX_POINTERS: u8 = 10;
 
 /// What a touch does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,6 +102,14 @@ pub enum ControlEvent {
     Window(u8),
     /// Close the app window named before it (tier 2).
     Close,
+    /// One finger of several at once in an app window (keys to taps): the
+    /// finger `pointer` (below [`MAX_POINTERS`]), what it does and where.
+    Pointer {
+        pointer: u8,
+        action: TouchAction,
+        x: u16,
+        y: u16,
+    },
 }
 
 /// A batch of events, and when its sender sent it.
@@ -152,6 +167,25 @@ impl ControlBatch {
                     out.push(*window);
                 }
                 ControlEvent::Close => out.push(8),
+                ControlEvent::Pointer {
+                    pointer,
+                    action,
+                    x,
+                    y,
+                } => {
+                    if *pointer >= MAX_POINTERS {
+                        return None;
+                    }
+                    out.push(9);
+                    out.push(*pointer);
+                    out.push(match action {
+                        TouchAction::Down => 0,
+                        TouchAction::Move => 1,
+                        TouchAction::Up => 2,
+                    });
+                    out.extend_from_slice(&x.to_le_bytes());
+                    out.extend_from_slice(&y.to_le_bytes());
+                }
             }
         }
         Some(out)
@@ -206,6 +240,24 @@ impl ControlBatch {
                     ControlEvent::Window(window)
                 }
                 8 => ControlEvent::Close,
+                9 => {
+                    let pointer = r.u8()?;
+                    if pointer >= MAX_POINTERS {
+                        return None;
+                    }
+                    let action = match r.u8()? {
+                        0 => TouchAction::Down,
+                        1 => TouchAction::Move,
+                        2 => TouchAction::Up,
+                        _ => return None,
+                    };
+                    ControlEvent::Pointer {
+                        pointer,
+                        action,
+                        x: r.u16()?,
+                        y: r.u16()?,
+                    }
+                }
                 _ => return None,
             };
             events.push(event);
@@ -287,6 +339,22 @@ impl ControlBatch {
                     serde_json::json!({"type": "window", "window": window})
                 }
                 ControlEvent::Close => serde_json::json!({"type": "close"}),
+                ControlEvent::Pointer {
+                    pointer,
+                    action,
+                    x,
+                    y,
+                } => serde_json::json!({
+                    "type": "pointer",
+                    "pointer": pointer,
+                    "action": match action {
+                        TouchAction::Down => "down",
+                        TouchAction::Move => "move",
+                        TouchAction::Up => "up",
+                    },
+                    "x": x,
+                    "y": y,
+                }),
             })
             .collect();
         serde_json::json!({"sent": self.sent_ms, "events": events})
@@ -438,6 +506,63 @@ mod tests {
         let mut past = 7u64.to_le_bytes().to_vec();
         past.extend_from_slice(&[1, 7, super::super::cast::MAX_WINDOWS + 1]);
         assert_eq!(ControlBatch::decode(&past), None, "past the cap");
+    }
+
+    #[test]
+    fn several_fingers_at_once_come_back_and_stay_within_the_cap() {
+        let batch = ControlBatch {
+            sent_ms: 9,
+            events: vec![
+                ControlEvent::Window(2),
+                ControlEvent::Pointer {
+                    pointer: 1,
+                    action: TouchAction::Down,
+                    x: 100,
+                    y: 200,
+                },
+                ControlEvent::Pointer {
+                    pointer: MAX_POINTERS - 1,
+                    action: TouchAction::Move,
+                    x: 65535,
+                    y: 0,
+                },
+                ControlEvent::Pointer {
+                    pointer: 1,
+                    action: TouchAction::Up,
+                    x: 101,
+                    y: 201,
+                },
+            ],
+        };
+        let bytes = batch.encode().unwrap();
+        let back = ControlBatch::decode(&bytes).unwrap();
+        assert_eq!(back, batch);
+        let json = back.to_json();
+        assert_eq!(json["events"][1]["type"], "pointer");
+        assert_eq!(json["events"][1]["pointer"], 1);
+        assert_eq!(json["events"][1]["action"], "down");
+        assert_eq!(json["events"][2]["pointer"], MAX_POINTERS - 1);
+        // A finger past the cap is neither sent nor read.
+        let past = ControlBatch {
+            sent_ms: 9,
+            events: vec![ControlEvent::Pointer {
+                pointer: MAX_POINTERS,
+                action: TouchAction::Down,
+                x: 0,
+                y: 0,
+            }],
+        };
+        assert_eq!(past.encode(), None);
+        let mut wire = 7u64.to_le_bytes().to_vec();
+        wire.extend_from_slice(&[1, 9, MAX_POINTERS, 0, 0, 0, 0, 0]);
+        assert_eq!(ControlBatch::decode(&wire), None, "a finger past the cap");
+        let mut action = 7u64.to_le_bytes().to_vec();
+        action.extend_from_slice(&[1, 9, 1, 3, 0, 0, 0, 0]);
+        assert_eq!(ControlBatch::decode(&action), None, "an action unknown");
+        // A viewer of one window still makes the fingers its window's.
+        let made = batch.for_window(3).unwrap();
+        assert_eq!(made.window(), Some(3));
+        assert!(made.encode().is_some());
     }
 
     #[test]
