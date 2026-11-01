@@ -268,6 +268,7 @@ pub(crate) fn link_to(computer: &PeerComputer, name: &str, pin: &str, facts: &Va
         fingerprint: Some(computer.fingerprint.to_ascii_lowercase()),
         endpoint: computer.endpoint.as_ref().map(|e| e.to_string()),
         mine: false,
+        wifi: None,
     }
 }
 

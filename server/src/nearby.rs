@@ -801,6 +801,7 @@ fn link_from(
         pin: pin.to_string(),
         fingerprint: Some(nearby::to_hex(theirs)),
         mine: body.get("mine").and_then(|v| v.as_bool()) == Some(true),
+        wifi: None,
         endpoint: body.get("endpoint").map(|e| e.to_string()),
     })
 }

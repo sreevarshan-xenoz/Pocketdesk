@@ -431,6 +431,7 @@ fn the_windows_decoder_on_a_real_view() {
         )),
         endpoint: identity::read_endpoint(&b_state).map(|e| e.to_string()),
         mine: false,
+        wifi: None,
     };
     let asked = computers::request(
         &a_state,
