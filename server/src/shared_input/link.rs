@@ -910,6 +910,15 @@ fn carve(arena: &mut bytes::BytesMut, bytes: &[u8]) -> bytes::Bytes {
     arena.split().freeze()
 }
 
+/// For the driver bench: whether a stream frame (its two-byte length,
+/// then the message) is a key, so only keys are timed by their write.
+#[cfg(test)]
+fn is_key_frame(frame: &[u8]) -> bool {
+    frame
+        .get(2..)
+        .is_some_and(|body| matches!(wire::decode(body), Ok(Msg::Key { .. })))
+}
+
 /// Write `frames` in order on a uni stream opened for them, the magic and
 /// the version first; finish it once the channel is gone. Why it stopped,
 /// if it broke, goes in `broken`.
@@ -927,16 +936,16 @@ async fn write_stream(
         let mut out = wire::STREAM_MAGIC.to_vec();
         out.push(wire::VERSION);
         while let Some(frame) = frames.recv().await {
-            out.extend_from_slice(&frame);
             #[cfg(test)]
-            let mut count = 1;
+            let mut count = usize::from(is_key_frame(&frame));
+            out.extend_from_slice(&frame);
             // Whatever else is waiting goes in the same write.
             while let Ok(frame) = frames.try_recv() {
-                out.extend_from_slice(&frame);
                 #[cfg(test)]
                 {
-                    count += 1;
+                    count += usize::from(is_key_frame(&frame));
                 }
+                out.extend_from_slice(&frame);
             }
             stream
                 .write_all(&out)

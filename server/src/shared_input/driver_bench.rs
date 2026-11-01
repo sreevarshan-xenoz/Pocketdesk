@@ -393,6 +393,24 @@ async fn the_driver_loop_bench() {
         away_wakes as f64 / rest.as_secs_f64()
     );
     assert!(!move_lat.is_empty(), "no move came across");
+    // The resting position always arrives (a paced move held at the end
+    // goes by the clock), and every key, in order.
+    let last_move = noted.iter().rev().find_map(|(msg, _)| match msg {
+        Msg::Move { seq, .. } => Some(*seq),
+        _ => None,
+    });
+    assert_eq!(last_move, Some(moves), "the last position arrived");
+    let keys_noted: Vec<(u16, bool)> = noted
+        .iter()
+        .filter_map(|(msg, _)| match msg {
+            Msg::Key { code, pressed } => Some((*code, *pressed)),
+            _ => None,
+        })
+        .collect();
+    let keys_meant: Vec<(u16, bool)> = (0..keys)
+        .map(|i| (30 + (i / 2 % 9) as u16, i % 2 == 0))
+        .collect();
+    assert_eq!(keys_noted, keys_meant, "every key, in order");
     receiver.abort();
     a.close().await;
     b.close().await;
