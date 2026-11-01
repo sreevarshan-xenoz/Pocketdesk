@@ -53,10 +53,19 @@ A server for Linux (Wayland-native, Hyprland first) and Windows 10/11, a desktop
 - On your network, through Tailscale, or over the internet with no port forward and no VPN (iroh punches a direct path, or uses a relay).
 - No account and no Pocketdesk server. Each end holds the other to its key (TLS 1.3), and each phone has its own permissions.
 
-**Linux hosts**
-- **KDE Plasma:** screen sharing through the desktop portal now gets a picture, and the grant can be remembered or allowed ahead (checked headless only; GNOME is supported but not yet checked).
-- **Firewall check:** Diagnostics reads ufw, firewalld, nftables and iptables and says which Pocketdesk ports get in, and the Pair page says so when the firewall is why a pairing times out. It only reads the rules.
-- **Software encoding on stock Fedora** through Cisco's OpenH264, where `ffmpeg-free` has no libx264 (tested in a container; a phone session on real Fedora is still owed).
+**KDE Plasma**
+- Screen sharing through the desktop portal gets a picture, and the grant can be remembered or allowed ahead (checked headless only).
+
+**In the next release** (merged to `main` since 0.8.3, not yet tagged; the [guide](docs/guide.md#features) has each one's switches, and most are off until you turn them on)
+- **Any app of the phone, from the computer:** a Phone apps page (Windows and Linux) lists the phone's apps; a click opens one on the phone and shows its screen in a window. Pin an app to the Start menu or applications menu, and where Android allows it open with no tap at the phone. No adb, Shizuku or wireless debugging.
+- **The phone's camera as a webcam on Linux:** apps see a PipeWire camera, with no kernel module; a tap on the phone starts it.
+- **Approve with the phone, on Linux:** sudo, polkit prompts and the lock screen can wait for the phone's fingerprint or screen lock, and the password keeps working ([how](docs/guide.md#approve-with-my-phone-sudo-polkit-and-the-lock-screen)).
+- **The phone's location for Linux apps** through GeoClue, now that Mozilla's service is gone ([how](docs/guide.md#your-phones-location-for-this-computer-geoclue)).
+- **A direct link** for when no network is shared: the computer makes its own Wi-Fi for one phone, on Linux through NetworkManager and on Windows through Mobile Hotspot ([how](docs/guide.md#a-direct-link-no-shared-network)).
+- **Folders kept on the computer:** phone folders picked with Android's folder picker (no all-files permission) are copied one way to the computer on a schedule.
+- **A spare phone as the wake helper:** an old phone on a charger at home sends the magic packet, so waking the computer from outside needs no router setting ([how](docs/guide.md#a-spare-phone-at-home-as-the-wake-helper)).
+- **Fit the screen to the window** (a Linux computer on Hyprland or Sway shows a screen the size of the window on another) and **Unattended on GNOME** (no dialog, off by default; [how](docs/guide.md#gnome-unattended-with-no-dialog)).
+- **On Linux hosts:** a firewall check (Diagnostics reads ufw, firewalld, nftables and iptables and says which Pocketdesk ports get in; the Pair page says so when the firewall is why a pairing times out; it only reads the rules), and software encoding on stock Fedora through Cisco's OpenH264, where `ffmpeg-free` has no libx264 (tested in a container; a phone session on real Fedora is still owed).
 
 ## Quickstart
 
