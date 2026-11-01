@@ -100,7 +100,10 @@ async fn geoclue_reads_the_fake_fix_through_avahi() {
     )
     .await
     .expect("closed in time");
-    assert!(matches!(read, Ok(0) | Err(_)), "a program that is not GeoClue reads nothing");
+    assert!(
+        matches!(read, Ok(0) | Err(_)),
+        "a program that is not GeoClue reads nothing"
+    );
     println!("a direct loopback client that is not GeoClue: refused");
 
     let demo = std::env::var("POCKETDESK_WHERE_AM_I")

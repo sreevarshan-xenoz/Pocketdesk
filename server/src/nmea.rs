@@ -200,7 +200,11 @@ pub fn from_geoclue(peer: SocketAddr, here: SocketAddr) -> bool {
         tracing::warn!("No GeoClue user on this computer: location clients are refused");
         return false;
     }
-    let table = if peer.is_ipv4() { "/proc/net/tcp" } else { "/proc/net/tcp6" };
+    let table = if peer.is_ipv4() {
+        "/proc/net/tcp"
+    } else {
+        "/proc/net/tcp6"
+    };
     std::fs::read_to_string(table)
         .ok()
         .and_then(|text| socket_uid(&text, peer, here))
@@ -423,37 +427,43 @@ mod tests {
 
     #[test]
     fn geoclues_users_are_found_by_name() {
-        let passwd = "root:x:0:0::/root:/bin/bash
-geoclue:x:964:964::/var/lib/geoclue:/usr/bin/nologin
-srvGeoClue:x:470:470::/:/sbin/nologin
-alice:x:1000:1000::/home/alice:/bin/sh
-broken
-";
-        assert_eq!(geoclue_uids(passwd), vec![964, 470]);
-        assert!(geoclue_uids("alice:x:1000:1000::/:/bin/sh
-").is_empty());
+        let passwd = [
+            "root:x:0:0::/root:/bin/bash",
+            "geoclue:x:964:964::/var/lib/geoclue:/usr/bin/nologin",
+            "srvGeoClue:x:470:470::/:/sbin/nologin",
+            "alice:x:1000:1000::/home/alice:/bin/sh",
+            "broken",
+        ]
+        .join("\n");
+        assert_eq!(geoclue_uids(&passwd), vec![964, 470]);
+        assert!(geoclue_uids("alice:x:1000:1000::/:/bin/sh").is_empty());
     }
 
     #[test]
     fn a_sockets_owner_is_read_from_the_kernels_table() {
         // Two ends of one loopback connection, as /proc/net/tcp shows them:
         // the client's socket (owned by 964) and the server's (by 1000).
-        let table = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
-   0: 0100007F:D431 0100007F:A2B4 01 00000000:00000000 00:00000000 00000000   964        0 1 1 0000000000000000 20 4 30 10 -1
-   1: 0100007F:A2B4 0100007F:D431 01 00000000:00000000 00:00000000 00000000  1000        0 2 1 0000000000000000 20 4 30 10 -1
-";
+        let table = [
+            "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode",
+            "   0: 0100007F:D431 0100007F:A2B4 01 00000000:00000000 00:00000000 00000000   964        0 1 1",
+            "   1: 0100007F:A2B4 0100007F:D431 01 00000000:00000000 00:00000000 00000000  1000        0 2 1",
+        ]
+        .join("\n");
         let client: SocketAddr = "127.0.0.1:54321".parse().unwrap();
         let server: SocketAddr = "127.0.0.1:41652".parse().unwrap();
-        assert_eq!(socket_uid(table, client, server), Some(964));
-        assert_eq!(socket_uid(table, server, client), Some(1000));
+        assert_eq!(socket_uid(&table, client, server), Some(964));
+        assert_eq!(socket_uid(&table, server, client), Some(1000));
         let other: SocketAddr = "127.0.0.1:1".parse().unwrap();
-        assert_eq!(socket_uid(table, other, server), None);
+        assert_eq!(socket_uid(&table, other, server), None);
     }
 
     #[test]
     fn an_ipv6_address_is_written_word_by_word() {
         let loopback: SocketAddr = "[::1]:80".parse().unwrap();
-        assert_eq!(proc_address(loopback), "00000000000000000000000001000000:0050");
+        assert_eq!(
+            proc_address(loopback),
+            "00000000000000000000000001000000:0050"
+        );
     }
 
     struct Fixed(Option<Fix>);
