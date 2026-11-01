@@ -1174,6 +1174,15 @@
     <string name="settings_windows_summary_needs_permission">Permite a Pocketdesk en Shizuku usar esto</string>
     <string name="settings_windows_summary_needs_shizuku">Shizuku no está en marcha: inícialo o desactiva esto</string>
     <string name="settings_windows_summary_needs_apps">Casi: activa también «Permitir que el equipo abra mis apps», pues una ventana se abre con una app</string>
+    <string name="settings_hotspot">Permitir que mis equipos activen mi punto de acceso</string>
+    <string name="settings_hotspot_summary_off">Desactivado. Permite que tu propio equipo active el punto de acceso Wi-Fi de este teléfono, tal como ya lo tienes configurado en Android, para tener internet a través de él. El equipo no envía ningún nombre ni contraseña. Usa Shizuku, que ya ejecutas</string>
+    <string name="settings_hotspot_summary_on">Activado. Tu equipo puede activar y desactivar el punto de acceso de este teléfono, incluso con el teléfono bloqueado. Android muestra su indicador habitual de punto de acceso. Desactiva esto para apagar al instante un punto de acceso que haya iniciado</string>
+    <string name="settings_hotspot_summary_needs_permission">Permite a Pocketdesk en Shizuku usar esto</string>
+    <string name="settings_hotspot_summary_needs_shizuku">Shizuku no está en marcha: inícialo o desactiva esto</string>
+    <string name="settings_hotspot_summary_needs_access">Casi: activa el acceso a notificaciones de Pocketdesk, que es como la petición del equipo llega a este teléfono</string>
+    <string name="settings_hotspot_off_title">Apagar el punto de acceso automáticamente</string>
+    <string name="settings_hotspot_off_after">Tras %1$d minutos sin una nueva petición del equipo. Toca para cambiar</string>
+    <string name="settings_hotspot_off_never">Nunca: solo el equipo o tú lo apagáis. Toca para cambiar</string>
     <string name="cast_showing_windows">Mostrando ventanas de apps en %1$s</string>
     <string name="settings_phone_actions">Permitir que el equipo haga capturas y bloquee este teléfono</string>
     <string name="settings_phone_actions_summary_off">Captura del teléfono y Bloquear el teléfono del equipo lo hacen aquí: la captura llega al equipo como la envía \"Enviar capturas nuevas\" (actívalo también), nunca de la pantalla de bloqueo. Usa el servicio de accesibilidad \"Control de Pocketdesk\"</string>

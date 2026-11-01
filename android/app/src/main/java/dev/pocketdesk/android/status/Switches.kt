@@ -78,5 +78,8 @@ internal fun readSwitches(ctx: Context): Map<String, SwitchReport.Switch> {
         "apps" to s(Prefs.appsFromComputer(ctx), access),
         // BF2: asked from Home, so Android needs nothing.
         "peek" to s(Prefs.peek(ctx)),
+        // Let my computers turn on my hotspot: Shizuku's helper does it; the ask comes on the
+        // listener's link, so notification access is needed too.
+        "hotspot" to dev.pocketdesk.android.windows.PhoneHotspot.report(ctx).let { s(it.on, it.android == true && access) },
     )
 }

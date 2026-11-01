@@ -665,6 +665,34 @@ object Prefs {
     }
 
     /**
+     * Let my computers turn on my hotspot: the phone's own computer may ask it to turn its
+     * Wi-Fi hotspot on and off, through Shizuku (off by default, shown only while Shizuku
+     * runs). The computer sends no name or password; the hotspot starts as Android has it set.
+     */
+    fun hotspotFromComputer(ctx: Context): Boolean =
+        prefs(ctx).getBoolean("hotspot_from_computer", false)
+
+    fun setHotspotFromComputer(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean("hotspot_from_computer", enabled) }
+        bump()
+    }
+
+    /** Minutes after the last ask to turn on that the hotspot is turned off by itself (0 = never). */
+    fun hotspotOffMinutes(ctx: Context): Int =
+        prefs(ctx).getInt("hotspot_off_minutes", dev.pocketdesk.android.windows.HotspotRule.DEFAULT_OFF_MINUTES)
+
+    fun setHotspotOffMinutes(ctx: Context, minutes: Int) {
+        prefs(ctx).edit { putInt("hotspot_off_minutes", minutes) }
+    }
+
+    /** When (wall clock, ms) the last ask to turn the hotspot on went through, or 0 when none is on from here. */
+    fun hotspotOnAt(ctx: Context): Long = prefs(ctx).getLong("hotspot_on_at", 0L)
+
+    fun setHotspotOnAt(ctx: Context, atMs: Long) {
+        prefs(ctx).edit { putLong("hotspot_on_at", atMs) }
+    }
+
+    /**
      * Hands-free: Pocketdesk accepts Android's own screen-sharing question for
      * the phone's own computer, when that computer asked to open an app (off by
      * default). It needs "Let the computer open my apps" and Pocketdesk control.

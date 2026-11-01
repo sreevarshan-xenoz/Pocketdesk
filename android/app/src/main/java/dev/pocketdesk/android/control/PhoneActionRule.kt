@@ -30,6 +30,14 @@ object PhoneActionRule {
 
         /** Apps part 2: share the file the computer is sending into the app in front. */
         SHARE("share"),
+
+        /**
+         * Let my computers turn on my hotspot: turn the phone's hotspot on or off through
+         * Shizuku's helper. Decided by [dev.pocketdesk.android.windows.HotspotRule], not by
+         * [decide] (it needs neither the control service nor an unlocked phone).
+         */
+        HOTSPOT_ON("hotspot_on"),
+        HOTSPOT_OFF("hotspot_off"),
         ;
 
         companion object {

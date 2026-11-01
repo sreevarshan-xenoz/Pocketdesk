@@ -128,9 +128,37 @@ object ShizukuBridge {
         }
     }
 
+    /** Hotspot jobs under way: [release] leaves the helper alone while one is, and the job lets it go after. */
+    private val hotspotJobs = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /**
+     * Let my computers turn on my hotspot: have the helper process turn the hotspot on or off
+     * ([on]), starting it if need be, off the caller's thread; [done] gets whether it went
+     * through. [windowsOpen] says whether app windows still use the helper, which is let go
+     * after the job only when none does.
+     */
+    fun hotspot(context: Context, on: Boolean, windowsOpen: () -> Boolean, done: (Boolean) -> Unit) {
+        hotspotJobs.incrementAndGet()
+        host(context) { helper ->
+            Thread {
+                val ok = runCatching {
+                    when {
+                        helper == null -> false
+                        on -> helper.startHotspot()
+                        else -> helper.stopHotspot()
+                    }
+                }.onFailure { Log.w(TAG, "the hotspot call failed", it) }.getOrDefault(false)
+                if (hotspotJobs.decrementAndGet() == 0 && !windowsOpen()) release()
+                done(ok)
+            }.start()
+        }
+    }
+
     /** Let the helper process go: no window is open. */
     @Synchronized
     fun release() {
+        // A hotspot job still using it lets it go itself when it is done.
+        if (hotspotJobs.get() > 0) return
         val made = host
         host = null
         runCatching { made?.destroy() }

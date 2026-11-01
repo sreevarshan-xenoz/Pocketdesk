@@ -23,10 +23,11 @@ import kotlin.system.exitProcess
 
 /**
  * Phone apps tier 2 (separate windows): the helper process Shizuku starts
- * with shell identity (uid 2000). It does three things and no more: makes a
- * display for an app window, starts an app on that display, and sends input
- * to that display. It runs only while windows are open, and exits when it is
- * told to or its last display is released.
+ * with shell identity (uid 2000). It does four things and no more: makes a
+ * display for an app window, starts an app on that display, sends input
+ * to that display, and (taking no argument) turns the phone's own hotspot on
+ * or off ([HotspotShell]). It runs only while windows are open or a hotspot
+ * ask is being done, and exits when it is told to or its last display is released.
  *
  * The technique is that of scrcpy (Apache-2.0, Copyright Genymobile): a
  * display made from a context that names `com.android.shell`, flags that make
@@ -192,6 +193,24 @@ class WindowHostService() : IWindowHost.Stub() {
         if (!displays.containsKey(displayId) || text.isEmpty()) return false
         val events = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD).getEvents(text.toCharArray()) ?: return false
         return events.all { inject(it, displayId) }
+    }
+
+    /**
+     * Let my computers turn on my hotspot: start the phone's own Wi-Fi hotspot with the
+     * settings Android already holds. Takes nothing from the caller, after the same
+     * caller-uid check as every call here.
+     */
+    override fun startHotspot(): Boolean {
+        guard()
+        val context = shellContext ?: return false
+        return HotspotShell.start(context)
+    }
+
+    /** Turn the hotspot off (see [startHotspot]). */
+    override fun stopHotspot(): Boolean {
+        guard()
+        val context = shellContext ?: return false
+        return HotspotShell.stop(context)
     }
 
     override fun destroy() {

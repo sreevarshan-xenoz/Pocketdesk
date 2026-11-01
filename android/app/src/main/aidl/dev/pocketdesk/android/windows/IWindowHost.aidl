@@ -1,7 +1,8 @@
 // Phone apps tier 2 (separate windows): what Pocketdesk asks of its helper
-// process, which Shizuku starts with shell identity. Used for exactly three
+// process, which Shizuku starts with shell identity. Used for exactly four
 // things: making a display for an app window, launching an app on that
-// display, and sending input to that display. Nothing else.
+// display, sending input to that display, and turning the phone's own hotspot
+// on and off (transactions 9 and 10, which take nothing). Nothing else.
 package dev.pocketdesk.android.windows;
 
 import android.view.Surface;
@@ -35,4 +36,12 @@ interface IWindowHost {
     // Android's MotionEvent action with the changing finger's index in its
     // high bits; finger i has id ids[i] and pixel (xs[i], ys[i]).
     boolean injectPointers(int displayId, int action, in int[] ids, in float[] xs, in float[] ys, long downTime) = 8;
+
+    // Let my computers turn on my hotspot: start the phone's own Wi-Fi hotspot
+    // with the settings Android already holds for it. No argument: no name,
+    // password or band is ever passed in. True when it started.
+    boolean startHotspot() = 9;
+
+    // Turn the hotspot off again. True when it was asked to stop.
+    boolean stopHotspot() = 10;
 }

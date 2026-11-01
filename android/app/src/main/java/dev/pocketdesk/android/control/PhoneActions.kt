@@ -13,6 +13,8 @@ import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.files.ScreenshotPrefs
 import dev.pocketdesk.android.notify.NotificationActionRule
+import dev.pocketdesk.android.windows.HotspotRule
+import dev.pocketdesk.android.windows.PhoneHotspot
 import dev.pocketdesk.android.windows.ShizukuBridge
 import dev.pocketdesk.android.windows.WindowRule
 import org.json.JSONArray
@@ -416,12 +418,26 @@ object PhoneActions {
 
     /** Take the asks waiting; [own] is the computer the phone works with. */
     fun take(context: Context, own: HostStore.Host?) {
+        // Let my computers turn on my hotspot: one the owner's minutes are up on goes off now.
+        PhoneHotspot.tick(context, System.currentTimeMillis())
         val asks = RustCore.takePhoneActions()
         if (asks.isEmpty()) return
         val service = ControlService.instance
         for (ask in asks) {
             val action = PhoneActionRule.Action.parse(ask.action) ?: continue
             val ownComputer = own != null && own.address == ask.host && own.controlPort == ask.port
+            // Let my computers turn on my hotspot: its own gate (the switch, Shizuku, the
+            // phone's own computer, a rate limit), never the control service or the lock.
+            if (action == PhoneActionRule.Action.HOTSPOT_ON || action == PhoneActionRule.Action.HOTSPOT_OFF) {
+                val hotspot = if (action == PhoneActionRule.Action.HOTSPOT_ON) HotspotRule.Ask.ON else HotspotRule.Ask.OFF
+                val decided = PhoneHotspot.decide(context, hotspot, ownComputer, SystemClock.elapsedRealtime())
+                if (decided == HotspotRule.Decision.DO) {
+                    PhoneHotspot.run(context, hotspot)
+                } else {
+                    Log.i(TAG, "an ask from the computer (${action.word}) was not done: $decided")
+                }
+                continue
+            }
             var decision = PhoneActionRule.decide(
                 action = action,
                 on = Prefs.phoneActionsFromComputer(context),

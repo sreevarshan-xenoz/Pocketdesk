@@ -187,6 +187,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 AppsSetting()
                 AutoAcceptSetting()
                 WindowsSetting()
+                HotspotSetting()
                 CopiesSetting()
                 CastSoundSetting()
                 WebcamSetting()
