@@ -24,6 +24,8 @@ pub mod device_keys;
 pub mod diagnostics;
 pub mod dials;
 pub mod direct_link;
+#[cfg(windows)]
+pub mod direct_link_windows;
 pub mod drive;
 pub mod events;
 pub mod hold_words;

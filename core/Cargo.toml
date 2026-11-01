@@ -170,7 +170,11 @@ wayland-protocols-misc = { version = "0.3", features = ["client"], optional = tr
 # Windows: capture backends, and owner-only file ACLs (secure_fs) on every
 # Windows build.
 [target.'cfg(windows)'.dependencies]
-windows.workspace = true
+# The Networking features are for the direct link's Mobile Hotspot
+# (`local::direct_link_windows`).
+windows = { workspace = true, features = ["Networking_Connectivity", "Networking_NetworkOperators"] }
+# Its async calls are waited for with a deadline (`IAsyncOperation::Status`).
+windows-future = "0.3"
 # BG8 (feature inproc-windows): the same ffmpeg-next the Linux build uses,
 # through a crate of its own (Cargo refuses one crate under two names), so
 # `encode` alone never pulls it in on Windows.

@@ -5675,6 +5675,7 @@ dependencies = [
  "wayland-protocols-wlr",
  "wayland-scanner",
  "windows 0.62.2",
+ "windows-future 0.3.2",
  "x11rb",
  "xcap",
 ]
