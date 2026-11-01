@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1096 open items.
+1095 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
 | A second computer | 149 |
-| A Linux desktop (the Azure VM serves for some) | 187 |
+| A Linux desktop (the Azure VM serves for some) | 186 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
 
@@ -1377,11 +1377,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **100. GNOME and KDE hosts that work unattended (N8)**
 
-- "Remember the screen-sharing grant" on: a session from the phone asks once at the desk; a second session and a reconnect start with no dialog. (KDE headless above; a phone session and GNOME owed.)
-- Without uinput access: the phone's taps, typing (accents, emoji), keys and the wheel (its direction, one click a notch) reach GNOME through the RemoteDesktop portal; a remote without the screen is told it gets no input there.
+- "Remember the screen-sharing grant" on: a session from the phone asks once at the desk; a second session and a reconnect start with no dialog. (KDE and GNOME headless above, by the probe; a phone session at a real desk owed.)
+- Without uinput access: the phone's taps, typing (accents, emoji), keys and the wheel (its direction, one click a notch) reach GNOME through the RemoteDesktop portal; a remote without the screen is told it gets no input there. (Headless 2026-11-01: taps, keys, ASCII typing and the wheel arrived, accents not on a US layout, and a grant with "Allow Remote Interaction" off gave no input and no word to the phone; owed: a phone, a layout with accents, emoji.)
 - Revoking in GNOME's settings brings the dialog back; Forget the grant and turning the setting off make the next session ask.
 - No RemoteDesktop portal (or refused): the screen alone.
-- The server started as a systemd user service: does the portal keep its restore data with no desktop app id? (Unnamed, KDE kept and restored both tokens under the empty id; the server now names itself `dev.pocketdesk.Pocketdesk` where the package's desktop file is installed. The unit itself is still owed.)
+- The server started as a systemd user service: does the portal keep its restore data with no desktop app id? (Unnamed, KDE kept and restored both tokens under the empty id; the server now names itself `dev.pocketdesk.Pocketdesk` where the package's desktop file is installed. The unit itself is still owed on a live desk. Answered 2026-11-01 from the unit and systemd's rules: a user unit gets only the user manager's environment, never the session's, and Plasma's `startplasma-wayland` sets `XDG_CURRENT_DESKTOP`, `KDE_FULL_SESSION` and `KDE_SESSION_VERSION` itself and carries KDE's `KUpdateLaunchEnvironmentJob`, the job that pushes them to the user manager and D-Bus activation (read from the 6.8.2 binary's strings, not run), while `plasma-workspace.target` is `Before=graphical-session.target`, which the unit starts after; the same rig showed the converse on GNOME, where the manager had no `XDG_CURRENT_DESKTOP` until the session set it, and the portal then offered no ScreenCast. Still to see on a real Plasma desk: `systemctl --user show-environment | grep -E 'XDG_CURRENT_DESKTOP|KDE_FULL_SESSION'`.)
 
 **101. KDE Connect, next steps (N9)**
 
@@ -1617,7 +1617,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Firefox and a GTK app under Sway or Hyprland without uinput: a slow two-finger scroll moves the page about as far as the same scroll on a laptop's own touchpad, with no jump at notch boundaries. (where: linux)
 - X11 (an Xorg session without uinput, through XTEST): the wheel scrolls up and down the right way, a click a notch. (where: linux)
 - KDE Plasma through the portal: a slow touchpad scroll from the window or the phone moves a few pixels at a time (`NotifyPointerAxis` pixels, 3.75 a quarter notch), the right way. (where: linux)
-- GNOME through the portal: a slow touchpad scroll still scrolls, a notch once the turns make one. (where: linux)
 - uinput on a Linux computer where `/dev/uinput` is writable: `libinput debug-events` shows `v120` values below 120 for a slow scroll, and a mouse wheel's notch from an older phone app still scrolls one notch. (where: linux)
 - The phone's trackpad: a slow two-finger scroll moves the page smoothly; with Settings' Smooth scrolling off it moves a notch at a time as before. (where: linux)
 
