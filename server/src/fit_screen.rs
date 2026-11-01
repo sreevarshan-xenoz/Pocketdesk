@@ -220,12 +220,14 @@ fn key_lock(device_id: &str, slot: u8) -> WindowLock {
 /// Ask the computer `device_id` for the window `slot`'s screen at `size`, or
 /// to give the one it has that size; the screen it made, or why not. The ask
 /// runs on a task of its own, so a view ended meanwhile does not leave one
-/// half-made: [`release`] waits for it.
+/// half-made: [`release`] waits for it. The lock is taken before the task
+/// starts, so a release that comes after this call always runs after the
+/// ask, never before it (review).
 pub async fn fit(device_id: &str, slot: u8, size: FitSize) -> Result<Fitted, String> {
-    let lock = key_lock(device_id, slot);
+    let one = key_lock(device_id, slot).lock_owned().await;
     let device = device_id.to_string();
     tokio::spawn(async move {
-        let _one = lock.lock().await;
+        let _one = one;
         fitted(&ask(&device, slot, "fit", Some(size)).await?)
     })
     .await
