@@ -92,6 +92,7 @@ pub fn register_all() -> PluginSet {
     registry.register(in_use::InUsePlugin);
     registry.register(phone_files::PhoneFilesPlugin);
     registry.register(phone_photos::PhonePhotosPlugin);
+    registry.register(crate::phone_location::PhoneLocationPlugin);
     registry.register(phone_screen::PhoneScreenPlugin);
     registry.register(crate::quiet_phone::PhoneQuietPlugin);
     registry.register(crate::virtual_screen::VirtualScreenPlugin);
