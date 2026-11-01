@@ -15,7 +15,11 @@ fun sendPadOutputs(address: String, port: Int, outputs: List<PadOutput>, send: (
                 RustCore.sendMouseEvent(address, port, out.dx.toFloat(), out.dy.toFloat(), 0, false)
             }
             is PadOutput.Scroll -> send {
-                RustCore.sendMouseEvent(address, port, out.dx.toFloat(), out.dy.toFloat(), 2, false)
+                if (out.fine) {
+                    RustCore.sendScroll(out.dx, out.dy, out.x120, out.y120)
+                } else {
+                    RustCore.sendMouseEvent(address, port, out.dx.toFloat(), out.dy.toFloat(), 2, false)
+                }
             }
             is PadOutput.Click -> send {
                 RustCore.sendMouseClick(out.button, true)

@@ -144,6 +144,8 @@ object RustCore {
     private external fun nativeLaserSupported(): Boolean
     private external fun nativeSendMouseClick(button: Int, pressed: Boolean): String
 
+    private external fun nativeSendScroll(dx: Int, dy: Int, x120: Int, y120: Int, fine: Boolean): String
+
     private external fun nativeSendKeyboardEvent(
         address: String,
         port: Int,
@@ -847,6 +849,15 @@ object RustCore {
      */
     fun sendMouseClick(button: Int, isPressed: Boolean): Result<Unit> =
         envelope(nativeSendMouseClick(button, isPressed)).map { }
+
+    /**
+     * A wheel turn with smooth scrolling: [dx]/[dy] whole notches (right,
+     * up) for a computer older than fine scrolling, and the same turn in
+     * 120ths of a notch ([x120], [y120]) for one that scrolls by them.
+     * Requires an active QUIC streaming connection.
+     */
+    fun sendScroll(dx: Int, dy: Int, x120: Int, y120: Int): Result<Unit> =
+        envelope(nativeSendScroll(dx, dy, x120, y120, true)).map { }
 
     /** Map a view-local pixel offset to the 0..=65535 normalized axis range. */
     fun normalizedCoord(offset: Float, size: Int): Int =

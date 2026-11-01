@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1088 open items.
+1096 open items.
 
 | Where | Items |
 |---|---|
@@ -12,8 +12,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 147 |
-| A Linux desktop (the Azure VM serves for some) | 181 |
+| A second computer | 149 |
+| A Linux desktop (the Azure VM serves for some) | 187 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
 
@@ -557,7 +557,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - An input method here (Windows' Japanese IME, or Linux fcitx): note that it does not compose in the window in either mode (the picture asks for no input method), and that with Keys by position on, its keys go by place with nothing typed twice. (where: owner)
 
-**249. Approve with my phone: sudo, polkit and the lock screen**
+**250. Approve with my phone: sudo, polkit and the lock screen**
 
 - A real fingerprint on the owner's phone approves `sudo true` on the owner's desk, and the phone shows sudo's command; No, no answer and a phone out of reach each give the password prompt (at once with no phone linked, after the wait otherwise). (where: owner)
 - polkit on the owner's desk: a `pkexec true` (or a GUI admin prompt) with the line in `/etc/pam.d/polkit-1` is approved on the phone. (where: owner)
@@ -1115,6 +1115,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Windows driving the Linux laptop for real (the owner's mouse and keyboard, not the script): `share-test --keys 500 --moves 2000` from Windows to the laptop, before and after this build, and a feel check that the pointer keeps up and clicks land where it is. (where: second computer)
 
+**249. Fine scrolling end to end**
+
+- Windows host: a slow two-finger scroll from the phone or another computer's window scrolls a browser page a little at a time (`SendInput` wheel data below 120). (where: second computer)
+- Shared input between two computers on this build: a touchpad's slow scroll on the driving one scrolls finely on the other; with one on an older build, by notches. (where: second computer)
+
 ## A Linux desktop (the Azure VM serves for some)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1606,6 +1611,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A phone session against the tarball's server on a real stock Fedora machine with no working hardware encoder and `ffmpeg-free` plus `openh264`: the picture appears and stays, Diagnostics' last session names `ffmpeg-sidecar-openh264`, and the picture quality at the default bitrate is acceptable. (where: linux)
 - install.sh on a fresh stock Fedora: it lists `ffmpeg-free` and `openh264` and, once they are installed, `pocketdesk capabilities` names libopenh264; with `fedora-cisco-openh264` disabled it says how to enable it and enables nothing. (where: linux)
+
+**249. Fine scrolling end to end**
+
+- Firefox and a GTK app under Sway or Hyprland without uinput: a slow two-finger scroll moves the page about as far as the same scroll on a laptop's own touchpad, with no jump at notch boundaries. (where: linux)
+- X11 (an Xorg session without uinput, through XTEST): the wheel scrolls up and down the right way, a click a notch. (where: linux)
+- KDE Plasma through the portal: a slow touchpad scroll from the window or the phone moves a few pixels at a time (`NotifyPointerAxis` pixels, 3.75 a quarter notch), the right way. (where: linux)
+- GNOME through the portal: a slow touchpad scroll still scrolls, a notch once the turns make one. (where: linux)
+- uinput on a Linux computer where `/dev/uinput` is writable: `libinput debug-events` shows `v120` values below 120 for a slow scroll, and a mouse wheel's notch from an older phone app still scrolls one notch. (where: linux)
+- The phone's trackpad: a slow two-finger scroll moves the page smoothly; with Settings' Smooth scrolling off it moves a notch at a time as before. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

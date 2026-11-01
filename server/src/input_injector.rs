@@ -322,6 +322,9 @@ pub struct InputInjector {
     /// Button mask of the previous `Gamepad` packet. That packet is a state
     /// snapshot, so every bit must be treated as an edge (see 2063).
     gamepad_buttons: u16,
+    /// Fine wheel turns not yet a whole notch, for the backends that also
+    /// need notches (uinput's `REL_WHEEL`, enigo).
+    wheel_rest: pocketdesk_core::streaming::wheel::Notches,
     /// The phone's pen (E3).
     pen: PenState,
     /// The phone's gamepad as a game controller (T7), made at its first
@@ -511,6 +514,61 @@ impl InputInjector {
     }
 }
 
+/// `EV_REL` codes of the wheel: `REL_HWHEEL`, `REL_WHEEL`,
+/// `REL_WHEEL_HI_RES`, `REL_HWHEEL_HI_RES`.
+#[cfg(any(target_os = "linux", test))]
+const REL_HWHEEL_CODE: u16 = 0x06;
+#[cfg(any(target_os = "linux", test))]
+const REL_WHEEL_CODE: u16 = 0x08;
+#[cfg(any(target_os = "linux", test))]
+const REL_WHEEL_HI_RES_CODE: u16 = 0x0b;
+#[cfg(any(target_os = "linux", test))]
+const REL_HWHEEL_HI_RES_CODE: u16 = 0x0c;
+
+/// A wheel turn as a uinput device reports it, as a high-resolution mouse
+/// does: the notches completed (`nx`, `ny`) on `REL_WHEEL`/`REL_HWHEEL` for
+/// readers of those, and the turn in 120ths (`x`, `y`) on their `_HI_RES`
+/// axes, which libinput reads instead; then the report. Positive is up,
+/// and right; an axis with nothing to say is left out.
+#[cfg(any(target_os = "linux", test))]
+fn wheel_report(x: i32, y: i32, nx: i32, ny: i32) -> Vec<(u16, i32)> {
+    [
+        (REL_WHEEL_CODE, ny),
+        (REL_WHEEL_HI_RES_CODE, y),
+        (REL_HWHEEL_CODE, nx),
+        (REL_HWHEEL_HI_RES_CODE, x),
+    ]
+    .into_iter()
+    .filter(|(_, v)| *v != 0)
+    .collect()
+}
+
+/// [`wheel_report`] as the events to emit.
+#[cfg(target_os = "linux")]
+fn uinput_wheel_events(x: i32, y: i32, nx: i32, ny: i32) -> Vec<InputEvent> {
+    let mut events: Vec<InputEvent> = wheel_report(x, y, nx, ny)
+        .into_iter()
+        .map(|(code, value)| InputEvent::new(EV_REL, code, value))
+        .collect();
+    events.push(InputEvent::new(EV_SYN, SYN_REPORT, 0));
+    events
+}
+
+/// Wheel notches (`x` right, `y` up) as enigo's scrolls: one click a
+/// notch, and enigo's positive is down, or right. It used to drop the sign
+/// and divide by ten, so every turn went down or right, one click for up
+/// to 19 notches.
+fn enigo_scroll(x: i32, y: i32) -> Vec<(i32, enigo::Axis)> {
+    let mut out = Vec::new();
+    if y != 0 {
+        out.push((y.saturating_neg(), enigo::Axis::Vertical));
+    }
+    if x != 0 {
+        out.push((x, enigo::Axis::Horizontal));
+    }
+    out
+}
+
 /// The wheel notches one gamepad packet's right stick gives (E4): none
 /// within a third of its travel, one from there, two from two thirds (the
 /// phone's edge is 32767); up scrolls up.
@@ -596,6 +654,7 @@ impl InputInjector {
             Ok(Self {
                 backend: InputBackend::SendInput(crate::input_sendinput::SendInputBackend::new()),
                 gamepad_buttons: 0,
+                wheel_rest: Default::default(),
                 display_size: None,
                 keep_display_size: false,
                 #[cfg(target_os = "linux")]
@@ -631,6 +690,7 @@ impl InputInjector {
                             return Ok(Self {
                                 backend: InputBackend::Wlr(wlr),
                                 gamepad_buttons: 0,
+                                wheel_rest: Default::default(),
                                 display_size: None,
                                 keep_display_size: false,
                                 #[cfg(target_os = "linux")]
@@ -650,6 +710,7 @@ impl InputInjector {
                             return Ok(Self {
                                 backend: InputBackend::Portal,
                                 gamepad_buttons: 0,
+                                wheel_rest: Default::default(),
                                 display_size: None,
                                 keep_display_size: false,
                                 #[cfg(target_os = "linux")]
@@ -674,6 +735,7 @@ impl InputInjector {
                 return Ok(Self {
                     backend: InputBackend::Enigo(Box::new(Mutex::new(enigo))),
                     gamepad_buttons: 0,
+                    wheel_rest: Default::default(),
                     display_size: None,
                     keep_display_size: false,
                     #[cfg(target_os = "linux")]
@@ -731,6 +793,7 @@ impl InputInjector {
                     .ok(),
             })),
             gamepad_buttons: 0,
+            wheel_rest: Default::default(),
             display_size: None,
             keep_display_size: false,
             #[cfg(target_os = "linux")]
@@ -921,13 +984,8 @@ impl InputInjector {
             InputBackend::SendInput(backend) => backend.scroll(x, y),
             InputBackend::Enigo(enigo) => {
                 let e = enigo.get_mut().unwrap();
-                if y != 0 {
-                    e.scroll((y.abs() / 10).max(1), enigo::Axis::Vertical)
-                        .context("enigo vertical scroll failed")?;
-                }
-                if x != 0 {
-                    e.scroll((x.abs() / 10).max(1), enigo::Axis::Horizontal)
-                        .context("enigo horizontal scroll failed")?;
+                for (clicks, axis) in enigo_scroll(x, y) {
+                    e.scroll(clicks, axis).context("enigo scroll failed")?;
                 }
                 Ok(())
             }
@@ -944,14 +1002,58 @@ impl InputInjector {
                 }
                 Ok(())
             }
+            // The device has the high-resolution wheel too, which libinput
+            // reads in place of the notches: each notch is said both ways.
             #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 let guard = state.get_mut().unwrap();
-                let events = [
-                    InputEvent::new(EV_REL, RelativeAxisCode::REL_WHEEL.0, y),
-                    InputEvent::new(EV_REL, RelativeAxisCode::REL_HWHEEL.0, x),
-                    InputEvent::new(EV_SYN, SYN_REPORT, 0),
-                ];
+                let fine = |n: i32| n.saturating_mul(pocketdesk_core::streaming::wheel::NOTCH);
+                let events = uinput_wheel_events(fine(x), fine(y), x, y);
+                emit_uinput(guard, UinputDevice::Main, &events, "scroll")
+            }
+        }
+    }
+
+    /// Turn the wheel `x` and `y` 120ths of a notch (right, and up): as
+    /// finely as the backend takes it, with the whole notches the turns add
+    /// up to where it also needs those.
+    pub fn scroll_fine(&mut self, x: i32, y: i32) -> Result<()> {
+        if x == 0 && y == 0 {
+            return Ok(());
+        }
+        if matches!(self.backend, InputBackend::Enigo(_)) {
+            // XTEST has whole clicks only.
+            let (nx, ny) = self.wheel_rest.add(x, y);
+            if nx == 0 && ny == 0 {
+                return Ok(());
+            }
+            return self.scroll(nx, ny);
+        }
+        match &mut self.backend {
+            #[cfg(windows)]
+            InputBackend::SendInput(backend) => backend.scroll_fine(x, y),
+            InputBackend::Enigo(_) => Ok(()),
+            #[cfg(target_os = "linux")]
+            InputBackend::Wlr(wlr) => wlr.scroll_fine(x, y).context("virtual pointer scroll"),
+            // As `scroll`: the portal's down is the wheel's negative.
+            #[cfg(target_os = "linux")]
+            InputBackend::Portal => {
+                if y != 0 {
+                    portal(PortalEvent::FineScroll {
+                        axis: 0,
+                        v120: y.saturating_neg(),
+                    })?;
+                }
+                if x != 0 {
+                    portal(PortalEvent::FineScroll { axis: 1, v120: x })?;
+                }
+                Ok(())
+            }
+            #[cfg(target_os = "linux")]
+            InputBackend::Uinput(state) => {
+                let (nx, ny) = self.wheel_rest.add(x, y);
+                let guard = state.get_mut().unwrap();
+                let events = uinput_wheel_events(x, y, nx, ny);
                 emit_uinput(guard, UinputDevice::Main, &events, "scroll")
             }
         }
@@ -1193,7 +1295,12 @@ impl InputInjector {
                 };
                 self.mouse_button(mouse_key, *pressed)
             }
-            InputPacket::MouseScroll { dx, dy } => self.scroll(*dx as i32, *dy as i32),
+            // Fine when the sender says the turn in 120ths; from one before
+            // fine scrolling, its notches, as ever.
+            InputPacket::MouseScroll { dx, dy, fine } => match fine {
+                Some((x, y)) => self.scroll_fine(i32::from(*x), i32::from(*y)),
+                None => self.scroll(i32::from(*dx), i32::from(*dy)),
+            },
             InputPacket::Pen(sample) => self.pen(sample),
             // G4: a dot drawn on the screen; the pointer stays where it is.
             InputPacket::Laser { dx, dy, show } => {
@@ -1772,6 +1879,10 @@ fn build_main_device() -> Result<VirtualDevice> {
     rel.insert(RelativeAxisCode::REL_Y);
     rel.insert(RelativeAxisCode::REL_WHEEL);
     rel.insert(RelativeAxisCode::REL_HWHEEL);
+    // Fine scrolling: libinput then reads these, in 120ths of a notch, and
+    // gives clients `value120` from them.
+    rel.insert(RelativeAxisCode::REL_WHEEL_HI_RES);
+    rel.insert(RelativeAxisCode::REL_HWHEEL_HI_RES);
 
     #[allow(deprecated)]
     let device = VirtualDeviceBuilder::new()
@@ -2410,6 +2521,50 @@ mod tests {
             gamepad_edges(0x0800, 0),
             vec![(GamepadAction::Key(Key::UpArrow), false)]
         );
+    }
+
+    #[test]
+    fn the_wheel_reports_notches_and_their_120ths_as_a_hi_res_mouse() {
+        // A notch up from an older sender: both ways, as a hi-res mouse.
+        assert_eq!(
+            wheel_report(0, 120, 0, 1),
+            [(REL_WHEEL_CODE, 1), (REL_WHEEL_HI_RES_CODE, 120)]
+        );
+        // A quarter notch: the fine axis alone.
+        assert_eq!(wheel_report(0, 30, 0, 0), [(REL_WHEEL_HI_RES_CODE, 30)]);
+        // The turn that completes a notch left carries it.
+        assert_eq!(
+            wheel_report(-40, 0, -1, 0),
+            [(REL_HWHEEL_CODE, -1), (REL_HWHEEL_HI_RES_CODE, -40)]
+        );
+        assert!(wheel_report(0, 0, 0, 0).is_empty());
+        // The codes are the kernel's.
+        #[cfg(target_os = "linux")]
+        {
+            assert_eq!(REL_WHEEL_CODE, RelativeAxisCode::REL_WHEEL.0);
+            assert_eq!(REL_HWHEEL_CODE, RelativeAxisCode::REL_HWHEEL.0);
+            assert_eq!(REL_WHEEL_HI_RES_CODE, RelativeAxisCode::REL_WHEEL_HI_RES.0);
+            assert_eq!(
+                REL_HWHEEL_HI_RES_CODE,
+                RelativeAxisCode::REL_HWHEEL_HI_RES.0
+            );
+        }
+    }
+
+    #[test]
+    fn enigo_scrolls_each_notch_the_right_way() {
+        let words = |x, y| {
+            enigo_scroll(x, y)
+                .into_iter()
+                .map(|(n, axis)| (n, axis == enigo::Axis::Vertical))
+                .collect::<Vec<_>>()
+        };
+        // Up is enigo's negative; two notches are two clicks.
+        assert_eq!(words(0, 2), [(-2, true)]);
+        assert_eq!(words(0, -1), [(1, true)]);
+        assert_eq!(words(-3, 0), [(-3, false)]);
+        assert_eq!(words(1, 1), [(-1, true), (1, false)]);
+        assert!(words(0, 0).is_empty());
     }
 
     #[test]
