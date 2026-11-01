@@ -29,6 +29,8 @@ class HealthReceiver : BroadcastReceiver() {
         // conditions, so an ordinary reboot does it too (M1 review).
         if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
             runCatching { dev.pocketdesk.android.service.LinkKeeperService.sync(app) }
+            // A spare phone as the wake helper, if its switch is on.
+            runCatching { dev.pocketdesk.android.service.WakeHelperService.sync(app) }
         }
         when (intent.action) {
             Intent.ACTION_MY_PACKAGE_REPLACED -> noteBuild(app)

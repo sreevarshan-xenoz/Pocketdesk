@@ -962,6 +962,10 @@ class PhoneNotificationListener : NotificationListenerService() {
         media.sync()
         // Its inputs (the features, shared folders' grants, the saved
         // computers) cost a read each: every 10 s is soon enough (M1 review).
+        if (keeperTicks % 5 == 0) {
+            // What computers said of wake helpers, kept for the Wake button.
+            runCatching { dev.pocketdesk.android.wake.WakeHelperKeeper.poll(this) }
+        }
         if (keeperTicks++ % 5 == 0) dev.pocketdesk.android.service.LinkKeeperService.sync(this)
     }
 

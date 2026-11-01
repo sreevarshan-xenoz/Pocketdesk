@@ -150,6 +150,9 @@ object HostStore {
             KEY_WOL_MAC_PREFIX,
             KEY_WAKE_INFO_PREFIX,
             KEY_WAKE_SETTINGS_PREFIX,
+            // A spare phone as the wake helper: what the computer said of it.
+            KEY_HELPER_DUTY_PREFIX,
+            KEY_HELPER_INFO_PREFIX,
             KEY_WAN_IDENTITY_PREFIX,
             KEY_MONITOR_PREFIX,
             KEY_PAIRED_PREFIX,
@@ -349,6 +352,47 @@ object HostStore {
         return true
     }
 
+    private const val KEY_HELPER_DUTY_PREFIX = "wake_helper_duty:"
+    private const val KEY_HELPER_INFO_PREFIX = "wake_helper_info:"
+
+    /**
+     * What the computer at [address] told this phone to do as its wake helper
+     * (a `wake_helper_duty` body), or null. Kept only for a computer this
+     * phone paired with.
+     */
+    fun wakeHelperDuty(ctx: Context, address: String): String? =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString("$KEY_HELPER_DUTY_PREFIX$address", null)?.takeIf { it.isNotBlank() }
+
+    /** Keep the duty the computer sent; returns whether it changed. */
+    fun saveWakeHelperDuty(ctx: Context, address: String, json: String): Boolean {
+        val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.getString("$KEY_HELPER_DUTY_PREFIX$address", null) == json) return false
+        prefs.edit { putString("$KEY_HELPER_DUTY_PREFIX$address", json) }
+        return true
+    }
+
+    /** Forget the duty kept for [address]: it removed this phone as its helper. */
+    fun clearWakeHelperDuty(ctx: Context, address: String) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { remove("$KEY_HELPER_DUTY_PREFIX$address") }
+    }
+
+    /**
+     * Where the computer at [address] said its wake helper is (a
+     * `wake_helper_info` body: the helper, or none), or null.
+     */
+    fun wakeHelperInfo(ctx: Context, address: String): String? =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString("$KEY_HELPER_INFO_PREFIX$address", null)?.takeIf { it.isNotBlank() }
+
+    /** Keep the info the computer sent; returns whether it changed. */
+    fun saveWakeHelperInfo(ctx: Context, address: String, json: String): Boolean {
+        val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.getString("$KEY_HELPER_INFO_PREFIX$address", null) == json) return false
+        prefs.edit { putString("$KEY_HELPER_INFO_PREFIX$address", json) }
+        return true
+    }
+
     /**
      * The user's wake settings for [address]. A MAC typed before N6 carries
      * over with what Wake did then: ask the saved computer itself, an
@@ -374,6 +418,7 @@ object HostStore {
                 outsideHost = o.optString("outsideHost"),
                 outsidePort = o.optInt("outsidePort"),
                 mac = o.optString("mac"),
+                viaHelper = o.optBoolean("viaHelper", false),
             )
         }.getOrNull()
 
@@ -384,6 +429,7 @@ object HostStore {
             .put("outsideHost", settings.outsideHost)
             .put("outsidePort", settings.outsidePort)
             .put("mac", settings.mac)
+            .put("viaHelper", settings.viaHelper)
             .toString()
 
     /**

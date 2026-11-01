@@ -172,4 +172,44 @@ class WakePlanTest {
         assertEquals("192.0.2.2", WakePlan.relayShown(WakeSettings(), saved))
         assertEquals("192.0.2.3", WakePlan.relayShown(WakeSettings(method = WakeMethod.RELAY, relay = "192.0.2.3"), saved))
     }
+
+    @Test
+    fun `a phone away asks its helper only when told to and one is known`() {
+        val through = WakeSettings(viaHelper = true)
+        // Away, switched on, a helper introduced: the helper.
+        assertEquals(WakePlan.Plan.Helper, WakePlan.plan(through, info, identity, atHome = false, helperKnown = true))
+        // Off by default: the plan is what it was.
+        assertEquals(
+            WakePlan.Plan.Direct("02:11:22:33:44:55", listOf("203.0.113.7:40009")),
+            WakePlan.plan(WakeSettings(), info, identity, atHome = false, helperKnown = true),
+        )
+        // Switched on but no helper introduced yet.
+        assertEquals(
+            WakePlan.Plan.Direct("02:11:22:33:44:55", listOf("203.0.113.7:40009")),
+            WakePlan.plan(through, info, identity, atHome = false, helperKnown = false),
+        )
+        // At home the phone sends it itself, as before.
+        assertEquals(
+            WakePlan.Plan.Direct(
+                "02:11:22:33:44:55",
+                listOf("192.168.1.255:9", "255.255.255.255:9", "203.0.113.7:40009"),
+            ),
+            WakePlan.plan(through, info, identity, atHome = true, helperKnown = true),
+        )
+        // Wake off for this computer stays off, helper or not.
+        assertEquals(
+            WakePlan.Plan.Off,
+            WakePlan.plan(WakeSettings(method = WakeMethod.OFF, viaHelper = true), info, identity, false, true),
+        )
+    }
+
+    @Test
+    fun `the helper needs no mac from this phone`() {
+        // The helper holds the computer's own MAC, learned from the computer,
+        // so a phone that never learned one still asks it.
+        assertEquals(
+            WakePlan.Plan.Helper,
+            WakePlan.plan(WakeSettings(viaHelper = true), null, emptyList(), atHome = false, helperKnown = true),
+        )
+    }
 }

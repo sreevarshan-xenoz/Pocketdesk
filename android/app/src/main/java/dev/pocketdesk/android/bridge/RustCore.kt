@@ -277,6 +277,20 @@ object RustCore {
         broadcast: String,
     ): String
 
+    private external fun nativeWakeHelperStart(): String
+
+    private external fun nativeWakeHelperStop(): String
+
+    private external fun nativeWakeHelperStatus(): String
+
+    private external fun nativeWakeHelperSetDuties(dutiesJson: String): String
+
+    private external fun nativeWakeHelperSetNetworks(networksJson: String): String
+
+    private external fun nativeTakeWakeHelper(): String
+
+    private external fun nativeWakeViaHelper(infoJson: String): String
+
     val version: String
         get() = nativeVersion()
 
@@ -1528,6 +1542,38 @@ object RustCore {
         mac: String,
         broadcast: String = "",
     ): Result<Unit> = envelope(nativeWakeViaRelay(address, port, mac, broadcast)).map { }
+
+    /**
+     * Start listening as a wake helper (a spare phone at home); the status
+     * JSON `{running, id, relays, sent, refused, dropped}`.
+     */
+    fun wakeHelperStart(): Result<String> = envelope(nativeWakeHelperStart())
+
+    /** Stop listening as a wake helper. */
+    fun wakeHelperStop() {
+        runCatching { nativeWakeHelperStop() }
+    }
+
+    /** The helper's status JSON, as [wakeHelperStart] says it. */
+    fun wakeHelperStatus(): String = envelope(nativeWakeHelperStatus()).getOrDefault("{}")
+
+    /** Set the duties the helper serves (a JSON array of what the computers told it). */
+    fun wakeHelperSetDuties(json: String): Result<String> = envelope(nativeWakeHelperSetDuties(json))
+
+    /** Set the broadcast addresses of the networks the phone is on. */
+    fun wakeHelperSetNetworks(json: String): Result<String> = envelope(nativeWakeHelperSetNetworks(json))
+
+    /**
+     * What computers said about wake helpers since the last call, a JSON
+     * array `[{type, host, port, body}]`, taken.
+     */
+    fun takeWakeHelper(): String = envelope(nativeTakeWakeHelper()).getOrDefault("[]")
+
+    /**
+     * Ask a computer's wake helper (the computer's `wake_helper_info` JSON)
+     * to wake that computer: `sent`, `slow_down`, `unknown` or `failed`.
+     */
+    fun wakeViaHelper(infoJson: String): Result<String> = envelope(nativeWakeViaHelper(infoJson))
 
     // ---- internals ----
 

@@ -70,6 +70,8 @@ object Prefs {
     private const val KEY_CONNECTION_DETAILS = "connection_details"
     private const val KEY_CONNECT_AFTER_WAKE = "connect_after_wake"
     private const val KEY_OFFER_WAKE = "offer_wake"
+    private const val KEY_WAKE_HELPER = "wake_helper"
+    private const val KEY_WAKE_HELPER_FRESH = "wake_helper_fresh"
     private const val KEY_VERSION_HINTS = "version_hints"
     private const val KEY_PHONE_NAME = "phone_name"
     private const val KEY_SHOW_DRIVING = "show_driving"
@@ -813,6 +815,31 @@ object Prefs {
     fun setOfferWake(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_OFFER_WAKE, enabled) }
         bump()
+    }
+
+    /**
+     * "Wake helper for this home" (off by default): while on, on a charger and on
+     * Wi-Fi, this phone sends the magic packet for the owner's other phones that ask
+     * through it, and nothing else.
+     */
+    fun wakeHelper(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_WAKE_HELPER, false)
+
+    /** Turning it on is a fresh offer: only that undoes a removal at the computer. */
+    fun setWakeHelper(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit {
+            putBoolean(KEY_WAKE_HELPER, enabled)
+            putBoolean(KEY_WAKE_HELPER_FRESH, enabled)
+        }
+        bump()
+    }
+
+    /** The next offer to the computer says the owner just turned the switch on. */
+    fun wakeHelperFresh(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_WAKE_HELPER_FRESH, false)
+
+    fun setWakeHelperFresh(ctx: Context, fresh: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_WAKE_HELPER_FRESH, fresh) }
     }
 
     fun setHaptics(ctx: Context, enabled: Boolean) {

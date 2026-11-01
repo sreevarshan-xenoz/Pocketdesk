@@ -591,6 +591,18 @@ fun SettingsScreen(onBack: () -> Unit) {
                     Prefs.offerWake(context),
                     { Prefs.setOfferWake(context, it) },
                 )
+                // A spare phone at home sends the wake for the owner's other phones.
+                SettingSwitch(
+                    stringResource(R.string.settings_wake_helper),
+                    stringResource(R.string.settings_wake_helper_summary),
+                    Prefs.wakeHelper(context),
+                    {
+                        Prefs.setWakeHelper(context, it)
+                        val app = context.applicationContext
+                        if (!it) dev.pocketdesk.android.service.WakeHelperService.turnedOff(app)
+                        Thread { runCatching { dev.pocketdesk.android.service.WakeHelperService.sync(app) } }.start()
+                    },
+                )
             }
 
             SettingsGroup(stringResource(R.string.settings_appearance)) {

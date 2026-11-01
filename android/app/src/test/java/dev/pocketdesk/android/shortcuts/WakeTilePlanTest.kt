@@ -19,6 +19,7 @@ class WakeTilePlanTest {
         assertEquals(WakeTilePlan.Said.Ready, say(plan))
         assertEquals(WakeTilePlan.Said.Ready, say(WakePlan.Plan.Relay("192.0.2.2", "00:00:5e:00:53:01", "192.0.2.255")))
         assertEquals(WakeTilePlan.Said.Ready, say(WakePlan.Plan.Away))
+        assertEquals(WakeTilePlan.Said.Ready, say(WakePlan.Plan.Helper))
         assertEquals(WakeTilePlan.Said.NotYet, say(WakePlan.Plan.NoMac))
         assertEquals(WakeTilePlan.Said.Off, say(WakePlan.Plan.Off))
         assertEquals(WakeTilePlan.Said.NotYet, say(WakePlan.Plan.NoRelay))
