@@ -2073,7 +2073,9 @@ impl SettingsForm {
                     row(ui, "phone_hotspot_network", |ui| {
                         ui.add(
                             egui::TextEdit::singleline(&mut e.phone_hotspot_network)
-                                .char_limit(pocketdesk_core::local::phone_hotspot::MAX_NETWORK_BYTES)
+                                .char_limit(
+                                    pocketdesk_core::local::phone_hotspot::MAX_NETWORK_BYTES,
+                                )
                                 .hint_text("a saved Wi-Fi network, e.g. My phone"),
                         );
                         note(

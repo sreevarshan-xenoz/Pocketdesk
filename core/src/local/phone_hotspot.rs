@@ -139,7 +139,15 @@ mod tests {
     fn a_network_name_is_checked_before_a_command_names_it() {
         assert!(valid_network_name("My phone"));
         assert!(valid_network_name(&"x".repeat(MAX_NETWORK_BYTES)));
-        for bad in ["", "   ", "-x", "--help", "a\nb", "a\0b", "caf\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}"] {
+        for bad in [
+            "",
+            "   ",
+            "-x",
+            "--help",
+            "a\nb",
+            "a\0b",
+            "caf\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}",
+        ] {
             assert!(!valid_network_name(bad), "{bad:?}");
         }
         assert!(!valid_network_name(&"x".repeat(MAX_NETWORK_BYTES + 1)));
@@ -165,7 +173,11 @@ mod tests {
         assert_eq!(odd.len(), 7);
         assert_eq!(odd[6], "a; rm -rf x $(y) `z`");
         assert!(join_argv("--version").is_none());
-        let all: Vec<String> = join_argv("n").unwrap().into_iter().chain(list_argv()).collect();
+        let all: Vec<String> = join_argv("n")
+            .unwrap()
+            .into_iter()
+            .chain(list_argv())
+            .collect();
         for word in ["password", "wifi", "device", "connect", "secrets", "--ask"] {
             assert!(!all.iter().any(|a| a == word), "{word}");
         }
@@ -181,7 +193,10 @@ mod tests {
         assert!(is_saved_wifi(listing, "Same"));
         assert!(!is_saved_wifi(listing, "Wired connection 1"), "not Wi-Fi");
         assert!(!is_saved_wifi(listing, "vpn one"));
-        assert!(!is_saved_wifi(listing, "Unknown"), "not saved: never joined");
+        assert!(
+            !is_saved_wifi(listing, "Unknown"),
+            "not saved: never joined"
+        );
         assert!(!is_saved_wifi(listing, "My"), "a whole name only");
         assert!(!is_saved_wifi("", "My phone"));
     }

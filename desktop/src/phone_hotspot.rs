@@ -47,8 +47,9 @@ pub fn join(name: &str) -> Result<String, String> {
     if !cfg!(target_os = "linux") {
         return Err("Joining by itself is for Linux with NetworkManager.".to_string());
     }
-    let listing = run(&hotspot::list_argv())
-        .map_err(|e| format!("Could not look at the saved networks (is NetworkManager's nmcli installed?): {e}"))?;
+    let listing = run(&hotspot::list_argv()).map_err(|e| {
+        format!("Could not look at the saved networks (is NetworkManager's nmcli installed?): {e}")
+    })?;
     if !hotspot::is_saved_wifi(&listing.1, name) {
         return Err(format!(
             "\u{201c}{name}\u{201d} is not a Wi-Fi network saved on this computer, so it was not joined. Connect to your phone's network once yourself, then it can be joined from here."
@@ -92,8 +93,14 @@ mod tests {
     /// A join happens only when the owner named a valid network, and only on Linux.
     #[test]
     fn a_network_is_joined_only_when_named_and_valid_on_linux() {
-        assert_eq!(network_to_join("My phone", true).as_deref(), Some("My phone"));
-        assert_eq!(network_to_join("  My phone  ", true).as_deref(), Some("My phone"));
+        assert_eq!(
+            network_to_join("My phone", true).as_deref(),
+            Some("My phone")
+        );
+        assert_eq!(
+            network_to_join("  My phone  ", true).as_deref(),
+            Some("My phone")
+        );
         assert_eq!(network_to_join("My phone", false), None);
         for bad in ["", "   ", "--help", "a\nb"] {
             assert_eq!(network_to_join(bad, true), None, "{bad:?}");

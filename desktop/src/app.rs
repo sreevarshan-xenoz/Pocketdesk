@@ -2245,8 +2245,9 @@ impl PocketdeskApp {
                         if let Some(name) = join.clone()
                             && self.hotspot_join.is_none()
                         {
-                            self.hotspot_join =
-                                Some(std::thread::spawn(move || crate::phone_hotspot::join(&name)));
+                            self.hotspot_join = Some(std::thread::spawn(move || {
+                                crate::phone_hotspot::join(&name)
+                            }));
                         }
                         crate::phone_hotspot::asked_words(&who, join.as_deref())
                     }
