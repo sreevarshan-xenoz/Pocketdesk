@@ -33,10 +33,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use eframe::egui;
-use pocketdesk_core::local::computers::{self, ComputerAsk};
+use pocketdesk_core::local::computers::{self, ComputerAsk, FitSize};
 use pocketdesk_core::local::config::{COMPUTER_VIEW_QUALITIES, Config};
 use pocketdesk_core::local::view::{
-    self as wire, Message, Phase, ViewFile, ViewPrivacy, ViewStatus,
+    self as wire, Message, Phase, ViewFile, ViewFit, ViewPrivacy, ViewStatus,
 };
 use pocketdesk_core::streaming::InputPacket;
 
@@ -44,6 +44,7 @@ use crate::video::{
     Accel, Admit, Codec, DecodeWanted, Decoder, KeyGate, Picture, Planes, Recorder, free_name,
     letterbox, now_unix, stamp, user_folder,
 };
+use crate::view_fit;
 use crate::view_follow::{self, DropBatch, Edge, FocusEdges};
 use crate::view_input::{MOVE_EVERY, SendKey, WindowInput, send_key_choices};
 use crate::view_mic::{self, MicRun, MicSwitch};
@@ -112,6 +113,19 @@ struct Wanted {
     device_id: String,
     name: String,
     monitor: u32,
+    /// "Fit the screen to this window" (item 8): the view asks for a screen
+    /// of the window's size in place of `monitor`, which it shows when none
+    /// is made.
+    fit: bool,
+}
+
+/// A view's ask held back until the window's first picture area is
+/// measured (item 8): a fit asks at the window's size, which is known only
+/// once the window has been drawn.
+#[derive(Debug, Clone)]
+struct Waiting {
+    wanted: Wanted,
+    hevc: HevcAsk,
 }
 
 #[derive(Default)]
@@ -219,6 +233,10 @@ struct State {
     /// the bar that Settings has not heard yet.
     lock_on_close: bool,
     lock_saved: Option<bool>,
+    /// "Fit the screen to this window" (item 8), and an ask for it held
+    /// back until the window is measured.
+    fit: view_fit::FitWindow,
+    fit_waiting: Option<Waiting>,
     /// Settings' "Smooth scrolling" off: the wheel goes in whole notches
     /// only (on, a touchpad's scroll goes in 120ths of a notch).
     notches_only: bool,
@@ -1211,17 +1229,15 @@ impl ComputerView {
         view_only: bool,
         stats: bool,
     ) -> Result<(), String> {
-        let wanted = Wanted {
-            device_id: device_id.to_string(),
-            name: name.to_string(),
-            monitor,
-        };
         let mut state = lock(&self.shared);
         let same = state
             .wanted
             .as_ref()
             .is_some_and(|w| w.device_id == device_id);
         if !same {
+            // Fit as Settings say; the window's own switch then holds
+            // (item 8).
+            state.fit.on = state.fit.default;
             state.hevc_refused = false;
             state.quality = quality;
             state.view_only = view_only;
@@ -1237,6 +1253,12 @@ impl ComputerView {
             state.position_hint = PositionHint::default();
         }
         state.later = false;
+        let wanted = Wanted {
+            device_id: device_id.to_string(),
+            name: name.to_string(),
+            monitor,
+            fit: state.fit.on,
+        };
         ask(&self.state_dir, &mut state, wanted)
     }
 
@@ -1294,6 +1316,20 @@ impl ComputerView {
     /// window follows at once.
     pub fn set_lock_on_close(&self, on: bool) {
         self.each(|state| state.lock_on_close = on);
+    }
+
+    /// "Fit the screen to this window" as Settings have it (item 8): the
+    /// next computer a window shows starts so. An open window keeps its own
+    /// switch (turning it asks the other computer again), so a change in
+    /// Settings never restarts a view.
+    pub fn set_fit_default(&self, on: bool) {
+        self.each(|state| state.fit.default = on);
+    }
+
+    /// The bar's "Fit the screen to this window", saved since the last call
+    /// (item 8): Settings follows it.
+    pub fn take_fit_saved(&self) -> Option<bool> {
+        self.take_each(|state| state.fit.saved.take())
     }
 
     /// "Smooth scrolling" as Settings has it: an open window follows at
@@ -1464,7 +1500,14 @@ impl ComputerView {
             state.grab.setting = from.grab.setting;
         }
         drop(from);
-        let next = Wanted { monitor, ..wanted };
+        // A screen picked to open in a window is that screen, never one
+        // made to fit (item 8): the new window's switch starts off.
+        state.fit.on = false;
+        let next = Wanted {
+            monitor,
+            fit: false,
+            ..wanted
+        };
         if let Err(e) = ask(&self.state_dir, &mut state, next) {
             state.ended = Some(e);
         }
@@ -1571,30 +1614,23 @@ fn ask_with(
     );
     let release = state.input.release_all();
     send(state, release);
-    let slot = state.slot;
-    match hevc_ask(could, known) {
-        HevcAsk::Now(hevc) => {
-            computers::request(state_dir, view_ask(&wanted, hevc, slot), now_unix())
-                .map_err(|e| format!("Not asked: {e}"))?;
-        }
-        HevcAsk::Wait => {
-            // The probe has not said yet: the ask waits for it on a thread
-            // of its own, at most HEVC_PROBE_WAIT.
-            let (dir, request_for) = (state_dir.to_path_buf(), wanted.clone());
-            let waited = std::thread::Builder::new()
-                .name("computer-view-ask".into())
-                .spawn(move || {
-                    let hevc = crate::video::wait_for_hevc_probe(HEVC_PROBE_WAIT);
-                    if let Err(e) =
-                        computers::request(&dir, view_ask(&request_for, hevc, slot), now_unix())
-                    {
-                        eprintln!("Pocketdesk: a computer's screen was not asked for: {e}");
-                    }
-                });
-            if let Err(e) = waited {
-                return Err(format!("Not asked: {e}"));
-            }
-        }
+    // A newer ask replaces one still held back, and starts the fit's
+    // debounce afresh (item 8).
+    state.fit_waiting = None;
+    state.fit.seen = None;
+    let hevc = hevc_ask(could, known);
+    if wanted.fit && state.fit.area.is_none() {
+        // The window has not been measured yet: the ask goes with its
+        // first measure ([`follow_fit`]).
+        state.fit.asked = None;
+        state.fit_waiting = Some(Waiting {
+            wanted: wanted.clone(),
+            hevc,
+        });
+    } else {
+        let fit = wanted.fit.then_some(state.fit.area).flatten();
+        send_view_ask(state_dir, &wanted, hevc, state.slot, fit)?;
+        state.fit.asked = fit;
     }
     // The microphone stops with the view it went to (PR #569 re-review
     // N5): never a frame named for the next computer.
@@ -1646,6 +1682,45 @@ fn ask_with(
     Ok(())
 }
 
+/// Leave the server the ask for `wanted`'s screen in the window `slot`, at
+/// `fit` when the window fits the screen to itself, saying HEVC as `hevc`
+/// decides: at once, or after the probe, on a thread of its own, at most
+/// [`HEVC_PROBE_WAIT`].
+fn send_view_ask(
+    state_dir: &Path,
+    wanted: &Wanted,
+    hevc: HevcAsk,
+    slot: u8,
+    fit: Option<FitSize>,
+) -> Result<(), String> {
+    match hevc {
+        HevcAsk::Now(hevc) => {
+            computers::request(state_dir, view_ask(wanted, hevc, slot, fit), now_unix())
+                .map_err(|e| format!("Not asked: {e}"))?;
+        }
+        HevcAsk::Wait => {
+            // The probe has not said yet: the ask waits for it.
+            let (dir, request_for) = (state_dir.to_path_buf(), wanted.clone());
+            let waited = std::thread::Builder::new()
+                .name("computer-view-ask".into())
+                .spawn(move || {
+                    let hevc = crate::video::wait_for_hevc_probe(HEVC_PROBE_WAIT);
+                    if let Err(e) = computers::request(
+                        &dir,
+                        view_ask(&request_for, hevc, slot, fit),
+                        now_unix(),
+                    ) {
+                        eprintln!("Pocketdesk: a computer's screen was not asked for: {e}");
+                    }
+                });
+            if let Err(e) = waited {
+                return Err(format!("Not asked: {e}"));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Whether a view asks for HEVC (PC5, PR #562 review I3): with "Use HEVC
 /// when both can" on, decoding on the graphics card on too (review M10: on
 /// the processor HEVC decodes about twice as slowly as H.264), this app's
@@ -1675,13 +1750,13 @@ pub fn hevc_ask(could: bool, known: Option<bool>) -> HevcAsk {
 }
 
 /// The ask for `wanted`'s screen in the window `slot`, taking HEVC or not.
-fn view_ask(wanted: &Wanted, hevc: bool, slot: u8) -> ComputerAsk {
+fn view_ask(wanted: &Wanted, hevc: bool, slot: u8, fit: Option<FitSize>) -> ComputerAsk {
     ComputerAsk::View {
         device_id: wanted.device_id.clone(),
         monitor: wanted.monitor,
         hevc,
         window: slot,
-        fit: None,
+        fit,
     }
 }
 
@@ -1694,9 +1769,33 @@ fn switch_screen(state_dir: &Path, state: &mut State, monitor: u32) -> Result<()
     let Some(wanted) = state.wanted.clone() else {
         return Ok(());
     };
-    if wanted.monitor == monitor && state.ended.is_none() {
+    // A fitted view shows a screen the other computer made, whatever
+    // `monitor` is: picking a screen leaves it (item 8).
+    if wanted.monitor == monitor && state.ended.is_none() && !wanted.fit {
         return Ok(());
     }
+    state.fit.on = false;
+    carrying_ask(
+        state_dir,
+        state,
+        Wanted {
+            monitor,
+            fit: false,
+            ..wanted
+        },
+        monitor,
+    )
+}
+
+/// Ask for `wanted` as this window's next view, keeping the window's state
+/// as a switch of screens does (PC11), the last picture dimmed until the
+/// new one comes; `to` is the screen the dimmed picture says it goes to.
+fn carrying_ask(
+    state_dir: &Path,
+    state: &mut State,
+    wanted: Wanted,
+    to: u32,
+) -> Result<(), String> {
     if state.pointer.locked() || state.pointer_said == Some(true) {
         say_pointer(state, false);
     }
@@ -1717,7 +1816,7 @@ fn switch_screen(state_dir: &Path, state: &mut State, monitor: u32) -> Result<()
     // to end, and a later end would wrongly start one (PR #570 review M2).
     state.record_carry = state.record_want && going;
     let device_id = wanted.device_id.clone();
-    ask(state_dir, state, Wanted { monitor, ..wanted })?;
+    ask(state_dir, state, wanted)?;
     // Set after the ask, which forgets any (re-review N1): only this
     // switch carries it.
     if resume {
@@ -1730,8 +1829,77 @@ fn switch_screen(state_dir: &Path, state: &mut State, monitor: u32) -> Result<()
     if going {
         state.status.privacy = privacy;
     }
-    state.switching = Some((monitor, Instant::now()));
+    state.switching = Some((to, Instant::now()));
     Ok(())
+}
+
+/// The window's "Fit the screen to this window" switched from its bar
+/// (item 8): at once, remembered as `computer_view_fit`, and the view asked
+/// again with or without a fitted screen, the window's state kept.
+fn switch_fit(shared: &Mutex<State>, state_dir: &Path, config: Option<&Path>, on: bool) {
+    let mut state = lock(shared);
+    state.fit.on = on;
+    let saved =
+        config.map(|path| save_switch(path, "computer_view_fit", |c| c.computer_view_fit = on));
+    match saved {
+        Some(Ok(())) => state.fit.saved = Some(on),
+        Some(Err(e)) => {
+            state.saved_note = Some((format!("Not saved: {e}"), Instant::now()));
+        }
+        None => {}
+    }
+    let Some(wanted) = state.wanted.clone() else {
+        return;
+    };
+    if wanted.fit == on {
+        return;
+    }
+    let to = wanted.monitor;
+    let next = Wanted { fit: on, ..wanted };
+    if let Err(e) = carrying_ask(state_dir, &mut state, next, to) {
+        state.ended = Some(e);
+    }
+}
+
+/// Each pass (item 8): the picture area `measured` in pixels. A fit held
+/// back for the first measure goes now; a fitted window whose area has
+/// held a new size for [`view_fit::DEBOUNCE`] asks again at it, the other
+/// computer resizing the same screen. When to look again, if the area is
+/// changing.
+fn follow_fit(
+    state_dir: &Path,
+    state: &mut State,
+    measured: Option<FitSize>,
+    now: Instant,
+) -> Option<Duration> {
+    let area = measured?;
+    state.fit.area = Some(area);
+    if let Some(waiting) = state.fit_waiting.take() {
+        let fit = Some(area);
+        match send_view_ask(state_dir, &waiting.wanted, waiting.hevc, state.slot, fit) {
+            Ok(()) => state.fit.asked = fit,
+            Err(e) => state.ended = Some(e),
+        }
+        return None;
+    }
+    let fitted = state.fit.on && state.wanted.as_ref().is_some_and(|w| w.fit);
+    if !fitted || state.ended.is_some() {
+        state.fit.seen = None;
+        return None;
+    }
+    match view_fit::step(state.fit.asked, &mut state.fit.seen, area, now) {
+        view_fit::Step::Idle => None,
+        view_fit::Step::Wait(wait) => Some(wait),
+        view_fit::Step::Refit => {
+            if let Some(wanted) = state.wanted.clone() {
+                let to = wanted.monitor;
+                if let Err(e) = carrying_ask(state_dir, state, wanted, to) {
+                    state.ended = Some(e);
+                }
+            }
+            None
+        }
+    }
 }
 
 /// Whether a view whose last way just gave up (`step`) is asked for again
@@ -2311,6 +2479,13 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         ));
         stop_view(state_dir, &mut state, lock);
         state.wanted = None;
+        // The fit goes with the window (item 8): its screen there is taken
+        // away as the server ends the view, and a reopened window is
+        // measured afresh.
+        state.fit.area = None;
+        state.fit.asked = None;
+        state.fit.seen = None;
+        state.fit_waiting = None;
         // A switch under way ends with the window (PC11).
         state.switching = None;
         state.record_carry = false;
@@ -2366,6 +2541,16 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
     // The size of the picture drawn, wherever it is drawn from.
     let drawn = on_gpu.or_else(|| texture.as_ref().map(egui::TextureHandle::size));
     let status = state.status.clone();
+    // A fit the other computer could not make is off (item 8): the view
+    // shows the screen asked for, and the bar says why.
+    if matches!(*status.fit, ViewFit::Failed(_)) && state.fit.on {
+        state.fit.on = false;
+        state.fit.asked = None;
+        if let Some(w) = state.wanted.as_mut() {
+            w.fit = false;
+        }
+    }
+    let fit_on = state.fit.on;
     let ended = state.ended.clone();
     let note = state.note.clone();
     let connected = state.writer.is_some();
@@ -2417,7 +2602,10 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         .map(|(note, _)| note);
     drop(state);
 
-    let mut monitor = wanted.monitor;
+    // The screen shown: the one the other computer made to fit the window
+    // when it made one (item 8), else the one asked for.
+    let shown_monitor = view_fit::shown_monitor(wanted.monitor, &status);
+    let mut monitor = shown_monitor;
     let choices = screen_choices(&status);
     // PC11: Ctrl+Alt+Shift+1 to 9 shows that screen, wherever the focus is.
     if let Some(n) = events.iter().find_map(screen_chord)
@@ -2426,6 +2614,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         monitor = n;
     }
     let mut open_new: Option<u32> = None;
+    let mut fit_toggle: Option<bool> = None;
     let mut send_key: Option<SendKey> = None;
     let mut privacy_ask: Option<u8> = None;
     egui::Panel::top("computer-view-bar")
@@ -2446,7 +2635,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                     ui.label(egui::RichText::new(said).strong());
                     if choices.len() > 1 {
                         // PC11: a button a screen, laid out as they sit.
-                        let current = switching.unwrap_or(wanted.monitor);
+                        let current = switching.unwrap_or(shown_monitor);
                         if let Some(pick) =
                             screen_bar(ui, &choices, &status.layout, current, &mut open_new)
                         {
@@ -2475,6 +2664,20 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                         .on_hover_text("Show the computer without sending it clicks or keys");
                     if switch.clicked() {
                         switch.surrender_focus();
+                    }
+                    // Item 8: the other computer's screen made to the size of
+                    // this window; greyed for a computer that cannot.
+                    let mut fit_switch = fit_on;
+                    let fit_box = ui
+                        .add_enabled(
+                            view_fit::unavailable(&wanted.name, &status).is_none(),
+                            egui::Checkbox::new(&mut fit_switch, view_fit::LABEL),
+                        )
+                        .on_hover_text(view_fit::hover(&wanted.name, &status))
+                        .on_disabled_hover_text(view_fit::hover(&wanted.name, &status));
+                    if fit_box.clicked() {
+                        fit_box.surrender_focus();
+                        fit_toggle = Some(fit_switch);
                     }
                     // PC4: the keys this computer keeps, or that cannot be
                     // pressed through the window, while it controls.
@@ -2701,7 +2904,11 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         lock(shared).open_new = Some(n);
         ctx.request_repaint_of(egui::ViewportId::ROOT);
     }
-    if monitor != wanted.monitor {
+    if let Some(on) = fit_toggle {
+        switch_fit(shared, state_dir, config, on);
+        return;
+    }
+    if monitor != shown_monitor {
         let mut state = lock(shared);
         if let Err(e) = switch_screen(state_dir, &mut state, monitor) {
             state.ended = Some(e);
@@ -2846,7 +3053,11 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                         .show(ui, |ui| {
                             ui.colored_label(
                                 egui::Color32::LIGHT_GRAY,
-                                format!("Switching to {to_name}\u{2026}"),
+                                if fit_on {
+                                    view_fit::FITTING.to_string()
+                                } else {
+                                    format!("Switching to {to_name}\u{2026}")
+                                },
                             );
                         });
                 });
@@ -2897,6 +3108,15 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
             }
             // This pass's input, to the other computer.
             let mut state = lock(shared);
+            // Item 8: the picture area's size, in pixels, for a fit.
+            if let Some(wait) = follow_fit(
+                state_dir,
+                &mut state,
+                view_fit::area_size(area.size(), ctx.pixels_per_point()),
+                Instant::now(),
+            ) {
+                ctx.request_repaint_after(wait);
+            }
             let current = match (drawn, state.size) {
                 (Some(size), Some((w, h))) => size == [usize::from(w), usize::from(h)],
                 _ => false,
@@ -2950,6 +3170,26 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                 ctx.request_repaint_after(MOVE_EVERY);
             }
             drop(state);
+            // Item 8: a fit being made, or why it was not, over the picture's
+            // foot (not in the bar, whose height is part of the area).
+            if ended.is_none()
+                && matches!(*status.fit, ViewFit::Asking | ViewFit::Failed(_))
+                && let Some(words) = view_fit::words(&status)
+            {
+                egui::Area::new(egui::Id::new("computer-view-fit"))
+                    .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -16.0))
+                    .order(egui::Order::Foreground)
+                    .interactable(false)
+                    .show(&ctx, |ui| {
+                        egui::Frame::NONE
+                            .fill(egui::Color32::from_black_alpha(210))
+                            .corner_radius(6.0)
+                            .inner_margin(egui::Margin::symmetric(12, 8))
+                            .show(ui, |ui| {
+                                ui.colored_label(egui::Color32::from_gray(235), words);
+                            });
+                    });
+            }
             // How the picture comes, over its corner (PC2).
             if stats_on && ended.is_none() {
                 let mut lines = stats_lines(&status, size, shown, &decoding);
@@ -4040,6 +4280,7 @@ mod tests {
                 device_id: "desk".into(),
                 name: "Desk".into(),
                 monitor: 0,
+                fit: false,
             }),
             session_id: Some(9),
             writer: Some(writer),
@@ -4094,6 +4335,7 @@ mod tests {
                 device_id: "desk".into(),
                 name: "Desk".into(),
                 monitor: 0,
+                fit: false,
             }),
             lock_on_close,
             ended,
@@ -4180,6 +4422,7 @@ mod tests {
                 device_id: "desk".into(),
                 name: "Desk".into(),
                 monitor: 0,
+                fit: false,
             }),
             session_id: Some(9),
             writer: Some(writer),
@@ -4548,6 +4791,7 @@ mod tests {
             device_id: "desk".into(),
             name: "Desk".into(),
             monitor: 0,
+            fit: false,
         };
         ask_with(&dir, &mut state, wanted, Some(true)).unwrap();
         let asked = computers::take_all(&dir, now_unix());
@@ -4577,6 +4821,7 @@ mod tests {
             device_id: "desk".into(),
             name: "Desk".into(),
             monitor: 0,
+            fit: false,
         };
         ask(&dir, &mut state, wanted).unwrap();
         let asked = computers::take_all(&dir, now_unix());
@@ -4587,6 +4832,226 @@ mod tests {
             ),
             "{asked:?}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn fit_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("pd-fit-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn fit_wanted(fit: bool) -> Wanted {
+        Wanted {
+            device_id: "desk".into(),
+            name: "Desk".into(),
+            monitor: 1,
+            fit,
+        }
+    }
+
+    fn fit_size(width: u32, height: u32) -> FitSize {
+        FitSize { width, height }
+    }
+
+    /// What the server was asked since the last call, as (monitor, fit).
+    fn fit_asks(dir: &Path) -> Vec<(u32, Option<FitSize>)> {
+        computers::take_all(dir, now_unix())
+            .into_iter()
+            .map(|r| match r.ask {
+                ComputerAsk::View { monitor, fit, .. } => (monitor, fit),
+                other => panic!("not a view ask: {other:?}"),
+            })
+            .collect()
+    }
+
+    /// Item 8: a fit asks at the window's size, which is known only once
+    /// the window has been drawn, so the ask of a new window waits for its
+    /// first measure and goes with it.
+    #[test]
+    fn a_fit_ask_waits_for_the_windows_first_measure() {
+        let dir = fit_dir("first");
+        let mut state = State::default();
+        state.fit.on = true;
+        ask(&dir, &mut state, fit_wanted(true)).unwrap();
+        assert!(
+            fit_asks(&dir).is_empty(),
+            "nothing yet: the size is unknown"
+        );
+        assert!(state.fit_waiting.is_some());
+        // A pass that measured nothing (a sliver) changes nothing.
+        assert_eq!(follow_fit(&dir, &mut state, None, Instant::now()), None);
+        assert!(fit_asks(&dir).is_empty());
+        // The first measure sends it, at that size.
+        assert_eq!(
+            follow_fit(&dir, &mut state, Some(fit_size(1280, 720)), Instant::now()),
+            None
+        );
+        assert_eq!(fit_asks(&dir), [(1, Some(fit_size(1280, 720)))]);
+        assert!(state.fit_waiting.is_none());
+        assert_eq!(state.fit.asked, Some(fit_size(1280, 720)));
+        // The same size again asks nothing.
+        assert_eq!(
+            follow_fit(&dir, &mut state, Some(fit_size(1280, 720)), Instant::now()),
+            None
+        );
+        assert!(fit_asks(&dir).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Item 8: a window already measured asks at once; a newer ask
+    /// replaces one still waiting.
+    #[test]
+    fn a_measured_window_fits_at_once_and_a_newer_ask_replaces_a_waiting_one() {
+        let dir = fit_dir("measured");
+        let mut state = State::default();
+        state.fit.on = true;
+        state.fit.area = Some(fit_size(1000, 600));
+        ask(&dir, &mut state, fit_wanted(true)).unwrap();
+        assert_eq!(fit_asks(&dir), [(1, Some(fit_size(1000, 600)))]);
+        // Not fitted: no size, whatever was measured.
+        ask(&dir, &mut state, fit_wanted(false)).unwrap();
+        assert_eq!(fit_asks(&dir), [(1, None)]);
+        // An ask held back, then a plain one: only the plain one goes.
+        state.fit.area = None;
+        ask(&dir, &mut state, fit_wanted(true)).unwrap();
+        ask(&dir, &mut state, fit_wanted(false)).unwrap();
+        assert!(state.fit_waiting.is_none());
+        assert_eq!(
+            follow_fit(&dir, &mut state, Some(fit_size(800, 600)), Instant::now()),
+            None
+        );
+        assert_eq!(fit_asks(&dir), [(1, None)]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Item 8: a resized window asks again only once its new size has held
+    /// for the debounce, carrying the window's state as a switch does.
+    #[test]
+    fn a_resized_window_fits_again_once_the_size_holds() {
+        let dir = fit_dir("resize");
+        let mut state = State::default();
+        state.fit.on = true;
+        state.fit.area = Some(fit_size(1280, 720));
+        ask(&dir, &mut state, fit_wanted(true)).unwrap();
+        assert_eq!(fit_asks(&dir).len(), 1);
+        let asked_before = state.asked;
+        let t0 = Instant::now();
+        let new = Some(fit_size(900, 700));
+        assert_eq!(
+            follow_fit(&dir, &mut state, new, t0),
+            Some(view_fit::DEBOUNCE)
+        );
+        assert!(fit_asks(&dir).is_empty(), "not yet");
+        assert!(follow_fit(&dir, &mut state, new, t0 + Duration::from_millis(200)).is_some());
+        assert!(fit_asks(&dir).is_empty());
+        assert_eq!(
+            follow_fit(&dir, &mut state, new, t0 + view_fit::DEBOUNCE),
+            None
+        );
+        assert_eq!(fit_asks(&dir), [(1, Some(fit_size(900, 700)))]);
+        assert_eq!(state.asked, asked_before + 1);
+        assert_eq!(state.fit.asked, Some(fit_size(900, 700)));
+        assert!(state.switching.is_some(), "the last picture waits, dimmed");
+        // A drag that settles back where it was asks nothing.
+        let mut state = State::default();
+        state.fit.on = true;
+        state.fit.area = Some(fit_size(1280, 720));
+        ask(&dir, &mut state, fit_wanted(true)).unwrap();
+        fit_asks(&dir);
+        follow_fit(&dir, &mut state, Some(fit_size(1000, 700)), t0);
+        follow_fit(
+            &dir,
+            &mut state,
+            Some(fit_size(1280, 720)),
+            t0 + view_fit::DEBOUNCE,
+        );
+        assert!(fit_asks(&dir).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Item 8: without a fit, or with the view ended, a resize asks nothing.
+    #[test]
+    fn a_window_not_fitted_or_ended_asks_nothing_as_it_is_resized() {
+        let dir = fit_dir("plain");
+        let t0 = Instant::now();
+        let mut state = State::default();
+        state.fit.area = Some(fit_size(1280, 720));
+        ask(&dir, &mut state, fit_wanted(false)).unwrap();
+        fit_asks(&dir);
+        for ms in [0, 600, 1200] {
+            let at = t0 + Duration::from_millis(ms);
+            assert_eq!(
+                follow_fit(&dir, &mut state, Some(fit_size(500 + ms as u32, 600)), at),
+                None
+            );
+        }
+        assert!(fit_asks(&dir).is_empty());
+        let mut fitted = State::default();
+        fitted.fit.on = true;
+        fitted.fit.area = Some(fit_size(1280, 720));
+        ask(&dir, &mut fitted, fit_wanted(true)).unwrap();
+        fit_asks(&dir);
+        fitted.ended = Some("gone".into());
+        follow_fit(&dir, &mut fitted, Some(fit_size(600, 600)), t0);
+        follow_fit(
+            &dir,
+            &mut fitted,
+            Some(fit_size(600, 600)),
+            t0 + Duration::from_secs(2),
+        );
+        assert!(fit_asks(&dir).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Item 8: picking another screen leaves the fit (its switch off, the
+    /// next ask a plain one for that screen); the bar's switch asks again
+    /// with or without a screen made to fit, keeping the window's state.
+    #[test]
+    fn the_switch_and_a_picked_screen_change_what_the_view_asks() {
+        let dir = fit_dir("switch");
+        let shared = Mutex::new(State::default());
+        {
+            let mut state = lock(&shared);
+            state.fit.area = Some(fit_size(1280, 720));
+            state.wanted = Some(fit_wanted(false));
+        }
+        switch_fit(&shared, &dir, None, true);
+        assert_eq!(fit_asks(&dir), [(1, Some(fit_size(1280, 720)))]);
+        assert!(lock(&shared).fit.on);
+        assert!(lock(&shared).wanted.as_ref().unwrap().fit);
+        // Again with the same choice: nothing more.
+        switch_fit(&shared, &dir, None, true);
+        assert!(fit_asks(&dir).is_empty());
+        // Another screen: a plain ask for it, the switch off.
+        {
+            let mut state = lock(&shared);
+            switch_screen(&dir, &mut state, 2).unwrap();
+            assert!(!state.fit.on);
+        }
+        assert_eq!(fit_asks(&dir), [(2, None)]);
+        // Off from the bar for a fitted view: asked plainly, for the
+        // screen the window had asked for.
+        switch_fit(&shared, &dir, None, true);
+        fit_asks(&dir);
+        switch_fit(&shared, &dir, None, false);
+        assert_eq!(fit_asks(&dir), [(2, None)]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Item 8: the bar's switch is remembered for the windows that open next.
+    #[test]
+    fn the_bars_fit_switch_is_saved_and_settings_hear_it() {
+        let dir = fit_dir("saved");
+        let config = dir.join("config.toml");
+        std::fs::write(&config, "").unwrap();
+        let shared = Mutex::new(State::default());
+        switch_fit(&shared, &dir, Some(&config), true);
+        assert!(Config::load_from(&config).unwrap().computer_view_fit);
+        assert_eq!(lock(&shared).fit.saved.take(), Some(true));
+        switch_fit(&shared, &dir, Some(&config), false);
+        assert!(!Config::load_from(&config).unwrap().computer_view_fit);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -4679,6 +5144,7 @@ mod tests {
                 device_id: "desk".into(),
                 name: "Desk".into(),
                 monitor: 0,
+                fit: false,
             }),
             session_id: Some(41),
             status: ViewStatus {
@@ -4854,6 +5320,7 @@ mod tests {
                 device_id: "desk".into(),
                 name: "Desk".into(),
                 monitor: 0,
+                fit: false,
             }),
             status: ViewStatus {
                 phase: Phase::Showing,
@@ -4987,6 +5454,7 @@ mod tests {
                 device_id: "desk".into(),
                 name: "Desk".into(),
                 monitor: 0,
+                fit: false,
             }),
             status: ViewStatus {
                 phase: Phase::Showing,
@@ -5476,6 +5944,7 @@ mod tests {
             device_id: "lab".into(),
             name: "Lab".into(),
             monitor: 0,
+            fit: false,
         };
         let _ = ask_with(&dir, &mut state, other, Some(false));
         assert!(!state.mic.on() && !state.mic.wanted());
@@ -6164,6 +6633,7 @@ mod tests {
                 device_id: device.into(),
                 name: "Desk".into(),
                 monitor: 0,
+                fit: false,
             }),
             status: ViewStatus {
                 phase: Phase::Showing,
@@ -6204,6 +6674,7 @@ mod tests {
                 device_id: "desk".into(),
                 name: "Desk".into(),
                 monitor: 0,
+                fit: false,
             }),
             session_id: Some(9),
             writer: Some(writer),
@@ -6378,6 +6849,7 @@ mod tests {
                     device_id: "desk".into(),
                     name: "Desk".into(),
                     monitor: 0,
+                    fit: false,
                 },
                 Some(false),
             )
@@ -6511,6 +6983,7 @@ mod tests {
                 device_id: "desk".into(),
                 name: "Desk".into(),
                 monitor: 0,
+                fit: false,
             }),
             ..State::default()
         };
@@ -6545,6 +7018,7 @@ mod tests {
             device_id: "desk".into(),
             name: "Desk".into(),
             monitor: 0,
+            fit: false,
         };
         let controlled = |state: &mut State| {
             state.status = ViewStatus {
@@ -6572,6 +7046,7 @@ mod tests {
                         device_id: "lap".into(),
                         name: "Lap".into(),
                         monitor: 0,
+                        fit: false,
                     };
                     ask_with(&dir, &mut state, lap, Some(false)).unwrap();
                 }
@@ -6661,6 +7136,7 @@ mod tests {
                 device_id: "desk".into(),
                 name: "Desk".into(),
                 monitor: 0,
+                fit: false,
             }),
             decoder_gen: 4,
             ..State::default()
@@ -6840,6 +7316,7 @@ mod tests {
             device_id: "lap".into(),
             name: "Lap".into(),
             monitor: 1,
+            fit: false,
         });
         assert_eq!(view.mic_on_air(), None);
         for window in view.windows() {
@@ -7061,6 +7538,7 @@ mod tests {
                 device_id: "desk".into(),
                 name: "Desk".into(),
                 monitor: 0,
+                fit: false,
             }),
             writer: Some(TcpStream::connect(listener.local_addr().unwrap()).unwrap()),
             status: ViewStatus {

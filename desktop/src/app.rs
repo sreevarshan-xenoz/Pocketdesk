@@ -1031,6 +1031,8 @@ impl PocketdeskApp {
                 .as_ref()
                 .is_some_and(|c| c.computer_view_lock_on_close),
         );
+        // Item 8: "Fit the screen to this window" starts a window so.
+        view.set_fit_default(self.config.as_ref().is_some_and(|c| c.computer_view_fit));
         // Fine scrolling: "Smooth scrolling" too.
         view.set_smooth_scrolling(self.config.as_ref().is_none_or(|c| c.smooth_scrolling));
         if let Err(e) = view.open(device_id, name, 0, preset, view_only, stats) {
@@ -3417,6 +3419,7 @@ impl PocketdeskApp {
                             #[cfg(windows)]
                             view.set_grab_keys(form.saved_computer_view_grab_keys());
                             view.set_lock_on_close(form.saved_computer_view_lock_on_close());
+                            view.set_fit_default(form.saved_computer_view_fit());
                             view.set_smooth_scrolling(form.saved_smooth_scrolling());
                         }
                         self.notice = crate::notice::Notice::done("Saved.");
@@ -4473,6 +4476,15 @@ impl eframe::App for PocketdeskApp {
                 }
                 if let Some(Ok(form)) = self.settings.as_mut() {
                     form.saved_elsewhere_computer_view_lock_on_close(on);
+                }
+            }
+            // Item 8: its "Fit the screen to this window", likewise.
+            if let Some(on) = view.take_fit_saved() {
+                if let Some(config) = self.config.as_mut() {
+                    config.computer_view_fit = on;
+                }
+                if let Some(Ok(form)) = self.settings.as_mut() {
+                    form.saved_elsewhere_computer_view_fit(on);
                 }
             }
             // PC4: its "Send Win and Alt+Tab there", likewise.

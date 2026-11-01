@@ -40,6 +40,7 @@ mod type_view;
 #[cfg(test)]
 mod ui_tests;
 mod video;
+mod view_fit;
 mod view_follow;
 #[cfg(windows)]
 mod view_grab;

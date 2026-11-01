@@ -388,6 +388,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "computer_view_fit",
+        "Fit the screen to this window",
+        Section::Computers,
+    ),
+    (
         "computer_view_scancodes",
         "Keys by position",
         Section::Computers,
@@ -690,6 +695,8 @@ pub fn applies_live(key: &str) -> bool {
             | "computer_view_hevc"
             // PC8: read by an open window at once.
             | "computer_view_lock_on_close"
+            // Item 8: read as a window starts showing a computer.
+            | "computer_view_fit"
             // Read as each window opens.
             | "computer_view_scancodes"
             // Read by an open window at once, and by shared input within a
@@ -917,6 +924,20 @@ impl SettingsForm {
     /// "Lock it when I close the window" as saved (PC8), for an open window.
     pub fn saved_computer_view_lock_on_close(&self) -> bool {
         self.saved.computer_view_lock_on_close
+    }
+
+    /// "Fit the screen to this window" as saved (item 8), for the windows
+    /// that open next.
+    pub fn saved_computer_view_fit(&self) -> bool {
+        self.saved.computer_view_fit
+    }
+
+    /// The window's bar saved `computer_view_fit` (item 8): this form says
+    /// the same, with nothing left to save.
+    pub fn saved_elsewhere_computer_view_fit(&mut self, on: bool) {
+        self.saved.computer_view_fit = on;
+        self.edited.computer_view_fit = on;
+        self.running.computer_view_fit = on;
     }
 
     /// "Smooth scrolling" as saved, for an open window.
@@ -1657,7 +1678,7 @@ impl SettingsForm {
                 row(ui, "virtual_screens", |ui| {
                     ui.checkbox(
                         &mut e.virtual_screens,
-                        "a phone with Input can add a screen of its own shape (Sway, Hyprland)",
+                        "a phone, or a computer's screen window, with Input can add a screen (Sway, Hyprland): a phone's of its own shape, a window's of its own size",
                     );
                 });
                 // BF2: a still of the screen on a phone's Home.
@@ -2389,6 +2410,16 @@ impl SettingsForm {
                     note(
                         ui,
                         "With that computer's own lock, when the window closes, or Pocketdesk quits with it open, while it shows that computer (not while it reconnects); a notification says when it could not lock. That computer decides: its Devices page needs \u{201c}Lock, sleep, privacy and wake others\u{201d} on for this computer. The window's bar has it too, with \u{201c}Hide what I do there\u{201d}.",
+                    );
+                });
+                row(ui, "computer_view_fit", |ui| {
+                    ui.checkbox(
+                        &mut e.computer_view_fit,
+                        "fit the screen to this window: a computer's screen window asks the other computer for a screen of its own size, and resizes it as the window is resized",
+                    );
+                    note(
+                        ui,
+                        "Only a Linux computer on Hyprland or Sway can: it makes an extra, empty screen (a virtual one, an \u{201c}empty extra desktop\u{201d}; nothing is moved onto it) and removes it when the window closes. A Windows computer cannot, and the switch is greyed on the window's bar. The other computer needs \u{201c}Phones may add a screen\u{201d} on (Settings under Phones) and Input control on for this one; at most four screens are made there in all. Starts from this the next time a window shows a computer; the window's bar has the switch too.",
                     );
                 });
                 // Keys by position: the window's start for a computer with
@@ -3224,6 +3255,7 @@ mod tests {
             "computer_view_hw_decode",
             "computer_view_hevc",
             "computer_view_lock_on_close",
+            "computer_view_fit",
             "computer_view_scancodes",
             "smooth_scrolling",
             "computer_view_mic_device",
