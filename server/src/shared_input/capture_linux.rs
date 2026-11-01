@@ -621,7 +621,7 @@ mod tests {
                     button: 0,
                     pressed: false
                 },
-                Msg::Wheel { dx: 0, dy: 2 },
+                Msg::WheelFine { dx: 0, dy: 240 },
                 Msg::Key {
                     code: 30,
                     pressed: true

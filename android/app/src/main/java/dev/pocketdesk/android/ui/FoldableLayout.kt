@@ -103,6 +103,7 @@ fun TrackpadDock(
     fun send(block: () -> Unit) = scope.launch(padOrdered) { block() }
     Prefs.observedVersion()
     val sensitivity = Prefs.trackpadSensitivity(LocalContext.current)
+    val smoothScroll = Prefs.smoothScrolling(LocalContext.current)
 
     Surface(
         modifier = modifier,
@@ -121,7 +122,7 @@ fun TrackpadDock(
                 modifier =
                     Modifier
                         .fillMaxSize()
-                        .pointerInput(address to port to sensitivity) {
+                        .pointerInput(address to port to sensitivity to smoothScroll) {
                             // F3: the in-stream trackpad's gesture engine, so
                             // taps by finger count, tap-and-drag and speed
                             // behave the same here.
@@ -129,6 +130,7 @@ fun TrackpadDock(
                 slop = viewConfiguration.touchSlop,
                 sensitivity = sensitivity,
                 pxPerNotch = SCROLL_DP_PER_NOTCH.dp.toPx(),
+                fine = smoothScroll,
             )
                             fun sendPad(outputs: List<PadOutput>) = sendPadOutputs(address, port, outputs) { send(it) }
                             try {
@@ -154,7 +156,14 @@ fun TrackpadDock(
                                     }
                                     val delta = change.position - last
                                     last = change.position
-                                    sendPad(pad.move(delta.x, delta.y, fingers))
+                                    sendPad(
+                                        pad.move(
+                                            delta.x,
+                                            delta.y,
+                                            fingers,
+                                            timeMs = android.os.SystemClock.uptimeMillis(),
+                                        ),
+                                    )
                                 }
                             }
                             } finally {
