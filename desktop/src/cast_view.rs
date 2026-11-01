@@ -666,6 +666,22 @@ fn draw(shared: &Arc<Mutex<State>>, ui: &mut egui::Ui, control: bool, keymaps: b
     let mut state = lock(shared);
     if ctx.input(|i| i.viewport().close_requested()) {
         state.dismissed = state.session_id;
+        // Fingers held for a game are lifted before the window goes, and
+        // the pointer lock for aiming goes with it.
+        let lifts = state
+            .keys
+            .as_mut()
+            .map(|keys| {
+                let lifts = keys.release();
+                keys.close(&ctx);
+                lifts
+            })
+            .unwrap_or_default();
+        if !lifts.is_empty()
+            && let Some(mut writer) = state.writer.as_ref().and_then(|w| w.try_clone().ok())
+        {
+            let _ = send_control(&mut writer, lifts);
+        }
         // An app window closed here is closed on the phone too, and its
         // display given back (best effort: the relay closes one nobody
         // shows after a while anyway).
@@ -677,10 +693,6 @@ fn draw(shared: &Arc<Mutex<State>>, ui: &mut egui::Ui, control: bool, keymaps: b
         state.writer = None;
         if let Some(stream) = state.stream.take() {
             let _ = stream.shutdown(std::net::Shutdown::Both);
-        }
-        // The pointer lock for aiming goes with the window.
-        if let Some(keys) = state.keys.as_mut() {
-            keys.close(&ctx);
         }
         return;
     }
@@ -1051,7 +1063,9 @@ fn draw(shared: &Arc<Mutex<State>>, ui: &mut egui::Ui, control: bool, keymaps: b
             // editor open) every finger lifts.
             if let Some(k) = keys.as_mut() {
                 if keys_live {
-                    fingers.extend(k.tick(std::time::Instant::now()));
+                    let now = std::time::Instant::now();
+                    fingers.extend(k.tick(now));
+                    k.pace(&mut fingers, now);
                     if k.busy() {
                         ctx.request_repaint_after(Duration::from_millis(8));
                     }
@@ -1067,10 +1081,14 @@ fn draw(shared: &Arc<Mutex<State>>, ui: &mut egui::Ui, control: bool, keymaps: b
             drop(state);
             // Fingers go in batches of their own: a phone older than keys
             // to taps drops a batch it cannot read, and then loses only these.
-            if let Some(mut writer) = writer
-                && !(send_control(&mut writer, events) && send_control(&mut writer, fingers))
-            {
-                lock(shared).writer = None;
+            // Both are always tried: the fingers carry the lifts, which are tried
+            // even when the first write failed.
+            if let Some(mut writer) = writer {
+                let sent = send_control(&mut writer, events);
+                let lifted = send_control(&mut writer, fingers);
+                if !(sent && lifted) {
+                    lock(shared).writer = None;
+                }
             }
         });
     lock(shared).keys = keys;

@@ -74,7 +74,13 @@ pub struct Keys {
     dirty: bool,
     grab: Option<Grab>,
     swipe_from: Option<Point>,
+    /// When fingers were last sent, for the keep-alive.
+    last_sent: Instant,
 }
+
+/// How often fingers held down are said to be held: the phone lifts any it
+/// has heard nothing about for two seconds.
+pub const KEEP_ALIVE: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// How near a marker a press grabs it, in points.
 const GRAB: f32 = 18.0;
@@ -97,6 +103,19 @@ impl Keys {
             dirty: false,
             grab: None,
             swipe_from: None,
+            last_sent: Instant::now(),
+        }
+    }
+
+    /// Say that fingers held down are still held: when `fingers` has
+    /// something it is that word; otherwise, after [`KEEP_ALIVE`] without
+    /// one, each held finger's move to where it is.
+    pub fn pace(&mut self, fingers: &mut Vec<ControlEvent>, now: Instant) {
+        if !fingers.is_empty() {
+            self.last_sent = now;
+        } else if self.runner.busy() && now.saturating_duration_since(self.last_sent) >= KEEP_ALIVE {
+            fingers.extend(self.runner.keep_alive());
+            self.last_sent = now;
         }
     }
 
@@ -451,6 +470,21 @@ impl Keys {
         if let Some(back) = view_pointer::recentre(ctx.input(|i| i.pointer.latest_pos()), over) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CursorPosition(back));
         }
+        // Said for as long as the pointer is locked, not for a moment: a
+        // hidden pointer is how a window is lost.
+        egui::Area::new(egui::Id::new("cast-keys-pointer-note"))
+            .fixed_pos(egui::pos2(over.center().x - 140.0, over.top() + 16.0))
+            .order(egui::Order::Foreground)
+            .interactable(false)
+            .show(ctx, |ui| {
+                egui::Frame::NONE
+                    .fill(egui::Color32::from_black_alpha(210))
+                    .corner_radius(6.0)
+                    .inner_margin(egui::Margin::symmetric(12, 8))
+                    .show(ui, |ui| {
+                        ui.colored_label(egui::Color32::from_gray(235), view_pointer::HINT);
+                    });
+            });
     }
 
     /// The window closed: the lock is let go.
@@ -1076,6 +1110,49 @@ mod tests {
         assert!(!keys.busy());
         keys.set_editing(true);
         assert!(!keys.acting(), "the editor is open");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_finger_held_is_said_to_be_held_every_half_second_and_never_when_none_is() {
+        let dir = dir("alive");
+        let mut keys = Keys::new("org.example.game", dir.clone());
+        keys.set_editing(true);
+        keys.choose(Tool::Tap);
+        keys.place(Point { x: 100, y: 100 });
+        keys.key_chosen("E");
+        keys.set_editing(false);
+        keys.on = true;
+        let t0 = Instant::now();
+        let mut said = Vec::new();
+        keys.pace(&mut said, t0);
+        assert!(said.is_empty(), "nothing held, nothing said");
+        let out = keys.translate(&[key(egui::Key::E, true)], picture(), t0);
+        let mut fingers = out.fingers;
+        keys.pace(&mut fingers, t0);
+        assert_eq!(fingers.len(), 1, "the press itself is the word");
+        // Held with nothing new: quiet for a while, then a move to where it is.
+        let mut quiet = Vec::new();
+        keys.pace(&mut quiet, t0 + KEEP_ALIVE / 2);
+        assert!(quiet.is_empty());
+        keys.pace(&mut quiet, t0 + KEEP_ALIVE);
+        assert_eq!(quiet.len(), 1);
+        assert!(matches!(
+            quiet[0],
+            ControlEvent::Pointer {
+                action: pocketdesk_core::streaming::cast_control::TouchAction::Move,
+                x: 100,
+                y: 100,
+                ..
+            }
+        ));
+        let mut next = Vec::new();
+        keys.pace(&mut next, t0 + KEEP_ALIVE + KEEP_ALIVE / 2);
+        assert!(next.is_empty(), "said again only after another half second");
+        keys.release();
+        let mut none = Vec::new();
+        keys.pace(&mut none, t0 + KEEP_ALIVE * 10);
+        assert!(none.is_empty(), "released: nothing to say");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
