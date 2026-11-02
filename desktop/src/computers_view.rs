@@ -702,6 +702,17 @@ impl ComputersView {
         ui.separator();
         ui.label(RichText::new(format!("Windows on {name}")).strong());
         let step = windows_step(there.as_ref(), now_unix);
+        // An open picker asks again well within the time the server keeps a
+        // list (it drops one nobody asked for again), so a list in use stays.
+        if server_running
+            && step != WindowsStep::Asking
+            && there
+                .as_ref()
+                .is_some_and(|t| list_age(t, now_unix) >= BORROW_REFRESH_SECS)
+        {
+            self.ask_windows(state_dir, &computer.device_id, now_unix);
+        }
+        ui.ctx().request_repaint_after(Duration::from_secs(5));
         match &step {
             WindowsStep::Asking => {
                 ui.horizontal(|ui| {
@@ -724,9 +735,19 @@ impl ComputersView {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(window_label(window));
                     ui.label(RichText::new(window_facts(window)).color(crate::theme::muted(ui)));
+                    // A window lent to this computer already is shown once:
+                    // another view of it would give it back under the first.
                     if ui
-                        .add_enabled(server_running, egui::Button::new("Borrow"))
+                        .add_enabled(
+                            server_running && !window.lent,
+                            egui::Button::new("Borrow"),
+                        )
                         .on_hover_text(borrow_hover(&name))
+                        .on_disabled_hover_text(if window.lent {
+                            ALREADY_BORROWED
+                        } else {
+                            REMOVE_WAITS
+                        })
                         .clicked()
                     {
                         pick = Some(window.clone());
@@ -1399,6 +1420,18 @@ pub const BORROW: &str = "Borrow a window\u{2026}";
 
 /// What "Borrow a window\u{2026}" does.
 const BORROW_HOVER: &str = "Pick one window of that computer to show in a window here, with its own picture and your keys and mouse. The window moves off that computer's screen while you hold it, and goes back when this one closes.";
+
+/// How old a list in an open picker gets before it is asked for again, and
+/// how long ago it was listed or asked (whichever is later).
+const BORROW_REFRESH_SECS: u64 = 30;
+
+fn list_age(there: &computers::WindowsThere, now_unix: u64) -> u64 {
+    now_unix.saturating_sub(there.listed_unix.max(there.asked_unix))
+}
+
+/// Why a window already lent here cannot be borrowed again.
+const ALREADY_BORROWED: &str =
+    "Already borrowed here: it is shown in a window of this app (or was, and goes back shortly)";
 
 /// What there is when a computer has no window to lend.
 const NO_WINDOWS: &str = "No window there can be borrowed now.";
@@ -2272,7 +2305,7 @@ mod tests {
             });
             file.windows_there = Some(computers::WindowsThere {
                 device_id: "mine-pc".to_string(),
-                listed_unix: 1,
+                listed_unix: pocketdesk_core::local::pin::now_unix(),
                 windows: vec![lendable("0x5a", "Notes", "app.notes")],
                 ..Default::default()
             });
@@ -2322,6 +2355,56 @@ mod tests {
             ],
             "asked as the picker opens, forgotten as it closes with the pick"
         );
+    }
+
+    /// Borrowing a window: a window already lent here cannot be borrowed
+    /// again, and a list left in an open picker is asked for again before the
+    /// server drops it.
+    #[test]
+    fn a_lent_window_is_not_borrowed_twice_and_an_open_list_is_kept_alive() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let dir = temp("borrow-twice");
+        let now = pocketdesk_core::local::pin::now_unix();
+        computers::update(&dir, |file| {
+            file.computers.push(PeerComputer {
+                device_id: "mine-pc".to_string(),
+                name: "Tower".to_string(),
+                mine: true,
+                ..computer("linked")
+            });
+            file.windows_there = Some(computers::WindowsThere {
+                device_id: "mine-pc".to_string(),
+                listed_unix: now - BORROW_REFRESH_SECS - 1,
+                windows: vec![
+                    lendable("0x5a", "Notes", "app.notes"),
+                    computers::LendableWindow {
+                        lent: true,
+                        ..lendable("0x6b", "Terminal", "foot")
+                    },
+                ],
+                ..Default::default()
+            });
+        })
+        .unwrap();
+        let mut harness = list_page(&dir, true);
+        harness.get_by_label(BORROW).click();
+        harness.run_steps(2);
+        let buttons: Vec<bool> = harness
+            .query_all_by_label("Borrow")
+            .map(|b| b.accesskit_node().is_disabled())
+            .collect();
+        let asked: Vec<ComputerAsk> = computers::take_all(&dir, now)
+            .into_iter()
+            .map(|r| r.ask)
+            .collect();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(buttons, [false, true], "the lent one is greyed");
+        let lists = |asks: &[ComputerAsk]| {
+            asks.iter()
+                .filter(|a| matches!(a, ComputerAsk::WindowsThere { .. }))
+                .count()
+        };
+        assert!(lists(&asked) >= 1, "a stale list is asked for again: {asked:?}");
     }
 
     /// Borrowing a window: a computer whose link is down offers no picker.

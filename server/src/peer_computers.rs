@@ -94,6 +94,9 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
     if let Err(e) = restarted {
         tracing::debug!("Could not reset the links' state: {e}");
     }
+    // The windows of another computer an earlier run listed for the app's
+    // picker (titles) are not kept past it.
+    crate::borrow_window::expire_lists(&dir, true);
     loop {
         for request in computers::take_all(&dir, pocketdesk_core::local::pin::now_unix()) {
             match request.ask {
@@ -228,16 +231,8 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     fit,
                     borrow,
                 } => {
-                    // A borrowed window not named by a window id is no view:
-                    // showing `monitor` instead would show the other
-                    // computer's own screen, which was not what was picked.
-                    if borrow
-                        .as_deref()
-                        .is_some_and(|w| !crate::lend_window::is_window_id(w))
-                    {
-                        tracing::warn!("A view of a window that is not a window id was not shown");
-                        continue;
-                    }
+                    // (A borrow that is no window id ends the view with a
+                    // word, in the view relay: never the computer's own screen.)
                     // PC6: viewed now, for the recents, off the runtime.
                     let (at, id) = (dir.clone(), device_id.clone());
                     tokio::task::spawn_blocking(move || viewed(&at, &id));
@@ -283,6 +278,9 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
         }
         forget_untrusted_mine(&dir, &cert_manager, &mut links, views.as_ref()).await;
         lapse_pending(&dir);
+        // A list of another computer's windows nobody asked for again (the
+        // app quit, or the page was left) does not keep their titles.
+        crate::borrow_window::expire_lists(&dir, false);
         if let Some(wan) = &wan {
             keep_links(&dir, wan, &mut links);
         }

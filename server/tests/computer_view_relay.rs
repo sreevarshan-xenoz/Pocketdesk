@@ -2227,3 +2227,58 @@ async fn a_fit_that_cannot_be_asked_still_shows_the_screen_asked_for() {
     relay.await.unwrap();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Borrowing a window: a borrow that names no window id, or a window another
+/// window here already shows, is no view: the window says why, never showing
+/// the computer's own screen (and one loan has one view, so closing a view
+/// cannot return the window under another).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_borrow_that_is_no_window_or_is_shown_twice_ends_its_view_with_why() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let dir = temp_dir("borrow-refused");
+    paired(&dir);
+    let cert = Arc::new(CertManager::new().expect("cert manager"));
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let (commands, rx) = mpsc::channel(4);
+    let relay = tokio::spawn(run(
+        rx,
+        listener,
+        dir.to_path_buf(),
+        Dialer::Direct {
+            addr: "127.0.0.1:9".parse().unwrap(),
+            certs: cert,
+            id: "viewer".into(),
+        },
+    ));
+    let start = |window: u8, borrow: &str| Command::Start {
+        device_id: "desk".into(),
+        monitor: 0,
+        hevc: false,
+        window,
+        fit: None,
+        borrow: Some(borrow.to_string()),
+    };
+    // Not a window id.
+    commands.send(start(0, "5; exec true")).await.unwrap();
+    let file = window_file(&dir, 0, 0).await;
+    let mut window = join(&file).await;
+    assert_eq!(
+        end_of(&mut window).await,
+        "That is not a window of another computer."
+    );
+    // A window shown in one window is refused in a second (the first is
+    // still asking its computer, which no link here answers).
+    commands.send(start(0, "5")).await.unwrap();
+    let first = window_file(&dir, 0, file.session_id).await;
+    commands.send(start(1, "5")).await.unwrap();
+    let second = window_file(&dir, 1, 0).await;
+    let mut other = join(&second).await;
+    assert_eq!(
+        end_of(&mut other).await,
+        "That window is already shown in another window here."
+    );
+    assert!(first.session_id > file.session_id);
+    drop(commands);
+    relay.await.unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}

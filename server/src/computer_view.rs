@@ -1081,6 +1081,10 @@ async fn session(
     }
 }
 
+/// What a window says when the window it was asked to borrow is already
+/// shown in another window here.
+const ALREADY_SHOWN: &str = "That window is already shown in another window here.";
+
 /// What the window says when the computer it borrowed from lost the window.
 fn gone_words(name: &str) -> String {
     format!("{name} closed that window, or stopped lending its windows.")
@@ -1125,6 +1129,8 @@ async fn session_run(
         // computer's own, never what was picked.
         match apply_borrow(&computer, borrowed, &mut status).await {
             Ok(index) => monitor = index,
+            // Not reached at all as the view starts: ended, as a dial that
+            // does not reach is (a gap later is tried again).
             Err(why) => {
                 say.say(Event::Ended(borrow_failed(&name, &why))).await;
                 return;
@@ -1144,12 +1150,40 @@ async fn session_run(
     let _forward = AbortOnDrop(tokio::spawn(forward_input(input, conn_rx)));
     let mut reconnect = Reconnect::default();
     let mut shown_once = false;
+    // A borrowed window is asked for again before each dial after the first
+    // (the host gives the same screen back while it is still lent).
+    let mut relend = false;
     loop {
+        let mut lend_unreached = false;
+        if relend && let Some(borrowed) = &borrow {
+            match apply_borrow(&computer, borrowed, &mut status).await {
+                Ok(index) => {
+                    monitor = index;
+                    relend = false;
+                    say.say(Event::Status(status.clone())).await;
+                }
+                // The host said no (closed, not lent, another has it): the
+                // view ends with its reason.
+                Err(crate::borrow_window::LendError::Refused(why)) => {
+                    say.say(Event::Ended(borrow_failed(&name, &why))).await;
+                    return;
+                }
+                // A gap in the network, no link yet, no answer: a failed try
+                // like a failed dial, on the same backoff.
+                Err(crate::borrow_window::LendError::Unreached(_)) => lend_unreached = true,
+            }
+        }
         let dial_started = Instant::now();
         // HEVC too when the window's decoder reads it (PC5), as this
         // computer's settings say at each dial.
-        let next = match dialer.dial(&computer, monitor, view_codec_caps(hevc)).await {
-            Err(why) if !shown_once => {
+        let dialled = if lend_unreached {
+            None
+        } else {
+            Some(dialer.dial(&computer, monitor, view_codec_caps(hevc)).await)
+        };
+        let next = match dialled {
+            None => reconnect.failed(Instant::now()),
+            Some(Err(why)) if !shown_once => {
                 // Its addresses stay out of the log at info (BK7 review M8):
                 // the window says them to the owner.
                 tracing::info!(device_id = %computer.device_id, "Another computer's screen not reached");
@@ -1158,11 +1192,11 @@ async fn session_run(
                     .await;
                 return;
             }
-            Err(why) => {
+            Some(Err(why)) => {
                 tracing::debug!(device_id = %computer.device_id, attempt = status.reconnecting, "Another computer's screen not reached again: {why}");
                 reconnect.failed(Instant::now())
             }
-            Ok(dialed) => {
+            Some(Ok(dialed)) => {
                 let dial_ms = millis(dial_started.elapsed());
                 let outcome = attempt(
                     &computer,
@@ -1234,15 +1268,8 @@ async fn session_run(
         // The fitted screen asked for again (it is the same one, kept there
         // while the window lives), as a computer that restarted has none and
         // its screen numbers may have moved on.
-        if let Some(borrowed) = &borrow {
-            match apply_borrow(&computer, borrowed, &mut status).await {
-                Ok(index) => monitor = index,
-                Err(why) => {
-                    say.say(Event::Ended(borrow_failed(&name, &why))).await;
-                    return;
-                }
-            }
-            say.say(Event::Status(status.clone())).await;
+        if borrow.is_some() {
+            relend = true;
         } else if let Some(size) = fit {
             monitor = apply_fit(&computer, window, size, asked_monitor, &mut status).await;
             say.say(Event::Status(status.clone())).await;
@@ -1257,7 +1284,7 @@ async fn apply_borrow(
     computer: &PeerComputer,
     borrowed: &str,
     status: &mut ViewStatus,
-) -> Result<u32, String> {
+) -> Result<u32, crate::borrow_window::LendError> {
     match crate::borrow_window::lend(&computer.device_id, borrowed).await {
         Ok(lent) => {
             *status.fit = ViewFit::Borrowed {
@@ -1275,7 +1302,7 @@ async fn apply_borrow(
 }
 
 /// What the window says when the computer would not lend the window picked.
-fn borrow_failed(name: &str, why: &str) -> String {
+fn borrow_failed(name: &str, why: &crate::borrow_window::LendError) -> String {
     format!("Could not borrow that window from {name}: {why}")
 }
 
@@ -2408,8 +2435,27 @@ pub async fn run_with(
                     holders: mic_holders.clone(),
                     ..MicLink::default()
                 });
-                let (task, ended) = match computer {
-                    Some(computer) => (
+                // A borrowed window that is no window id, or that another
+                // window here already shows (one loan, one view: closing one
+                // would return it under the other), is no view: said, never
+                // a fallback to the computer's own screen.
+                let refused = borrow.as_deref().and_then(|w| {
+                    if !crate::lend_window::is_window_id(w) {
+                        return Some("That is not a window of another computer.".to_string());
+                    }
+                    let shown_elsewhere = views.iter().enumerate().any(|(i, v)| {
+                        i != slot
+                            && v.as_ref().is_some_and(|v| {
+                                v.ended.is_none()
+                                    && v.device_id == device_id
+                                    && v.borrow_held.as_ref().is_some_and(|(_, held)| held == w)
+                            })
+                    });
+                    shown_elsewhere.then(|| ALREADY_SHOWN.to_string())
+                });
+                let (task, ended) = match (computer, refused) {
+                    (_, Some(why)) => (None, Some((why, Instant::now()))),
+                    (Some(computer), None) => (
                         Some(tokio::spawn(session(
                             session_id,
                             state_dir.clone(),
@@ -2426,7 +2472,7 @@ pub async fn run_with(
                         ))),
                         None,
                     ),
-                    None => (
+                    (None, None) => (
                         None,
                         Some((NOT_PAIRED.to_string(), Instant::now())),
                     ),

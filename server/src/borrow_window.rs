@@ -52,6 +52,25 @@ pub fn windows(body: &Value) -> Result<Vec<LendableWindow>, String> {
         .collect())
 }
 
+/// Why a window was not lent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LendError {
+    /// The host answered no (the switch is off, the window closed, another
+    /// computer has it, its screens are used): asking again will not help.
+    Refused(String),
+    /// The host could not be asked or did not answer (no link, a short
+    /// network gap): the view tries again as it dials again.
+    Unreached(String),
+}
+
+impl std::fmt::Display for LendError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Refused(why) | Self::Unreached(why) => f.write_str(why),
+        }
+    }
+}
+
 /// The screen a host lent a window on, or why not: what [`fitted`] reads
 /// (`{name, index, width, height, window}`), but for the window asked for.
 pub fn lent(body: &Value, window: &str) -> Result<Fitted, String> {
@@ -80,18 +99,21 @@ where
 /// Ask the computer `device_id` to lend `window`: the screen it was moved
 /// to. Asked again for a window already lent to this computer, the host
 /// answers with the same screen.
-pub async fn lend(device_id: &str, window: &str) -> Result<Fitted, String> {
+pub async fn lend(device_id: &str, window: &str) -> Result<Fitted, LendError> {
     lend_via(crate::fit_screen::link_to(device_id), device_id, window).await
 }
 
 /// [`lend`], sent as `send` sends.
-async fn lend_via<F, Fut>(send: F, device_id: &str, window: &str) -> Result<Fitted, String>
+async fn lend_via<F, Fut>(send: F, device_id: &str, window: &str) -> Result<Fitted, LendError>
 where
     F: Fn(NetworkPacket) -> Fut,
     Fut: std::future::Future<Output = Result<(), String>>,
 {
     let body = json!({ "action": "lend", "window": window });
-    lent(&ask_body_via(send, device_id, body).await?, window)
+    let answer = ask_body_via(send, device_id, body)
+        .await
+        .map_err(LendError::Unreached)?;
+    lent(&answer, window).map_err(LendError::Refused)
 }
 
 /// Give `window` back to the computer `device_id`, as its view ends. Not
@@ -122,10 +144,20 @@ pub fn give_back(device_id: &str, window: &str) {
 
 /// Record in `file` that the list is asked of `computer` at `now`.
 fn record_ask(file: &mut computers::ComputersFile, computer: &str, now: u64) {
+    // What the computer listed before stays until the answer, so a refresh
+    // does not blank the picker.
+    let kept = file
+        .windows_there
+        .take()
+        .filter(|t| t.device_id == computer)
+        .map(|t| (t.windows, t.listed_unix))
+        .unwrap_or_default();
     file.windows_there = Some(WindowsThere {
         device_id: computer.to_string(),
         asking: true,
         asked_unix: now,
+        windows: kept.0,
+        listed_unix: kept.1,
         ..WindowsThere::default()
     });
 }
@@ -189,6 +221,34 @@ pub async fn ask_list(dir: &Path, computer: &str) {
         })
     })
     .await;
+}
+
+/// How long a list is kept without being asked for again: the app's open
+/// picker asks again well within it, so a list left behind (the app quit or
+/// crashed, the page left) does not keep window titles on disk.
+pub const LIST_KEPT: u64 = 60;
+
+/// Whether `there` has been left longer than [`LIST_KEPT`] at `now`.
+fn list_expired(there: &WindowsThere, now: u64) -> bool {
+    now.saturating_sub(there.listed_unix.max(there.asked_unix)) > LIST_KEPT
+}
+
+/// Drop a list nobody asked for again within [`LIST_KEPT`] (run every pass
+/// of the computers loop), and, at start (`all`), any a stopped server left.
+pub fn expire_lists(dir: &Path, all: bool) {
+    let now = pocketdesk_core::local::pin::now_unix();
+    let saved = computers::update(dir, |file| {
+        if file
+            .windows_there
+            .as_ref()
+            .is_some_and(|t| all || list_expired(t, now))
+        {
+            file.windows_there = None;
+        }
+    });
+    if let Err(e) = saved {
+        tracing::debug!("Could not drop an old list of another computer's windows: {e}");
+    }
 }
 
 /// Forget what `computer` listed, the picker closed: the titles are not
@@ -328,6 +388,49 @@ mod tests {
     }
 
     #[test]
+    fn a_refresh_keeps_the_old_list_until_the_answer() {
+        let mut file = ComputersFile::default();
+        record_ask(&mut file, "desk", 100);
+        let listed = windows(&json!({ "windows": [window("5", "Notes")] })).unwrap();
+        record_answer(&mut file, "desk", 100, Ok(listed), 101);
+        record_ask(&mut file, "desk", 130);
+        let there = file.windows_there.clone().unwrap();
+        assert!(there.asking);
+        assert_eq!(there.windows.len(), 1, "the picker does not blank");
+        assert_eq!(there.listed_unix, 101);
+        // Another computer's ask starts clean.
+        record_ask(&mut file, "lap", 131);
+        assert!(file.windows_there.unwrap().windows.is_empty());
+    }
+
+    #[test]
+    fn a_list_nobody_asked_for_again_is_dropped_and_a_start_drops_any() {
+        let dir = std::env::temp_dir().join(format!("pd-borrow-expire-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let now = pocketdesk_core::local::pin::now_unix();
+        let kept = |dir: &Path| computers::read(dir).windows_there.is_some();
+        computers::update(&dir, |file| record_ask(file, "desk", now - LIST_KEPT - 5)).unwrap();
+        assert!(kept(&dir));
+        expire_lists(&dir, false);
+        assert!(!kept(&dir), "left past the time kept");
+        // A fresh one stays through a pass, and goes at a start.
+        computers::update(&dir, |file| record_ask(file, "desk", now)).unwrap();
+        expire_lists(&dir, false);
+        assert!(kept(&dir));
+        expire_lists(&dir, true);
+        assert!(!kept(&dir), "a stopped server's list goes at start");
+        // A list answered later counts from its answer.
+        computers::update(&dir, |file| {
+            record_ask(file, "desk", now - LIST_KEPT - 5);
+            record_answer(file, "desk", now - LIST_KEPT - 5, Ok(Vec::new()), now - 10);
+        })
+        .unwrap();
+        expire_lists(&dir, false);
+        assert!(kept(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_refusal_is_recorded_with_no_windows_left_from_before() {
         let mut file = ComputersFile::default();
         record_ask(&mut file, "desk", 100);
@@ -430,8 +533,33 @@ mod tests {
         .await;
         assert_eq!(
             said,
-            Err("This computer does not lend its windows".to_string())
+            Err(LendError::Refused(
+                "This computer does not lend its windows".to_string()
+            ))
         );
+    }
+
+    /// A host that cannot be asked, or does not answer, has not said no: the
+    /// view tries again as it dials again.
+    #[tokio::test(start_paused = true)]
+    async fn a_host_that_cannot_be_reached_is_not_a_refusal() {
+        let no_link = lend_via(
+            |_: NetworkPacket| std::future::ready(Err("no link".to_string())),
+            "borrow-test-nolink",
+            "5",
+        )
+        .await;
+        assert_eq!(
+            no_link,
+            Err(LendError::Unreached("it was not asked: no link".to_string()))
+        );
+        let silent = lend_via(
+            |_: NetworkPacket| std::future::ready(Ok(())),
+            "borrow-test-silent",
+            "5",
+        )
+        .await;
+        assert!(matches!(silent, Err(LendError::Unreached(why)) if why.contains("did not answer")));
     }
 
     #[tokio::test]
