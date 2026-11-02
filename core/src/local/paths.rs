@@ -498,6 +498,7 @@ pub fn is_temp_beside_file(name: &str) -> bool {
         WAN_STATUS_FILE,
         super::sms::SMS_FILE,
         "virtual_screens.json",
+        "lent_windows.json",
     ];
     // The extra windows' `view-<n>.json`.
     let window = name

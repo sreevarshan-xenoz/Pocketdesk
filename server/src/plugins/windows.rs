@@ -53,7 +53,8 @@ pub(crate) fn screen_box(monitors: &[HyprMonitor]) -> Option<[i32; 4]> {
 /// Responds to `kdeconnect.pocketdesk.windows` queries with the visible
 /// windows (address, title, class, global + monitor-local geometry, size,
 /// workspace) plus the active window address and the monitor layout box.
-/// On non-Hyprland sessions replies `available: false`.
+/// Sway answers the same, from its tree ([`crate::sway_tree`]; the address
+/// is a window's container id). Elsewhere it replies `available: false`.
 pub struct WindowsPlugin;
 
 #[async_trait::async_trait]
@@ -116,17 +117,43 @@ impl Plugin for WindowsPlugin {
                     })
                 }
             },
-            Err(_) => serde_json::json!({
-                "available": false,
-                "activeAddress": null,
-                "screen": null,
-                "windows": [],
-            }),
+            Err(_) => sway_body().await,
         };
 
         let response = NetworkPacket::new("kdeconnect.pocketdesk.windows").with_body(body);
         sender.send_packet(&response).await?;
         Ok(())
+    }
+}
+
+/// The answer under Sway: its windows from `get_tree`, or `available:
+/// false` with no Sway or a tree that does not read.
+#[cfg(not(windows))]
+async fn sway_body() -> serde_json::Value {
+    let none = serde_json::json!({
+        "available": false,
+        "activeAddress": null,
+        "screen": null,
+        "windows": [],
+    });
+    if std::env::var_os("SWAYSOCK").is_none() {
+        return none;
+    }
+    match tokio::task::spawn_blocking(crate::sway_tree::list).await {
+        Ok(Ok((windows, active, monitors))) => {
+            info!("Windows queried: {} visible (Sway)", windows.len());
+            serde_json::json!({
+                "available": true,
+                "activeAddress": active.map(|w| w.address),
+                "screen": screen_box(&monitors),
+                "windows": entries(windows, &monitors),
+            })
+        }
+        Ok(Err(e)) => {
+            info!("Sway window query failed: {e}");
+            none
+        }
+        Err(_) => none,
     }
 }
 

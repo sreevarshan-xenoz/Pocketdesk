@@ -436,6 +436,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "lend_windows",
+        "Let my computers borrow my windows",
+        Section::Computers,
+    ),
+    (
         "computer_view_quality",
         "Quality of a computer's screen here",
         Section::Computers,
@@ -789,6 +794,8 @@ pub fn applies_live(key: &str) -> bool {
             | "remote_revoke"
             // Ecosystem phase 4: read by the server at each introduction.
             | "computer_introductions"
+            // Window handoff 3a: read by the server at each ask.
+            | "lend_windows"
             // BK7: read by this app as a computer's window opens.
             | "computer_view_quality"
             | "computer_view_only"
@@ -2734,6 +2741,16 @@ impl SettingsForm {
                     note(
                         ui,
                         "A phone paired with your other computer's own code can pair here too, once you say yes on the phone: it gets this computer's usual permissions, never more than it has there. Only your computers paired both ways can ask. Removing the phone on one computer removes it on the other.",
+                    );
+                });
+                // Window handoff, phase 3a: a computer paired both ways
+                // moves one of this computer's windows onto a hidden screen
+                // and shows it there.
+                row(ui, "lend_windows", |ui| {
+                    ui.checkbox(&mut e.lend_windows, name("lend_windows"));
+                    note(
+                        ui,
+                        "A computer of yours paired both ways, with Input allowed, can move one of this computer's windows (Sway, Hyprland) to a hidden screen of its own size and show it there. The program keeps running here; the window leaves your screen until it is returned, its session ends or this server stops. Off: no window is lent.",
                     );
                 });
                 // BK7: "Show its screen" is on each computer's line below.

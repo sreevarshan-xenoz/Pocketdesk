@@ -904,6 +904,8 @@ pub async fn run(config: Config) -> Result<()> {
             Some(reason) = shutdown.recv() => {
                 tracing::info!("Shutdown requested ({reason})");
                 withdraw_announcement(&announcement).await;
+                // Windows lent to another computer go back where they were.
+                crate::lend_window::return_all_on_stop().await;
                 break;
             }
             event = discovery_rx.recv() => {

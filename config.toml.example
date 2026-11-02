@@ -192,6 +192,12 @@ video_quality = "balanced"
 # open_links = true
 # Let a phone with Input add a screen of its own shape (Sway and Hyprland).
 # virtual_screens = true
+# Let my other computers (paired both ways, with the Input permission) borrow
+# this computer's windows (Sway and Hyprland): a window moves to a hidden
+# screen of its own size here and is shown on the other computer, and goes
+# back where it was when it is returned, the other computer's session ends,
+# or this server stops. Off until turned on.
+# lend_windows = false
 # Let a phone with the Peek permission (off for every phone until turned
 # on in the desktop app, Devices) see this screen as one still, from its
 # Home, with no session.
