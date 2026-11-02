@@ -88,6 +88,12 @@ pub(crate) fn folders(name: &str, control: u16, extra: &str) -> (PathBuf, PathBu
     (base, config, state)
 }
 
+/// Where a throwaway server (its folder `base`) writes the latency probe's
+/// stage trace.
+pub(crate) fn trace_file(base: &Path) -> PathBuf {
+    base.join("latency-trace.log")
+}
+
 /// A throwaway server; `pattern` is the value of `POCKETDESK_TEST_PATTERN`
 /// when its screen is the test pattern (`1`, or `probe` for the latency
 /// probe's marker and no injected input).
@@ -120,6 +126,16 @@ pub(crate) fn server(
     }
     if let Some(value) = pattern {
         command.env("POCKETDESK_TEST_PATTERN", value);
+        // The latency probe's stage trace, for the table the probe prints
+        // (`PD_LIVE_STAGES=0` leaves it off).
+        if value == pocketdesk_core::streaming::latency_probe::MODE
+            && std::env::var("PD_LIVE_STAGES").as_deref() != Ok("0")
+        {
+            command.env(
+                pocketdesk_core::streaming::latency_trace::VAR,
+                trace_file(base),
+            );
+        }
     }
     command.spawn().unwrap()
 }
@@ -500,7 +516,10 @@ pub(crate) fn print_codec_lines(bases: &[&Path]) {
         let log = std::fs::read_to_string(base.join("server.log")).unwrap_or_default();
         for line in log.lines().filter(|l| {
             let l = l.to_ascii_lowercase();
-            l.contains("hevc") || l.contains("codec") || l.contains("showing another")
+            l.contains("hevc")
+                || l.contains("codec")
+                || l.contains("showing another")
+                || (l.contains("encoder") && !l.contains("forcing idr"))
         }) {
             let at = line.find("pocketdesk").unwrap_or(0);
             println!("log: {}", &line[at..]);

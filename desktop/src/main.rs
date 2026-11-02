@@ -53,6 +53,8 @@ mod view_input;
 #[cfg(test)]
 mod view_latency_live;
 #[cfg(test)]
+mod view_latency_stages;
+#[cfg(test)]
 mod view_live;
 mod view_mic;
 mod view_pointer;

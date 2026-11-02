@@ -38,6 +38,15 @@
 //! VA-API node's name, as `view_live` lists them), `PD_LIVE_LOG=1` keeps
 //! the servers' logs for their codec lines.
 //!
+//! The stage table (phase 0b): B also traces its steps with
+//! `POCKETDESK_LATENCY_TRACE` (set for B by the test; `PD_LIVE_STAGES=0`
+//! leaves it off), and the stand-in notes the access units it reads and the
+//! frame number each picture's counting strip says, so each move's time is
+//! split into the stages of [`crate::view_latency_stages`] and printed with
+//! the median and 95th percentile of each. Moves are put off by up to
+//! `PD_LIVE_JITTER_MS` (17) past the gap so they fall on every point of the
+//! pattern's frame clock.
+//!
 //! `input_to_picture_on_a_running_pair` measures a pair that already runs,
 //! across a network too (see its comment: B must be a throwaway in probe
 //! mode).
@@ -52,11 +61,15 @@ use pocketdesk_core::local::pin;
 use pocketdesk_core::local::view::{self as wire, Message};
 use pocketdesk_core::streaming::InputPacket;
 use pocketdesk_core::streaming::latency_probe;
+use pocketdesk_core::streaming::latency_trace::{self, wall_us};
 
 use crate::computer_view::percentile;
 use crate::nv12::Layout;
 use crate::video::{Accel, Admit, Codec, DecodeWanted, Decoder, KeyGate, Picture, Planes};
-use crate::view_live::{StopViewOnDrop, ms, print_codec_lines, start_pair, wait_for, ways};
+use crate::view_latency_stages::{Au, Move, Seen};
+use crate::view_live::{
+    StopViewOnDrop, ms, print_codec_lines, start_pair, trace_file, wait_for, ways,
+};
 
 /// The two places the pointer alternates between, over the picture's width
 /// (`x_norm`); far apart, so a late picture of the last place is never
@@ -90,6 +103,12 @@ struct Report {
     pictures: u64,
     seen: Vec<Duration>,
     misses: u32,
+    /// Each move sent and the picture that showed it, the access units the
+    /// stand-in read, and when (wall clock, microseconds) the way began:
+    /// what the stage table is made of.
+    moves: Vec<Move>,
+    aus: Vec<Au>,
+    began: u64,
 }
 
 impl Report {
@@ -120,13 +139,18 @@ struct Shared {
     pending: Option<(u32, Instant)>,
     /// How long the last pending move took, once its picture came.
     seen: Option<Duration>,
+    /// The picture that showed it.
+    landed: Option<Seen>,
+    /// The access units read from the relay.
+    aus: Vec<Au>,
     pictures: u64,
     size: Option<(usize, usize)>,
 }
 
-/// One picture: counted, and if it shows the pending move's marker where
-/// it should be, the move is seen.
-fn on_picture(shared: &Mutex<Shared>, p: &Picture, now: Instant) {
+/// One picture, given at `now` (`wall` on the wall clock, microseconds):
+/// counted, and if it shows the pending move's marker where it should be,
+/// the move is seen.
+fn on_picture(shared: &Mutex<Shared>, p: &Picture, now: Instant, wall: u64) {
     let mut s = shared.lock().unwrap();
     s.pictures += 1;
     s.size = Some((p.width, p.height));
@@ -141,6 +165,11 @@ fn on_picture(shared: &Mutex<Shared>, p: &Picture, now: Instant) {
         && is_it(found, expected)
     {
         s.seen = Some(now - sent);
+        s.landed = Some(Seen {
+            picture_at: wall,
+            n: latency_probe::read_frame_number(luma, p.width, p.height),
+            found_at: wall_us(),
+        });
         s.pending = None;
     }
 }
@@ -199,7 +228,10 @@ fn run_way(
                         let shared = shared.clone();
                         decoder = Decoder::open(
                             &wanted,
-                            Box::new(move |p| on_picture(&shared, &p, Instant::now())),
+                            Box::new(move |p| {
+                                let (now, wall) = (Instant::now(), wall_us());
+                                on_picture(&shared, &p, now, wall);
+                            }),
                         )
                         .ok();
                         gate = KeyGate::default();
@@ -211,6 +243,7 @@ fn run_way(
                         data,
                     } => {
                         let Some(d) = decoder.as_mut() else { continue };
+                        let at = wall_us();
                         match gate.admit(*keyframe, *seq) {
                             Admit::Feed => {}
                             Admit::Skip => continue,
@@ -219,6 +252,7 @@ fn run_way(
                                 continue;
                             }
                         }
+                        shared.lock().unwrap().aus.push(Au { at, seq: *seq });
                         if d.feed(data).is_err() {
                             break;
                         }
@@ -247,15 +281,22 @@ fn run_way(
         std::thread::sleep(Duration::from_millis(50));
     }
     let width = shared.lock().unwrap().size.unwrap().0 as u32;
-    let mut report = Report::default();
+    let mut report = Report {
+        began: wall_us(),
+        ..Report::default()
+    };
     let mut next = Instant::now();
+    let mut jitter = Jitter::new(jitter_ms());
     for i in 0..n {
         let x_norm = place(i);
         let expected = latency_probe::marker_left(width, x_norm);
+        let sent_wall;
         {
             let mut s = shared.lock().unwrap();
             s.seen = None;
+            s.landed = None;
             // The send instant, taken just before the write.
+            sent_wall = wall_us();
             s.pending = Some((expected, Instant::now()));
         }
         let packet = InputPacket::MouseMoveAbs {
@@ -279,13 +320,20 @@ fn run_way(
             std::thread::sleep(Duration::from_micros(500));
         };
         match took {
-            Some(took) => report.seen.push(took),
+            Some(took) => {
+                report.seen.push(took);
+                report.moves.push(Move {
+                    sent: sent_wall,
+                    x_norm,
+                    seen: shared.lock().unwrap().landed,
+                });
+            }
             None => {
                 report.misses += 1;
                 shared.lock().unwrap().pending = None;
             }
         }
-        next += gap;
+        next += gap + jitter.next();
         let now = Instant::now();
         if next > now {
             std::thread::sleep(next - now);
@@ -297,12 +345,55 @@ fn run_way(
         let s = shared.lock().unwrap();
         report.pictures = s.pictures;
         report.size = s.size;
+        report.aus = s.aus.clone();
     }
     report.codec = *codec.lock().unwrap();
     stop.store(true, Ordering::Relaxed);
     let _ = writer.lock().unwrap().shutdown(std::net::Shutdown::Both);
     let _ = reader.join();
     Some(report)
+}
+
+/// The most a move is put off past the gap, in milliseconds
+/// (`PD_LIVE_JITTER_MS`, default 17). A gap that is a whole number of the
+/// pattern's frame periods (250 ms is 15 at 60 fps) would send every move at
+/// the same point of the frame clock, so the wait for the next frame would
+/// be the same each time and the median and the 95th percentile would
+/// agree; moves put off by up to a frame period fall on every point of it.
+fn jitter_ms() -> u64 {
+    std::env::var("PD_LIVE_JITTER_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(17)
+}
+
+/// A repeatable run of delays from 0 up to (not including) a most, from a
+/// small generator: the same run each time, so two ways see the same
+/// phases.
+struct Jitter {
+    state: u64,
+    most_us: u64,
+}
+
+impl Jitter {
+    fn new(most_ms: u64) -> Self {
+        Self {
+            state: 0x9E37_79B9_7F4A_7C15,
+            most_us: most_ms * 1000,
+        }
+    }
+
+    fn next(&mut self) -> Duration {
+        if self.most_us == 0 {
+            return Duration::ZERO;
+        }
+        // xorshift64*
+        self.state ^= self.state >> 12;
+        self.state ^= self.state << 25;
+        self.state ^= self.state >> 27;
+        let r = self.state.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11;
+        Duration::from_micros(r % self.most_us)
+    }
 }
 
 /// The moves a way, the gap between them and the ways, from the
@@ -324,7 +415,7 @@ fn settings() -> (usize, Duration, String) {
 
 /// Measure each wanted way on A's view of B and print its line; how many
 /// ways gave pictures. A view must be running (or asked for).
-fn measure_ways(a_state: &std::path::Path, b_id: &str) -> usize {
+fn measure_ways(a_state: &std::path::Path, b_id: &str, trace: Option<&std::path::Path>) -> usize {
     let (n, gap, wanted) = settings();
     let mut gave = 0;
     for (name, accel, planes) in ways() {
@@ -336,6 +427,19 @@ fn measure_ways(a_state: &std::path::Path, b_id: &str) -> usize {
             continue;
         };
         println!("{}", report.line(&name));
+        if let Some(trace) = trace {
+            // The host's events of this way (it started the way's clock),
+            // against the moves and access units the stand-in saw.
+            let host: Vec<_> = latency_trace::read(trace)
+                .into_iter()
+                .filter(|e| e.at() >= report.began.saturating_sub(1_000_000))
+                .collect();
+            let mut table = crate::view_latency_stages::table(&host, &report.aus, &report.moves);
+            println!("stages, {}, {name}:", report.codec);
+            for line in table.lines() {
+                println!("  {line}");
+            }
+        }
         // Most moves were seen: the marker was found where it was drawn.
         // Fewer says the probe or the stream is broken, not slow.
         assert!(
@@ -354,6 +458,9 @@ fn input_to_picture() {
     let hevc = std::env::var("PD_LIVE_HEVC").is_ok_and(|v| v == "1");
     let pair = start_pair((19516, 19616), Some(latency_probe::MODE), hevc, true);
     let (a_state, b_id) = (&pair.a_state, &pair.b_id);
+    // The host's stage trace, unless `PD_LIVE_STAGES=0`.
+    let trace =
+        (std::env::var("PD_LIVE_STAGES").as_deref() != Ok("0")).then(|| trace_file(&pair.b_base));
     computers::request(
         a_state,
         ComputerAsk::View {
@@ -368,7 +475,7 @@ fn input_to_picture() {
     .unwrap();
     let gave = {
         let _stop = StopViewOnDrop(a_state);
-        measure_ways(a_state, b_id)
+        measure_ways(a_state, b_id, trace.as_deref())
     };
     print_codec_lines(&[&pair.a_base, &pair.b_base]);
     assert!(gave > 0, "some way gave pictures");
@@ -404,7 +511,13 @@ fn input_to_picture_on_a_running_pair() {
     )
     .unwrap();
     let _stop = StopViewOnDrop(&a_state);
-    assert!(measure_ways(&a_state, &b_id) > 0, "some way gave pictures");
+    // B's stage trace, if it runs on this machine with
+    // `POCKETDESK_LATENCY_TRACE` set (`PD_LIVE_B_TRACE` is its file).
+    let trace = std::env::var_os("PD_LIVE_B_TRACE").map(std::path::PathBuf::from);
+    assert!(
+        measure_ways(&a_state, &b_id, trace.as_deref()) > 0,
+        "some way gave pictures"
+    );
 }
 
 #[cfg(test)]
@@ -462,17 +575,45 @@ mod tests {
             &shared,
             &picture(data.clone()),
             sent + Duration::from_millis(9),
+            0,
         );
         assert!(shared.lock().unwrap().seen.is_none());
         assert_eq!(shared.lock().unwrap().pictures, 1);
         // At the new place it is, with the time since the send.
         shared.lock().unwrap().pending =
             Some((latency_probe::marker_left(w as u32, place(0)), sent));
-        on_picture(&shared, &picture(data), sent + Duration::from_millis(12));
+        on_picture(
+            &shared,
+            &picture(data),
+            sent + Duration::from_millis(12),
+            777,
+        );
         let s = shared.lock().unwrap();
         assert_eq!(s.seen, Some(Duration::from_millis(12)));
+        let landed = s.landed.expect("the picture that showed it");
+        assert_eq!(landed.picture_at, 777);
+        assert_eq!(landed.n, Some(0), "a dark strip says frame 0");
         assert!(s.pending.is_none());
         assert_eq!(s.size, Some((w, h)));
+    }
+
+    #[test]
+    fn the_jitter_covers_a_frame_period_and_repeats_and_is_off_at_zero() {
+        let run = |most| {
+            let mut j = Jitter::new(most);
+            (0..2000).map(|_| j.next()).collect::<Vec<_>>()
+        };
+        let a = run(17);
+        assert_eq!(a, run(17), "the same run each time");
+        assert!(a.iter().all(|d| *d < Duration::from_millis(17)));
+        // Spread over the whole period, not bunched.
+        for slot in 0..17u128 {
+            assert!(
+                a.iter().filter(|d| d.as_millis() == slot).count() > 50,
+                "slot {slot}"
+            );
+        }
+        assert!(run(0).iter().all(|d| d.is_zero()));
     }
 
     #[test]
@@ -483,6 +624,7 @@ mod tests {
             pictures: 900,
             seen: (1..=100).map(Duration::from_millis).collect(),
             misses: 2,
+            ..Report::default()
         };
         let line = report.line("auto, NV12");
         assert!(line.contains("H.264, auto, NV12"), "{line}");
