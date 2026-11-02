@@ -41,7 +41,7 @@ pub struct Au {
 }
 
 /// The stages, in the order a move takes them.
-pub const STAGES: [&str; 17] = [
+pub const STAGES: [&str; 18] = [
     "send > host input",
     "host input > frame",
     "frame > encoder in",
@@ -59,6 +59,7 @@ pub const STAGES: [&str; 17] = [
     "enc: upload to card",
     "enc: send_frame",
     "enc: sent > packet out",
+    "enc: BGRA > NV12 (card)",
 ];
 
 /// The rows that count (units, frames) rather than time.
@@ -213,16 +214,18 @@ pub fn table(host: &[Event], aus: &[Au], moves: &[Move]) -> Table {
                 .count();
             t.samples[11].push(later as i64);
             // The steps inside it, where it says them (VA-API): each from
-            // the one before.
+            // the one before. The processor path says copy, scale, upload;
+            // the card path says upload, convert; both end with the send.
             let mut from = enc_in;
             for (row, step) in [
                 (12, Step::Copied),
                 (13, Step::Scaled),
                 (14, Step::Uploaded),
+                (17, Step::Converted),
                 (15, Step::Sent),
             ] {
                 let Some(&at) = steps.get(&(ts, step)) else {
-                    break;
+                    continue;
                 };
                 t.samples[row].push(diff(from, at));
                 from = at;
