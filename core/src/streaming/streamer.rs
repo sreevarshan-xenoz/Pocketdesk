@@ -96,6 +96,9 @@ struct ClientClaim {
     /// (another computer's window). Said with
     /// [`super::client::CODEC_CAP_NO_IDLE_REPEATS`], in the codec caps.
     no_idle_repeats: bool,
+    /// The client draws the other computer's pointer itself. Said with
+    /// [`super::client::CODEC_CAP_LOCAL_CURSOR`], in the codec caps.
+    local_cursor: bool,
 }
 
 /// Tells the relay a cast ended, however its session ends (T10k).
@@ -760,6 +763,10 @@ impl StreamingServer {
         // Another computer's window needs no repeat of a still screen: the
         // encode task drops the capture's idle heartbeat for it.
         let no_idle_repeats = claim.no_idle_repeats && !no_picture;
+        // The client draws the pointer itself: the capture is asked to take
+        // it out of the picture where it can, and reports it here.
+        let cursor_feed =
+            (claim.local_cursor && !no_picture && !cast).then(super::cursor_feed::CursorFeed::new);
 
         // R4 A2 session telemetry: a shared recorder observes the connection
         // on a slow poll and an RAII guard emits the outcome report when the
@@ -1161,10 +1168,22 @@ impl StreamingServer {
                 window_mode.clone(),
                 self.capture_backend,
                 self.screen_grant.clone(),
+                cursor_feed.clone(),
             )
             .await
             .context("Failed to start screen capture")?;
             info!("Screen capture session started");
+            // Said whether or not the capture could take the pointer out:
+            // the client keeps it in the picture on a no. The sender follows
+            // the feed from here, so a capture that gives the pointer up
+            // later (or puts it back in a window's picture) is said too.
+            if let Some(feed) = cursor_feed.clone() {
+                info!(
+                    separate = feed.separate(),
+                    "Pointer sent apart from the picture"
+                );
+                tokio::spawn(run_cursor_sender(connection.clone(), feed, cancel.clone()));
+            }
             // A capture that carries input itself (GNOME's and KDE's portal,
             // mutter) may find it refused only when the first event comes:
             // the phone hears then.
@@ -1875,6 +1894,7 @@ impl StreamingServer {
         let monitor_cast_want = cast_want_tx;
         let monitor_cast_control_on = cast_control_on;
         let monitor_window_input = cast_window_input;
+        let monitor_cursor = cursor_feed;
         let mut cast_chain = super::cast::CastChain::default();
         // Each app window is its own decode chain (Phone apps tier 2).
         let mut window_chains: [super::cast::CastChain; super::cast::MAX_WINDOWS as usize] =
@@ -2080,6 +2100,15 @@ impl StreamingServer {
                                                     cropped = rect.is_some();
                                                     let _ = monitor_crop_tx.send(rect);
                                                     let _ = monitor_window_tx.send(addr);
+                                                    continue;
+                                                }
+                                                // The viewer asks for the pointer's
+                                                // places (local cursor): control-
+                                                // plane, never injected.
+                                                if let InputPacket::CursorTrack { on } = packet {
+                                                    if let Some(feed) = &monitor_cursor {
+                                                        feed.set_tracking(on);
+                                                    }
                                                     continue;
                                                 }
                                                 // View-only is server-enforced input
@@ -2520,10 +2549,12 @@ async fn read_client_config(
                 config.codec = codec;
             }
             claim.no_idle_repeats = wants_no_idle_repeats(caps[0]);
+            claim.local_cursor = wants_local_cursor(caps[0]);
             info!(
                 caps = caps[0],
                 codec = config.codec.display_name(),
                 no_idle_repeats = claim.no_idle_repeats,
+                local_cursor = claim.local_cursor,
                 "Client codec caps negotiated"
             );
         } else if marker == SESSION_MODE_MARKER {
@@ -2580,6 +2611,13 @@ fn wants_no_idle_repeats(caps: u8) -> bool {
     caps & super::client::CODEC_CAP_NO_IDLE_REPEATS != 0
 }
 
+/// Whether the client's capability bits say it draws the other computer's
+/// pointer itself (local cursor). Bits an older client never sets read as
+/// no, so a phone keeps the pointer in the picture.
+fn wants_local_cursor(caps: u8) -> bool {
+    caps & super::client::CODEC_CAP_LOCAL_CURSOR != 0
+}
+
 /// R4 C1: pick the session codec from the client's capability bits and the
 /// server's policy. Pure so the negotiation is unit-testable without a
 /// pipeline. Returns `None` to keep the current config codec (H.264 default).
@@ -2617,6 +2655,95 @@ async fn send_cast_control(connection: &SharedConnection, batch: &[u8]) {
             let _ = stream.finish();
         }
         Err(e) => debug!(error = %e, "Could not send control to the phone"),
+    }
+}
+
+/// How a pointer message went.
+enum CursorSent {
+    Yes,
+    /// The stream opened but the write failed: the viewer may not have it.
+    Failed,
+    /// The connection is gone.
+    Gone,
+}
+
+/// One pointer message on a stream of its own (local cursor): the header
+/// numbers it, so the viewer drops one that arrives after a newer.
+async fn send_cursor_message(
+    connection: &SharedConnection,
+    sequence: u64,
+    message: &crate::protocol::cursor::CursorMessage,
+) -> CursorSent {
+    let header = super::transport::PacketHeader {
+        sequence,
+        stream_kind: super::transport::STREAM_KIND_CURSOR,
+        is_keyframe: false,
+        timestamp_us: 0,
+    };
+    let Ok(mut stream) = connection.open_uni().await else {
+        return CursorSent::Gone;
+    };
+    let sent = async {
+        stream.write_all(&header.as_bytes()).await?;
+        stream.write_all(&message.encode()).await
+    }
+    .await;
+    let _ = stream.finish();
+    match sent {
+        Ok(()) => CursorSent::Yes,
+        Err(e) => {
+            debug!(error = %e, "Could not send the pointer to the viewer");
+            CursorSent::Failed
+        }
+    }
+}
+
+/// The pointer to a viewer that draws it (local cursor): the mode first
+/// (whether the picture has the pointer taken out), then, while it has, the
+/// shape, whether it shows, and, while the viewer asked, where it is, each
+/// as it changes. A mode that changes later (the capture lost the pointer
+/// capture, a window's picture has it drawn in) is said at once. A message
+/// may be lost, so the whole of it is said again every
+/// [`REFRESH_EVERY`](super::cursor_feed::REFRESH_EVERY) once it was ever
+/// apart, and at once after a write that failed. Ends with the session.
+async fn run_cursor_sender(
+    connection: SharedConnection,
+    feed: super::cursor_feed::CursorFeed,
+    cancel: CancellationToken,
+) {
+    use super::cursor_feed::{PLACE_EVERY, REFRESH_EVERY, RETRY_AFTER, Sender};
+    use crate::protocol::cursor::CursorMessage;
+    let mut sender = Sender::default();
+    let mut refresh_at = tokio::time::Instant::now() + REFRESH_EVERY;
+    loop {
+        let now = tokio::time::Instant::now();
+        let refresh = now >= refresh_at;
+        if refresh {
+            refresh_at = now + REFRESH_EVERY;
+        }
+        let mut moved = false;
+        for (sequence, message) in sender.step(&feed, refresh) {
+            moved |= matches!(message, CursorMessage::Move { .. });
+            match send_cursor_message(&connection, sequence, &message).await {
+                CursorSent::Yes => {}
+                CursorSent::Failed => {
+                    sender.lost();
+                    refresh_at = refresh_at.min(tokio::time::Instant::now() + RETRY_AFTER);
+                }
+                CursorSent::Gone => return,
+            }
+        }
+        if moved {
+            tokio::select! {
+                _ = cancel.cancelled() => return,
+                _ = tokio::time::sleep(PLACE_EVERY) => {}
+            }
+        }
+        tokio::select! {
+            _ = cancel.cancelled() => return,
+            _ = feed.changed() => {}
+            _ = tokio::time::sleep_until(refresh_at) => {}
+        }
     }
 }
 
@@ -3306,6 +3433,214 @@ mod tests {
         assert!(claim.no_idle_repeats);
         assert_eq!(config.codec, VideoCodec::H265, "HEVC read beside it");
         assert!(!claim.input_only);
+    }
+
+    /// Local cursor: a viewer that draws the other computer's pointer says
+    /// so in its codec caps; the host sends the pointer's messages on
+    /// streams of their own and the viewer's inbox takes them in order, with
+    /// the picture's receive loop never taking them for a frame.
+    #[tokio::test]
+    async fn a_viewer_that_draws_the_pointer_is_sent_it_apart_from_the_picture() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        use super::super::client::{CODEC_CAP_LOCAL_CURSOR, StreamingClient};
+        use super::super::cursor_feed::CursorFeed;
+        use crate::protocol::cursor::{CursorMessage, CursorShape, CursorState};
+
+        let certs = std::sync::Arc::new(CertManager::new().expect("certs"));
+        let alpn = vec![StreamTransportConfig::default().alpn];
+        let server_endpoint = quinn::Endpoint::server(
+            certs.server_config(alpn.clone()).expect("server config"),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .expect("bind");
+        let addr = server_endpoint.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let incoming = server_endpoint.accept().await.expect("incoming");
+            QuinnConnection::shared(incoming.await.expect("accept"))
+        });
+        let (mut client, mut frames, _audio) = StreamingClient::connect(
+            &addr.to_string(),
+            certs,
+            Some(0),
+            Some("device-pc"),
+            None,
+            Some(CODEC_CAP_LOCAL_CURSOR),
+            super::super::client::SessionMode::Screen,
+        )
+        .await
+        .expect("connect");
+        let inbox = client.remote().cursor;
+        assert!(inbox.wanted());
+        tokio::spawn(async move { client.start().await });
+
+        let server_conn = accept.await.expect("accept task");
+        let mut config = StreamingConfig::default();
+        let claim = read_client_config(&server_conn, &mut config, true).await;
+        assert!(claim.local_cursor);
+
+        let feed = CursorFeed::new();
+        feed.set_separate(true);
+        feed.set_shape(CursorShape::new(2, 2, 1, 1, vec![9; 16]).unwrap());
+        let cancel = CancellationToken::new();
+        tokio::spawn(run_cursor_sender(
+            server_conn.clone(),
+            feed.clone(),
+            cancel.clone(),
+        ));
+        let mut got = Vec::new();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while got.len() < 3 && tokio::time::Instant::now() < deadline {
+            let _ = tokio::time::timeout(Duration::from_millis(200), inbox.arrived()).await;
+            got.extend(inbox.drain());
+        }
+        assert_eq!(got[0], CursorMessage::Mode { separate: true }, "first");
+        assert!(
+            got.iter()
+                .any(|m| matches!(m, CursorMessage::Shape(s) if s.hot_x == 1))
+        );
+        assert!(got.contains(&CursorMessage::Visible(true)));
+        assert!(
+            !got.iter().any(|m| matches!(m, CursorMessage::Move { .. })),
+            "no places unasked"
+        );
+
+        // Asked for places, the newest comes; the picture's stream saw none
+        // of it.
+        feed.set_tracking(true);
+        feed.set_place(100, 200);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let mut moved = false;
+        while !moved && tokio::time::Instant::now() < deadline {
+            let _ = tokio::time::timeout(Duration::from_millis(200), inbox.arrived()).await;
+            moved = inbox
+                .drain()
+                .contains(&CursorMessage::Move { x: 100, y: 200 });
+        }
+        assert!(moved, "a place, once asked for");
+        assert!(
+            frames.try_recv().is_err(),
+            "a pointer message is never a frame"
+        );
+
+        // Nothing changes, and the host still says the whole pointer again
+        // (a message may have been lost on the way): the mode, the shape
+        // that is current, whether it shows.
+        inbox.drain();
+        let mut again = Vec::new();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(6);
+        while again.len() < 3 && tokio::time::Instant::now() < deadline {
+            let _ = tokio::time::timeout(Duration::from_millis(200), inbox.arrived()).await;
+            again.extend(inbox.drain());
+        }
+        assert_eq!(again.first(), Some(&CursorMessage::Mode { separate: true }));
+        assert!(
+            again
+                .iter()
+                .any(|m| matches!(m, CursorMessage::Shape(s) if s.hot_x == 1)),
+            "the shape whole again: {again:?}"
+        );
+        assert!(again.contains(&CursorMessage::Visible(true)));
+
+        // The capture gives the pointer up: the viewer is told at once,
+        // and forgets what it held.
+        feed.set_separate(false);
+        let mut state = CursorState::default();
+        state.apply(CursorMessage::Mode { separate: true });
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let mut told = false;
+        while !told && tokio::time::Instant::now() < deadline {
+            let _ = tokio::time::timeout(Duration::from_millis(200), inbox.arrived()).await;
+            for message in inbox.drain() {
+                told |= message == (CursorMessage::Mode { separate: false });
+                state.apply(message);
+            }
+        }
+        assert!(told, "the mode of no, said at once");
+        assert!(!state.separate && state.shape.is_none());
+        cancel.cancel();
+    }
+
+    /// A host that cannot take the pointer out of the picture still answers
+    /// a viewer that asked: `separate: false`, so it hides nothing.
+    #[tokio::test]
+    async fn a_host_that_keeps_the_pointer_in_the_picture_says_so_and_sends_no_more() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        use super::super::client::{CODEC_CAP_LOCAL_CURSOR, StreamingClient};
+        use super::super::cursor_feed::CursorFeed;
+        use crate::protocol::cursor::{CursorMessage, CursorState};
+
+        let certs = std::sync::Arc::new(CertManager::new().expect("certs"));
+        let alpn = vec![StreamTransportConfig::default().alpn];
+        let server_endpoint = quinn::Endpoint::server(
+            certs.server_config(alpn.clone()).expect("server config"),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .expect("bind");
+        let addr = server_endpoint.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let incoming = server_endpoint.accept().await.expect("incoming");
+            QuinnConnection::shared(incoming.await.expect("accept"))
+        });
+        let (mut client, _frames, _audio) = StreamingClient::connect(
+            &addr.to_string(),
+            certs,
+            Some(0),
+            Some("device-pc"),
+            None,
+            Some(CODEC_CAP_LOCAL_CURSOR),
+            super::super::client::SessionMode::Screen,
+        )
+        .await
+        .expect("connect");
+        let inbox = client.remote().cursor;
+        tokio::spawn(async move { client.start().await });
+        let server_conn = accept.await.expect("accept task");
+        let mut config = StreamingConfig::default();
+        read_client_config(&server_conn, &mut config, true).await;
+
+        let feed = CursorFeed::new();
+        let cancel = CancellationToken::new();
+        tokio::spawn(run_cursor_sender(server_conn.clone(), feed, cancel.clone()));
+        let mut state = CursorState::default();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let mut said = false;
+        while !said && tokio::time::Instant::now() < deadline {
+            let _ = tokio::time::timeout(Duration::from_millis(200), inbox.arrived()).await;
+            for message in inbox.drain() {
+                said |= message == (CursorMessage::Mode { separate: false });
+                state.apply(message);
+            }
+        }
+        assert!(said, "the answer");
+        assert!(!state.separate, "the viewer hides and draws nothing");
+        cancel.cancel();
+    }
+
+    /// A viewer that never said it draws the pointer does not read pointer
+    /// streams, and a host never sends them (old viewers keep the pointer in
+    /// the picture they always had).
+    #[test]
+    fn the_local_cursor_bit_is_a_bit_of_its_own_and_an_old_viewer_never_sets_it() {
+        use super::super::client::{
+            CODEC_CAP_HEVC, CODEC_CAP_LOCAL_CURSOR, CODEC_CAP_NO_IDLE_REPEATS,
+        };
+        assert!(!wants_local_cursor(0));
+        assert!(!wants_local_cursor(
+            CODEC_CAP_HEVC | CODEC_CAP_NO_IDLE_REPEATS
+        ));
+        assert!(wants_local_cursor(CODEC_CAP_LOCAL_CURSOR));
+        assert!(wants_local_cursor(CODEC_CAP_LOCAL_CURSOR | CODEC_CAP_HEVC));
+        assert_eq!(
+            CODEC_CAP_LOCAL_CURSOR & (CODEC_CAP_HEVC | CODEC_CAP_NO_IDLE_REPEATS),
+            0
+        );
+        // Not a codec, and not the idle repeats: the other negotiations
+        // ignore it.
+        assert_eq!(
+            negotiate_codec(CODEC_CAP_LOCAL_CURSOR, true, VideoCodec::H264),
+            None
+        );
+        assert!(!wants_no_idle_repeats(CODEC_CAP_LOCAL_CURSOR));
     }
 
     /// T10i: a remote says it is input only, and sends neither a monitor

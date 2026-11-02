@@ -18,8 +18,8 @@ use pocketdesk_core::local::computers::{self, PeerComputer};
 use pocketdesk_core::local::view::{self as wire, Message, Phase, ViewFile, ViewPrivacy};
 use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
 use pocketdesk_core::streaming::transport::{
-    CertManager, PacketHeader, STREAM_KIND_READY, STREAM_KIND_VIDEO, StreamServer,
-    StreamTransportConfig,
+    CertManager, PacketHeader, STREAM_KIND_CURSOR, STREAM_KIND_READY, STREAM_KIND_VIDEO,
+    StreamServer, StreamTransportConfig,
 };
 use pocketdesk_core::streaming::{
     InputPacket, SCREEN_FEATURE_INPUT, SCREEN_FEATURE_SYSTEM_SAID, SCREEN_FEATURE_WINDOWS,
@@ -214,6 +214,21 @@ async fn other_computer_again_and_again(
     Arc<AtomicUsize>,
     mpsc::UnboundedSender<&'static [u8]>,
 ) {
+    other_computer_again_with_pointer(cert, refuse_after, Vec::new()).await
+}
+
+/// [`other_computer_again_and_again`], each session also sending `pointer`
+/// (local cursor) on streams of its own, as a computer does whose capture
+/// takes the pointer out of the picture.
+async fn other_computer_again_with_pointer(
+    cert: Arc<CertManager>,
+    refuse_after: Option<usize>,
+    pointer: Vec<pocketdesk_core::protocol::cursor::CursorMessage>,
+) -> (
+    SocketAddr,
+    Arc<AtomicUsize>,
+    mpsc::UnboundedSender<&'static [u8]>,
+) {
     let listen = StreamTransportConfig {
         address: "127.0.0.1:0".parse().unwrap(),
         ..StreamTransportConfig::default()
@@ -240,6 +255,26 @@ async fn other_computer_again_and_again(
             }
             let (this_tx, this_rx) = tokio::sync::oneshot::channel();
             let (input, _ignored) = mpsc::unbounded_channel();
+            let sending = conn.clone();
+            let messages = pointer.clone();
+            tokio::spawn(async move {
+                // After the client's config streams, as a real host's capture is.
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                for (n, message) in messages.iter().enumerate() {
+                    let Ok(mut stream) = sending.open_uni().await else {
+                        return;
+                    };
+                    let header = PacketHeader {
+                        sequence: n as u64 + 1,
+                        stream_kind: STREAM_KIND_CURSOR,
+                        is_keyframe: false,
+                        timestamp_us: 0,
+                    };
+                    let _ = stream.write_all(&header.as_bytes()).await;
+                    let _ = stream.write_all(&message.encode()).await;
+                    let _ = stream.finish();
+                }
+            });
             let session = tokio::spawn(serve(conn, input, keyframe(), this_rx, None));
             // The next hang-up closes this session.
             match hang_up_rx.recv().await {
@@ -284,6 +319,182 @@ async fn join(file: &ViewFile) -> TcpStream {
     stream
 }
 
+/// A stand-in for a computer that sends its pointer apart from the picture
+/// (local cursor): the stream's session as [`other_computer`] has it, and
+/// pointer messages on streams of their own once its client is there. They
+/// are sent whether or not the client asked: one that did not ask must not
+/// hear them.
+async fn other_computer_with_pointer(
+    cert: Arc<CertManager>,
+    messages: Vec<pocketdesk_core::protocol::cursor::CursorMessage>,
+) -> SocketAddr {
+    let listen = StreamTransportConfig {
+        address: "127.0.0.1:0".parse().unwrap(),
+        ..StreamTransportConfig::default()
+    };
+    let server = StreamServer::new(listen, &cert).await.expect("bind");
+    let addr = server.local_addr().unwrap();
+    tokio::spawn(async move {
+        let conn = server
+            .accept_connection()
+            .await
+            .expect("a client")
+            .accept()
+            .expect("accepted")
+            .await
+            .expect("handshake");
+        let (input, _ignored) = mpsc::unbounded_channel();
+        let (_hang_up, hang_up_rx) = tokio::sync::oneshot::channel();
+        let pointer = conn.clone();
+        tokio::spawn(async move {
+            // After the client's config streams, as a real host's capture is.
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            for (n, message) in messages.iter().enumerate() {
+                let Ok(mut stream) = pointer.open_uni().await else {
+                    return;
+                };
+                let header = PacketHeader {
+                    sequence: n as u64 + 1,
+                    stream_kind: STREAM_KIND_CURSOR,
+                    is_keyframe: false,
+                    timestamp_us: 0,
+                };
+                let _ = stream.write_all(&header.as_bytes()).await;
+                let _ = stream.write_all(&message.encode()).await;
+                let _ = stream.finish();
+            }
+        });
+        serve(conn, input, keyframe(), hang_up_rx, None).await;
+    });
+    addr
+}
+
+/// Starts a view of "desk" asking for the pointer as `cursor` says, against
+/// a stand-in that sends `messages`; the window joined.
+async fn pointer_view(
+    name: &str,
+    cursor: bool,
+    messages: Vec<pocketdesk_core::protocol::cursor::CursorMessage>,
+) -> (PathBuf, mpsc::Sender<Command>, ViewFile, TcpStream) {
+    let dir = temp_dir(name);
+    paired(&dir);
+    let cert = Arc::new(CertManager::new().expect("cert manager"));
+    let addr = other_computer_with_pointer(cert.clone(), messages).await;
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let (commands, rx) = mpsc::channel(4);
+    tokio::spawn(run(
+        rx,
+        listener,
+        dir.clone(),
+        Dialer::Direct {
+            addr,
+            certs: cert,
+            id: "viewer".into(),
+        },
+    ));
+    commands
+        .send(Command::Start {
+            device_id: "desk".into(),
+            monitor: 0,
+            hevc: false,
+            cursor,
+            window: 0,
+            fit: None,
+            borrow: None,
+        })
+        .await
+        .unwrap();
+    let file = view_file(&dir).await;
+    let window = join(&file).await;
+    (dir, commands, file, window)
+}
+
+/// Local cursor: a window that asked hears the other computer's pointer
+/// (that it is sent apart, its shape, that it shows, where it is), in
+/// order; a window that joins later is brought to the state at once; and a
+/// window that did not ask hears none of it, though the other computer
+/// sends it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_window_that_asked_hears_the_pointer_and_one_that_did_not_hears_none() {
+    use pocketdesk_core::protocol::cursor::{CursorMessage, CursorShape, CursorState};
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let shape = CursorShape::new(3, 3, 1, 1, vec![200; 36]).unwrap();
+    let messages = vec![
+        CursorMessage::Mode { separate: true },
+        CursorMessage::Shape(shape.clone()),
+        CursorMessage::Visible(true),
+        CursorMessage::Move { x: 100, y: 200 },
+    ];
+
+    // Asked for: it hears all four, in order, and a state that draws them.
+    let (dir, commands, file, mut window) =
+        pointer_view("pointer-asked", true, messages.clone()).await;
+    let mut heard = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while heard.len() < 4 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "its pointer within 20 s: {heard:?}"
+        );
+        if let Message::Cursor(message) =
+            tokio::time::timeout(Duration::from_secs(10), read_message(&mut window))
+                .await
+                .expect("a message")
+        {
+            heard.push(message);
+        }
+    }
+    assert_eq!(heard, messages);
+    let mut state = CursorState::default();
+    for message in heard {
+        state.apply(message);
+    }
+    assert!(state.separate && state.visible);
+    assert_eq!(state.shape.as_ref().map(|s| s.id), Some(shape.id));
+    assert_eq!(state.place, Some((100, 200)));
+
+    // A window that comes late (the newest replaces the one before) is told
+    // the state as it stands, with no message of the other computer's.
+    let mut late = join(&file).await;
+    let mut caught_up = CursorState::default();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while caught_up.place.is_none() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the state within 20 s"
+        );
+        if let Message::Cursor(message) =
+            tokio::time::timeout(Duration::from_secs(10), read_message(&mut late))
+                .await
+                .expect("a message")
+        {
+            caught_up.apply(message);
+        }
+    }
+    assert!(caught_up.separate && caught_up.visible);
+    assert_eq!(caught_up.shape.as_ref().map(|s| s.id), Some(shape.id));
+    drop((commands, late, window));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // Not asked for: frames come, a pointer message never does.
+    let (dir, commands, _file, mut window) = pointer_view("pointer-unasked", false, messages).await;
+    let mut frames = 0;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while frames < 12 {
+        assert!(tokio::time::Instant::now() < deadline, "frames within 20 s");
+        match tokio::time::timeout(Duration::from_secs(10), read_message(&mut window))
+            .await
+            .expect("a message")
+        {
+            Message::Cursor(message) => panic!("a pointer message nobody asked for: {message:?}"),
+            Message::Frame { .. } => frames += 1,
+            _ => {}
+        }
+    }
+    drop((commands, window));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_computers_screen_reaches_the_window_and_its_input_the_computer() {
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -311,6 +522,7 @@ async fn a_computers_screen_reaches_the_window_and_its_input_the_computer() {
             device_id: "desk".into(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window: 0,
             fit: None,
             borrow: None,
@@ -519,6 +731,7 @@ async fn a_dropped_view_reconnects_by_itself_until_stopped() {
             device_id: "desk".into(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window: 0,
             fit: None,
             borrow: None,
@@ -607,6 +820,115 @@ async fn a_dropped_view_reconnects_by_itself_until_stopped() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Local cursor, a redial: the other computer's session drops, and a window
+/// that asked is told the pointer is gone with it (so it goes back to its
+/// own pointer and forgets what it asked of the old session), then hears the
+/// new session say it sends the pointer apart again. A window that did not
+/// ask hears none of it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_redial_clears_the_pointer_of_a_window_that_asked_and_tells_one_that_did_not_nothing() {
+    use pocketdesk_core::protocol::cursor::{CursorMessage, CursorShape, CursorState};
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let shape = CursorShape::new(3, 3, 1, 1, vec![200; 36]).unwrap();
+    let messages = vec![
+        CursorMessage::Mode { separate: true },
+        CursorMessage::Shape(shape.clone()),
+        CursorMessage::Visible(true),
+    ];
+    for asked in [true, false] {
+        let dir = temp_dir(if asked {
+            "redial-asked"
+        } else {
+            "redial-unasked"
+        });
+        paired(&dir);
+        let cert = Arc::new(CertManager::new().expect("cert manager"));
+        let (addr, sessions, hang_ups) =
+            other_computer_again_with_pointer(cert.clone(), None, messages.clone()).await;
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let (commands, rx) = mpsc::channel(4);
+        let relay = tokio::spawn(run(
+            rx,
+            listener,
+            dir.clone(),
+            Dialer::Direct {
+                addr,
+                certs: cert,
+                id: "viewer".into(),
+            },
+        ));
+        commands
+            .send(Command::Start {
+                device_id: "desk".into(),
+                monitor: 0,
+                hevc: false,
+                cursor: asked,
+                window: 0,
+                fit: None,
+                borrow: None,
+            })
+            .await
+            .unwrap();
+        let file = view_file(&dir).await;
+        let mut window = join(&file).await;
+        let mut state = CursorState::default();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+        // The first session: a window that asked ends up holding the shape.
+        let mut frames = 0;
+        while (asked && state.shape.is_none()) || frames < 3 {
+            assert!(tokio::time::Instant::now() < deadline, "within 20 s");
+            match tokio::time::timeout(Duration::from_secs(10), read_message(&mut window))
+                .await
+                .expect("a message")
+            {
+                Message::Cursor(message) => {
+                    assert!(asked, "a pointer message nobody asked for: {message:?}");
+                    state.apply(message);
+                }
+                Message::Frame { .. } => frames += 1,
+                Message::End { why } => panic!("ended: {why}"),
+                _ => {}
+            }
+        }
+        assert_eq!(state.separate, asked);
+
+        // Its server stops: the window that asked hears the pointer is
+        // gone, before it is told it is reconnecting; then the new session
+        // says it sends the pointer apart, and the shape comes again.
+        hang_ups.send(STOPPING).unwrap();
+        let (mut cleared, mut reconnecting, mut again) = (false, false, false);
+        while !(reconnecting && (!asked || (cleared && again))) {
+            assert!(tokio::time::Instant::now() < deadline, "back within 20 s");
+            match tokio::time::timeout(Duration::from_secs(10), read_message(&mut window))
+                .await
+                .expect("a message")
+            {
+                Message::Cursor(message) => {
+                    assert!(asked, "a pointer message nobody asked for: {message:?}");
+                    state.apply(message);
+                    if !state.separate {
+                        cleared = true;
+                        assert!(
+                            state.shape.is_none() && state.place.is_none(),
+                            "nothing of the old session is held"
+                        );
+                        assert!(!reconnecting, "said before the reconnecting status");
+                    } else if cleared && state.shape.is_some() {
+                        again = true;
+                    }
+                }
+                Message::Status(status) if status.reconnecting > 0 => reconnecting = true,
+                Message::End { why } => panic!("ended: {why}"),
+                _ => {}
+            }
+        }
+        assert!(sessions.load(Ordering::SeqCst) >= 1);
+        drop((commands, window));
+        relay.abort();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 /// Start a view of the stand-in at `addr` through a relay over `dir`, join
 /// it as the window, and read until three frames came.
 async fn shown_view(
@@ -636,6 +958,7 @@ async fn shown_view(
             device_id: "desk".into(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window: 0,
             fit: None,
             borrow: None,
@@ -792,6 +1115,7 @@ async fn frames_too_large_for_the_window_are_said() {
             device_id: "desk".into(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window: 0,
             fit: None,
             borrow: None,
@@ -837,6 +1161,7 @@ async fn a_computer_not_paired_here_ends_the_view_with_why() {
             device_id: "gone".into(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window: 0,
             fit: None,
             borrow: None,
@@ -900,6 +1225,7 @@ async fn a_window_that_comes_late_still_hears_why_the_view_ended() {
             device_id: "desk".into(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window: 0,
             fit: None,
             borrow: None,
@@ -948,6 +1274,7 @@ async fn a_window_without_the_token_sees_nothing() {
             device_id: "desk".into(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window: 0,
             fit: None,
             borrow: None,
@@ -1033,6 +1360,7 @@ async fn the_windows_privacy_is_asked_of_the_computer_and_let_go_as_it_closes() 
             device_id: "desk".into(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window: 0,
             fit: None,
             borrow: None,
@@ -1195,6 +1523,7 @@ async fn privacy_held_is_let_go_as_the_view_ends() {
             device_id: "desk".into(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window: 0,
             fit: None,
             borrow: None,
@@ -1551,6 +1880,7 @@ async fn controlled_view(
             device_id: "desk".into(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window: 0,
             fit: None,
             borrow: None,
@@ -1821,6 +2151,7 @@ async fn two_windows_show_one_computers_two_screens_side_by_side() {
                 device_id: "desk".into(),
                 monitor,
                 hevc: false,
+                cursor: false,
                 window,
                 fit: None,
                 borrow: None,
@@ -1912,6 +2243,7 @@ async fn two_windows_show_one_computers_two_screens_side_by_side() {
             device_id: "desk".into(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window: wire::MAX_VIEWS,
             fit: None,
             borrow: None,
@@ -2023,6 +2355,7 @@ async fn privacy_stays_as_the_window_switches_screens() {
             device_id: "desk".into(),
             monitor: 1,
             hevc: false,
+            cursor: false,
             window: 0,
             fit: None,
             borrow: None,
@@ -2125,6 +2458,7 @@ async fn privacy_is_let_go_as_the_window_turns_to_another_computer() {
             device_id: "lap".into(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window: 0,
             fit: None,
             borrow: None,
@@ -2186,6 +2520,7 @@ async fn a_fit_that_cannot_be_asked_still_shows_the_screen_asked_for() {
             device_id: "desk".into(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window: 0,
             fit: Some(pocketdesk_core::local::computers::FitSize {
                 width: 1280,
@@ -2254,6 +2589,7 @@ async fn a_borrow_that_is_no_window_or_is_shown_twice_ends_its_view_with_why() {
         device_id: "desk".into(),
         monitor: 0,
         hevc: false,
+        cursor: false,
         window,
         fit: None,
         borrow: Some(borrow.to_string()),

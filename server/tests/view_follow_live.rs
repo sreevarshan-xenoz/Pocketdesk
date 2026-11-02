@@ -218,6 +218,7 @@ fn the_clipboard_and_files_follow_the_window() {
             device_id: b_id.clone(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window: 0,
             fit: None,
             borrow: None,

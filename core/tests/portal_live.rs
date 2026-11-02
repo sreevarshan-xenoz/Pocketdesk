@@ -107,6 +107,7 @@ async fn the_portal_shares_the_screen_and_takes_input() {
         tx,
         cancel.clone(),
         Some(dir.clone()),
+        None,
     )
     .await
     .expect("the capture starts");

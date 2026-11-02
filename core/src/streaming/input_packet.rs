@@ -28,6 +28,7 @@ const TAG_LINK_FEEDBACK: u8 = 13;
 const TAG_CLIENT_SAMPLES: u8 = 14;
 const TAG_PEN: u8 = 15;
 const TAG_LASER: u8 = 16;
+const TAG_CURSOR_TRACK: u8 = 17;
 
 /// A [`PenSample`]'s flags (E3). Bits not named here are ignored.
 pub const PEN_CONTACT: u8 = 1;
@@ -306,6 +307,14 @@ pub enum InputPacket {
     /// `show: false`. Input, as a mouse move is (dropped in view-only), but
     /// the computer's pointer stays where it is.
     Laser { dx: i16, dy: i16, show: bool },
+    /// The viewer asks for the shown computer's pointer places
+    /// ([`crate::protocol::cursor::CursorMessage::Move`]) while `on`: it
+    /// has locked its own pointer to the window, so the other computer's is
+    /// drawn where that one says it is. Control-plane: never injected, and
+    /// it survives view-only. A computer that does not know the tag drops
+    /// the packet; a viewer sends it only to one that said it takes the
+    /// pointer out of the picture.
+    CursorTrack { on: bool },
     /// Gamepad state: 6 analog axes + 16-bit button bitmask.
     Gamepad {
         /// Left stick X, Left stick Y, Right stick X, Right stick Y, L2, R2.
@@ -367,6 +376,7 @@ impl InputPacket {
                 buf.push(pen.flags);
                 buf
             }
+            InputPacket::CursorTrack { on } => vec![TAG_CURSOR_TRACK, u8::from(*on)],
             InputPacket::Laser { dx, dy, show } => {
                 let mut buf = Vec::with_capacity(6);
                 buf.push(TAG_LASER);
@@ -609,6 +619,10 @@ impl InputPacket {
                     window,
                 })
             }
+            TAG_CURSOR_TRACK => {
+                anyhow::ensure!(data.len() == 2, "CursorTrack packet must be 2 bytes");
+                Ok(InputPacket::CursorTrack { on: data[1] != 0 })
+            }
             TAG_QUALITY_PRESET => {
                 anyhow::ensure!(
                     data.len() == 2,
@@ -693,6 +707,23 @@ mod tests {
         let mut long = data.clone();
         long.push(0);
         assert!(InputPacket::decode(&long).is_err(), "exactly ten bytes");
+    }
+
+    #[test]
+    fn the_viewers_ask_for_pointer_places_is_two_bytes_and_tag_seventeen() {
+        for on in [true, false] {
+            let data = InputPacket::CursorTrack { on }.encode();
+            assert_eq!(data, vec![17, u8::from(on)], "tags are never renumbered");
+            assert!(matches!(
+                InputPacket::decode(&data).unwrap(),
+                InputPacket::CursorTrack { on: got } if got == on
+            ));
+        }
+        assert!(InputPacket::decode(&[17]).is_err(), "short");
+        assert!(
+            InputPacket::decode(&[17, 1, 0]).is_err(),
+            "exactly two bytes"
+        );
     }
 
     #[test]

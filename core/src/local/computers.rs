@@ -558,6 +558,13 @@ pub enum ComputerAsk {
         monitor: u32,
         #[serde(default)]
         hevc: bool,
+        /// This app draws the other computer's pointer itself (local
+        /// cursor, `computer_view_local_cursor`): the server asks that
+        /// computer for the pointer's shape and sends it on, and that
+        /// computer takes the pointer out of the picture where it can. An
+        /// app before it never asks, so its picture is as it was.
+        #[serde(default, skip_serializing_if = "is_false")]
+        cursor: bool,
         /// Which of the app's screen windows asks (PC11): 0 the first, the
         /// one every app before PC11 has; up to [`super::view::MAX_VIEWS`]
         /// views are held at once, one a window, and a window's new ask
@@ -683,6 +690,10 @@ pub struct LendableWindow {
 }
 
 /// Whether a window number is the first window's, left out of a request.
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 fn is_zero(n: &u8) -> bool {
     *n == 0
 }
@@ -1102,6 +1113,7 @@ mod tests {
                 device_id: "desk".to_string(),
                 monitor: 1,
                 hevc: true,
+                cursor: false,
                 window: 0,
                 fit: None,
                 borrow: None,
@@ -1144,6 +1156,7 @@ mod tests {
                 device_id: "desk".to_string(),
                 monitor: 0,
                 hevc: false,
+                cursor: false,
                 window: 0,
                 fit: None,
                 borrow: None,
@@ -1156,6 +1169,7 @@ mod tests {
             device_id: "desk".to_string(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window: 1,
             fit: Some(FitSize {
                 width: 1280,
@@ -1173,6 +1187,7 @@ mod tests {
             device_id: "desk".to_string(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window: 0,
             fit: None,
             borrow: None,
@@ -1308,6 +1323,7 @@ mod tests {
                         device_id: format!("desk-{n}"),
                         monitor: 0,
                         hevc: false,
+                        cursor: false,
                         window: 0,
                         fit: None,
                         borrow: None,
@@ -1572,6 +1588,7 @@ mod tests {
             device_id: "desk".to_string(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window: 1,
             fit: None,
             borrow: Some("0x5".to_string()),
@@ -1583,6 +1600,7 @@ mod tests {
             device_id: "desk".to_string(),
             monitor: 2,
             hevc: false,
+            cursor: false,
             window: 0,
             fit: None,
             borrow: None,

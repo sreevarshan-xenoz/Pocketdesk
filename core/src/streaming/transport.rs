@@ -1243,6 +1243,11 @@ pub const STREAM_KIND_CAST_KEYFRAME: u8 = 3;
 /// Server → phone on a cast: a batch of control events (C8,
 /// [`super::cast_control`]), sent only after the phone said control is on.
 pub const STREAM_KIND_CAST_CONTROL: u8 = 4;
+/// Server → viewer on a screen session that said it draws the other
+/// computer's pointer ([`super::client::CODEC_CAP_LOCAL_CURSOR`]): one
+/// message about the pointer ([`crate::protocol::cursor`]) per stream.
+/// Sent to no one else, so a viewer that does not know it never meets it.
+pub const STREAM_KIND_CURSOR: u8 = 5;
 
 /// Packet header for streaming transport
 ///

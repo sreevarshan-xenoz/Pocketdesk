@@ -1095,6 +1095,12 @@ impl PocketdeskApp {
         });
         // PC5: the next view asks for HEVC, or not, as Settings say.
         view.set_hevc(self.config.as_ref().is_none_or(|c| c.computer_view_hevc));
+        // The next view draws the other computer's pointer here, or not.
+        view.set_local_cursor(
+            self.config
+                .as_ref()
+                .is_none_or(|c| c.computer_view_local_cursor),
+        );
         // PC5: the next view decodes on the card, or not, as Settings say.
         view.set_hw_decode(
             self.config

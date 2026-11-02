@@ -10,6 +10,7 @@ pub mod cast_control;
 pub mod chaos;
 pub mod client;
 pub mod connection;
+pub mod cursor_feed;
 #[cfg(feature = "wan")]
 pub mod dht;
 pub mod encoder_detect;
@@ -51,6 +52,10 @@ pub mod bench;
 #[cfg(feature = "capture")]
 pub mod capture;
 pub mod capture_backend;
+#[cfg(all(feature = "capture", target_os = "linux"))]
+mod capture_cursor_pw;
+#[cfg(all(feature = "capture", target_os = "linux"))]
+mod capture_cursor_wl;
 #[cfg(all(feature = "capture", windows))]
 mod capture_d3d;
 #[cfg(all(feature = "capture", windows))]

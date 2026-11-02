@@ -227,6 +227,7 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     device_id,
                     monitor,
                     hevc,
+                    cursor,
                     window,
                     fit,
                     borrow,
@@ -243,6 +244,7 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                         device_id,
                         monitor,
                         hevc,
+                        cursor,
                         window,
                         // A size of nothing is no ask for a fit; a borrowed
                         // window is its own size, never fitted.

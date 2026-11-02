@@ -331,6 +331,7 @@ fn each_windows_clicks_land_on_its_own_screen() {
                 device_id: b_id.clone(),
                 monitor: u32::from(window),
                 hevc: false,
+                cursor: false,
                 window,
                 fit: None,
                 borrow: None,

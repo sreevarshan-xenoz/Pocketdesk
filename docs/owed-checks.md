@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1313 open items.
+1326 open items.
 
 | Where | Items |
 |---|---|
@@ -12,8 +12,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 40 |
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
-| A second computer | 183 |
-| A Linux desktop (the Azure VM serves for some) | 243 |
+| A second computer | 194 |
+| A Linux desktop (the Azure VM serves for some) | 245 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 80 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
 
@@ -1354,6 +1354,20 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A borrowed window resized on the host (dragged, or its program resizing itself) keeps showing its first size: following the viewer's size and the host's is later (the status history says so). (where: second computer)
 - A window with a very long or odd title (emoji, right-to-left text) in the picker and in the viewing window's title bar: shown cut and without control characters, never garbled past the picker. (where: second computer)
 
+**275. The other computer's pointer drawn here (local cursor, phase 2 of the window handoff)**
+
+- A real Hyprland host (the owner's laptop) shown in a window on another computer: the picture has no pointer in it (move the pointer over a plain wallpaper: nothing is drawn in the picture while the window's own pointer follows the mouse at once), the shape follows the host's pointer (an arrow, a text cursor over a text field, a hand over a link, a resize arrow on a window edge), and it hides when the host hides its own (a full-screen video, typing). If the cursor session never answers on Hyprland 0.56, the log says "The pointer stays in the picture" and nothing is lost. (where: second computer)
+- A real Sway host on a real output (a cursor plane): the same; and a Sway session that draws its pointer in software (a GPU or driver with hardware cursors off) shows both pointers, the window's own and the picture's. (where: second computer)
+- A GNOME host (the portal, with Allow Remote Interaction, and Unattended on GNOME's mutter path) and a KDE host: the portal offers cursor metadata, the picture has no pointer in it and the shape arrives; with a portal that offers none, the log says so and the picture is as it was. (where: second computer)
+- A Windows host shown on Linux, and a Linux X11 host: the pointer stays in the picture as before, the window's own pointer is the system arrow, and nothing is hidden or doubled. (where: second computer)
+- An older computer (before this build) as the host, and an older one as the viewer: neither hides or draws anything extra; the view works as before. (where: second computer)
+- "Lock the pointer" on the window (Ctrl+Alt+Shift+M) over a host that sends its pointer apart: the other computer's pointer is painted over the picture where that computer says it is and follows the relative moves; freed, the window's own pointer takes the shape again. (where: second computer)
+- Over the internet and over Wi-Fi: a move of the free pointer is as quick as the mouse (it waits for nothing), and a locked pointer's painted copy follows the host's within about the link's round trip. (where: second computer)
+- A lossy link (Wi-Fi with loss, or `tc netem loss 10%` on the host): a pointer message that is lost does not leave the window with a wrong or no pointer for more than about two seconds (the host says the whole pointer again every 1.5 s), and a shape that changed during the loss shows after the next refresh. (where: second computer)
+- A Hyprland host shown in a window on another computer, a borrowed window of that host (its picture comes from the compositor's toplevel export): the window's picture shows the host's pointer (drawn into it) and the window draws none of its own, so there are never two or none, and showing the whole screen again leaves it out of the picture and draws it in the window. (where: second computer)
+- The host's pointer capture ending mid-view (kill the host's compositor-side client or restart the compositor's capture): the window goes back to its own pointer within a moment and the picture shows the host's pointer again. (where: second computer)
+- A GNOME or KDE host (portal or mutter) with a window of that host cropped in software, with this window's pointer locked: the painted pointer is placed over the whole screen's coordinates, not the crop's, so it is off by the crop's offset (a known gap; the free pointer is not affected). (where: second computer)
+
 ## A Linux desktop (the Azure VM serves for some)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1946,6 +1960,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Hyprland, GNOME and KDE: no tearing and no visible judder in a computer's screen at the display's refresh with the swap not waiting (a moving screen at 60 and 120 Hz), and the main window's animations are smooth. (where: linux)
 - A computer's screen window that is not shown on Wayland keeps decoding and drawing its pictures (the compositor shows no signal of it): its cost on the processor and the card is about the same as shown, so say what a long hidden window costs on a battery. (where: linux)
 - X11 (an X11 session, or XWayland with the window forced onto it): the swap still waits by default (no tearing), a window covered or on another workspace does not stop the app (X11 reports it covered, and eframe stops drawing it), and the Settings switch on makes pictures sooner and tears at most. (where: linux)
+
+**275. The other computer's pointer drawn here (local cursor, phase 2 of the window handoff)**
+
+- The setting off: the pointer is in the picture as before (and, from a GNOME or KDE host, as the portal gave it) and the window's pointer is the system arrow. A change applies from the next view. (where: linux)
+- A very large pointer (an accessibility size, over 256 pixels) shows shrunk, not cut; a pointer that changes often (a program animating it) costs no more than the shapes it sends, each sent once. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

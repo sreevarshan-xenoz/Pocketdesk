@@ -440,6 +440,7 @@ mod tests {
             cancel.clone(),
             wrx,
             window_mode,
+            None,
         ) {
             Ok(s) => s,
             Err(e) => {
