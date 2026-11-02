@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1268 open items.
+1277 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
 | A second computer | 170 |
-| A Linux desktop (the Azure VM serves for some) | 215 |
+| A Linux desktop (the Azure VM serves for some) | 224 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 80 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
 
@@ -1865,6 +1865,18 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A Linux host on Hyprland or another wlroots desktop (screencopy's heartbeat), viewed from another computer: the same stillness numbers as the first item and a change shown at once. (where: linux)
 - Hyprland, a change the compositor did not report: Hyprland says "no damage" at once, so the capture's once-a-second copy is the only way some changes get out. Change the screen (type, play a video, drag a window) and let it rest: the window shows each new picture within about a second, none is dropped as a repeat, and a screen that then stays the same goes silent after the settling repeats. (where: linux)
+
+**269. Lending a window to another computer (the host side, phase 3a of the window handoff)**
+
+- On a real desktop session: the Arch laptop's own Hyprland, "Let my computers borrow my windows" on in Settings, Other computers, a computer paired both ways with Input allowed asking for an unimportant window (a terminal): the window leaves the laptop's screen, its picture is on the asking computer at its size, and typing and clicking there reach it; returned, it is on its old workspace, tiled or floating as it was, and the extra screen is gone. (where: linux)
+- The same on a real Sway session, with a window that has a title bar and border (the default `border normal`): put back with the same title bar, border and size. (where: linux)
+- The switch off (the default): the same ask is answered that the computer does not lend its windows, and nothing moves; a phone and a computer paired one way are told only a computer paired both ways may. (where: linux)
+- The borrowing computer's session and link both gone (close its window, then stop its server): within about 15 seconds (two 5-second checks, never in the first minute) the lent window is back and its screen gone. (where: linux)
+- The server stopped (`pocketdesk stop`) with a window lent: the window is back on its workspace before the server exits. A server killed (`kill -9`) with one lent, then started again in the same compositor: the window is back and the extra screen gone at start. (where: linux)
+- A browser (or any program that hides its toolbars when it is told it is full screen) lent on Hyprland keeps its toolbars: the program is not told it fills the screen. (where: linux)
+- A window closed while lent leaves its empty screen, and no more than that: a return or the computer going takes it away, and the window list no longer shows the window. (where: linux)
+- A tiled window lent from a workspace with others comes back to that workspace; it may not come back to its old slot among them (the limit the guide names). (where: linux)
+- An X11 (Xwayland) program's window on Sway lent and returned: its title and class are in the window list, and it moves and returns like a Wayland one. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

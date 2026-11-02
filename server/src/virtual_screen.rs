@@ -24,6 +24,11 @@
 //! with the phones'. The screen is an empty extra desktop: nothing is moved
 //! onto it.
 //!
+//! A computer may also lend one of its windows ([`crate::lend_window`]): that
+//! makes a screen the same way (`lend`, a key `<device>#lend-<window>`), the
+//! window is moved onto it, and whenever the screen is removed (the
+//! computer gone, a return, a sweep) the window goes back first.
+//!
 //! An output lasts while its phone has a session or link, and those a server
 //! that stopped left are swept by the next one in the same compositor
 //! (`virtual_screens.json`); on Hyprland the next one also removes any of its
@@ -108,12 +113,12 @@ pub struct Rect {
 
 /// The compositor a screen is added in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Desk {
+pub(crate) enum Desk {
     Sway,
     Hyprland,
 }
 
-fn desk() -> Option<Desk> {
+pub(crate) fn desk() -> Option<Desk> {
     if std::env::var_os("SWAYSOCK").is_some() {
         Some(Desk::Sway)
     } else if crate::hyprland::HyprlandIpc::is_available() {
@@ -221,7 +226,7 @@ pub fn hypr_outputs(raw: &str) -> std::io::Result<Vec<Output>> {
         .collect())
 }
 
-fn hypr(req: &str) -> std::io::Result<String> {
+pub(crate) fn hypr(req: &str) -> std::io::Result<String> {
     crate::hyprland::HyprlandIpc::from_env()
         .map_err(|e| std::io::Error::other(e.to_string()))?
         .request_blocking(req)
@@ -312,7 +317,7 @@ pub(crate) fn ipc(_kind: u32, _payload: &str) -> std::io::Result<serde_json::Val
     Err(std::io::Error::other("not running under Sway"))
 }
 
-fn outputs() -> std::io::Result<Vec<Output>> {
+pub(crate) fn outputs() -> std::io::Result<Vec<Output>> {
     match desk() {
         Some(Desk::Hyprland) => hypr_outputs(&hypr("j/monitors")?),
         _ => sway_outputs(),
@@ -325,7 +330,7 @@ pub(crate) fn sway_outputs() -> std::io::Result<Vec<Output>> {
 }
 
 /// Run a Sway command; an error when Sway says it failed.
-fn run(command: &str) -> std::io::Result<()> {
+pub(crate) fn run(command: &str) -> std::io::Result<()> {
     let reply = ipc(RUN_COMMAND, command)?;
     let ok = reply
         .as_array()
@@ -513,7 +518,9 @@ fn wait_for_size(
     }
 }
 
-fn remove(name: &str) {
+pub(crate) fn remove(name: &str) {
+    // A window lent onto it goes back first.
+    crate::lend_window::give_back_for_output(name);
     let removed = match desk() {
         Some(Desk::Hyprland) if this_tag().is_some_and(|tag| is_hypr_screen(name, &tag)) => {
             hypr(&format!("output remove {name}")).and_then(|r| hypr_ok(&r))
@@ -637,7 +644,7 @@ impl Host for Live {
     }
 }
 
-fn this_instance() -> Option<String> {
+pub(crate) fn this_instance() -> Option<String> {
     match desk()? {
         Desk::Sway => std::env::var("SWAYSOCK").ok(),
         Desk::Hyprland => std::env::var("HYPRLAND_INSTANCE_SIGNATURE")
@@ -697,6 +704,8 @@ pub fn clear_left_over() {
     let Ok(dir) = crate::state::state_dir() else {
         return;
     };
+    // Windows a stopped server lent go back first, their screens with them.
+    let returned = crate::lend_window::return_left_over();
     let path = dir.join(STATE_FILE);
     let left = std::fs::read_to_string(&path)
         .ok()
@@ -705,7 +714,8 @@ pub fn clear_left_over() {
     if let Some(left) = left {
         if left.instance.is_some() && left.instance == this_instance() {
             let mut made = made().lock().unwrap_or_else(|e| e.into_inner());
-            for (phone, names) in left.phones {
+            for (phone, mut names) in left.phones {
+                names.retain(|n| !returned.contains(n));
                 kept.extend(names.iter().cloned());
                 made.phones.entry(phone).or_default().extend(names);
             }
@@ -887,6 +897,11 @@ pub async fn respond(device: &str, body: &serde_json::Value) -> serde_json::Valu
             .unwrap_or(0)
     };
     let (width, height) = (side("width"), side("height"));
+    // A computer's lending of one of its windows (phase 3a of the window
+    // handoff) has its own gate and its own state.
+    if matches!(action.as_str(), "lend" | "return") {
+        return said_with(body, crate::lend_window::answer(device, body).await);
+    }
     // A computer's window, 0 to 3; a phone says none. One past the last is
     // no window.
     let slot = match body.get("slot") {
@@ -932,6 +947,18 @@ fn answer(key: &str, action: &str, width: u32, height: u32) -> serde_json::Value
     answer_with(screens(), &Live, key, action, width, height)
 }
 
+/// The screen for a window lent under `key` ([`crate::lend_window::lend_key`]):
+/// `{name, index, width, height}` or `{error}`. The same limits as any
+/// screen's, and swept as any screen is.
+pub(crate) fn add_for_lend(key: &str, width: u32, height: u32) -> serde_json::Value {
+    answer_with(screens(), &Live, key, "lend", width, height)
+}
+
+/// Take away the screen of `key` (see [`add_for_lend`]).
+pub(crate) fn drop_for_lend(key: &str) {
+    answer_with(screens(), &Live, key, "remove", 0, 0);
+}
+
 fn answer_with(
     screens: &Screens,
     host: &dyn Host,
@@ -958,8 +985,10 @@ fn answer_with(
             json!({ "removed": names.len() })
         }
         // `fit` (a computer's window) is `add` that also gives the screen it
-        // has the window's new size.
-        "add" | "fit" => {
+        // has the window's new size. `lend` (a window of this computer moved
+        // onto the screen, [`crate::lend_window`]) is `add` under its own
+        // switch, not this one's.
+        "add" | "fit" | "lend" => {
             let Some((w, h)) = screen_size(width, height) else {
                 return json!({ "error": "not a screen size" });
             };

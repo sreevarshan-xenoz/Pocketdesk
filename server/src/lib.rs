@@ -52,6 +52,7 @@ pub mod laser;
 mod laser_linux;
 #[cfg(windows)]
 mod laser_windows;
+pub mod lend_window;
 pub mod live_sessions;
 pub mod local_api;
 pub mod media;

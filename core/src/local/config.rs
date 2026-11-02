@@ -263,6 +263,12 @@ pub struct Config {
     /// Let a phone with Input add a screen of its own shape (T10j; Sway and Hyprland).
     #[serde(default = "default_true")]
     pub virtual_screens: bool,
+    /// Let the owner's other computers (paired both ways, with Input) borrow
+    /// this computer's windows: the window moves to a hidden screen of its
+    /// own size here, is streamed there, and goes back on return (Sway and
+    /// Hyprland). Off by default: a window leaves the screen it was on.
+    #[serde(default)]
+    pub lend_windows: bool,
     /// Let phones with the Peek permission see this screen as one still,
     /// with no session (BF2). On: the permission, off for every phone until
     /// chosen, is what lets one.
@@ -843,6 +849,7 @@ impl Default for Config {
             link_rules: Vec::new(),
             share_state: true,
             virtual_screens: true,
+            lend_windows: false,
             peek: true,
             notes_file: String::new(),
             clipboard_push: true,
@@ -1139,6 +1146,7 @@ impl Config {
         "link_rules",
         "share_state",
         "virtual_screens",
+        "lend_windows",
         "peek",
         "notes_file",
         "clipboard_push",
@@ -2056,6 +2064,19 @@ phone_battery = \"x\"
             "the clipboard crosses to other computers only when asked (2g)"
         );
         assert!(Config::default().kdeconnect_compat, "on by default (3a)");
+    }
+
+    #[test]
+    fn windows_are_lent_only_when_asked_and_the_choice_saves() {
+        assert!(
+            !Config::default().lend_windows,
+            "a window leaves its screen only when the owner says so"
+        );
+        let path = temp("lend-windows");
+        let mut config = Config::load_from(&path).unwrap();
+        config.lend_windows = true;
+        config.save_to(&path).unwrap();
+        assert!(Config::load_from(&path).unwrap().lend_windows);
     }
 
     #[test]

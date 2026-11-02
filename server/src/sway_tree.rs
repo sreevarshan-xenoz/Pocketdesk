@@ -2,7 +2,7 @@
 //! shape Hyprland's `j/clients` gives ([`crate::hyprland::HyprWindow`]), so
 //! the window list a phone or a computer asks for
 //! ([`crate::plugins::windows`]) and the lending of a window
-//! (`crate::lend_window`) read both compositors alike.
+//! ([`crate::lend_window`]) read both compositors alike.
 //!
 //! A window's id is Sway's container id (`con_id`), in decimal; its geometry
 //! is the window's own, without the title bar and border Sway draws round it.

@@ -3686,6 +3686,20 @@ Built 2026-11-02 (phase 1a of the window handoff, "ultra-low latency, low resour
 - [ ] An encoder that holds frames, on a still screen: a Windows host on an AMD card (AMF holds one frame) and one on Media Foundation (holds several; the debug log's "holds N frame(s) until the next input" names the lag). At session start on a still desktop the first picture comes out (never a blank window), and after a change the last picture is whole and sharp, not the one before it: the repeats go on for about N + 2 more after a change, then stop. (where: second computer)
 - [ ] Hyprland, a change the compositor did not report: Hyprland says "no damage" at once, so the capture's once-a-second copy is the only way some changes get out. Change the screen (type, play a video, drag a window) and let it rest: the window shows each new picture within about a second, none is dropped as a repeat, and a screen that then stays the same goes silent after the settling repeats. (where: linux)
 
+## 269. Lending a window to another computer (the host side, phase 3a of the window handoff)
+
+Built 2026-11-02: `server/src/lend_window.rs` and `server/src/sway_tree.rs`; the live test `server/tests/lend_window_live.rs` ran in a throwaway headless Sway and a Hyprland 0.56.2 nested in the Arch laptop's session (the results are in `docs/status-history.md`). There is no app UI yet: the ask is a `lend` / `return` of `kdeconnect.pocketdesk.virtual_screen` (`docs/protocol.md`), so these checks need the live test's way of asking, or the viewer of the next step.
+
+- [ ] On a real desktop session: the Arch laptop's own Hyprland, "Let my computers borrow my windows" on in Settings, Other computers, a computer paired both ways with Input allowed asking for an unimportant window (a terminal): the window leaves the laptop's screen, its picture is on the asking computer at its size, and typing and clicking there reach it; returned, it is on its old workspace, tiled or floating as it was, and the extra screen is gone. (where: linux)
+- [ ] The same on a real Sway session, with a window that has a title bar and border (the default `border normal`): put back with the same title bar, border and size. (where: linux)
+- [ ] The switch off (the default): the same ask is answered that the computer does not lend its windows, and nothing moves; a phone and a computer paired one way are told only a computer paired both ways may. (where: linux)
+- [ ] The borrowing computer's session and link both gone (close its window, then stop its server): within about 15 seconds (two 5-second checks, never in the first minute) the lent window is back and its screen gone. (where: linux)
+- [ ] The server stopped (`pocketdesk stop`) with a window lent: the window is back on its workspace before the server exits. A server killed (`kill -9`) with one lent, then started again in the same compositor: the window is back and the extra screen gone at start. (where: linux)
+- [ ] A browser (or any program that hides its toolbars when it is told it is full screen) lent on Hyprland keeps its toolbars: the program is not told it fills the screen. (where: linux)
+- [ ] A window closed while lent leaves its empty screen, and no more than that: a return or the computer going takes it away, and the window list no longer shows the window. (where: linux)
+- [ ] A tiled window lent from a workspace with others comes back to that workspace; it may not come back to its old slot among them (the limit the guide names). (where: linux)
+- [ ] An X11 (Xwayland) program's window on Sway lent and returned: its title and class are in the window list, and it moves and returns like a Wayland one. (where: linux)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
