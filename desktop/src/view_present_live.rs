@@ -1,6 +1,7 @@
 //! Where the window's time goes after a picture is decoded, phase 1d of the
 //! window handoff work: the real computer window ([`crate::computer_view`],
-//! its deferred viewport, its decoder, its NV12 shader, vsync on) showing a
+//! its deferred viewport, its decoder, its NV12 shader, the swap as the app
+//! has it on this session: waiting for the display except on Wayland) showing a
 //! throwaway server's test pattern, with the window's stage trace
 //! ([`crate::view_present_trace`]) joined to the host's
 //! ([`pocketdesk_core::streaming::latency_trace`]) by the pattern's frame
@@ -16,7 +17,8 @@
 //! window floating) is what the numbers in `docs/status-history.md` used.
 //! `PD_LIVE_SECS` (15) is how long it runs, `PD_LIVE_HEVC=1` lets B send
 //! HEVC, `PD_LIVE_HW=0` decodes on the processor (the app's own default is
-//! the card first), `PD_LIVE_VSYNC=0` turns the window's vsync off.
+//! the card first), `PD_LIVE_VSYNC=1` or `0` makes the window's swap wait for
+//! the display or not, whatever the session.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -242,7 +244,10 @@ fn present_stages() {
     use winit::platform::wayland::EventLoopBuilderExtWayland as _;
     let hevc = std::env::var("PD_LIVE_HEVC").is_ok_and(|v| v == "1");
     let hw = std::env::var("PD_LIVE_HW").map_or(true, |v| v != "0");
-    let vsync = std::env::var("PD_LIVE_VSYNC").map_or(true, |v| v != "0");
+    let vsync = std::env::var("PD_LIVE_VSYNC").map_or_else(
+        |_| crate::frame_pacing::swap_waits_here(false),
+        |v| v != "0",
+    );
     let secs: u64 = std::env::var("PD_LIVE_SECS")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -281,6 +286,9 @@ fn present_stages() {
             options,
             Box::new(move |cc| {
                 crate::nv12::set_glow(cc.gl.is_some());
+                if !vsync {
+                    crate::frame_pacing::install(&cc.egui_ctx);
+                }
                 if let Some(gl) = cc.gl.as_ref() {
                     use eframe::glow::HasContext as _;
                     // SAFETY: the context eframe made, current on this thread.

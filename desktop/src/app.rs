@@ -4859,7 +4859,8 @@ impl eframe::App for PocketdeskApp {
         ctx.request_repaint_after(REFRESH);
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        crate::frame_pacing::watch_refresh(frame);
         self.take_files_to_send(ui.ctx());
         // Ctrl+Page Down and Up move through the pages as listed (I3).
         let (next, previous) = ui.input_mut(|i| {

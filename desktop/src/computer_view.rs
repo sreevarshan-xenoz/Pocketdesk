@@ -52,7 +52,7 @@ use crate::view_pointer::{self, PointerLock, ReleaseChord};
 
 /// The window `slot`'s id among the app's viewports: the first window's
 /// as before PC11, the others' their own.
-fn viewport_id(slot: u8) -> egui::ViewportId {
+pub(crate) fn viewport_id(slot: u8) -> egui::ViewportId {
     if slot == 0 {
         egui::ViewportId::from_hash_of("pocketdesk-computer-view")
     } else {

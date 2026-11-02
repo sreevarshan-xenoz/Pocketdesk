@@ -2901,7 +2901,7 @@ impl SettingsForm {
                     );
                     note(
                         ui,
-                        "Off, a picture waits for the display's next refresh before it is drawn, which never tears. On, it is drawn at once: on Wayland the compositor still shows whole frames, but on X11 and Windows a picture can tear, and anything that animates draws as fast as it can, which uses more power. Applies after the app restarts.",
+                        "Off, a picture waits for the display's next refresh before it is drawn, which never tears. On, it is drawn at once: on X11 and Windows a picture can tear, and no window draws more than twice the display's refresh a second, so an animation does not run flat out. On Wayland this changes nothing: the app never waits for the display there (a window the compositor is not showing gets no signal, and waiting would stop every window of the app), and the compositor shows whole frames. Applies after the app restarts.",
                     );
                 });
                 // PC10: the microphone "Send my mic" sends.
