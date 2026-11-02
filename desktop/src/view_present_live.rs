@@ -281,6 +281,12 @@ fn present_stages() {
             options,
             Box::new(move |cc| {
                 crate::nv12::set_glow(cc.gl.is_some());
+                if let Some(gl) = cc.gl.as_ref() {
+                    use eframe::glow::HasContext as _;
+                    // SAFETY: the context eframe made, current on this thread.
+                    let renderer = unsafe { gl.get_parameter_string(eframe::glow::RENDERER) };
+                    println!("GL renderer: {renderer}");
+                }
                 Ok(Box::new(shown.lock().unwrap().take().unwrap()))
             }),
         )
