@@ -93,6 +93,7 @@ pub mod service;
 pub mod session_telemetry;
 pub mod shared_input;
 pub mod state;
+pub mod sway_tree;
 pub mod system_state;
 pub mod tel_handler;
 pub mod toast_answers;

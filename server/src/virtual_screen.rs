@@ -286,7 +286,7 @@ const GET_OUTPUTS: u32 = 3;
 
 /// Send one i3-IPC message to Sway and read its reply.
 #[cfg(unix)]
-fn ipc(kind: u32, payload: &str) -> std::io::Result<serde_json::Value> {
+pub(crate) fn ipc(kind: u32, payload: &str) -> std::io::Result<serde_json::Value> {
     use std::io::{Read, Write};
     let socket = std::env::var_os("SWAYSOCK")
         .ok_or_else(|| std::io::Error::other("not running under Sway"))?;
@@ -308,15 +308,20 @@ fn ipc(kind: u32, payload: &str) -> std::io::Result<serde_json::Value> {
 }
 
 #[cfg(not(unix))]
-fn ipc(_kind: u32, _payload: &str) -> std::io::Result<serde_json::Value> {
+pub(crate) fn ipc(_kind: u32, _payload: &str) -> std::io::Result<serde_json::Value> {
     Err(std::io::Error::other("not running under Sway"))
 }
 
 fn outputs() -> std::io::Result<Vec<Output>> {
     match desk() {
         Some(Desk::Hyprland) => hypr_outputs(&hypr("j/monitors")?),
-        _ => serde_json::from_value(ipc(GET_OUTPUTS, "")?).map_err(std::io::Error::other),
+        _ => sway_outputs(),
     }
+}
+
+/// Sway's outputs.
+pub(crate) fn sway_outputs() -> std::io::Result<Vec<Output>> {
+    serde_json::from_value(ipc(GET_OUTPUTS, "")?).map_err(std::io::Error::other)
 }
 
 /// Run a Sway command; an error when Sway says it failed.
