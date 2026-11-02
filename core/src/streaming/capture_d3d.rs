@@ -137,6 +137,7 @@ impl StagingCopy {
             stride: width * 4,
             timestamp: Instant::now(),
             gpu: None,
+            repeat: false,
         })
     }
 }

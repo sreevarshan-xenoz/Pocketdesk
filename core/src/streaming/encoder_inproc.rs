@@ -585,6 +585,7 @@ mod tests {
             stride: stride as u32,
             timestamp: Instant::now(),
             gpu: None,
+            repeat: false,
         }
     }
 

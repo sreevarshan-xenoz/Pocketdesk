@@ -250,6 +250,15 @@ impl SessionMode {
 /// H.264 is assumed for every client; future bits cover AV1 etc.
 pub const CODEC_CAP_HEVC: u8 = 0b0000_0001;
 
+/// `CODEC_CAPS_MARKER` bit 1: the client needs no idle repeats. A screen
+/// that has not changed is not sent again once a second to show the link is
+/// alive; the client keeps the last picture and holds the link by the
+/// connection's own keepalive. Only another computer's window sets it (the
+/// phone's decoder reads ten silent seconds as a dead link and keeps the
+/// repeats). A host that does not know the bit reads only bit 0 and goes on
+/// repeating, and a client that never sets it gets the repeats as before.
+pub const CODEC_CAP_NO_IDLE_REPEATS: u8 = 0b0000_0010;
+
 /// R4 E3 — compositor-true end-to-end latency probe.
 ///
 /// Every video packet header carries the frame's *age at send* measured on
