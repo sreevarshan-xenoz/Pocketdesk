@@ -214,6 +214,21 @@ async fn other_computer_again_and_again(
     Arc<AtomicUsize>,
     mpsc::UnboundedSender<&'static [u8]>,
 ) {
+    other_computer_again_with_pointer(cert, refuse_after, Vec::new()).await
+}
+
+/// [`other_computer_again_and_again`], each session also sending `pointer`
+/// (local cursor) on streams of its own, as a computer does whose capture
+/// takes the pointer out of the picture.
+async fn other_computer_again_with_pointer(
+    cert: Arc<CertManager>,
+    refuse_after: Option<usize>,
+    pointer: Vec<pocketdesk_core::protocol::cursor::CursorMessage>,
+) -> (
+    SocketAddr,
+    Arc<AtomicUsize>,
+    mpsc::UnboundedSender<&'static [u8]>,
+) {
     let listen = StreamTransportConfig {
         address: "127.0.0.1:0".parse().unwrap(),
         ..StreamTransportConfig::default()
@@ -240,6 +255,26 @@ async fn other_computer_again_and_again(
             }
             let (this_tx, this_rx) = tokio::sync::oneshot::channel();
             let (input, _ignored) = mpsc::unbounded_channel();
+            let sending = conn.clone();
+            let messages = pointer.clone();
+            tokio::spawn(async move {
+                // After the client's config streams, as a real host's capture is.
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                for (n, message) in messages.iter().enumerate() {
+                    let Ok(mut stream) = sending.open_uni().await else {
+                        return;
+                    };
+                    let header = PacketHeader {
+                        sequence: n as u64 + 1,
+                        stream_kind: STREAM_KIND_CURSOR,
+                        is_keyframe: false,
+                        timestamp_us: 0,
+                    };
+                    let _ = stream.write_all(&header.as_bytes()).await;
+                    let _ = stream.write_all(&message.encode()).await;
+                    let _ = stream.finish();
+                }
+            });
             let session = tokio::spawn(serve(conn, input, keyframe(), this_rx, None));
             // The next hang-up closes this session.
             match hang_up_rx.recv().await {
@@ -783,6 +818,115 @@ async fn a_dropped_view_reconnects_by_itself_until_stopped() {
     drop(commands);
     relay.await.unwrap();
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Local cursor, a redial: the other computer's session drops, and a window
+/// that asked is told the pointer is gone with it (so it goes back to its
+/// own pointer and forgets what it asked of the old session), then hears the
+/// new session say it sends the pointer apart again. A window that did not
+/// ask hears none of it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_redial_clears_the_pointer_of_a_window_that_asked_and_tells_one_that_did_not_nothing() {
+    use pocketdesk_core::protocol::cursor::{CursorMessage, CursorShape, CursorState};
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let shape = CursorShape::new(3, 3, 1, 1, vec![200; 36]).unwrap();
+    let messages = vec![
+        CursorMessage::Mode { separate: true },
+        CursorMessage::Shape(shape.clone()),
+        CursorMessage::Visible(true),
+    ];
+    for asked in [true, false] {
+        let dir = temp_dir(if asked {
+            "redial-asked"
+        } else {
+            "redial-unasked"
+        });
+        paired(&dir);
+        let cert = Arc::new(CertManager::new().expect("cert manager"));
+        let (addr, sessions, hang_ups) =
+            other_computer_again_with_pointer(cert.clone(), None, messages.clone()).await;
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let (commands, rx) = mpsc::channel(4);
+        let relay = tokio::spawn(run(
+            rx,
+            listener,
+            dir.clone(),
+            Dialer::Direct {
+                addr,
+                certs: cert,
+                id: "viewer".into(),
+            },
+        ));
+        commands
+            .send(Command::Start {
+                device_id: "desk".into(),
+                monitor: 0,
+                hevc: false,
+                cursor: asked,
+                window: 0,
+                fit: None,
+                borrow: None,
+            })
+            .await
+            .unwrap();
+        let file = view_file(&dir).await;
+        let mut window = join(&file).await;
+        let mut state = CursorState::default();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+        // The first session: a window that asked ends up holding the shape.
+        let mut frames = 0;
+        while (asked && state.shape.is_none()) || frames < 3 {
+            assert!(tokio::time::Instant::now() < deadline, "within 20 s");
+            match tokio::time::timeout(Duration::from_secs(10), read_message(&mut window))
+                .await
+                .expect("a message")
+            {
+                Message::Cursor(message) => {
+                    assert!(asked, "a pointer message nobody asked for: {message:?}");
+                    state.apply(message);
+                }
+                Message::Frame { .. } => frames += 1,
+                Message::End { why } => panic!("ended: {why}"),
+                _ => {}
+            }
+        }
+        assert_eq!(state.separate, asked);
+
+        // Its server stops: the window that asked hears the pointer is
+        // gone, before it is told it is reconnecting; then the new session
+        // says it sends the pointer apart, and the shape comes again.
+        hang_ups.send(STOPPING).unwrap();
+        let (mut cleared, mut reconnecting, mut again) = (false, false, false);
+        while !(reconnecting && (!asked || (cleared && again))) {
+            assert!(tokio::time::Instant::now() < deadline, "back within 20 s");
+            match tokio::time::timeout(Duration::from_secs(10), read_message(&mut window))
+                .await
+                .expect("a message")
+            {
+                Message::Cursor(message) => {
+                    assert!(asked, "a pointer message nobody asked for: {message:?}");
+                    state.apply(message);
+                    if !state.separate {
+                        cleared = true;
+                        assert!(
+                            state.shape.is_none() && state.place.is_none(),
+                            "nothing of the old session is held"
+                        );
+                        assert!(!reconnecting, "said before the reconnecting status");
+                    } else if cleared && state.shape.is_some() {
+                        again = true;
+                    }
+                }
+                Message::Status(status) if status.reconnecting > 0 => reconnecting = true,
+                Message::End { why } => panic!("ended: {why}"),
+                _ => {}
+            }
+        }
+        assert!(sessions.load(Ordering::SeqCst) >= 1);
+        drop((commands, window));
+        relay.abort();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 /// Start a view of the stand-in at `addr` through a relay over `dir`, join

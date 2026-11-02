@@ -1261,6 +1261,19 @@ async fn session_run(
             say.say(Event::Ended(gave_up_words(&name))).await;
             return;
         };
+        // The other computer's pointer went with its session (local
+        // cursor): the relay forgets it, and the window goes back to its
+        // own pointer until the next session says it sends one apart (its
+        // places are then asked for again, which the new session knows
+        // nothing of).
+        // Only to a window that asked: one before it does not know the
+        // message.
+        if cursor {
+            say.say(Event::Cursor(
+                pocketdesk_core::protocol::cursor::CursorMessage::Mode { separate: false },
+            ))
+            .await;
+        }
         status = ViewStatus {
             phase: Phase::Connecting,
             monitor: status.monitor,
@@ -2209,6 +2222,30 @@ struct View {
     /// of it (the state is then sent whole, with the next frame).
     cursor: pocketdesk_core::protocol::cursor::CursorState,
     cursor_lost: bool,
+    /// The window asked for the pointer (`Command::Start`'s `cursor`): only
+    /// then does it know the messages about it.
+    cursor_asked: bool,
+}
+
+impl View {
+    /// What brings the window to the pointer as the relay holds it: its
+    /// state when the computer sends the pointer apart. A window that lost
+    /// a message (`held`: it may hold a pointer from before) is told a mode
+    /// of `false` when the computer keeps the pointer in the picture, which
+    /// drops what it holds; a window that is only joining holds nothing.
+    /// Nothing to a window that did not ask.
+    fn cursor_catch_up(&self, held: bool) -> Vec<pocketdesk_core::protocol::cursor::CursorMessage> {
+        use pocketdesk_core::protocol::cursor::CursorMessage;
+        if !self.cursor_asked {
+            return Vec::new();
+        }
+        match self.cursor.snapshot() {
+            snapshot if snapshot.is_empty() && held => {
+                vec![CursorMessage::Mode { separate: false }]
+            }
+            snapshot => snapshot,
+        }
+    }
 }
 
 impl Drop for View {
@@ -2544,6 +2581,7 @@ pub async fn run_with(
                     borrow_held,
                     cursor: Default::default(),
                     cursor_lost: false,
+                    cursor_asked: cursor,
                 });
             }
             Some((session_id, event)) = events.recv() => {
@@ -2608,12 +2646,14 @@ pub async fn run_with(
                         // state is sent whole, once the queue has room.
                         if current.cursor_lost
                             && let Some(v) = watching
-                            && v.tx.capacity() >= current.cursor.snapshot().len()
                         {
-                            for message in current.cursor.snapshot() {
-                                let _ = v.tx.try_send(Message::Cursor(message));
+                            let catch_up = current.cursor_catch_up(true);
+                            if v.tx.capacity() >= catch_up.len() {
+                                for message in catch_up {
+                                    let _ = v.tx.try_send(Message::Cursor(message));
+                                }
+                                current.cursor_lost = false;
                             }
-                            current.cursor_lost = false;
                         }
                         if let Some(v) = watching
                             && v.tx.try_send(Message::Frame { keyframe, seq, data }).is_err()
@@ -2673,7 +2713,7 @@ pub async fn run_with(
                 }
                 // The pointer as it is now (local cursor), for a window that
                 // joins late.
-                for message in v.cursor.snapshot() {
+                for message in v.cursor_catch_up(false) {
                     let _ = joined.tx.try_send(Message::Cursor(message));
                 }
                 v.cursor_lost = false;
