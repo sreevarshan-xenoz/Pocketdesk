@@ -497,6 +497,10 @@ pub async fn run(config: Config) -> Result<()> {
     let streaming_config = config.video_quality.to_streaming_config();
     // Read as each session opens its encoder.
     pocketdesk_core::streaming::keyframes::set_smooth(config.smooth_keyframes);
+    // Read as each capture starts (Linux's wlroots capture; no effect where
+    // the capture has no DMA-BUFs).
+    #[cfg(target_os = "linux")]
+    pocketdesk_core::streaming::dmabuf::set_copy(config.capture_copy);
     // T10k: phones' casts are handed to the desktop app through one relay.
     let cast_tx = match crate::state::state_dir() {
         Ok(dir) => Some(crate::cast_relay::spawn(dir)),

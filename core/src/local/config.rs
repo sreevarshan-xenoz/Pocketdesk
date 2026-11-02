@@ -50,6 +50,15 @@ pub struct Config {
     /// (`streaming::keyframes`). The server reads it at its start.
     #[serde(default)]
     pub smooth_keyframes: bool,
+    /// Copy the screen through memory, as every capture did before the
+    /// zero-copy capture: on a wlroots desktop with VA-API the compositor
+    /// renders into buffers on the graphics card and the encoder reads them
+    /// there, with no copy and no upload. Turn this on to go back to the
+    /// copy, if that picture ever misbehaves on a card or driver
+    /// (`POCKETDESK_CAPTURE_COPY=1` does the same for one run). Off by
+    /// default. The server reads it at its start.
+    #[serde(default)]
+    pub capture_copy: bool,
     /// Draw a phone's laser dot (G4): the air mouse in Remote moves a red
     /// dot on the screen instead of the pointer. On by default; drawn on
     /// Windows and on wlroots compositors (N10).
@@ -834,6 +843,7 @@ impl Default for Config {
             allow_hevc: false,
             slow_link_frame_rate: true,
             smooth_keyframes: false,
+            capture_copy: false,
             laser_pointer: true,
             internet_files: true,
             keep_file_dates: true,
@@ -1136,6 +1146,7 @@ impl Config {
         "allow_hevc",
         "slow_link_frame_rate",
         "smooth_keyframes",
+        "capture_copy",
         "laser_pointer",
         "internet_files",
         "keep_file_dates",
@@ -2120,6 +2131,18 @@ phone_battery = \"x\"
         config.save_to(&path).unwrap();
         assert!(Config::load_from(&path).unwrap().smooth_keyframes);
         assert!(Config::KNOWN_KEYS.contains(&"smooth_keyframes"));
+    }
+
+    #[test]
+    fn capture_copy_is_off_by_default_and_the_choice_saves() {
+        assert!(!Config::default().capture_copy);
+        let path = temp("capture-copy");
+        let mut config = Config::load_from(&path).unwrap();
+        assert!(!config.capture_copy, "a file without the key");
+        config.capture_copy = true;
+        config.save_to(&path).unwrap();
+        assert!(Config::load_from(&path).unwrap().capture_copy);
+        assert!(Config::KNOWN_KEYS.contains(&"capture_copy"));
     }
 
     #[test]
