@@ -903,7 +903,7 @@ pub async fn respond(device: &str, body: &serde_json::Value) -> serde_json::Valu
     let (width, height) = (side("width"), side("height"));
     // A computer's lending of one of its windows (phase 3a of the window
     // handoff) has its own gate and its own state.
-    if matches!(action.as_str(), "lend" | "return") {
+    if matches!(action.as_str(), "lend" | "list" | "return") {
         return said_with(body, crate::lend_window::answer(device, body).await);
     }
     // A computer's window, 0 to 3; a phone says none. One past the last is

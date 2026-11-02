@@ -25,11 +25,16 @@
 //!   says `ok` even to a window that is not there, so each step is checked
 //!   in `j/clients`.
 //!
+//! **The list:** `list` answers the windows this computer would lend (id,
+//! title, app, size, workspace; [`listed`]) so the other computer's owner can
+//! pick one. Titles are personal: they are sent to the asker and never
+//! logged.
+//!
 //! **Who may ask:** only a computer paired both ways ("both are mine"), with
 //! the Input permission (held to it before this runs, on a connection and on
 //! the link), and only while "Let my computers borrow my windows"
-//! (`lend_windows`, off by default) is on; taking a window back is never
-//! refused. Window ids are digits (Sway's container id) or `0x` and hex
+//! (`lend_windows`, off by default) is on, for `lend` and `list` alike;
+//! taking a window back is never refused. Window ids are digits (Sway's container id) or `0x` and hex
 //! (Hyprland's address), and nothing else reaches a command or the Lua.
 //!
 //! What was lent, from where, is kept in `lent_windows.json` (written before
@@ -46,6 +51,9 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use pocketdesk_core::local::computers::LendableWindow;
+
+use crate::hyprland::HyprWindow;
 use crate::virtual_screen::{Desk, Output};
 
 /// The file what is lent is kept in.
@@ -180,10 +188,10 @@ pub fn lend_size(size: [i32; 2]) -> Option<(u32, u32)> {
 }
 
 /// Why `action` is refused: only an owner's computer, paired both ways,
-/// borrows a window, and only while the owner's switch is on. Taking one
-/// back is never refused.
+/// borrows a window or sees which there are, and only while the owner's
+/// switch is on. Taking one back is never refused.
 pub fn refusal(action: &str, enabled: bool, owner_computer: bool) -> Option<&'static str> {
-    if action != "lend" {
+    if !matches!(action, "lend" | "list") {
         return None;
     }
     if !owner_computer {
@@ -195,6 +203,53 @@ pub fn refusal(action: &str, enabled: bool, owner_computer: bool) -> Option<&'st
         );
     }
     None
+}
+
+// ---- The list ----
+
+/// The most windows a list names.
+const MOST_LISTED: usize = 100;
+
+/// `text` without control characters, at most `most` characters.
+fn clean(text: &str, most: usize) -> String {
+    text.chars()
+        .filter(|c| !c.is_control())
+        .take(most)
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+/// The windows `device` may borrow, from the compositor's window list and
+/// what is lent now: those a screen can be made for, not on a special
+/// workspace (Hyprland's scratch ones, Sway's hidden one) and not lent to
+/// another computer; one lent to `device` is marked.
+pub fn listed(windows: Vec<HyprWindow>, lent: &[Lent], device: &str) -> Vec<LendableWindow> {
+    windows
+        .into_iter()
+        .filter(|w| w.mapped && !w.hidden && is_window_id(&w.address))
+        .filter(|w| {
+            !w.workspace.name.starts_with("special") && !w.workspace.name.starts_with("__i3")
+        })
+        .filter(|w| lend_size(w.size).is_some())
+        .filter(|w| {
+            lent.iter()
+                .find(|l| l.window == w.address)
+                .is_none_or(|l| l.device == device)
+        })
+        .take(MOST_LISTED)
+        .map(|w| LendableWindow {
+            lent: lent
+                .iter()
+                .any(|l| l.window == w.address && l.device == device),
+            title: clean(&w.title, 200),
+            class: clean(&w.class, 64),
+            width: u32::try_from(w.size[0]).unwrap_or(0),
+            height: u32::try_from(w.size[1]).unwrap_or(0),
+            workspace: clean(&w.workspace.name, 64),
+            address: w.address,
+        })
+        .collect()
 }
 
 // ---- Sway's commands ----
@@ -410,6 +465,8 @@ trait Env: Sync {
     /// Why no window can be lent here, if none can.
     fn cannot(&self) -> Option<&'static str>;
     fn seen(&self, window: &str) -> std::io::Result<Option<Seen>>;
+    /// The windows on this computer's screens now.
+    fn windows(&self) -> std::io::Result<Vec<HyprWindow>>;
     /// The screen of the key, made at `width`×`height` or the one it has:
     /// `{name, index, width, height}` or `{error}`.
     fn add_screen(&self, key: &str, width: u32, height: u32) -> Value;
@@ -590,6 +647,23 @@ fn lend_with(lends: &Lends, env: &dyn Env, device: &str, window: &str) -> Value 
     }
 }
 
+/// The windows `device` may borrow: `{windows: [..]}` or `{error}`. Read
+/// only; the titles in it are not logged.
+fn list_with(lends: &Lends, env: &dyn Env, device: &str) -> Value {
+    if let Some(why) = env.cannot() {
+        return error(why);
+    }
+    match env.windows() {
+        Ok(windows) => {
+            let lent = lends.all().clone();
+            let windows = listed(windows, &lent, device);
+            tracing::debug!("Listed {} windows a computer may borrow", windows.len());
+            json!({ "windows": windows })
+        }
+        Err(e) => error(format!("Could not read this computer's windows: {e}")),
+    }
+}
+
 /// Take back `window` from `device`, or, with none, all it has: `{returned:
 /// n}`, or `{error, returned}` when one would not go back: it stays lent
 /// (with its screen) for a sweep or another `return` to try again, and
@@ -743,7 +817,7 @@ fn is_owner_computer(device: &str) -> bool {
         && crate::remote_devices::is_owner_device(&store, &computers::read(&dir), device)
 }
 
-/// The answer to the `lend` or `return` request `body` from `device`: see
+/// The answer to the `lend`, `list` or `return` request `body` from `device`: see
 /// [`lend_with`] and [`return_with`].
 pub async fn answer(device: &str, body: &Value) -> Value {
     let action = body["action"].as_str().unwrap_or("").to_string();
@@ -759,6 +833,7 @@ pub async fn answer(device: &str, body: &Value) -> Value {
         match (action.as_str(), window.as_deref()) {
             ("lend", Some(window)) => lend_with(lends(), &Live, &device, window),
             ("lend", None) => error("no window named"),
+            ("list", _) => list_with(lends(), &Live, &device),
             ("return", window) => return_with(lends(), &Live, &device, window),
             _ => error("unknown action"),
         }
@@ -856,6 +931,17 @@ impl Env for Live {
 
     fn seen(&self, window: &str) -> std::io::Result<Option<Seen>> {
         seen_now(window)
+    }
+
+    fn windows(&self) -> std::io::Result<Vec<HyprWindow>> {
+        match crate::virtual_screen::desk() {
+            Some(Desk::Sway) => Ok(crate::sway_tree::list()?.0),
+            Some(Desk::Hyprland) => {
+                serde_json::from_str(&crate::virtual_screen::hypr("j/clients")?)
+                    .map_err(std::io::Error::other)
+            }
+            None => Err(other("not running under Sway or Hyprland")),
+        }
     }
 
     fn add_screen(&self, key: &str, width: u32, height: u32) -> Value {
@@ -1026,6 +1112,8 @@ mod tests {
     #[derive(Default)]
     struct Fake {
         windows: Mutex<Vec<Seen>>,
+        /// What the compositor lists (for `list`).
+        listing: Mutex<Vec<HyprWindow>>,
         screens: Mutex<Vec<(String, String, u32, u32)>>,
         calls: Mutex<Vec<String>>,
         saved: Mutex<Vec<Lent>>,
@@ -1057,6 +1145,9 @@ mod tests {
     impl Env for Fake {
         fn cannot(&self) -> Option<&'static str> {
             None
+        }
+        fn windows(&self) -> std::io::Result<Vec<HyprWindow>> {
+            Ok(self.listing.lock().unwrap().clone())
         }
         fn seen(&self, window: &str) -> std::io::Result<Option<Seen>> {
             Ok(self
@@ -1139,6 +1230,9 @@ mod tests {
         }
         fn seen(&self, window: &str) -> std::io::Result<Option<Seen>> {
             self.0.seen(window)
+        }
+        fn windows(&self) -> std::io::Result<Vec<HyprWindow>> {
+            self.0.windows()
         }
         fn add_screen(&self, key: &str, width: u32, height: u32) -> Value {
             self.0.add_screen(key, width, height)
@@ -1681,6 +1775,115 @@ mod tests {
         assert!(!fake.calls().iter().any(|c| c.starts_with("back 6")));
         assert_eq!(lends.all().len(), 1, "the other stays lent");
         assert_eq!(lends.all()[0].window, "6");
+    }
+
+    fn client(address: &str, title: &str, size: [i32; 2], workspace: &str) -> HyprWindow {
+        HyprWindow {
+            address: address.into(),
+            title: title.into(),
+            class: "app.example".into(),
+            pid: 1,
+            mapped: true,
+            hidden: false,
+            at: [0, 0],
+            size,
+            monitor: 0,
+            fullscreen: 0,
+            workspace: crate::hyprland::HyprWorkspaceRef {
+                id: 1,
+                name: workspace.into(),
+            },
+        }
+    }
+
+    #[test]
+    fn list_is_gated_like_lend_and_returns_are_not() {
+        assert!(refusal("list", true, true).is_none());
+        assert!(
+            refusal("list", true, false)
+                .unwrap()
+                .contains("paired both ways")
+        );
+        assert!(
+            refusal("list", false, true)
+                .unwrap()
+                .contains("Let my computers borrow my windows")
+        );
+        assert!(refusal("list", false, false).is_some());
+    }
+
+    #[test]
+    fn the_list_names_the_windows_a_screen_can_be_made_for() {
+        let mut hidden = client("0x2", "Hidden", [800, 600], "1");
+        hidden.hidden = true;
+        let mut unmapped = client("0x3", "Unmapped", [800, 600], "1");
+        unmapped.mapped = false;
+        let windows = vec![
+            client("0x1", "Notes\u{7}\n", [1280, 720], "main"),
+            hidden,
+            unmapped,
+            client("0x4", "Scratch", [800, 600], "special:scratch"),
+            client("7", "Sway window", [640, 480], "2"),
+            client("5; exec true", "Odd id", [640, 480], "2"),
+            client("0x6", "No size", [0, 480], "2"),
+        ];
+        let listed = listed(windows, &[], DEVICE);
+        let addresses: Vec<&str> = listed.iter().map(|w| w.address.as_str()).collect();
+        assert_eq!(addresses, ["0x1", "7"]);
+        assert_eq!(listed[0].title, "Notes", "control characters go");
+        assert_eq!(
+            (
+                listed[0].width,
+                listed[0].height,
+                listed[0].workspace.as_str()
+            ),
+            (1280, 720, "main")
+        );
+        assert_eq!(listed[0].class, "app.example");
+        assert!(!listed[0].lent);
+    }
+
+    #[test]
+    fn a_window_lent_to_another_computer_is_not_listed_and_ones_lent_to_the_asker_are_marked() {
+        let windows = vec![
+            client("5", "Mine", [800, 600], "1"),
+            client("6", "Theirs", [800, 600], "1"),
+            client("7", "Free", [800, 600], "1"),
+        ];
+        let lent = vec![
+            Lent::new(DEVICE, &seen("5", 800, 600), "PD-a-1"),
+            Lent::new("fedcba9876543210", &seen("6", 800, 600), "PD-a-2"),
+        ];
+        let listed = listed(windows, &lent, DEVICE);
+        let seen: Vec<(&str, bool)> = listed
+            .iter()
+            .map(|w| (w.address.as_str(), w.lent))
+            .collect();
+        assert_eq!(seen, [("5", true), ("7", false)]);
+    }
+
+    #[test]
+    fn a_long_title_and_a_long_list_are_cut() {
+        let long = "x".repeat(500);
+        let many: Vec<HyprWindow> = (1..=150)
+            .map(|n| client(&n.to_string(), &long, [800, 600], "1"))
+            .collect();
+        let listed = listed(many, &[], DEVICE);
+        assert_eq!(listed.len(), MOST_LISTED);
+        assert_eq!(listed[0].title.chars().count(), 200);
+    }
+
+    #[test]
+    fn list_answers_the_windows_and_changes_nothing() {
+        let fake = Fake::with(vec![seen("5", 1280, 720)]);
+        *fake.listing.lock().unwrap() = vec![client("5", "Notes", [1280, 720], "1")];
+        let lends = Lends::new();
+        let reply = list_with(&lends, &fake, DEVICE);
+        assert_eq!(reply["windows"][0]["address"], "5");
+        assert_eq!(reply["windows"][0]["title"], "Notes");
+        assert_eq!(reply["windows"][0]["width"], 1280);
+        assert!(fake.calls().is_empty(), "nothing moved or made");
+        assert!(lends.all().is_empty());
     }
 
     #[test]

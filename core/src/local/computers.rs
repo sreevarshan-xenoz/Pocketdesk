@@ -609,6 +609,28 @@ pub struct FitSize {
     pub height: u32,
 }
 
+/// A window of another computer that may be borrowed (`list` of
+/// `kdeconnect.pocketdesk.virtual_screen`): what the owner picks from. The
+/// title is personal: it is shown and never logged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LendableWindow {
+    /// The id a `lend` names it by: Sway's container id in decimal, or
+    /// Hyprland's `0x` address.
+    pub address: String,
+    pub title: String,
+    /// Its app id (Wayland) or class (X11).
+    #[serde(default)]
+    pub class: String,
+    pub width: u32,
+    pub height: u32,
+    /// The workspace it is on, by name.
+    #[serde(default)]
+    pub workspace: String,
+    /// It is already lent to the computer that asked.
+    #[serde(default)]
+    pub lent: bool,
+}
+
 /// Whether a window number is the first window's, left out of a request.
 fn is_zero(n: &u8) -> bool {
     *n == 0
