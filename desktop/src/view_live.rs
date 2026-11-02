@@ -390,6 +390,7 @@ fn the_decoder_on_a_running_pairs_view() {
             hevc: false,
             window: 0,
             fit: None,
+            borrow: None,
         },
         pin::now_unix(),
     )
@@ -544,6 +545,7 @@ fn the_windows_decoder_on_a_real_view() {
             hevc: hevc && crate::video::probe_hevc("ffmpeg"),
             window: 0,
             fit: None,
+            borrow: None,
         },
         pin::now_unix(),
     )

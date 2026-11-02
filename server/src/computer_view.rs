@@ -236,6 +236,11 @@ pub enum Command {
         hevc: bool,
         window: u8,
         fit: Option<FitSize>,
+        /// Show the window with this id of that computer instead of a
+        /// screen ([`crate::borrow_window`]): it is asked to lend it, the
+        /// view shows the screen it was moved to, and gives it back as the
+        /// view ends. `monitor` and `fit` are not used.
+        borrow: Option<String>,
     },
     /// Stop showing it: the view `session_id` when given (one since
     /// replaced is left alone, BK7 review M1), else the one the window
@@ -1012,11 +1017,80 @@ enum Outcome {
     Lost(Option<String>),
 }
 
+/// One view, until it ends: [`session_run`], and, for a borrowed window, also
+/// until that computer says the window is gone (closed, or lending turned
+/// off), which ends the view with the reason.
+#[allow(clippy::too_many_arguments)]
+async fn session(
+    session_id: u64,
+    state_dir: PathBuf,
+    computer: PeerComputer,
+    asked_monitor: u32,
+    hevc: bool,
+    window: u8,
+    fit: Option<FitSize>,
+    borrow: Option<String>,
+    dialer: Arc<Dialer>,
+    events: mpsc::Sender<(u64, Event)>,
+    input: mpsc::Receiver<InputPacket>,
+    mic: Arc<MicLink>,
+) {
+    let Some(borrowed) = borrow.clone() else {
+        return session_run(
+            session_id,
+            state_dir,
+            computer,
+            asked_monitor,
+            hevc,
+            window,
+            fit,
+            None,
+            dialer,
+            events,
+            input,
+            mic,
+        )
+        .await;
+    };
+    // Listening before the view starts, so a word that comes first is heard.
+    let mut gone = crate::borrow_window::gone();
+    let say = Say {
+        session_id,
+        events: events.clone(),
+    };
+    let (device_id, name) = (computer.device_id.clone(), computer.name.clone());
+    tokio::select! {
+        () = session_run(
+            session_id,
+            state_dir,
+            computer,
+            asked_monitor,
+            hevc,
+            window,
+            fit,
+            borrow,
+            dialer,
+            events,
+            input,
+            mic,
+        ) => {}
+        () = crate::borrow_window::wait_gone(&mut gone, &device_id, &borrowed) => {
+            tracing::info!(device_id = %device_id, "A borrowed window is gone; ending its view");
+            say.say(Event::Ended(gone_words(&name))).await;
+        }
+    }
+}
+
+/// What the window says when the computer it borrowed from lost the window.
+fn gone_words(name: &str) -> String {
+    format!("{name} closed that window, or stopped lending its windows.")
+}
+
 /// One view, until it ends: dialled, shown, and after a drop dialled again
 /// by itself with [`backoff`] for about two minutes (PC2). A Stop or a
 /// window closed aborts it, so it never dials again after one.
 #[allow(clippy::too_many_arguments)]
-async fn session(
+async fn session_run(
     session_id: u64,
     state_dir: PathBuf,
     mut computer: PeerComputer,
@@ -1024,6 +1098,7 @@ async fn session(
     hevc: bool,
     window: u8,
     fit: Option<FitSize>,
+    borrow: Option<String>,
     dialer: Arc<Dialer>,
     events: mpsc::Sender<(u64, Event)>,
     input: mpsc::Receiver<InputPacket>,
@@ -1036,7 +1111,7 @@ async fn session(
     let mut monitor = asked_monitor;
     let mut status = ViewStatus {
         monitor,
-        fit: Box::new(if fit.is_some() {
+        fit: Box::new(if fit.is_some() || borrow.is_some() {
             ViewFit::Asking
         } else {
             ViewFit::Off
@@ -1045,7 +1120,18 @@ async fn session(
     };
     crate::peer_computers::ask_screens(&computer.device_id);
     say.say(Event::Status(status.clone())).await;
-    if let Some(size) = fit {
+    if let Some(borrowed) = &borrow {
+        // A window not lent is no view: the screen asked for would be the
+        // computer's own, never what was picked.
+        match apply_borrow(&computer, borrowed, &mut status).await {
+            Ok(index) => monitor = index,
+            Err(why) => {
+                say.say(Event::Ended(borrow_failed(&name, &why))).await;
+                return;
+            }
+        }
+        say.say(Event::Status(status.clone())).await;
+    } else if let Some(size) = fit {
         monitor = apply_fit(&computer, window, size, asked_monitor, &mut status).await;
         say.say(Event::Status(status.clone())).await;
     }
@@ -1148,11 +1234,49 @@ async fn session(
         // The fitted screen asked for again (it is the same one, kept there
         // while the window lives), as a computer that restarted has none and
         // its screen numbers may have moved on.
-        if let Some(size) = fit {
+        if let Some(borrowed) = &borrow {
+            match apply_borrow(&computer, borrowed, &mut status).await {
+                Ok(index) => monitor = index,
+                Err(why) => {
+                    say.say(Event::Ended(borrow_failed(&name, &why))).await;
+                    return;
+                }
+            }
+            say.say(Event::Status(status.clone())).await;
+        } else if let Some(size) = fit {
             monitor = apply_fit(&computer, window, size, asked_monitor, &mut status).await;
             say.say(Event::Status(status.clone())).await;
         }
     }
+}
+
+/// Ask the computer to lend `borrowed` ([`crate::borrow_window`]) and say how
+/// it went in `status`: the screen's number and size. The screen to dial, or
+/// why the window was not lent.
+async fn apply_borrow(
+    computer: &PeerComputer,
+    borrowed: &str,
+    status: &mut ViewStatus,
+) -> Result<u32, String> {
+    match crate::borrow_window::lend(&computer.device_id, borrowed).await {
+        Ok(lent) => {
+            *status.fit = ViewFit::Borrowed {
+                width: lent.width,
+                height: lent.height,
+            };
+            status.monitor = lent.index;
+            Ok(lent.index)
+        }
+        Err(why) => {
+            tracing::info!(device_id = %computer.device_id, "A window was not lent: {why}");
+            Err(why)
+        }
+    }
+}
+
+/// What the window says when the computer would not lend the window picked.
+fn borrow_failed(name: &str, why: &str) -> String {
+    format!("Could not borrow that window from {name}: {why}")
 }
 
 /// Ask the computer for the window's fitted screen ([`crate::fit_screen`])
@@ -2020,6 +2144,10 @@ struct View {
     /// 8): taken away there as the view ends, unless the window's next view
     /// of the same computer carries it on.
     fit_held: Option<String>,
+    /// The computer and the id of the window this view borrowed from it:
+    /// given back as the view ends, unless the window's next view of the
+    /// same window carries it on.
+    borrow_held: Option<(String, String)>,
 }
 
 impl Drop for View {
@@ -2029,6 +2157,9 @@ impl Drop for View {
         }
         if let Some(device_id) = self.fit_held.take() {
             crate::fit_screen::release(&device_id, self.window);
+        }
+        if let Some((device_id, window)) = self.borrow_held.take() {
+            crate::borrow_window::give_back(&device_id, &window);
         }
     }
 }
@@ -2176,7 +2307,7 @@ pub async fn run_with(
                 let Some(command) = command else { break };
                 let shown: Vec<Option<u64>> =
                     views.iter().map(|v| v.as_ref().map(|v| v.session_id)).collect();
-                let Command::Start { device_id, monitor, hevc, window, fit } = command else {
+                let Command::Start { device_id, monitor, hevc, window, fit, borrow } = command else {
                     match command {
                         Command::Stop { session_id, window } => {
                             if let Some(i) = stop_slot(&shown, session_id, window)
@@ -2243,6 +2374,19 @@ pub async fn run_with(
                 {
                     old.fit_held = None;
                 }
+                // The same window borrowed again (a reconnect the app asks
+                // for) is still lent: the old view's end does not give it
+                // back just before the new one asks for it. Another window,
+                // or a plain screen, gives the old one back as it ends.
+                if let Some(borrowed) = &borrow
+                    && computer.is_some()
+                    && let Some(old) = views[slot].as_mut().filter(|v| {
+                        v.device_id == device_id
+                            && v.borrow_held.as_ref().is_some_and(|(_, w)| w == borrowed)
+                    })
+                {
+                    old.borrow_held = None;
+                }
                 end(&mut views[slot], &mut viewers[slot], &state_dir, None);
                 next_id += 1;
                 let session_id = next_id;
@@ -2274,6 +2418,7 @@ pub async fn run_with(
                             hevc,
                             window,
                             fit,
+                            borrow.clone(),
                             dialer.clone(),
                             events_tx.clone(),
                             input_rx,
@@ -2292,6 +2437,10 @@ pub async fn run_with(
                 };
                 // A view that never started has no screen to take away.
                 let fit_held = (fit.is_some() && task.is_some()).then(|| device_id.clone());
+                // A borrowed window is given back as the view ends.
+                let borrow_held = borrow
+                    .filter(|_| task.is_some())
+                    .map(|window| (device_id.clone(), window));
                 views[slot] = Some(View {
                     session_id,
                     window,
@@ -2311,6 +2460,7 @@ pub async fn run_with(
                     window_dropped: 0,
                     focus_said: None,
                     fit_held,
+                    borrow_held,
                 });
             }
             Some((session_id, event)) = events.recv() => {

@@ -195,6 +195,22 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     })
                     .await;
                 }
+                // Borrowing a window: the other computer's lendable windows,
+                // asked off this loop (the answer may take seconds), and
+                // forgotten as the picker closes.
+                ComputerAsk::WindowsThere { device_id } => {
+                    let dir = dir.clone();
+                    tokio::spawn(
+                        async move { crate::borrow_window::ask_list(&dir, &device_id).await },
+                    );
+                }
+                ComputerAsk::CloseWindowsThere { device_id } => {
+                    let dir = dir.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        crate::borrow_window::close_list(&dir, &device_id)
+                    })
+                    .await;
+                }
                 ComputerAsk::LetDrive { device_id, allow } => {
                     let_drive(&dir, &device_id, allow);
                 }
@@ -210,6 +226,7 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     hevc,
                     window,
                     fit,
+                    borrow,
                 } => {
                     // PC6: viewed now, for the recents, off the runtime.
                     let (at, id) = (dir.clone(), device_id.clone());
@@ -222,8 +239,12 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                         monitor,
                         hevc,
                         window,
-                        // A size of nothing is no ask for a fit.
-                        fit: fit.filter(|f| f.width > 0 && f.height > 0),
+                        // A size of nothing is no ask for a fit; a borrowed
+                        // window is its own size, never fitted.
+                        fit: fit
+                            .filter(|f| f.width > 0 && f.height > 0)
+                            .filter(|_| borrow.is_none()),
+                        borrow: borrow.filter(|w| crate::lend_window::is_window_id(w)),
                     };
                     if views.send(start).await.is_err() {
                         tracing::warn!(

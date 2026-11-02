@@ -313,6 +313,7 @@ async fn a_computers_screen_reaches_the_window_and_its_input_the_computer() {
             hevc: false,
             window: 0,
             fit: None,
+            borrow: None,
         })
         .await
         .unwrap();
@@ -520,6 +521,7 @@ async fn a_dropped_view_reconnects_by_itself_until_stopped() {
             hevc: false,
             window: 0,
             fit: None,
+            borrow: None,
         })
         .await
         .unwrap();
@@ -636,6 +638,7 @@ async fn shown_view(
             hevc: false,
             window: 0,
             fit: None,
+            borrow: None,
         })
         .await
         .unwrap();
@@ -791,6 +794,7 @@ async fn frames_too_large_for_the_window_are_said() {
             hevc: false,
             window: 0,
             fit: None,
+            borrow: None,
         })
         .await
         .unwrap();
@@ -835,6 +839,7 @@ async fn a_computer_not_paired_here_ends_the_view_with_why() {
             hevc: false,
             window: 0,
             fit: None,
+            borrow: None,
         })
         .await
         .unwrap();
@@ -897,6 +902,7 @@ async fn a_window_that_comes_late_still_hears_why_the_view_ended() {
             hevc: false,
             window: 0,
             fit: None,
+            borrow: None,
         })
         .await
         .unwrap();
@@ -944,6 +950,7 @@ async fn a_window_without_the_token_sees_nothing() {
             hevc: false,
             window: 0,
             fit: None,
+            borrow: None,
         })
         .await
         .unwrap();
@@ -1028,6 +1035,7 @@ async fn the_windows_privacy_is_asked_of_the_computer_and_let_go_as_it_closes() 
             hevc: false,
             window: 0,
             fit: None,
+            borrow: None,
         })
         .await
         .unwrap();
@@ -1189,6 +1197,7 @@ async fn privacy_held_is_let_go_as_the_view_ends() {
             hevc: false,
             window: 0,
             fit: None,
+            borrow: None,
         })
         .await
         .unwrap();
@@ -1544,6 +1553,7 @@ async fn controlled_view(
             hevc: false,
             window: 0,
             fit: None,
+            borrow: None,
         })
         .await
         .unwrap();
@@ -1813,6 +1823,7 @@ async fn two_windows_show_one_computers_two_screens_side_by_side() {
                 hevc: false,
                 window,
                 fit: None,
+                borrow: None,
             })
             .await
             .unwrap();
@@ -1903,6 +1914,7 @@ async fn two_windows_show_one_computers_two_screens_side_by_side() {
             hevc: false,
             window: wire::MAX_VIEWS,
             fit: None,
+            borrow: None,
         })
         .await
         .unwrap();
@@ -2013,6 +2025,7 @@ async fn privacy_stays_as_the_window_switches_screens() {
             hevc: false,
             window: 0,
             fit: None,
+            borrow: None,
         })
         .await
         .unwrap();
@@ -2114,6 +2127,7 @@ async fn privacy_is_let_go_as_the_window_turns_to_another_computer() {
             hevc: false,
             window: 0,
             fit: None,
+            borrow: None,
         })
         .await
         .unwrap();
@@ -2177,6 +2191,7 @@ async fn a_fit_that_cannot_be_asked_still_shows_the_screen_asked_for() {
                 width: 1280,
                 height: 720,
             }),
+            borrow: None,
         })
         .await
         .unwrap();

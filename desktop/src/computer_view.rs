@@ -117,6 +117,19 @@ struct Wanted {
     /// of the window's size in place of `monitor`, which it shows when none
     /// is made.
     fit: bool,
+    /// A window of that computer picked to be shown in place of a screen
+    /// ("Borrow a window…"): the server asks the computer to lend it, shows
+    /// the screen it was moved to, and gives it back as the view ends.
+    borrow: Option<Borrowed>,
+}
+
+/// A window of another computer being borrowed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Borrowed {
+    /// Its id there, from that computer's list.
+    pub window: String,
+    /// Its title, for this window's own.
+    pub title: String,
 }
 
 /// A view's ask held back until the window's first picture area is
@@ -1030,6 +1043,28 @@ pub fn window_title(name: &str, screen: u32, mic_on: bool) -> String {
     }
 }
 
+/// A borrowed window's own title cleaned for a window's: no control
+/// characters, at most 120 characters.
+pub fn clean_title(title: &str) -> String {
+    title
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(120)
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+/// The title of the window that shows a borrowed window: its own title and
+/// the computer it is on.
+pub fn borrowed_title(title: &str, name: &str) -> String {
+    if title.is_empty() {
+        format!("Window \u{b7} {name}")
+    } else {
+        format!("{title} \u{b7} {name}")
+    }
+}
+
 /// Whether a window after the first opens View only (PR #570 review I4):
 /// unless the computer, as its session said, lands a session's clicks on
 /// the screen it shows (`per_screen`: Windows always, Linux where its
@@ -1269,8 +1304,93 @@ impl ComputerView {
             name: name.to_string(),
             monitor,
             fit: state.fit.on,
+            borrow: None,
         };
         ask(&self.state_dir, &mut state, wanted)
+    }
+
+    /// Show the window `window` of the computer `device_id` ("Borrow a
+    /// window…") in a window of its own: one not in use, else a new one, at
+    /// most [`wire::MAX_VIEWS`] in all. The server asks that computer to
+    /// lend it, and gives it back as this window closes. `title` is the
+    /// window's, for this one's title; the choices are as [`Self::open`]'s.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_borrowed(
+        &self,
+        ctx: &egui::Context,
+        device_id: &str,
+        name: &str,
+        window: &str,
+        title: &str,
+        quality: u8,
+        view_only: bool,
+        stats: bool,
+    ) -> Result<(), String> {
+        let Some(target) = self.free_window(ctx, None) else {
+            return Err(format!(
+                "At most {} screen windows at once: close one first.",
+                wire::MAX_VIEWS
+            ));
+        };
+        let mut state = lock(&target);
+        // Never made to fit: a borrowed window is its own size.
+        state.fit.on = false;
+        state.hevc_refused = false;
+        state.quality = quality;
+        state.view_only = view_only;
+        state.stats_on = stats;
+        state.keys_by_position = computers::read(&self.state_dir)
+            .computers
+            .iter()
+            .find(|c| c.device_id == device_id)
+            .and_then(|c| c.keys_by_position)
+            .unwrap_or(state.keys_default);
+        state.position_hint = PositionHint::default();
+        // Not "Show its screen": a computer that lands a window's clicks over
+        // its first screen is said so on the bar, as for any later window.
+        state.later = true;
+        let wanted = Wanted {
+            device_id: device_id.to_string(),
+            name: name.to_string(),
+            monitor: 0,
+            fit: false,
+            borrow: Some(Borrowed {
+                window: window.to_string(),
+                title: clean_title(title),
+            }),
+        };
+        let asked = ask(&self.state_dir, &mut state, wanted);
+        ctx.request_repaint_of(viewport_id(state.slot));
+        asked
+    }
+
+    /// A window not in use (other than `not`): one of the others, else the
+    /// first's (closed while they stay, review M3), else a new one while
+    /// fewer than [`wire::MAX_VIEWS`] exist.
+    fn free_window(
+        &self,
+        ctx: &egui::Context,
+        not: Option<&Arc<Mutex<State>>>,
+    ) -> Option<Arc<Mutex<State>>> {
+        let mut extras = self
+            .extras
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let free = extras
+            .iter()
+            .chain(std::iter::once(&self.shared))
+            .find(|w| not.is_none_or(|n| !Arc::ptr_eq(w, n)) && lock(w).wanted.is_none())
+            .cloned();
+        match free {
+            Some(free) => Some(free),
+            None if extras.len() + 1 < usize::from(wire::MAX_VIEWS) => {
+                let slot = extras.len() as u8 + 1;
+                let window = new_window(ctx, &self.state_dir, slot, self.mic_claims.clone());
+                extras.push(window.clone());
+                Some(window)
+            }
+            None => None,
+        }
     }
 
     /// Stats switched in Settings (PR #551 review): an open window follows.
@@ -1453,29 +1573,7 @@ impl ComputerView {
     /// of its own (PC11): a window not in use, else a new one, at most
     /// [`wire::MAX_VIEWS`] in all; it starts with `source`'s choices.
     fn open_new_window(&self, ctx: &egui::Context, source: &Arc<Mutex<State>>, monitor: u32) {
-        let target = {
-            let mut extras = self
-                .extras
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            // A window not in use: one of the others, else the first's
-            // (closed while they stay, review M3).
-            let free = extras
-                .iter()
-                .chain(std::iter::once(&self.shared))
-                .find(|w| !Arc::ptr_eq(w, source) && lock(w).wanted.is_none())
-                .cloned();
-            match free {
-                Some(free) => Some(free),
-                None if extras.len() + 1 < usize::from(wire::MAX_VIEWS) => {
-                    let slot = extras.len() as u8 + 1;
-                    let window = new_window(ctx, &self.state_dir, slot, self.mic_claims.clone());
-                    extras.push(window.clone());
-                    Some(window)
-                }
-                None => None,
-            }
-        };
+        let target = self.free_window(ctx, Some(source));
         let mut from = lock(source);
         let Some(wanted) = from.wanted.clone() else {
             return;
@@ -1530,10 +1628,11 @@ impl ComputerView {
         let (title, slot) = {
             let state = lock(&shared);
             let Some(wanted) = &state.wanted else { return };
-            (
-                window_title(&wanted.name, wanted.monitor, state.mic.on()),
-                state.slot,
-            )
+            let title = match &wanted.borrow {
+                Some(borrowed) => borrowed_title(&borrowed.title, &wanted.name),
+                None => window_title(&wanted.name, wanted.monitor, state.mic.on()),
+            };
+            (title, state.slot)
         };
         let builder = egui::ViewportBuilder::default()
             .with_title(title)
@@ -1567,7 +1666,8 @@ fn would_lock(state: &State) -> Option<String> {
     let going = state.ended.is_none()
         && state.status.phase == Phase::Showing
         && state.status.reconnecting == 0
-        && state.switching.is_none();
+        && state.switching.is_none()
+        && state.wanted.as_ref().is_some_and(|w| w.borrow.is_none());
     going
         .then(|| state.wanted.as_ref().map(|w| w.device_id.clone()))
         .flatten()
@@ -1768,6 +1868,7 @@ fn view_ask(wanted: &Wanted, hevc: bool, slot: u8, fit: Option<FitSize>) -> Comp
         hevc,
         window: slot,
         fit,
+        borrow: wanted.borrow.as_ref().map(|b| b.window.clone()),
     }
 }
 
@@ -1780,6 +1881,10 @@ fn switch_screen(state_dir: &Path, state: &mut State, monitor: u32) -> Result<()
     let Some(wanted) = state.wanted.clone() else {
         return Ok(());
     };
+    // A borrowed window is the one picked: it has no other screen to show.
+    if wanted.borrow.is_some() {
+        return Ok(());
+    }
     // A fitted view shows a screen the other computer made, whatever
     // `monitor` is: picking a screen leaves it (item 8).
     if wanted.monitor == monitor && state.ended.is_none() && !wanted.fit {
@@ -1862,7 +1967,7 @@ fn switch_fit(shared: &Mutex<State>, state_dir: &Path, config: Option<&Path>, on
     let Some(wanted) = state.wanted.clone() else {
         return;
     };
-    if wanted.fit == on {
+    if wanted.fit == on || wanted.borrow.is_some() {
         return;
     }
     let to = wanted.monitor;
@@ -2029,7 +2134,10 @@ fn say_closing(state: &mut State) -> bool {
     state.mic_resume = None;
     // Another window still shows that computer (PC11): it is not locked
     // under it.
-    let lock_it = state.lock_on_close && !state.same_computer_open;
+    // A borrowed window closing is not that computer's screen closing: it
+    // is never locked for it, whoever is using it.
+    let borrowed = state.wanted.as_ref().is_some_and(|w| w.borrow.is_some());
+    let lock_it = state.lock_on_close && !state.same_computer_open && !borrowed;
     if let Some(ask) = closing_ask(lock_it, state.status.phase) {
         say_privacy(state, ask);
         owed = lock_owed(state.writer.is_some(), state.ended.is_some());
@@ -2624,6 +2732,9 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
     {
         monitor = n;
     }
+    // A borrowed window ("Borrow a window…") is one window of that computer:
+    // no screens to pick, no fit, no privacy mode or mic for the computer.
+    let borrowed = wanted.borrow.is_some();
     let mut open_new: Option<u32> = None;
     let mut fit_toggle: Option<bool> = None;
     let mut send_key: Option<SendKey> = None;
@@ -2644,7 +2755,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                         said.push_str(&format!(" \u{b7} {}", status.route));
                     }
                     ui.label(egui::RichText::new(said).strong());
-                    if choices.len() > 1 {
+                    if choices.len() > 1 && !borrowed {
                         // PC11: a button a screen, laid out as they sit.
                         let current = switching.unwrap_or(shown_monitor);
                         if let Some(pick) =
@@ -2678,17 +2789,20 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                     }
                     // Item 8: the other computer's screen made to the size of
                     // this window; greyed for a computer that cannot.
-                    let mut fit_switch = fit_on;
-                    let fit_box = ui
-                        .add_enabled(
-                            view_fit::unavailable(&wanted.name, &status).is_none(),
-                            egui::Checkbox::new(&mut fit_switch, view_fit::LABEL),
-                        )
-                        .on_hover_text(view_fit::hover(&wanted.name, &status))
-                        .on_disabled_hover_text(view_fit::hover(&wanted.name, &status));
-                    if fit_box.clicked() {
-                        fit_box.surrender_focus();
-                        fit_toggle = Some(fit_switch);
+                    // (Not for a borrowed window, which is its own size.)
+                    if !borrowed {
+                        let mut fit_switch = fit_on;
+                        let fit_box = ui
+                            .add_enabled(
+                                view_fit::unavailable(&wanted.name, &status).is_none(),
+                                egui::Checkbox::new(&mut fit_switch, view_fit::LABEL),
+                            )
+                            .on_hover_text(view_fit::hover(&wanted.name, &status))
+                            .on_disabled_hover_text(view_fit::hover(&wanted.name, &status));
+                        if fit_box.clicked() {
+                            fit_box.surrender_focus();
+                            fit_toggle = Some(fit_switch);
+                        }
                     }
                     // PC4: the keys this computer keeps, or that cannot be
                     // pressed through the window, while it controls.
@@ -2745,7 +2859,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                         }
                         // PC8: the other computer's own privacy mode.
                         let mut hide = hiding(&status.privacy);
-                        let hidden = ui.checkbox(&mut hide, "Hide what I do there").on_hover_text(
+                        let hidden = ui.add_visible(!borrowed, egui::Checkbox::new(&mut hide, "Hide what I do there")).on_hover_text(
                             format!(
                                 "Ask {} to block its own keyboard and mouse and show a ring on its screen while this window drives it. {} decides: its Devices page needs \u{201c}Lock, sleep, privacy and wake others\u{201d} on for this computer.",
                                 wanted.name, wanted.name
@@ -2760,7 +2874,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                             });
                         }
                         // PC10: this computer's microphone, there.
-                        if view_mic::available() {
+                        if view_mic::available() && !borrowed {
                             let mut mic_switch = mic_wanted;
                             let mic = ui
                                 .checkbox(&mut mic_switch, "Send my mic")
@@ -2779,7 +2893,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                     if mic_on {
                         on_air_label(ui).on_hover_text(on_air_hover(&wanted.name, status.mic));
                     }
-                    if ended.is_none() && status.phase == Phase::Showing {
+                    if ended.is_none() && status.phase == Phase::Showing && !borrowed {
                         let mut lock_on = lock_on_close;
                         let lock_switch = ui
                             .checkbox(&mut lock_on, "Lock it when I close the window")
@@ -3185,7 +3299,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
             // foot (not in the bar, whose height is part of the area).
             if ended.is_none()
                 && matches!(*status.fit, ViewFit::Asking | ViewFit::Failed(_))
-                && let Some(words) = view_fit::words(&status)
+                && let Some(words) = view_fit::words_for(&status, &wanted.name, borrowed)
             {
                 egui::Area::new(egui::Id::new("computer-view-fit"))
                     .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -16.0))
@@ -4292,6 +4406,7 @@ mod tests {
                 name: "Desk".into(),
                 monitor: 0,
                 fit: false,
+                borrow: None,
             }),
             session_id: Some(9),
             writer: Some(writer),
@@ -4347,6 +4462,7 @@ mod tests {
                 name: "Desk".into(),
                 monitor: 0,
                 fit: false,
+                borrow: None,
             }),
             lock_on_close,
             ended,
@@ -4434,6 +4550,7 @@ mod tests {
                 name: "Desk".into(),
                 monitor: 0,
                 fit: false,
+                borrow: None,
             }),
             session_id: Some(9),
             writer: Some(writer),
@@ -4815,13 +4932,14 @@ mod tests {
             name: "Desk".into(),
             monitor: 0,
             fit: false,
+            borrow: None,
         };
         ask_with(&dir, &mut state, wanted, Some(true)).unwrap();
         let asked = computers::take_all(&dir, now_unix());
         assert!(
             matches!(
                 asked.as_slice(),
-                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: true, window: 0, fit: None }
+                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: true, window: 0, fit: None, borrow: None }
             ),
             "{asked:?}"
         );
@@ -4845,13 +4963,14 @@ mod tests {
             name: "Desk".into(),
             monitor: 0,
             fit: false,
+            borrow: None,
         };
         ask(&dir, &mut state, wanted).unwrap();
         let asked = computers::take_all(&dir, now_unix());
         assert!(
             matches!(
                 asked.as_slice(),
-                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: false, window: 0, fit: None }
+                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: false, window: 0, fit: None, borrow: None }
             ),
             "{asked:?}"
         );
@@ -4871,6 +4990,7 @@ mod tests {
             name: "Desk".into(),
             monitor: 1,
             fit,
+            borrow: None,
         }
     }
 
@@ -5168,6 +5288,7 @@ mod tests {
                 name: "Desk".into(),
                 monitor: 0,
                 fit: false,
+                borrow: None,
             }),
             session_id: Some(41),
             status: ViewStatus {
@@ -5344,6 +5465,7 @@ mod tests {
                 name: "Desk".into(),
                 monitor: 0,
                 fit: false,
+                borrow: None,
             }),
             status: ViewStatus {
                 phase: Phase::Showing,
@@ -5478,6 +5600,7 @@ mod tests {
                 name: "Desk".into(),
                 monitor: 0,
                 fit: false,
+                borrow: None,
             }),
             status: ViewStatus {
                 phase: Phase::Showing,
@@ -5968,6 +6091,7 @@ mod tests {
             name: "Lab".into(),
             monitor: 0,
             fit: false,
+            borrow: None,
         };
         let _ = ask_with(&dir, &mut state, other, Some(false));
         assert!(!state.mic.on() && !state.mic.wanted());
@@ -6410,6 +6534,7 @@ mod tests {
                 hevc: false,
                 window: 0,
                 fit: None,
+                borrow: None,
             }]
         );
         let (mut relay, _) = listener.accept().unwrap();
@@ -6657,6 +6782,7 @@ mod tests {
                 name: "Desk".into(),
                 monitor: 0,
                 fit: false,
+                borrow: None,
             }),
             status: ViewStatus {
                 phase: Phase::Showing,
@@ -6698,6 +6824,7 @@ mod tests {
                 name: "Desk".into(),
                 monitor: 0,
                 fit: false,
+                borrow: None,
             }),
             session_id: Some(9),
             writer: Some(writer),
@@ -6735,6 +6862,7 @@ mod tests {
                 hevc: false,
                 window: 2,
                 fit: None,
+                borrow: None,
             }]
         );
         // The same screen again asks nothing.
@@ -6746,6 +6874,191 @@ mod tests {
         switch_screen(&dir, &mut state, 0).unwrap();
         assert!(!state.record_carry);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn borrowed(window: &str, title: &str) -> Wanted {
+        Wanted {
+            device_id: "desk".into(),
+            name: "Desk".into(),
+            monitor: 0,
+            fit: false,
+            borrow: Some(Borrowed {
+                window: window.into(),
+                title: title.into(),
+            }),
+        }
+    }
+
+    /// Borrowing a window: the window's own title names the view's window,
+    /// cleaned, with the computer it is on.
+    #[test]
+    fn a_borrowed_windows_title_names_the_window_and_its_computer() {
+        assert_eq!(borrowed_title("Notes", "Desk"), "Notes \u{b7} Desk");
+        assert_eq!(borrowed_title("", "Desk"), "Window \u{b7} Desk");
+        assert_eq!(clean_title("  Notes\u{2026}\u{7}\n x "), "Notes\u{2026} x");
+        assert_eq!(clean_title(&"x".repeat(300)).chars().count(), 120);
+    }
+
+    /// Borrowing a window: the view is asked for by the window's id, never
+    /// with a fit, and "Open in a new window" is not a borrowed window's.
+    #[test]
+    fn a_borrowed_view_is_asked_by_the_windows_id() {
+        let dir = std::env::temp_dir().join(format!("pd-computer-borrow-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let ctx = egui::Context::default();
+        let view = ComputerView::new(&ctx, dir.clone(), None);
+        view.open_borrowed(&ctx, "desk", "Desk", "0x5a", "Notes", 3, true, true)
+            .unwrap();
+        let first = lock(&view.shared);
+        assert_eq!(first.slot, 0);
+        assert!(first.later, "not Show its screen");
+        assert_eq!(
+            (first.quality, first.view_only, first.stats_on),
+            (3, true, true)
+        );
+        let wanted = first.wanted.clone().unwrap();
+        assert!(!first.fit.on && !wanted.fit);
+        assert_eq!(
+            wanted.borrow,
+            Some(Borrowed {
+                window: "0x5a".into(),
+                title: "Notes".into()
+            })
+        );
+        drop(first);
+        let asked = computers::take_all(&dir, now_unix());
+        assert_eq!(
+            asked.iter().map(|r| r.ask.clone()).collect::<Vec<_>>(),
+            [ComputerAsk::View {
+                device_id: "desk".into(),
+                monitor: 0,
+                hevc: false,
+                window: 0,
+                fit: None,
+                borrow: Some("0x5a".into()),
+            }]
+        );
+        // Another borrowed window takes a window of its own; the first stays.
+        view.open_borrowed(&ctx, "desk", "Desk", "0x6b", "Terminal", 3, true, true)
+            .unwrap();
+        let windows = view.windows();
+        assert_eq!(windows.len(), 2);
+        assert_eq!(lock(&windows[1]).slot, 1);
+        assert_eq!(
+            lock(&windows[0])
+                .wanted
+                .as_ref()
+                .and_then(|w| w.borrow.clone())
+                .map(|b| b.window),
+            Some("0x5a".to_string())
+        );
+        let asked = computers::take_all(&dir, now_unix());
+        assert!(matches!(
+            asked.last().map(|r| &r.ask),
+            Some(ComputerAsk::View { window: 1, borrow: Some(w), .. }) if w == "0x6b"
+        ));
+        // Closing one stops only its own view (the server gives the window back).
+        stop_view(&dir, &mut lock(&windows[1]), false);
+        let asked = computers::take_all(&dir, now_unix());
+        assert!(matches!(
+            asked.as_slice(),
+            [r] if r.ask == ComputerAsk::StopView { session_id: None, lock: false, window: 1 }
+        ));
+        // A window not in use is used again; at most four in all, the fifth said.
+        lock(&windows[1]).wanted = None;
+        for window in ["0x7", "0x8", "0x9"] {
+            view.open_borrowed(&ctx, "desk", "Desk", window, "A", 3, true, true)
+                .unwrap();
+        }
+        assert_eq!(view.windows().len(), 4);
+        let said = view
+            .open_borrowed(&ctx, "desk", "Desk", "0xa", "C", 3, true, true)
+            .unwrap_err();
+        assert!(said.contains("At most 4"), "{said}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Borrowing a window: it has no other screen to switch to and no fit,
+    /// so neither asks anything.
+    #[test]
+    fn a_borrowed_window_has_no_screens_to_switch_or_fit() {
+        let dir =
+            std::env::temp_dir().join(format!("pd-computer-borrow-fit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let shared = Mutex::new(State {
+            wanted: Some(borrowed("0x5a", "Notes")),
+            session_id: Some(4),
+            ..State::default()
+        });
+        switch_screen(&dir, &mut lock(&shared), 2).unwrap();
+        switch_fit(&shared, &dir, None, true);
+        assert!(computers::take_all(&dir, now_unix()).is_empty());
+        assert!(
+            lock(&shared)
+                .wanted
+                .as_ref()
+                .is_some_and(|w| w.borrow.is_some() && !w.fit)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Borrowing a window: closing it never locks that computer, however
+    /// "Lock it when I close the window" is set (the owner may be using the
+    /// computer: only its window is borrowed), and it does not count as a
+    /// view of the computer's screen for another window's lock.
+    #[test]
+    fn closing_a_borrowed_window_never_locks_its_computer() {
+        let showing = || ViewStatus {
+            phase: Phase::Showing,
+            ..ViewStatus::default()
+        };
+        let mut borrowed_state = State {
+            wanted: Some(borrowed("0x5a", "Notes")),
+            lock_on_close: true,
+            status: showing(),
+            ..State::default()
+        };
+        assert_eq!(would_lock(&borrowed_state), None);
+        assert!(!say_closing(&mut borrowed_state));
+        let screen = State {
+            wanted: Some(Wanted {
+                borrow: None,
+                ..borrowed("0x5a", "Notes")
+            }),
+            lock_on_close: true,
+            status: showing(),
+            ..State::default()
+        };
+        assert_eq!(would_lock(&screen), Some("desk".to_string()));
+    }
+
+    /// Borrowing a window: what the window says while the other computer is
+    /// asked to lend it, and nothing once it is.
+    #[test]
+    fn a_borrowed_window_says_it_is_being_asked_for() {
+        let mut status = ViewStatus {
+            fit: Box::new(ViewFit::Asking),
+            ..ViewStatus::default()
+        };
+        assert_eq!(
+            view_fit::words_for(&status, "Desk", true).as_deref(),
+            Some("Asking Desk to lend the window\u{2026}")
+        );
+        assert_eq!(
+            view_fit::words_for(&status, "Desk", false).as_deref(),
+            Some("Making a screen to fit this window\u{2026}")
+        );
+        *status.fit = ViewFit::Borrowed {
+            width: 800,
+            height: 600,
+        };
+        status.monitor = 3;
+        assert_eq!(view_fit::words_for(&status, "Desk", true), None);
+        assert_eq!(
+            view_fit::shown_monitor(0, &status),
+            3,
+            "the screen the window was lent on"
+        );
     }
 
     /// PC11: "Open in a new window" shows the screen in a window of its
@@ -6782,6 +7095,7 @@ mod tests {
                 hevc: false,
                 window: 1,
                 fit: None,
+                borrow: None,
             }]
         );
         // Its close stops its own view alone.
@@ -6873,6 +7187,7 @@ mod tests {
                     name: "Desk".into(),
                     monitor: 0,
                     fit: false,
+                    borrow: None,
                 },
                 Some(false),
             )
@@ -7007,6 +7322,7 @@ mod tests {
                 name: "Desk".into(),
                 monitor: 0,
                 fit: false,
+                borrow: None,
             }),
             ..State::default()
         };
@@ -7042,6 +7358,7 @@ mod tests {
             name: "Desk".into(),
             monitor: 0,
             fit: false,
+            borrow: None,
         };
         let controlled = |state: &mut State| {
             state.status = ViewStatus {
@@ -7070,6 +7387,7 @@ mod tests {
                         name: "Lap".into(),
                         monitor: 0,
                         fit: false,
+                        borrow: None,
                     };
                     ask_with(&dir, &mut state, lap, Some(false)).unwrap();
                 }
@@ -7160,6 +7478,7 @@ mod tests {
                 name: "Desk".into(),
                 monitor: 0,
                 fit: false,
+                borrow: None,
             }),
             decoder_gen: 4,
             ..State::default()
@@ -7340,6 +7659,7 @@ mod tests {
             name: "Lap".into(),
             monitor: 1,
             fit: false,
+            borrow: None,
         });
         assert_eq!(view.mic_on_air(), None);
         for window in view.windows() {
@@ -7562,6 +7882,7 @@ mod tests {
                 name: "Desk".into(),
                 monitor: 0,
                 fit: false,
+                borrow: None,
             }),
             writer: Some(TcpStream::connect(listener.local_addr().unwrap()).unwrap()),
             status: ViewStatus {

@@ -274,6 +274,7 @@ fn a_touchpads_fine_scroll_lands_in_120ths() {
             hevc: false,
             window: 0,
             fit: None,
+            borrow: None,
         },
         pin::now_unix(),
     )

@@ -469,6 +469,7 @@ fn input_to_picture() {
             hevc: hevc && crate::video::probe_hevc("ffmpeg"),
             window: 0,
             fit: None,
+            borrow: None,
         },
         pin::now_unix(),
     )
@@ -506,6 +507,7 @@ fn input_to_picture_on_a_running_pair() {
             hevc: hevc && crate::video::probe_hevc("ffmpeg"),
             window: 0,
             fit: None,
+            borrow: None,
         },
         pin::now_unix(),
     )

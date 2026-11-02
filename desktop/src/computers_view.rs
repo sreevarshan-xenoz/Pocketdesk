@@ -76,6 +76,26 @@ pub struct ComputersView {
     there_open: Option<String>,
     /// Remote revoke: the device there whose Remove waits for its answer.
     confirm_remove: Option<String>,
+    /// Borrowing a window: the computer whose "Borrow a window\u{2026}" picker
+    /// is open (the server keeps what it listed, titles and all, until the
+    /// picker closes).
+    borrow_open: Option<String>,
+    /// A window picked to be shown, until the app takes it.
+    borrow_pick: Option<BorrowPick>,
+    /// The frame the list was last drawn in: a gap is the page left, and
+    /// an open picker closes with it (its titles are not kept).
+    list_pass: Option<u64>,
+}
+
+/// A window of another computer picked in the picker, for the app to show.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BorrowPick {
+    pub device_id: String,
+    /// The computer's name.
+    pub name: String,
+    /// The window's id there, and its title.
+    pub window: String,
+    pub title: String,
 }
 
 /// How long "Wake it and show" waits for the computer's link (PC6): a
@@ -242,6 +262,12 @@ impl ComputersView {
     /// name, once (BK7).
     pub fn take_view(&mut self) -> Option<(String, String)> {
         self.view.take()
+    }
+
+    /// The window picked to borrow ("Borrow a window\u{2026}"), once, for the
+    /// app to show.
+    pub fn take_borrow(&mut self) -> Option<BorrowPick> {
+        self.borrow_pick.take()
     }
     /// Show `computer`'s screen (BK7), or with its link down and a way
     /// to wake it known, offer to wake it first (PC6).
@@ -448,7 +474,8 @@ impl ComputersView {
         // Read often only while an answer can still come (PR #574 review
         // N7): one past its wait is said as none.
         let now_unix = pocketdesk_core::local::pin::now_unix();
-        let waiting_there = there_step(self.file.there.as_ref(), now_unix) == ThereStep::Asking;
+        let waiting_there = there_step(self.file.there.as_ref(), now_unix) == ThereStep::Asking
+            || windows_step(self.file.windows_there.as_ref(), now_unix) == WindowsStep::Asking;
         let every = if self.pairing.is_some() || self.waking.is_some() || waiting_there {
             PAIRING_REFRESH
         } else {
@@ -608,6 +635,124 @@ impl ComputersView {
                 self.notice = crate::notice::Notice::error(format!("Not asked: {e}"));
             }
             self.read_at = None;
+        }
+    }
+
+    /// Open or close `computer`'s "Borrow a window\u{2026}": opened, its windows
+    /// are asked for; closed, they are forgotten. One picker at a time.
+    fn toggle_borrow(
+        &mut self,
+        state_dir: &Path,
+        computer: &PeerComputer,
+        server_running: bool,
+        now_unix: u64,
+    ) {
+        if self.borrow_open.as_deref() == Some(&computer.device_id) {
+            self.close_borrow(state_dir, server_running, now_unix);
+            return;
+        }
+        // Another computer's picker closes as this one opens.
+        self.close_borrow(state_dir, server_running, now_unix);
+        self.borrow_open = Some(computer.device_id.clone());
+        if server_running {
+            self.ask_windows(state_dir, &computer.device_id, now_unix);
+        }
+    }
+
+    /// Close the open picker, and ask the server to forget what it listed.
+    fn close_borrow(&mut self, state_dir: &Path, server_running: bool, now_unix: u64) {
+        let Some(device_id) = self.borrow_open.take() else {
+            return;
+        };
+        if server_running {
+            let ask = ComputerAsk::CloseWindowsThere { device_id };
+            let _ = computers::request(state_dir, ask, now_unix);
+            self.read_at = None;
+        }
+    }
+
+    /// Ask the server for the windows `device_id` would lend.
+    fn ask_windows(&mut self, state_dir: &Path, device_id: &str, now_unix: u64) {
+        let ask = ComputerAsk::WindowsThere {
+            device_id: device_id.to_string(),
+        };
+        if let Err(e) = computers::request(state_dir, ask, now_unix) {
+            self.notice = crate::notice::Notice::error(format!("Not asked: {e}"));
+        }
+        self.read_at = None;
+    }
+
+    /// "Borrow a window\u{2026}": the windows `computer` listed, each with Borrow;
+    /// what the ask came to. A window picked is handed to the app, and the
+    /// picker closes.
+    fn borrow_picker(
+        &mut self,
+        ui: &mut egui::Ui,
+        state_dir: &Path,
+        computer: &PeerComputer,
+        server_running: bool,
+        now_unix: u64,
+    ) {
+        let name = computer.name.clone();
+        let there = self
+            .file
+            .windows_there
+            .clone()
+            .filter(|t| t.device_id == computer.device_id);
+        ui.separator();
+        ui.label(RichText::new(format!("Windows on {name}")).strong());
+        let step = windows_step(there.as_ref(), now_unix);
+        match &step {
+            WindowsStep::Asking => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(format!("Asking {name}\u{2026}"));
+                });
+                ui.ctx().request_repaint_after(Duration::from_millis(500));
+            }
+            WindowsStep::Said(why) => {
+                ui.label(RichText::new(windows_words(why, &name)).color(crate::theme::bad(ui)));
+            }
+            WindowsStep::Listed | WindowsStep::NotAsked => {}
+        }
+        let mut pick = None;
+        if let Some(there) = &there {
+            if there.windows.is_empty() && step == WindowsStep::Listed {
+                ui.label(RichText::new(NO_WINDOWS).weak());
+            }
+            for window in &there.windows {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(window_label(window));
+                    ui.label(RichText::new(window_facts(window)).color(crate::theme::muted(ui)));
+                    if ui
+                        .add_enabled(server_running, egui::Button::new("Borrow"))
+                        .on_hover_text(borrow_hover(&name))
+                        .clicked()
+                    {
+                        pick = Some(window.clone());
+                    }
+                });
+            }
+        }
+        if ui
+            .add_enabled(
+                server_running && step != WindowsStep::Asking,
+                egui::Button::new("Refresh"),
+            )
+            .on_disabled_hover_text(REMOVE_WAITS)
+            .clicked()
+        {
+            self.ask_windows(state_dir, &computer.device_id, now_unix);
+        }
+        ui.label(RichText::new(borrow_note(&name)).color(crate::theme::muted(ui)));
+        if let Some(window) = pick {
+            self.borrow_pick = Some(BorrowPick {
+                device_id: computer.device_id.clone(),
+                name,
+                window: window.address,
+                title: window.title,
+            });
+            self.close_borrow(state_dir, server_running, now_unix);
         }
     }
 
@@ -907,6 +1052,13 @@ impl ComputersView {
         now_unix: u64,
     ) {
         self.refresh(state_dir);
+        // Left and come back to: the windows listed are not kept (they carry
+        // titles), as the pasted link is not.
+        let pass = ui.ctx().cumulative_pass_nr();
+        if self.list_pass.is_some_and(|at| at + 1 < pass) {
+            self.close_borrow(state_dir, server_running, now_unix);
+        }
+        self.list_pass = Some(pass);
         if self.file.computers.is_empty() {
             ui.label(RichText::new("No other computer paired yet.").weak());
         }
@@ -990,9 +1142,24 @@ impl ComputersView {
                         {
                             self.toggle_there(state_dir, computer, server_running, now_unix);
                         }
+                        // Borrowing a window: one window of it in a window
+                        // here, over the link between the two.
+                        let open = self.borrow_open.as_deref() == Some(&computer.device_id);
+                        let can = server_running && computer.link == "linked";
+                        if ui
+                            .add_enabled(can || open, egui::Button::new(BORROW).selected(open))
+                            .on_hover_text(BORROW_HOVER)
+                            .on_disabled_hover_text(borrow_waits(server_running))
+                            .clicked()
+                        {
+                            self.toggle_borrow(state_dir, computer, server_running, now_unix);
+                        }
                     }
                 });
                 self.wake_row(ui, state_dir, computer, server_running, now_unix);
+                if self.borrow_open.as_deref() == Some(&computer.device_id) {
+                    self.borrow_picker(ui, state_dir, computer, server_running, now_unix);
+                }
                 if self.there_open.as_deref() == Some(&computer.device_id) {
                     self.devices_there(ui, state_dir, computer, server_running, now_unix);
                 }
@@ -1226,6 +1393,119 @@ const REMOVE_WAITS: &str = "Needs the server running, and no ask under way";
 
 /// How long the app waits for the other computer's answer.
 const ANSWER_WAIT_SECS: u64 = 20;
+
+/// Borrowing a window: the button that lists another computer's windows.
+pub const BORROW: &str = "Borrow a window\u{2026}";
+
+/// What "Borrow a window\u{2026}" does.
+const BORROW_HOVER: &str = "Pick one window of that computer to show in a window here, with its own picture and your keys and mouse. The window moves off that computer's screen while you hold it, and goes back when this one closes.";
+
+/// What there is when a computer has no window to lend.
+const NO_WINDOWS: &str = "No window there can be borrowed now.";
+
+/// Why Borrow a window\u{2026} is greyed.
+fn borrow_waits(server_running: bool) -> &'static str {
+    if server_running {
+        "Needs that computer's link up: it is asked over the link between the two"
+    } else {
+        "Start the server first: it asks the other computer"
+    }
+}
+
+/// What a Borrow button says it does, for `name`.
+fn borrow_hover(name: &str) -> String {
+    format!("Ask {name} to lend this window and show it in a window here.")
+}
+
+/// What is said under the picker, for `name`: what borrowing does there and
+/// where it is allowed.
+fn borrow_note(name: &str) -> String {
+    format!(
+        "A window you borrow is taken off {name}'s screen, put alone on a hidden screen there and shown here; it goes back as you close this window. {name} must have \"Let my computers borrow my windows\" on (its Settings, Other computers)."
+    )
+}
+
+/// Where an ask of another computer's windows stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WindowsStep {
+    /// Nothing asked of this computer yet.
+    NotAsked,
+    /// Asked, its answer awaited.
+    Asking,
+    /// Answered with its windows (perhaps none).
+    Listed,
+    /// Why there is no list: the other computer's own words, or the
+    /// server's.
+    Said(String),
+}
+
+/// Where `there` stands at `now_unix`.
+pub fn windows_step(there: Option<&computers::WindowsThere>, now_unix: u64) -> WindowsStep {
+    let Some(there) = there else {
+        return WindowsStep::NotAsked;
+    };
+    if there.asking {
+        return if now_unix.saturating_sub(there.asked_unix) > ANSWER_WAIT_SECS {
+            WindowsStep::Said("it did not answer".to_string())
+        } else {
+            WindowsStep::Asking
+        };
+    }
+    match &there.error {
+        Some(why) => WindowsStep::Said(why.clone()),
+        None if there.listed_unix > 0 => WindowsStep::Listed,
+        None => WindowsStep::NotAsked,
+    }
+}
+
+/// What the owner reads for the reason `why` the windows of `computer` are
+/// not listed: the other computer's refusals, in its owner's terms.
+pub fn windows_words(why: &str, computer: &str) -> String {
+    if why.contains("Let my computers borrow my windows") {
+        format!(
+            "{computer} does not lend its windows. On {computer}, turn on Settings, Other computers, \"Let my computers borrow my windows\"."
+        )
+    } else if why.contains("paired both ways") {
+        format!(
+            "{computer} does not have this computer paired both ways, so it will not lend a window."
+        )
+    } else if why.contains("only Sway and Hyprland") {
+        format!(
+            "{computer} cannot lend a window: only a Linux computer on Sway or Hyprland can for now."
+        )
+    } else {
+        format!("{computer}: {why}")
+    }
+}
+
+/// A window's title for the picker, else its app.
+fn window_label(window: &pocketdesk_core::local::computers::LendableWindow) -> String {
+    let title = window.title.trim();
+    if !title.is_empty() {
+        title.to_string()
+    } else if !window.class.is_empty() {
+        window.class.clone()
+    } else {
+        "Untitled window".to_string()
+    }
+}
+
+/// What the picker says of a window beside its title: its app, size and
+/// workspace, and that it is already lent here.
+pub fn window_facts(window: &pocketdesk_core::local::computers::LendableWindow) -> String {
+    let mut facts = Vec::new();
+    if !window.class.is_empty() && !window.title.trim().is_empty() {
+        facts.push(window.class.clone());
+    }
+    facts.push(format!("{}\u{d7}{}", window.width, window.height));
+    if !window.workspace.is_empty() {
+        facts.push(format!("workspace {}", window.workspace));
+    }
+    if window.lent {
+        facts.push("already borrowed".to_string());
+    }
+    facts.join(" \u{b7} ")
+}
 
 /// Where an ask of another computer's devices stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1951,6 +2231,173 @@ mod tests {
                 remove: "lost".to_string()
             }),
             "only the answer removes"
+        );
+    }
+
+    fn lendable(
+        address: &str,
+        title: &str,
+        class: &str,
+    ) -> pocketdesk_core::local::computers::LendableWindow {
+        pocketdesk_core::local::computers::LendableWindow {
+            address: address.to_string(),
+            title: title.to_string(),
+            class: class.to_string(),
+            width: 1280,
+            height: 720,
+            workspace: "2".to_string(),
+            lent: false,
+        }
+    }
+
+    /// Borrowing a window: "Borrow a window\u{2026}" shows only for a linked
+    /// computer paired both ways, with the server running; opened it asks for
+    /// the windows, lists what is answered, hands the pick to the app and
+    /// asks the server to forget the list.
+    #[test]
+    fn borrow_a_window_lists_the_windows_and_hands_the_pick_to_the_app() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let dir = temp("borrow");
+        computers::update(&dir, |file| {
+            file.computers.push(PeerComputer {
+                device_id: "mine-pc".to_string(),
+                name: "Tower".to_string(),
+                mine: true,
+                ..computer("linked")
+            });
+            file.computers.push(PeerComputer {
+                device_id: "one-way".to_string(),
+                name: "Laptop".to_string(),
+                ..computer("linked")
+            });
+            file.windows_there = Some(computers::WindowsThere {
+                device_id: "mine-pc".to_string(),
+                listed_unix: 1,
+                windows: vec![lendable("0x5a", "Notes", "app.notes")],
+                ..Default::default()
+            });
+        })
+        .unwrap();
+        // With the server stopped, nothing can be asked.
+        let stopped = list_page(&dir, false);
+        let off = stopped.get_by_label(BORROW).accesskit_node().is_disabled();
+        drop(stopped);
+        let mut harness = list_page(&dir, true);
+        let buttons = harness.query_all_by_label(BORROW).count();
+        harness.get_by_label(BORROW).click();
+        harness.run_steps(2);
+        let listed = harness.query_by_label("Notes").is_some();
+        harness.get_by_label("Borrow").click();
+        harness.run_steps(2);
+        let pick = harness.state_mut().take_borrow();
+        let again = harness.state_mut().take_borrow();
+        let now = pocketdesk_core::local::pin::now_unix();
+        let requests: Vec<ComputerAsk> = computers::take_all(&dir, now)
+            .into_iter()
+            .map(|r| r.ask)
+            .collect();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(off, "no server, no ask");
+        assert_eq!(buttons, 1, "only the computer paired both ways");
+        assert!(listed, "the window is listed by its title");
+        assert_eq!(
+            pick,
+            Some(BorrowPick {
+                device_id: "mine-pc".to_string(),
+                name: "Tower".to_string(),
+                window: "0x5a".to_string(),
+                title: "Notes".to_string(),
+            })
+        );
+        assert_eq!(again, None, "taken once");
+        assert_eq!(
+            requests,
+            [
+                ComputerAsk::WindowsThere {
+                    device_id: "mine-pc".to_string()
+                },
+                ComputerAsk::CloseWindowsThere {
+                    device_id: "mine-pc".to_string()
+                }
+            ],
+            "asked as the picker opens, forgotten as it closes with the pick"
+        );
+    }
+
+    /// Borrowing a window: a computer whose link is down offers no picker.
+    #[test]
+    fn borrow_a_window_waits_for_the_link() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let dir = temp("borrow-link");
+        computers::update(&dir, |file| {
+            file.computers.push(PeerComputer {
+                device_id: "mine-pc".to_string(),
+                name: "Tower".to_string(),
+                mine: true,
+                ..computer("away: the link closed")
+            });
+        })
+        .unwrap();
+        let harness = list_page(&dir, true);
+        let off = harness.get_by_label(BORROW).accesskit_node().is_disabled();
+        drop(harness);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(off);
+    }
+
+    /// Borrowing a window: how an ask of a computer's windows stands, and the
+    /// words for why there is no list.
+    #[test]
+    fn an_ask_of_windows_there_says_how_it_stands() {
+        let mut there = computers::WindowsThere {
+            device_id: "pc".to_string(),
+            asking: true,
+            asked_unix: 100,
+            ..Default::default()
+        };
+        assert_eq!(windows_step(None, 100), WindowsStep::NotAsked);
+        assert_eq!(windows_step(Some(&there), 110), WindowsStep::Asking);
+        assert_eq!(
+            windows_step(Some(&there), 100 + ANSWER_WAIT_SECS + 1),
+            WindowsStep::Said("it did not answer".to_string())
+        );
+        there.asking = false;
+        assert_eq!(windows_step(Some(&there), 110), WindowsStep::NotAsked);
+        there.listed_unix = 105;
+        assert_eq!(windows_step(Some(&there), 110), WindowsStep::Listed);
+        there.error = Some("no".to_string());
+        assert_eq!(
+            windows_step(Some(&there), 110),
+            WindowsStep::Said("no".to_string())
+        );
+        assert!(
+            windows_words(
+                "This computer does not lend its windows (Settings, \"Let my computers borrow my windows\")",
+                "Tower"
+            )
+            .starts_with("Tower does not lend its windows. On Tower, turn on")
+        );
+        assert!(
+            windows_words(
+                "Only a computer of this one's owner, paired both ways, may borrow a window",
+                "Tower"
+            )
+            .contains("paired both ways")
+        );
+        assert!(windows_words("The computer made no screen", "Tower").starts_with("Tower: "));
+        let mut window = lendable("5", "Notes", "app.notes");
+        assert_eq!(
+            window_facts(&window),
+            "app.notes \u{b7} 1280\u{d7}720 \u{b7} workspace 2"
+        );
+        window.lent = true;
+        assert!(window_facts(&window).ends_with("already borrowed"));
+        assert_eq!(window_label(&window), "Notes");
+        window.title = "  ".to_string();
+        assert_eq!(window_label(&window), "app.notes", "the app when untitled");
+        assert_eq!(
+            window_facts(&window),
+            "1280\u{d7}720 \u{b7} workspace 2 \u{b7} already borrowed"
         );
     }
 
