@@ -28,6 +28,51 @@ use super::{StreamingConfig, VideoFrame};
 /// The seam's variable.
 pub const VAR: &str = latency_probe::PATTERN_VAR;
 
+/// With this set (not empty, `0`, `false`, `off` or `no`) the background is
+/// a page of text over the gradient, so a keyframe has a desktop's worth of
+/// detail to code and the frames between only what moves: the bytes a
+/// keyframe adds to the stream are then as a real screen's, which the
+/// gradient's are not (it costs about what any frame does). For the
+/// keyframe measurements (`docs/status-history.md`); off, the pattern is as
+/// it was.
+pub const TEXT_VAR: &str = "POCKETDESK_TEST_PATTERN_TEXT";
+
+fn text_wanted() -> bool {
+    wanted_by(std::env::var_os(TEXT_VAR))
+}
+
+fn hash(mut x: u32) -> u32 {
+    x ^= x >> 16;
+    x = x.wrapping_mul(0x7feb_352d);
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x846c_a68b);
+    x ^ (x >> 16)
+}
+
+/// Dark glyph-like marks in rows of 9 by 16 pixel cells, a fifth of them
+/// spaces, over `data` (BGRA, `stride` bytes a row): the same every time.
+fn draw_text(data: &mut [u8], width: u32, height: u32, stride: u32) {
+    let (cell_w, cell_h) = (9u32, 16u32);
+    for row in 1..height / cell_h {
+        for col in 0..width / cell_w {
+            let glyph = hash(row * 1000 + col);
+            if glyph.is_multiple_of(5) {
+                continue;
+            }
+            for y in 0..10 {
+                for x in 0..6 {
+                    if !hash(glyph ^ (y * 8 + x)).is_multiple_of(3) {
+                        continue;
+                    }
+                    let px =
+                        ((row * cell_h + 3 + y) * stride + (col * cell_w + 1 + x) * 4) as usize;
+                    data[px..px + 3].copy_from_slice(&[30, 30, 30]);
+                }
+            }
+        }
+    }
+}
+
 /// How far the bar moves each frame, in pixels.
 const BAR_STEP: u32 = 8;
 /// The bar's width, in pixels.
@@ -108,6 +153,9 @@ fn background(width: u32, height: u32) -> VideoFrame {
             let (b, g, r) = ((x * 255 / width) as u8, (y * 255 / height) as u8, 96);
             data[px..px + 4].copy_from_slice(&[b, g, r, 255]);
         }
+    }
+    if text_wanted() {
+        draw_text(&mut data, width, height, stride);
     }
     VideoFrame {
         data,
@@ -218,6 +266,22 @@ pub fn start(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_text_page_marks_the_rows_below_the_strip_and_is_the_same_every_time() {
+        let (w, h) = (192u32, 96u32);
+        let mut page = vec![255u8; (w * h * 4) as usize];
+        draw_text(&mut page, w, h, w * 4);
+        let marked = page.chunks(4).filter(|p| p[0] == 30).count();
+        assert!(marked > 500, "{marked} marked pixels");
+        assert!(
+            page[..(w * 16 * 4) as usize].iter().all(|b| *b == 255),
+            "the counting strip's rows are left alone"
+        );
+        let mut again = vec![255u8; (w * h * 4) as usize];
+        draw_text(&mut again, w, h, w * 4);
+        assert_eq!(page, again);
+    }
 
     #[test]
     fn the_seam_is_on_for_any_value_but_empty_or_0() {
