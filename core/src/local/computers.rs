@@ -250,6 +250,12 @@ pub struct ComputersFile {
     /// written before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub there: Option<DevicesThere>,
+    /// Borrowing a window: this computer's last ask of another computer's
+    /// lendable windows ("Borrow a window…"), and what it answered. Titles
+    /// are in it: the app asks for it to be cleared when its picker closes.
+    /// Absent in files written before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub windows_there: Option<WindowsThere>,
     /// The owner's phones introduced between this computer and another of
     /// the owner's (ecosystem phase 4): each one this computer introduced
     /// to a computer, or was introduced to by one. Removing such a phone
@@ -362,6 +368,29 @@ pub struct DevicesThere {
     pub refused: Option<String>,
 }
 
+/// This computer's ask of another computer's lendable windows (borrowing a
+/// window), as the server keeps it for the app.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowsThere {
+    /// The computer asked.
+    pub device_id: String,
+    /// The ask is out and unanswered.
+    #[serde(default)]
+    pub asking: bool,
+    /// When it was asked (unix seconds).
+    pub asked_unix: u64,
+    /// The windows as last listed, titles included.
+    #[serde(default)]
+    pub windows: Vec<LendableWindow>,
+    /// When the list was last answered (unix seconds), 0 never.
+    #[serde(default)]
+    pub listed_unix: u64,
+    /// Why there is no list: the computer's own words, or why it was not
+    /// asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 /// How long a grant both ways waits for the link before it lapses (PC1).
 pub const PENDING_FOR: u64 = 10 * 60;
 
@@ -466,6 +495,14 @@ impl ComputersFile {
         self.pending_introductions
             .retain(|i| i.computer != device_id);
         self.owed_confirmations.retain(|i| i.computer != device_id);
+        // What it listed of its windows goes with it.
+        if self
+            .windows_there
+            .as_ref()
+            .is_some_and(|t| t.device_id == device_id)
+        {
+            self.windows_there = None;
+        }
         // Its devices' list goes with it (remote revoke).
         if self
             .there
@@ -534,6 +571,13 @@ pub enum ComputerAsk {
         /// `monitor` as it is. A server before it ignores the field.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fit: Option<FitSize>,
+        /// Show one window of that computer instead of a screen (borrowing
+        /// a window): its id from `windows_there`. The server asks that
+        /// computer to lend it, shows the screen it was moved to, and gives
+        /// it back as the view ends; `monitor` and `fit` are not used. A
+        /// server before it ignores the field and shows `monitor`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        borrow: Option<String>,
     },
     /// Ask the nearby computer `device_id` (found by its announcement, at
     /// `address`, control port `port`) to pair ([`super::nearby`]). `mine`:
@@ -573,6 +617,13 @@ pub enum ComputerAsk {
     /// owner's paired both ways (remote revoke): the answer goes in
     /// [`ComputersFile::there`].
     DevicesThere { device_id: String },
+    /// List the windows the computer `device_id` would lend (borrowing a
+    /// window; it must be one of the owner's, paired both ways): the answer
+    /// goes in [`ComputersFile::windows_there`].
+    WindowsThere { device_id: String },
+    /// Forget what the computer `device_id` listed of its windows: the
+    /// picker was closed, and the titles are not kept past that.
+    CloseWindowsThere { device_id: String },
     /// Remove the device `remove` from the computer `device_id` (remote
     /// revoke), as its own Devices page's Unpair would.
     RemoveThere { device_id: String, remove: String },
@@ -607,6 +658,28 @@ pub enum ComputerAsk {
 pub struct FitSize {
     pub width: u32,
     pub height: u32,
+}
+
+/// A window of another computer that may be borrowed (`list` of
+/// `kdeconnect.pocketdesk.virtual_screen`): what the owner picks from. The
+/// title is personal: it is shown and never logged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LendableWindow {
+    /// The id a `lend` names it by: Sway's container id in decimal, or
+    /// Hyprland's `0x` address.
+    pub address: String,
+    pub title: String,
+    /// Its app id (Wayland) or class (X11).
+    #[serde(default)]
+    pub class: String,
+    pub width: u32,
+    pub height: u32,
+    /// The workspace it is on, by name.
+    #[serde(default)]
+    pub workspace: String,
+    /// It is already lent to the computer that asked.
+    #[serde(default)]
+    pub lent: bool,
 }
 
 /// Whether a window number is the first window's, left out of a request.
@@ -1031,6 +1104,7 @@ mod tests {
                 hevc: true,
                 window: 0,
                 fit: None,
+                borrow: None,
             },
             100,
         )
@@ -1072,6 +1146,7 @@ mod tests {
                 hevc: false,
                 window: 0,
                 fit: None,
+                borrow: None,
             },
             "the first screen unless named, and no HEVC from an app before PC5"
         );
@@ -1086,6 +1161,7 @@ mod tests {
                 width: 1280,
                 height: 720,
             }),
+            borrow: None,
         };
         let wire = serde_json::to_value(&fitted).unwrap();
         assert_eq!(
@@ -1099,6 +1175,7 @@ mod tests {
             hevc: false,
             window: 0,
             fit: None,
+            borrow: None,
         })
         .unwrap();
         assert!(
@@ -1233,6 +1310,7 @@ mod tests {
                         hevc: false,
                         window: 0,
                         fit: None,
+                        borrow: None,
                     }
                 };
                 asked.push(request(&dir, ask, 100).unwrap());
@@ -1456,6 +1534,73 @@ mod tests {
         );
         assert_eq!(file.last_pairing, None);
         assert_eq!(file.remove("gone"), None);
+    }
+
+    /// A computer taken out takes what it listed of its windows, with their
+    /// titles, and not another computer's.
+    #[test]
+    fn a_computer_removed_takes_the_windows_it_listed() {
+        let windows = |device_id: &str| WindowsThere {
+            device_id: device_id.to_string(),
+            windows: vec![LendableWindow {
+                address: "5".to_string(),
+                title: "Notes".to_string(),
+                class: "app".to_string(),
+                width: 800,
+                height: 600,
+                workspace: "1".to_string(),
+                lent: false,
+            }],
+            ..WindowsThere::default()
+        };
+        let mut file = ComputersFile {
+            computers: vec![computer("desk"), computer("lap")],
+            windows_there: Some(windows("lap")),
+            ..ComputersFile::default()
+        };
+        file.remove("desk");
+        assert_eq!(file.windows_there, Some(windows("lap")), "another's stays");
+        file.remove("lap");
+        assert_eq!(file.windows_there, None);
+    }
+
+    /// A borrow's ask and the picker's asks round-trip, and a view ask from
+    /// an app before borrowing, with no `borrow`, still reads.
+    #[test]
+    fn the_borrow_asks_round_trip_and_an_older_view_ask_reads() {
+        let ask = ComputerAsk::View {
+            device_id: "desk".to_string(),
+            monitor: 0,
+            hevc: false,
+            window: 1,
+            fit: None,
+            borrow: Some("0x5".to_string()),
+        };
+        let json = serde_json::to_string(&ask).unwrap();
+        assert!(json.contains("\"borrow\":\"0x5\""), "{json}");
+        assert_eq!(serde_json::from_str::<ComputerAsk>(&json).unwrap(), ask);
+        let plain = ComputerAsk::View {
+            device_id: "desk".to_string(),
+            monitor: 2,
+            hevc: false,
+            window: 0,
+            fit: None,
+            borrow: None,
+        };
+        assert!(!serde_json::to_string(&plain).unwrap().contains("borrow"));
+        let older = r#"{"ask":"view","device_id":"desk","monitor":2}"#;
+        assert_eq!(serde_json::from_str::<ComputerAsk>(older).unwrap(), plain);
+        for ask in [
+            ComputerAsk::WindowsThere {
+                device_id: "desk".to_string(),
+            },
+            ComputerAsk::CloseWindowsThere {
+                device_id: "desk".to_string(),
+            },
+        ] {
+            let json = serde_json::to_string(&ask).unwrap();
+            assert_eq!(serde_json::from_str::<ComputerAsk>(&json).unwrap(), ask);
+        }
     }
 
     /// BD3: a request left half-written by a crash goes once it is stale;

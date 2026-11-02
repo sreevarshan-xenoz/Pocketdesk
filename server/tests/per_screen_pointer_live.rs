@@ -333,6 +333,7 @@ fn each_windows_clicks_land_on_its_own_screen() {
                 hevc: false,
                 window,
                 fit: None,
+                borrow: None,
             },
             pin::now_unix(),
         )

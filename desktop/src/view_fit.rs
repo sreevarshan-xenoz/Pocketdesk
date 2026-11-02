@@ -130,7 +130,7 @@ pub fn hover(name: &str, status: &ViewStatus) -> String {
 /// fit the window when it made one, else the one asked for.
 pub fn shown_monitor(asked: u32, status: &ViewStatus) -> u32 {
     match *status.fit {
-        ViewFit::Fitted { .. } => status.monitor,
+        ViewFit::Fitted { .. } | ViewFit::Borrowed { .. } => status.monitor,
         _ => asked,
     }
 }
@@ -143,10 +143,21 @@ pub fn words(status: &ViewStatus) -> Option<String> {
         ViewFit::Fitted { width, height } => Some(format!(
             "Showing a {width}\u{d7}{height} screen made to fit this window."
         )),
+        ViewFit::Borrowed { .. } => None,
         ViewFit::Failed(why) => Some(format!(
             "Could not fit the screen to this window ({why}); showing the screen asked for."
         )),
     }
+}
+
+/// [`words`], or, for a borrowed window ("Borrow a window…"), what the
+/// window says while the other computer is asked to lend it.
+pub fn words_for(status: &ViewStatus, name: &str, borrowed: bool) -> Option<String> {
+    if !borrowed {
+        return words(status);
+    }
+    matches!(*status.fit, ViewFit::Asking)
+        .then(|| format!("Asking {name} to lend the window\u{2026}"))
 }
 
 /// What a dimmed picture says while the screen is being fitted again.

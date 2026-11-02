@@ -1027,7 +1027,44 @@ impl PocketdeskApp {
     /// Open a window on the computer `device_id`'s screen (BK7), at the
     /// quality, view-only and stats the settings start it with.
     fn show_computer(&mut self, ctx: &egui::Context, device_id: &str, name: &str) {
-        let (preset, view_only, stats) = self.config.as_ref().map_or(
+        let (preset, view_only, stats) = self.computer_view_choices();
+        let opened = self
+            .computer_view_ready(ctx)
+            .open(device_id, name, 0, preset, view_only, stats);
+        if let Err(e) = opened {
+            self.notice = crate::notice::Notice::error(e);
+        }
+    }
+
+    /// Open a window on the window `pick` names of another computer ("Borrow
+    /// a window..."): the other computer is asked to lend it, and it is
+    /// given back as this window closes. The quality, view-only and stats
+    /// are as for a computer's screen.
+    fn borrow_computer_window(
+        &mut self,
+        ctx: &egui::Context,
+        pick: &crate::computers_view::BorrowPick,
+    ) {
+        let (preset, view_only, stats) = self.computer_view_choices();
+        let opened = self.computer_view_ready(ctx).open_borrowed(
+            ctx,
+            &pick.device_id,
+            &pick.name,
+            &pick.window,
+            &pick.title,
+            preset,
+            view_only,
+            stats,
+        );
+        if let Err(e) = opened {
+            self.notice = crate::notice::Notice::error(e);
+        }
+    }
+
+    /// The quality preset, view-only and stats a computer's window starts
+    /// with, as the settings say.
+    fn computer_view_choices(&self) -> (u8, bool, bool) {
+        self.config.as_ref().map_or(
             (
                 pocketdesk_core::streaming::input_packet::PRESET_AUTO,
                 false,
@@ -1040,7 +1077,15 @@ impl PocketdeskApp {
                     c.computer_view_stats,
                 )
             },
-        );
+        )
+    }
+
+    /// The computer windows' worker, made as first needed, with every
+    /// setting a window follows brought up to date.
+    fn computer_view_ready(
+        &mut self,
+        ctx: &egui::Context,
+    ) -> &mut crate::computer_view::ComputerView {
         let view = self.computer_view.get_or_insert_with(|| {
             crate::computer_view::ComputerView::new(
                 ctx,
@@ -1079,9 +1124,7 @@ impl PocketdeskApp {
         view.set_fit_default(self.config.as_ref().is_some_and(|c| c.computer_view_fit));
         // Fine scrolling: "Smooth scrolling" too.
         view.set_smooth_scrolling(self.config.as_ref().is_none_or(|c| c.smooth_scrolling));
-        if let Err(e) = view.open(device_id, name, 0, preset, view_only, stats) {
-            self.notice = crate::notice::Notice::error(e);
-        }
+        view
     }
 
     /// Go to the page the tray program or a second launch asked for, and
@@ -4775,6 +4818,11 @@ impl eframe::App for PocketdeskApp {
         self.computers.tick(&self.state_dir);
         if let Some((device_id, name)) = self.computers.take_view() {
             self.show_computer(ctx, &device_id, &name);
+        }
+        // "Borrow a window": one window of another computer, picked in the
+        // list under Settings, Other computers.
+        if let Some(pick) = self.computers.take_borrow() {
+            self.borrow_computer_window(ctx, &pick);
         }
         if self.computers.waking().is_some() {
             ctx.request_repaint_after(Duration::from_millis(500));

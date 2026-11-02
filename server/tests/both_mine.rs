@@ -125,6 +125,7 @@ fn view(state: &Path, other: &str, other_state: &Path, me: &str) -> Seen {
             hevc: false,
             window: 0,
             fit: None,
+            borrow: None,
         },
         pin::now_unix(),
     )

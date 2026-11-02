@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1296 open items.
+1309 open items.
 
 | Where | Items |
 |---|---|
@@ -12,8 +12,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 40 |
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
-| A second computer | 171 |
-| A Linux desktop (the Azure VM serves for some) | 239 |
+| A second computer | 183 |
+| A Linux desktop (the Azure VM serves for some) | 240 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 80 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
 
@@ -1335,6 +1335,21 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The other hardware rungs for a held frame, with the stage probe or a stopwatch on the host's side: NVENC in-process and sidecar on a Windows host (`delay 0`), AMF and QSV (`-async_depth 1`) and Media Foundation: the frame's packet comes out at its own frame, not the next (the debug log's "holds N frame(s) until the next input" absent). None of these can run on the laptop. (where: second computer)
 
+**272. Borrowing a window of another computer (the viewing side, phase 3b of the window handoff)**
+
+- The Windows app against the Arch laptop's real session (Hyprland or Sway), a computer paired both ways with Input allowed and "Let my computers borrow my windows" on there: Borrow a window... lists the laptop's windows with their titles, Borrow on a terminal opens a window here titled with the terminal's title, its picture is the window's size, typing and clicking there reach the terminal, and closing the window puts the terminal back on its old workspace. (where: second computer)
+- The same from a Linux desktop app (the laptop as viewer, its Sway as host in a second session or a second computer): a borrowed window, then a second one in a window of its own, then a fifth refused with "At most 4 screen windows at once". (where: second computer)
+- The host's switch turned off while a window is borrowed: it goes back within a couple of seconds, and the viewing window says the other computer closed that window or stopped lending. (where: second computer)
+- The borrowing computer's link dropped (its network pulled, or its server stopped) with a window borrowed: the window is back on the host within a couple of seconds, not after a minute. (where: second computer)
+- A borrowed window closed on the host (its program quit): its empty screen is removed within a couple of seconds and the viewing window ends with a note, never a frozen picture. (where: second computer)
+- "Lock it when I close the window" on, a borrowed window closed: the other computer is not locked (only a screen window locks it). (where: second computer)
+- A short network gap (the viewing computer's Wi-Fi off for about 10 s, then on) with a window borrowed: the view dims and reconnects and the window is still lent, not ended; the window is back after 60 s if the viewer stays gone, and the host lends it again if the viewer comes back after that. (where: second computer)
+- A borrowed window's `return` lost (the link up but the packet not delivered, for instance the viewing server killed at the moment the window closes): within about a minute the host takes the window back without the viewer. (where: second computer)
+- Two windows cannot borrow the same window: its Borrow is greyed in the picker once lent, and a second view asked for by the local API says it is already shown. (where: second computer)
+- The app quit while the picker is open (or killed): the windows' titles are gone from the state folder's `computers.json` within a minute (and at the server's next start). (where: second computer)
+- A borrowed window resized on the host (dragged, or its program resizing itself) keeps showing its first size: following the viewer's size and the host's is later (the status history says so). (where: second computer)
+- A window with a very long or odd title (emoji, right-to-left text) in the picker and in the viewing window's title bar: shown cut and without control characters, never garbled past the picker. (where: second computer)
+
 ## A Linux desktop (the Azure VM serves for some)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1894,10 +1909,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - On a real desktop session: the Arch laptop's own Hyprland, "Let my computers borrow my windows" on in Settings, Other computers, a computer paired both ways with Input allowed asking for an unimportant window (a terminal): the window leaves the laptop's screen, its picture is on the asking computer at its size, and typing and clicking there reach it; returned, it is on its old workspace, tiled or floating as it was, and the extra screen is gone. (where: linux)
 - The same on a real Sway session, with a window that has a title bar and border (the default `border normal`): put back with the same title bar, border and size. (where: linux)
 - The switch off (the default): the same ask is answered that the computer does not lend its windows, and nothing moves; a phone and a computer paired one way are told only a computer paired both ways may. (where: linux)
-- The borrowing computer's session and link both gone (close its window, then stop its server): within about 15 seconds (two 5-second checks, never in the first minute) the lent window is back and its screen gone. (where: linux)
+- The borrowing computer's session, connection and link all gone (close its window, then stop its server): within a couple of seconds (the watcher's look a second; the 5-second sweeps are the backstop) the lent window is back and its screen gone. (where: linux)
 - The server stopped (`pocketdesk stop`) with a window lent: the window is back on its workspace before the server exits. A server killed (`kill -9`) with one lent, then started again in the same compositor: the window is back and the extra screen gone at start. (where: linux)
 - A browser (or any program that hides its toolbars when it is told it is full screen) lent on Hyprland keeps its toolbars: the program is not told it fills the screen. (where: linux)
-- A window closed while lent leaves its empty screen, and no more than that: a return or the computer going takes it away, and the window list no longer shows the window. (where: linux)
+- A window closed while lent has its empty screen removed within a couple of seconds, and the window list no longer shows the window. (where: linux)
 - A tiled window lent from a workspace with others comes back to that workspace; it may not come back to its old slot among them (the limit the guide names). (where: linux)
 - A window that will not go back stays lent and is retried: on a throwaway Sway or Hyprland make the compositor refuse the move back (a workspace name the record cannot use, or the compositor socket briefly unreachable), then ask `return`: the answer is an error, the window and its screen are still there, and once the compositor works again the next `return`, or the sweep after the borrower is gone, puts it back and takes the screen away. (where: linux)
 - An X11 (Xwayland) program's window on Sway lent and returned: its title and class are in the window list, and it moves and returns like a Wayland one. (where: linux)
@@ -1909,6 +1924,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A driver or FFmpeg that cannot do it: the open logs "conversion on the card unavailable (...); converting on the processor" once (later opens, for a resolution change or a new session, log it at debug only) and the stream works as before. Try an FFmpeg without `scale_vaapi` (a vendor build) or a VA-API driver without BGR0 surfaces. (where: linux)
 - A host with two GPUs (Intel and NVIDIA, as the laptop): the encoder opens on the render node whose driver has VA-API, and the card path works there; with `POCKETDESK_VAAPI_DEVICE` pointing at a node with no VA driver the open fails as before and the ladder goes on to the sidecar. (where: linux)
 - A resolution change in a live session (the host's display changes mode, or the viewer asks for another size): the encoder is rebuilt at the new size and the picture continues on the card path, no restart of the session and no "does not hold" error in the log. (where: linux)
+
+**272. Borrowing a window of another computer (the viewing side, phase 3b of the window handoff)**
+
+- The same on Hyprland 0.56 as the host (a headless Hyprland, or a real session): `list` names the windows, a click aimed at the lent screen lands on the window (the live test's check, which has only run on Sway). (where: linux)
 
 **273. The window's wait for the display (phase 1d of the window handoff: a setting to draw without vsync, and the window's stage trace)**
 

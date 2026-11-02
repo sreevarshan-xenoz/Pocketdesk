@@ -943,6 +943,9 @@ impl StreamingServer {
                 webcam,
             },
         );
+        if !no_picture {
+            _live_session.set_monitor(self.config.monitor_index);
+        }
         // Where this session's absolute moves land (PC11 on Linux): read
         // before the ready stream, which says whether they land on its
         // screen.
