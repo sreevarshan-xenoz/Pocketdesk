@@ -102,6 +102,9 @@ impl ZeroCopy {
     fn read_back(&mut self, _frame: &super::GpuFrame) -> Option<Vec<u8>> {
         match *self {}
     }
+    fn read_back_copy(&mut self, _bgra: &[u8], _width: u32) -> Option<Vec<u8>> {
+        match *self {}
+    }
 }
 
 /// Generated client bindings for `hyprland_toplevel_export_v1` (R4 B2:

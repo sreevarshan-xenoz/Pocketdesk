@@ -529,7 +529,7 @@ pub fn open_fds() -> usize {
 
 /// How many of this process's descriptors are dma-bufs (a leak check for
 /// the tests that hold the card).
-#[cfg(test)]
+#[cfg(all(test, feature = "inproc"))]
 pub(crate) fn dmabuf_fds() -> usize {
     std::fs::read_dir("/proc/self/fd")
         .unwrap()
@@ -547,7 +547,7 @@ pub fn node_device(path: &str) -> Option<u64> {
 
 /// The tests that open the card (here and in the encoder) take turns, so a
 /// count of this process's dma-bufs means one test's.
-#[cfg(test)]
+#[cfg(all(test, feature = "inproc"))]
 pub(crate) static DEVICE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
