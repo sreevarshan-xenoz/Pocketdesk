@@ -2,19 +2,19 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1326 open items.
+1333 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 91 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 94 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 199 |
 | A phone with a SIM | 40 |
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
-| A second computer | 194 |
+| A second computer | 196 |
 | A Linux desktop (the Azure VM serves for some) | 245 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 80 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 82 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
@@ -220,6 +220,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **271. VA-API converts BGRA to NV12 on the card (phase 1c of the window handoff: `scale_vaapi`, no processor conversion)**
 
 - The phone on a real device: the OPPO against a throwaway server on this laptop's VA-API encoder at 1080p60 and 1080p30, H.264 and HEVC (`allow_hevc`): a smooth picture for a minute, colours as before (compare a known test picture on the phone's screen with the old build's), the HUD's delay no higher, and a keyframe after a pause and a rejoin within about 2 seconds. (where: here)
+
+**276. Smooth keyframes (low-latency window handoff, phase 1: no whole keyframe on a two second beat)**
+
+- The OPPO as the viewer of a computer with the setting on (VA-API and the software encoder in turn): the picture starts at once, plays as before, and a stalled link that comes back shows a picture again within a few seconds (the computer's keyframe on request, `RequestKeyframe`); say how long a "decoder took no input" skip waits for the next whole keyframe (10 s on VA-API, 30 s on the software encoder: no phone asks for one then yet). (where: here)
+- A phone that joins mid-session, and one that reconnects after a drop, with the setting on: each gets a picture as fast as with it off (every connection opens its own encoder, which starts on a keyframe). (where: here)
+- A phone's own screen cast to the computer (the phone is the encoder): unchanged by this setting (its keyframe every five seconds and on request). (where: here)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -1368,6 +1374,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The host's pointer capture ending mid-view (kill the host's compositor-side client or restart the compositor's capture): the window goes back to its own pointer within a moment and the picture shows the host's pointer again. (where: second computer)
 - A GNOME or KDE host (portal or mutter) with a window of that host cropped in software, with this window's pointer locked: the painted pointer is placed over the whole screen's coordinates, not the crop's, so it is off by the crop's offset (a known gap; the free pointer is not affected). (where: second computer)
 
+**276. Smooth keyframes (low-latency window handoff, phase 1: no whole keyframe on a two second beat)**
+
+- The OPPO over Wi-Fi with some loss (`tc netem loss 5%` on the host's interface), the setting on, the software encoder: the picture heals within about two seconds of a loss on its own (the refresh wave), with no freeze, and no longer than with the setting off; with VA-API, a loss is healed by the keyframe the phone asks for. (where: second computer)
+- A slow link, the setting on, the software encoder: the queue that waits for a link trims to the newest whole keyframe as before, and with the keyframes far apart the wait is the queue's depth (8 frames), not the keyframe's distance. (where: second computer)
+
 ## A Linux desktop (the Azure VM serves for some)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -2215,6 +2226,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The first check, per Android: "Use my phone's hotspot" starts the phone's Wi-Fi hotspot within about 15 seconds with no tap and no screen on the phone, under its own saved name and password (the computer sent neither), Android shows its usual hotspot indicator, and the helper's log line says it started. Record the Android version and maker for each phone tried; if the helper logs "no tethering manager" or "did not start", record the exact line (the call may need another route on that Android). Android 11, 12, 13, 14 and 15 are each owed. (where: other hardware)
 - An older phone (a build before this) or an older computer: the computer shows no buttons for a phone that never reported `hotspot`; an older phone drops an `hotspot_on` ask it does not know and nothing breaks. (where: other hardware)
+
+**276. Smooth keyframes (low-latency window handoff, phase 1: no whole keyframe on a two second beat)**
+
+- Windows with an NVIDIA card, in-process NVENC, H.264, the setting on: the stream opens, plays, and a keyframe still comes on request (`forced-idr`), with no keyframe on a two second beat in the log of a session; HEVC through NVENC with the setting on gets whole keyframes every 10 s and on request (no intra refresh: a wave's start is told from an IDR only for H.264). `h264_nvenc` with `intra-refresh` is untested on a real card. (where: other hardware)
+- An AMD, Intel Windows or NVIDIA-on-Linux computer (the FFmpeg sidecar): with the setting on nothing changes (a keyframe every two seconds, no intra refresh), and the setting off is as before. (where: other hardware)
 
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 
