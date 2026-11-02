@@ -1421,8 +1421,13 @@ impl StreamingServer {
                         // The capture's idle heartbeat, for a client that
                         // needs none: dropped before the encoder, so the
                         // picture chain and its sequence numbers go on whole.
-                        if !from_hold && !repeat_gate.admit(frame.repeat) {
-                            continue;
+                        // One that replaced a waiting frame stands for it.
+                        if !from_hold {
+                            let replaced = frame_rx.last_replaced();
+                            let held = encoder.held_frames();
+                            if !repeat_gate.admit(frame.repeat, replaced, held) {
+                                continue;
+                            }
                         }
                         // R6f: at a lower frame rate than the capture's, pass
                         // frames on at the encoder's rate, holding the newest
@@ -1585,6 +1590,8 @@ impl StreamingServer {
                                 for packet in packets {
                                     if packet.is_keyframe {
                                         debug!("Keyframe encoded (seq={}, size={} bytes)", packet.sequence, packet.data.len());
+                                        // The fresh picture a client asked for is out.
+                                        repeat_gate.keyframe_sent();
                                     }
                                     trace_packet_stats(&packet);
 

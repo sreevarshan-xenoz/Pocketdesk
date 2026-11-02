@@ -44,6 +44,14 @@ use super::{EncodedPacket, EncoderPreset, H264Profile, StreamingConfig, VideoCod
 /// supervisor then sees) instead of growing memory without limit.
 const STDOUT_CHUNKS_IN_FLIGHT: usize = 256;
 
+/// Frames an encoder holds: the ones written whose packets are not out
+/// (`submitted`), or the lag learned for an encoder that keeps frames until
+/// more input arrives, whichever is more. The lag is learned one frame at a
+/// time, so the first picture of a session counts as held at once.
+fn held_frames(submitted: usize, lag: usize) -> usize {
+    submitted.max(lag)
+}
+
 /// Read the child's stdout on a dedicated thread and forward each chunk.
 ///
 /// The encode loop must never block on the pipe. On Linux that used to be
@@ -325,6 +333,23 @@ impl VideoEncoder {
             Self::InProcess(e) => e.request_keyframe(),
             #[cfg(all(target_os = "linux", feature = "inproc"))]
             Self::VaapiInProcess(e) => e.request_keyframe(),
+        }
+    }
+
+    /// Frames the encoder holds until more input arrives: written to it,
+    /// their packets not out yet. Only the FFmpeg sidecar holds any (AMF one,
+    /// Media Foundation more, learned as frames go in); the in-process
+    /// encoders give each frame's packet back at once.
+    pub fn held_frames(&self) -> usize {
+        match self {
+            Self::Sidecar(e) => e.held_frames(),
+            #[cfg(any(
+                all(target_os = "linux", feature = "inproc"),
+                all(windows, feature = "inproc-windows")
+            ))]
+            Self::InProcess(_) => 0,
+            #[cfg(all(target_os = "linux", feature = "inproc"))]
+            Self::VaapiInProcess(_) => 0,
         }
     }
 
@@ -844,6 +869,13 @@ impl SidecarEncoder {
             "Keyframe requested; the sidecar's next IDR is at most {} frames away",
             self.keyframe_interval - self.frames_since_keyframe
         );
+    }
+
+    /// Frames written to the child whose packets are not out yet, or the
+    /// lag learned for an encoder that keeps frames until more input comes,
+    /// whichever is more.
+    pub fn held_frames(&self) -> usize {
+        held_frames(self.submitted.len(), self.encoder_lag)
     }
 
     /// Get the current sequence number.
@@ -1528,6 +1560,17 @@ fn build_ffmpeg_args(
 
 #[cfg(test)]
 mod tests {
+    /// The gate behind `idle_repeats` reads this to keep repeats flowing
+    /// until an encoder that keeps frames has put the changed one out.
+    #[test]
+    fn an_encoder_holds_what_it_was_given_and_has_not_given_back() {
+        assert_eq!(held_frames(0, 0), 0, "NVENC: each frame at once");
+        assert_eq!(held_frames(1, 0), 1, "the first frame, lag not learned yet");
+        assert_eq!(held_frames(1, 1), 1, "AMF holds one");
+        assert_eq!(held_frames(0, 3), 3, "Media Foundation's learned lag");
+        assert_eq!(held_frames(5, 3), 5, "a slow frame in flight");
+    }
+
     #[test]
     fn the_fail_seam_names_hardware_rungs_only() {
         use HardwareEncoder::*;

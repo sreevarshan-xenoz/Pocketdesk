@@ -33,7 +33,14 @@ pub fn channel<T>() -> (FrameSender<T>, FrameReceiver<T>) {
         receiver_gone: AtomicBool::new(false),
         replaced: AtomicU64::new(0),
     });
-    (FrameSender(slot.clone()), FrameReceiver(slot))
+    (
+        FrameSender(slot.clone()),
+        FrameReceiver {
+            slot,
+            seen_replaced: 0,
+            last_replaced: false,
+        },
+    )
 }
 
 /// Puts frames in the slot.
@@ -46,14 +53,13 @@ impl<T> FrameSender<T> {
         if self.0.receiver_gone.load(Ordering::Acquire) {
             return Err(TrySendError::Closed(frame));
         }
-        let old = self
-            .0
-            .waiting
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .replace(frame);
-        if old.is_some() {
-            self.0.replaced.fetch_add(1, Ordering::Relaxed);
+        {
+            // Counted under the lock, so a receiver that takes this frame
+            // sees the replacement it made ([`FrameReceiver::last_replaced`]).
+            let mut waiting = self.0.waiting.lock().unwrap_or_else(|e| e.into_inner());
+            if waiting.replace(frame).is_some() {
+                self.0.replaced.fetch_add(1, Ordering::Relaxed);
+            }
         }
         self.0.wake.notify_one();
         Ok(())
@@ -82,7 +88,12 @@ impl<T> Drop for FrameSender<T> {
 }
 
 /// Takes frames from the slot.
-pub struct FrameReceiver<T>(Arc<Slot<T>>);
+pub struct FrameReceiver<T> {
+    slot: Arc<Slot<T>>,
+    /// The slot's replaced count at the last take.
+    seen_replaced: u64,
+    last_replaced: bool,
+}
 
 impl<T> FrameReceiver<T> {
     /// The newest frame, waiting for one; `None` once every sender is gone
@@ -90,11 +101,13 @@ impl<T> FrameReceiver<T> {
     pub async fn recv(&mut self) -> Option<T> {
         loop {
             // Registered before looking, so a frame put in between wakes it.
-            let woken = self.0.wake.notified();
+            // (Through a clone of the slot: `take` borrows the receiver.)
+            let slot = self.slot.clone();
+            let woken = slot.wake.notified();
             if let Some(frame) = self.take() {
                 return Some(frame);
             }
-            if self.0.senders.load(Ordering::Acquire) == 0 {
+            if self.slot.senders.load(Ordering::Acquire) == 0 {
                 return self.take();
             }
             woken.await;
@@ -113,7 +126,7 @@ impl<T> FrameReceiver<T> {
             if let Some(frame) = self.take() {
                 return Some(frame);
             }
-            if self.0.senders.load(Ordering::Acquire) == 0 {
+            if self.slot.senders.load(Ordering::Acquire) == 0 {
                 return self.take();
             }
             std::thread::sleep(std::time::Duration::from_millis(1));
@@ -122,9 +135,9 @@ impl<T> FrameReceiver<T> {
 
     /// Whether every sender is gone and nothing waits: no frame will come.
     pub fn is_closed(&self) -> bool {
-        self.0.senders.load(Ordering::Acquire) == 0
+        self.slot.senders.load(Ordering::Acquire) == 0
             && self
-                .0
+                .slot
                 .waiting
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
@@ -142,13 +155,13 @@ impl<T> FrameReceiver<T> {
     /// How many frames were replaced by a newer one before the encoder
     /// took them, since the slot was made.
     pub fn replaced(&self) -> u64 {
-        self.0.replaced.load(Ordering::Relaxed)
+        self.slot.replaced.load(Ordering::Relaxed)
     }
 }
 
 impl<T> Drop for FrameReceiver<T> {
     fn drop(&mut self) {
-        self.0.receiver_gone.store(true, Ordering::Release);
+        self.slot.receiver_gone.store(true, Ordering::Release);
     }
 }
 
@@ -168,6 +181,27 @@ mod tests {
         tx.try_send(4).unwrap();
         assert_eq!(rx.recv().await, Some(4));
         assert_eq!(rx.replaced(), 2, "a frame taken was not replaced");
+    }
+
+    #[tokio::test]
+    async fn a_frame_that_replaced_a_waiting_one_says_so_once() {
+        let (tx, mut rx) = channel();
+        assert!(!rx.last_replaced(), "nothing taken yet");
+        tx.try_send(1).unwrap();
+        assert_eq!(rx.recv().await, Some(1));
+        assert!(!rx.last_replaced(), "it replaced nothing");
+        // The encoder is busy: a changed frame waits and a heartbeat replaces it.
+        tx.try_send(2).unwrap();
+        tx.try_send(3).unwrap();
+        assert_eq!(rx.recv().await, Some(3));
+        assert!(rx.last_replaced(), "it replaced the frame waiting");
+        // The next one, taken while nothing was replaced, is a plain frame.
+        tx.try_send(4).unwrap();
+        assert_eq!(rx.recv().await, Some(4));
+        assert!(!rx.last_replaced());
+        tx.try_send(5).unwrap();
+        assert_eq!(rx.try_recv(), Some(5));
+        assert!(!rx.last_replaced());
     }
 
     #[tokio::test]
