@@ -58,6 +58,9 @@ mod view_latency_stages;
 mod view_live;
 mod view_mic;
 mod view_pointer;
+#[cfg(test)]
+mod view_present_live;
+mod view_present_trace;
 mod widgets;
 
 use eframe::egui;
