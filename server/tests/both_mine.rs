@@ -123,6 +123,7 @@ fn view(state: &Path, other: &str, other_state: &Path, me: &str) -> Seen {
             device_id: other.to_string(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window: 0,
             fit: None,
             borrow: None,

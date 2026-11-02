@@ -33,6 +33,11 @@ pub const STATUS: u8 = 5;
 /// with new parameter sets (PC5); no payload. Its size is the first
 /// decoded picture's. Sent only for a view that offered HEVC.
 pub const HEVC_CONFIG: u8 = 6;
+/// Server → app: a message about the other computer's pointer
+/// ([`crate::protocol::cursor::CursorMessage`], its own encoding as the
+/// payload), sent only to an app that asked for it (`ComputerAsk::View`'s
+/// `cursor`). An app before it never asks, so never hears it.
+pub const CURSOR: u8 = 7;
 /// App → server: send a keyframe (the decoder started or lost its way).
 pub const WANT_KEYFRAME: u8 = 0x11;
 /// App → server: one input packet for the other computer
@@ -278,6 +283,8 @@ pub enum Message {
     PointerLock(bool),
     /// The window's mic on or off (PC10).
     Mic(bool),
+    /// What the other computer says of its pointer (local cursor).
+    Cursor(crate::protocol::cursor::CursorMessage),
 }
 
 impl Message {
@@ -311,6 +318,7 @@ impl Message {
             Message::Privacy(ask) => (PRIVACY, vec![*ask]),
             Message::PointerLock(locked) => (POINTER_LOCK, vec![u8::from(*locked)]),
             Message::Mic(on) => (MIC, vec![u8::from(*on)]),
+            Message::Cursor(message) => (CURSOR, message.encode()),
         };
         let mut out = Vec::with_capacity(5 + payload.len());
         out.push(kind);
@@ -364,6 +372,13 @@ impl Message {
             PRIVACY if len == 1 && payload[0] <= PRIVACY_LOCK => Message::Privacy(payload[0]),
             POINTER_LOCK if len == 1 && payload[0] <= 1 => Message::PointerLock(payload[0] == 1),
             MIC if len == 1 && payload[0] <= 1 => Message::Mic(payload[0] == 1),
+            // A kind of pointer message this build does not know (a newer
+            // server's) is no malformed message: it reads as a heartbeat.
+            CURSOR => match crate::protocol::cursor::CursorMessage::decode(&payload) {
+                Ok(Some(message)) => Message::Cursor(message),
+                Ok(None) => Message::Heartbeat,
+                Err(_) => return Err(bad()),
+            },
             _ => return Err(bad()),
         })
     }
@@ -386,7 +401,8 @@ fn cut(words: &str) -> &str {
 }
 
 /// Whether the window may send `packet` to the other computer: the pointer,
-/// the keys, typed text, a keyframe ask, the quality preset and view-only;
+/// the keys, typed text, a keyframe ask, the quality preset, view-only and
+/// its ask for the other pointer's places;
 /// relative moves only while its pointer is locked (`pointer_locked`, as
 /// the window last said with [`POINTER_LOCK`], PC7); and its mic's frames
 /// only while its "Send my mic" is on (`mic_on`, as it last said with
@@ -406,6 +422,7 @@ pub fn input_allowed(packet: &InputPacket, pointer_locked: bool, mic_on: bool) -
                 | InputPacket::RequestKeyframe
                 | InputPacket::QualityPreset { .. }
                 | InputPacket::ViewOnly { .. }
+                | InputPacket::CursorTrack { .. }
         ),
     }
 }

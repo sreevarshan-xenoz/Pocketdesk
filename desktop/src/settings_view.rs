@@ -482,6 +482,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "computer_view_local_cursor",
+        "Draw the other computer's pointer here",
+        Section::Computers,
+    ),
+    (
         "computer_view_lock_on_close",
         "Lock it when I close the window",
         Section::Computers,
@@ -815,6 +820,8 @@ pub fn applies_live(key: &str) -> bool {
             | "computer_view_hevc"
             // Read by the server as each view dials.
             | "computer_view_no_idle_repeats"
+            // Read as each view starts.
+            | "computer_view_local_cursor"
             // PC8: read by an open window at once.
             | "computer_view_lock_on_close"
             // Item 8: read as a window starts showing a computer.
@@ -2850,6 +2857,17 @@ impl SettingsForm {
                         "Saves bandwidth and decoding, most over the internet or on a battery. A change on that screen shows at once. Turn it off if a still picture ever goes stale or grey; the other computer then repeats it once a second, as before. It needs this version on the other computer too (an older one repeats anyway), and a phone is not affected. Applies from the next view.",
                     );
                 });
+                // The window handoff's local cursor.
+                row(ui, "computer_view_local_cursor", |ui| {
+                    ui.checkbox(
+                        &mut e.computer_view_local_cursor,
+                        "draw the other computer's pointer here: it is shown as this computer's own pointer, so it moves with no wait for the picture",
+                    );
+                    note(
+                        ui,
+                        "The other computer takes its pointer out of the picture and sends its shape (an arrow, a text cursor, a hand) apart, on a Sway or Hyprland desktop, or GNOME and KDE through screen sharing; where it cannot (Windows, an X session, or a version before this one) the pointer stays in the picture as before, and nothing is hidden. With your pointer locked to the window, the other computer's is drawn where that one says it is. Off, the pointer stays as the picture has it. Applies from the next view.",
+                    );
+                });
                 row(ui, "computer_view_lock_on_close", |ui| {
                     ui.checkbox(
                         &mut e.computer_view_lock_on_close,
@@ -3729,6 +3747,7 @@ mod tests {
             "computer_view_hw_decode",
             "computer_view_hevc",
             "computer_view_no_idle_repeats",
+            "computer_view_local_cursor",
             "computer_view_lock_on_close",
             "computer_view_fit",
             "computer_view_scancodes",

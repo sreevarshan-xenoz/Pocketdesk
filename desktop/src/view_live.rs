@@ -388,6 +388,7 @@ fn the_decoder_on_a_running_pairs_view() {
             device_id: b_id.clone(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window: 0,
             fit: None,
             borrow: None,
@@ -543,6 +544,7 @@ fn the_windows_decoder_on_a_real_view() {
             monitor: 0,
             // The app's own probe, as the window asks (PR #562 review I3).
             hevc: hevc && crate::video::probe_hevc("ffmpeg"),
+            cursor: false,
             window: 0,
             fit: None,
             borrow: None,

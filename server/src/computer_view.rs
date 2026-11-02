@@ -107,21 +107,30 @@ const STATS_EVERY: Duration = Duration::from_secs(1);
 /// keepalive, so the other computer sends nothing while the screen is still
 /// (a host before it ignores the bit and goes on repeating). Off, the bit
 /// stays clear and the other computer repeats a still screen as before.
-pub fn codec_caps(asked: bool, wanted: bool, quiet: bool) -> u8 {
-    use pocketdesk_core::streaming::client::{CODEC_CAP_HEVC, CODEC_CAP_NO_IDLE_REPEATS};
+/// With the bit that says the window draws the other computer's pointer
+/// itself when `pointer` (the app asked for it and
+/// `computer_view_local_cursor` is on here): the other computer then takes
+/// the pointer out of its picture where it can and sends the pointer apart;
+/// a host before it ignores the bit and keeps the pointer in the picture.
+pub fn codec_caps(asked: bool, wanted: bool, quiet: bool, pointer: bool) -> u8 {
+    use pocketdesk_core::streaming::client::{
+        CODEC_CAP_HEVC, CODEC_CAP_LOCAL_CURSOR, CODEC_CAP_NO_IDLE_REPEATS,
+    };
     let hevc = if asked && wanted { CODEC_CAP_HEVC } else { 0 };
     let still = if quiet { CODEC_CAP_NO_IDLE_REPEATS } else { 0 };
-    still | hevc
+    let cursor = if pointer { CODEC_CAP_LOCAL_CURSOR } else { 0 };
+    still | hevc | cursor
 }
 
 /// The codecs a view the app asked for (`asked` HEVC or not) offers now.
-fn view_codec_caps(asked: bool) -> Option<u8> {
+fn view_codec_caps(asked: bool, cursor: bool) -> Option<u8> {
     let config = crate::events::current_config();
     let wanted = config.computer_view_hevc && config.computer_view_hw_decode;
     Some(codec_caps(
         asked,
         wanted,
         config.computer_view_no_idle_repeats,
+        cursor && config.computer_view_local_cursor,
     ))
 }
 
@@ -234,6 +243,9 @@ pub enum Command {
         device_id: String,
         monitor: u32,
         hevc: bool,
+        /// The app draws the other computer's pointer itself (local
+        /// cursor).
+        cursor: bool,
         window: u8,
         fit: Option<FitSize>,
         /// Show the window with this id of that computer instead of a
@@ -654,6 +666,8 @@ pub async fn race<T: Send + 'static>(
 #[derive(Debug)]
 enum Event {
     Status(ViewStatus),
+    /// What the other computer says of its pointer (local cursor).
+    Cursor(pocketdesk_core::protocol::cursor::CursorMessage),
     /// The stream's codec and size, as the window is told it.
     Config(Message),
     Frame {
@@ -1027,6 +1041,7 @@ async fn session(
     computer: PeerComputer,
     asked_monitor: u32,
     hevc: bool,
+    cursor: bool,
     window: u8,
     fit: Option<FitSize>,
     borrow: Option<String>,
@@ -1042,6 +1057,7 @@ async fn session(
             computer,
             asked_monitor,
             hevc,
+            cursor,
             window,
             fit,
             None,
@@ -1066,6 +1082,7 @@ async fn session(
             computer,
             asked_monitor,
             hevc,
+            cursor,
             window,
             fit,
             borrow,
@@ -1100,6 +1117,7 @@ async fn session_run(
     mut computer: PeerComputer,
     asked_monitor: u32,
     hevc: bool,
+    cursor: bool,
     window: u8,
     fit: Option<FitSize>,
     borrow: Option<String>,
@@ -1179,7 +1197,11 @@ async fn session_run(
         let dialled = if lend_unreached {
             None
         } else {
-            Some(dialer.dial(&computer, monitor, view_codec_caps(hevc)).await)
+            Some(
+                dialer
+                    .dial(&computer, monitor, view_codec_caps(hevc, cursor))
+                    .await,
+            )
         };
         let next = match dialled {
             None => reconnect.failed(Instant::now()),
@@ -1556,6 +1578,13 @@ async fn attempt(
     let mut screens_link_ups = crate::peer_computers::link_ups(&computer.device_id);
     loop {
         tokio::select! {
+            // The other computer's pointer (local cursor): nothing comes
+            // unless the window asked for it.
+            () = remote.cursor.arrived() => {
+                for message in remote.cursor.drain() {
+                    say.say(Event::Cursor(message)).await;
+                }
+            }
             packet = frames.recv() => {
                 let Some(packet) = packet else { break };
                 admitted = true;
@@ -2175,6 +2204,11 @@ struct View {
     /// given back as the view ends, unless the window's next view of the
     /// same window carries it on.
     borrow_held: Option<(String, String)>,
+    /// The other computer's pointer as last told (local cursor), for a
+    /// window that joins, and whether the window was too slow for a message
+    /// of it (the state is then sent whole, with the next frame).
+    cursor: pocketdesk_core::protocol::cursor::CursorState,
+    cursor_lost: bool,
 }
 
 impl Drop for View {
@@ -2334,7 +2368,7 @@ pub async fn run_with(
                 let Some(command) = command else { break };
                 let shown: Vec<Option<u64>> =
                     views.iter().map(|v| v.as_ref().map(|v| v.session_id)).collect();
-                let Command::Start { device_id, monitor, hevc, window, fit, borrow } = command else {
+                let Command::Start { device_id, monitor, hevc, cursor, window, fit, borrow } = command else {
                     match command {
                         Command::Stop { session_id, window } => {
                             if let Some(i) = stop_slot(&shown, session_id, window)
@@ -2462,6 +2496,7 @@ pub async fn run_with(
                             computer,
                             monitor,
                             hevc,
+                            cursor,
                             window,
                             fit,
                             borrow.clone(),
@@ -2507,6 +2542,8 @@ pub async fn run_with(
                     focus_said: None,
                     fit_held,
                     borrow_held,
+                    cursor: Default::default(),
+                    cursor_lost: false,
                 });
             }
             Some((session_id, event)) = events.recv() => {
@@ -2555,7 +2592,29 @@ pub async fn run_with(
                             *viewer = None;
                         }
                     }
+                    Event::Cursor(message) => {
+                        // The state is kept whether or not a window watches,
+                        // so one that joins is brought to it.
+                        current.cursor.apply(message.clone());
+                        if let Some(v) = watching
+                            && !current.cursor_lost
+                            && v.tx.try_send(Message::Cursor(message)).is_err()
+                        {
+                            current.cursor_lost = true;
+                        }
+                    }
                     Event::Frame { keyframe, seq, data } => {
+                        // A pointer message the window was too slow for: the
+                        // state is sent whole, once the queue has room.
+                        if current.cursor_lost
+                            && let Some(v) = watching
+                            && v.tx.capacity() >= current.cursor.snapshot().len()
+                        {
+                            for message in current.cursor.snapshot() {
+                                let _ = v.tx.try_send(Message::Cursor(message));
+                            }
+                            current.cursor_lost = false;
+                        }
                         if let Some(v) = watching
                             && v.tx.try_send(Message::Frame { keyframe, seq, data }).is_err()
                         {
@@ -2612,6 +2671,12 @@ pub async fn run_with(
                 if let Some(config) = v.config.clone() {
                     let _ = joined.tx.try_send(config);
                 }
+                // The pointer as it is now (local cursor), for a window that
+                // joins late.
+                for message in v.cursor.snapshot() {
+                    let _ = joined.tx.try_send(Message::Cursor(message));
+                }
+                v.cursor_lost = false;
                 if let Some((why, _)) = &v.ended {
                     let _ = joined.tx.try_send(Message::End { why: why.clone() });
                     end(view, &mut None, &state_dir, None);
@@ -3452,9 +3517,17 @@ mod tests {
     fn hevc_is_offered_only_when_the_app_asks_and_the_setting_lets_it() {
         use pocketdesk_core::streaming::client::{CODEC_CAP_HEVC, CODEC_CAP_NO_IDLE_REPEATS};
         let (hevc, still) = (CODEC_CAP_HEVC, CODEC_CAP_NO_IDLE_REPEATS);
-        assert_eq!(codec_caps(true, true, true), hevc | still);
-        assert_eq!(codec_caps(true, false, true), still, "turned off here");
-        assert_eq!(codec_caps(false, true, true), still, "the app did not ask");
+        assert_eq!(codec_caps(true, true, true, false), hevc | still);
+        assert_eq!(
+            codec_caps(true, false, true, false),
+            still,
+            "turned off here"
+        );
+        assert_eq!(
+            codec_caps(false, true, true, false),
+            still,
+            "the app did not ask"
+        );
         let older: pocketdesk_core::local::computers::ComputerRequest = serde_json::from_str(
             r#"{"id":"a","ask":"view","device_id":"desk","monitor":0,"created_unix":1}"#,
         )
@@ -3463,7 +3536,11 @@ mod tests {
         else {
             panic!("a view");
         };
-        assert_eq!(codec_caps(asked, true, true), still, "an app before PC5");
+        assert_eq!(
+            codec_caps(asked, true, true, false),
+            still,
+            "an app before PC5"
+        );
     }
 
     /// With "Send nothing while the other screen is still" on (the default),
@@ -3475,13 +3552,47 @@ mod tests {
         use pocketdesk_core::streaming::client::{CODEC_CAP_HEVC, CODEC_CAP_NO_IDLE_REPEATS};
         for asked in [false, true] {
             for wanted in [false, true] {
-                let on = codec_caps(asked, wanted, true);
+                let on = codec_caps(asked, wanted, true, false);
                 assert_ne!(on & CODEC_CAP_NO_IDLE_REPEATS, 0);
-                let off = codec_caps(asked, wanted, false);
+                let off = codec_caps(asked, wanted, false, false);
                 assert_eq!(off & CODEC_CAP_NO_IDLE_REPEATS, 0);
                 assert_eq!(off, on & CODEC_CAP_HEVC, "only the bit differs");
             }
         }
+    }
+
+    /// Local cursor: a view says its window draws the other computer's
+    /// pointer only when the app asked for it and the setting here is on;
+    /// the bit never changes what else is offered, and an app before it
+    /// (whose ask has no field) never sets it.
+    #[test]
+    fn a_view_says_it_draws_the_other_pointer_only_when_asked_and_allowed() {
+        use pocketdesk_core::streaming::client::{
+            CODEC_CAP_HEVC, CODEC_CAP_LOCAL_CURSOR, CODEC_CAP_NO_IDLE_REPEATS,
+        };
+        for asked in [false, true] {
+            for wanted in [false, true] {
+                for quiet in [false, true] {
+                    let without = codec_caps(asked, wanted, quiet, false);
+                    let with = codec_caps(asked, wanted, quiet, true);
+                    assert_eq!(without & CODEC_CAP_LOCAL_CURSOR, 0);
+                    assert_ne!(with & CODEC_CAP_LOCAL_CURSOR, 0);
+                    assert_eq!(
+                        with & (CODEC_CAP_HEVC | CODEC_CAP_NO_IDLE_REPEATS),
+                        without,
+                        "only its own bit differs"
+                    );
+                }
+            }
+        }
+        let older: pocketdesk_core::local::computers::ComputerRequest = serde_json::from_str(
+            r#"{"id":"a","ask":"view","device_id":"desk","monitor":0,"created_unix":1}"#,
+        )
+        .unwrap();
+        let pocketdesk_core::local::computers::ComputerAsk::View { cursor, .. } = older.ask else {
+            panic!("a view");
+        };
+        assert!(!cursor, "an app before the local cursor never asks");
     }
 
     fn computer(addresses: &[&str], endpoint: Option<serde_json::Value>) -> PeerComputer {

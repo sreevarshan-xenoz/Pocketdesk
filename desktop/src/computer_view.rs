@@ -38,12 +38,14 @@ use pocketdesk_core::local::config::{COMPUTER_VIEW_QUALITIES, Config};
 use pocketdesk_core::local::view::{
     self as wire, Message, Phase, ViewFile, ViewFit, ViewPrivacy, ViewStatus,
 };
+use pocketdesk_core::protocol::cursor::CursorState;
 use pocketdesk_core::streaming::InputPacket;
 
 use crate::video::{
     Accel, Admit, Codec, DecodeWanted, Decoder, KeyGate, Picture, Planes, Recorder, free_name,
     letterbox, now_unix, stamp, user_folder,
 };
+use crate::view_cursor;
 use crate::view_fit;
 use crate::view_follow::{self, DropBatch, Edge, FocusEdges};
 use crate::view_input::{MOVE_EVERY, SendKey, WindowInput, send_key_choices};
@@ -139,6 +141,8 @@ pub struct Borrowed {
 struct Waiting {
     wanted: Wanted,
     hevc: HevcAsk,
+    /// The ask says this window draws the other computer's pointer.
+    cursor: bool,
 }
 
 #[derive(Default)]
@@ -230,6 +234,15 @@ struct State {
     /// view gave up on HEVC (every way gave nothing, PR #562 review I3),
     /// and whether the worker asks for it again without.
     hevc_setting: bool,
+    /// "Draw the other computer's pointer here" as Settings has it
+    /// (`computer_view_local_cursor`): the next view asks for it.
+    local_cursor: bool,
+    /// What the other computer last said of its pointer, and what the
+    /// window last asked it of the pointer's places (local cursor).
+    cursor: CursorState,
+    cursor_places: bool,
+    /// The painted pointer's image as a texture, by its shape's id.
+    cursor_texture: Option<(u32, egui::TextureHandle)>,
     hevc_refused: bool,
     redial_h264: bool,
     /// The window's focus, as said to the server for the clipboard (PC3).
@@ -1404,6 +1417,12 @@ impl ComputerView {
         self.each(|state| state.hevc_setting = on);
     }
 
+    /// "Draw the other computer's pointer here" as Settings has it: the
+    /// next view follows.
+    pub fn set_local_cursor(&self, on: bool) {
+        self.each(|state| state.local_cursor = on);
+    }
+
     /// "Decode on the graphics card" as Settings has it (PC5): the next
     /// view follows.
     pub fn set_hw_decode(&self, on: bool) {
@@ -1593,6 +1612,7 @@ impl ComputerView {
         state.view_only = from.view_only;
         state.stats_on = from.stats_on;
         state.hevc_setting = from.hevc_setting;
+        state.local_cursor = from.local_cursor;
         state.hw_decode = from.hw_decode;
         state.lock_on_close = from.lock_on_close;
         state.notches_only = from.notches_only;
@@ -1737,10 +1757,18 @@ fn ask_with(
         state.fit_waiting = Some(Waiting {
             wanted: wanted.clone(),
             hevc,
+            cursor: state.local_cursor,
         });
     } else {
         let fit = wanted.fit.then_some(state.fit.area).flatten();
-        send_view_ask(state_dir, &wanted, hevc, state.slot, fit)?;
+        send_view_ask(
+            state_dir,
+            &wanted,
+            hevc,
+            state.local_cursor,
+            state.slot,
+            fit,
+        )?;
         state.fit.asked = fit;
     }
     // The microphone stops with the view it went to (PR #569 re-review
@@ -1760,6 +1788,9 @@ fn ask_with(
     // (PR #570 review I1).
     state.decoder_gen += 1;
     state.picture = None;
+    // The other computer's pointer is said again by the next view.
+    state.cursor = CursorState::default();
+    state.cursor_places = false;
     state.writer = None;
     state.newer_than = state.newer_than.max(state.session_id.unwrap_or(0));
     state.session_id = None;
@@ -1801,13 +1832,18 @@ fn send_view_ask(
     state_dir: &Path,
     wanted: &Wanted,
     hevc: HevcAsk,
+    cursor: bool,
     slot: u8,
     fit: Option<FitSize>,
 ) -> Result<(), String> {
     match hevc {
         HevcAsk::Now(hevc) => {
-            computers::request(state_dir, view_ask(wanted, hevc, slot, fit), now_unix())
-                .map_err(|e| format!("Not asked: {e}"))?;
+            computers::request(
+                state_dir,
+                view_ask(wanted, hevc, cursor, slot, fit),
+                now_unix(),
+            )
+            .map_err(|e| format!("Not asked: {e}"))?;
         }
         HevcAsk::Wait => {
             // The probe has not said yet: the ask waits for it.
@@ -1818,7 +1854,7 @@ fn send_view_ask(
                     let hevc = crate::video::wait_for_hevc_probe(HEVC_PROBE_WAIT);
                     if let Err(e) = computers::request(
                         &dir,
-                        view_ask(&request_for, hevc, slot, fit),
+                        view_ask(&request_for, hevc, cursor, slot, fit),
                         now_unix(),
                     ) {
                         eprintln!("Pocketdesk: a computer's screen was not asked for: {e}");
@@ -1861,11 +1897,18 @@ pub fn hevc_ask(could: bool, known: Option<bool>) -> HevcAsk {
 }
 
 /// The ask for `wanted`'s screen in the window `slot`, taking HEVC or not.
-fn view_ask(wanted: &Wanted, hevc: bool, slot: u8, fit: Option<FitSize>) -> ComputerAsk {
+fn view_ask(
+    wanted: &Wanted,
+    hevc: bool,
+    cursor: bool,
+    slot: u8,
+    fit: Option<FitSize>,
+) -> ComputerAsk {
     ComputerAsk::View {
         device_id: wanted.device_id.clone(),
         monitor: wanted.monitor,
         hevc,
+        cursor,
         window: slot,
         fit,
         borrow: wanted.borrow.as_ref().map(|b| b.window.clone()),
@@ -1992,7 +2035,14 @@ fn follow_fit(
     state.fit.area = Some(area);
     if let Some(waiting) = state.fit_waiting.take() {
         let fit = Some(area);
-        match send_view_ask(state_dir, &waiting.wanted, waiting.hevc, state.slot, fit) {
+        match send_view_ask(
+            state_dir,
+            &waiting.wanted,
+            waiting.hevc,
+            waiting.cursor,
+            state.slot,
+            fit,
+        ) {
             Ok(()) => state.fit.asked = fit,
             Err(e) => state.ended = Some(e),
         }
@@ -3258,6 +3308,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                 going,
                 connected,
             );
+            follow_cursor(&mut state, ui, picture_rect);
             // Relative moves need no picture of the right size: a size
             // change while locked keeps the movement and what is held
             // (PR #563 review M6).
@@ -3417,6 +3468,58 @@ fn follow_pointer(
                     });
             });
         ctx.request_repaint_after(view_pointer::HINT_FOR);
+    }
+}
+
+/// The other computer's pointer, each pass (local cursor): as this
+/// window's own system pointer while the pointer is free over the picture,
+/// hidden when that computer hides its own, and, while this pointer is
+/// locked to the window, painted over the picture where that computer says
+/// its pointer is (which it is asked to say only meanwhile). Nothing is
+/// done for a computer that did not say its picture has no pointer in it.
+fn follow_cursor(state: &mut State, ui: &egui::Ui, picture: Option<egui::Rect>) {
+    let ctx = ui.ctx();
+    let locked = state.pointer.locked();
+    let want = view_cursor::wants_places(&state.cursor, locked);
+    if want != state.cursor_places {
+        state.cursor_places = want;
+        send(state, vec![InputPacket::CursorTrack { on: want }]);
+    }
+    if !state.cursor.separate {
+        return;
+    }
+    let pointer = ctx.input(|i| i.pointer.hover_pos());
+    match view_cursor::plan(&state.cursor, picture, pointer, locked) {
+        view_cursor::Draw::Leave => {}
+        view_cursor::Draw::System(shape) => {
+            ctx.set_cursor_image(Some(view_cursor::system_image(&shape)));
+        }
+        view_cursor::Draw::Hide => ctx.set_cursor_icon(egui::CursorIcon::None),
+        view_cursor::Draw::Paint { shape, at } => {
+            let texture = match &state.cursor_texture {
+                Some((id, texture)) if *id == shape.id => texture.clone(),
+                _ => {
+                    let image = egui::ColorImage::from_rgba_unmultiplied(
+                        [usize::from(shape.width), usize::from(shape.height)],
+                        &shape.rgba,
+                    );
+                    let texture = ctx.load_texture(
+                        "computer-view-pointer",
+                        image,
+                        egui::TextureOptions::NEAREST,
+                    );
+                    state.cursor_texture = Some((shape.id, texture.clone()));
+                    texture
+                }
+            };
+            let rect = view_cursor::paint_rect(&shape, at, ctx.pixels_per_point());
+            ui.painter().image(
+                texture.id(),
+                rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
     }
 }
 
@@ -3939,6 +4042,20 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                         lock(shared).note = Some(format!("The decoder stopped ({e})."));
                         repaint(ctx, shared);
                     }
+                }
+            }
+            // The other computer's pointer (local cursor): kept, and drawn
+            // by the window's next pass.
+            Message::Cursor(message) => {
+                let mut state = lock(shared);
+                let was = state.cursor.separate;
+                if state.cursor.apply(message) {
+                    // A computer that sends the pointer apart again (a new
+                    // session): the places asked for are asked again.
+                    if state.cursor.separate && !was {
+                        state.cursor_places = false;
+                    }
+                    ctx.request_repaint_of(viewport_id(state.slot));
                 }
             }
             Message::End { why } => return Ok(why),
@@ -4948,10 +5065,50 @@ mod tests {
         assert!(
             matches!(
                 asked.as_slice(),
-                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: true, window: 0, fit: None, borrow: None }
+                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: true, cursor: false, window: 0, fit: None, borrow: None }
             ),
             "{asked:?}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Local cursor: the view's ask says the window draws the other
+    /// computer's pointer when Settings let it, and not otherwise (a server
+    /// then asks that computer for nothing it would not draw).
+    #[test]
+    fn the_view_ask_says_whether_the_window_draws_the_other_pointer() {
+        let dir = std::env::temp_dir().join(format!("pd-cursor-ask-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let wanted = || Wanted {
+            device_id: "desk".into(),
+            name: "Desk".into(),
+            monitor: 0,
+            fit: false,
+            borrow: None,
+        };
+        for on in [true, false] {
+            let mut state = State {
+                local_cursor: on,
+                ..State::default()
+            };
+            ask_with(&dir, &mut state, wanted(), Some(false)).unwrap();
+            let asked = computers::take_all(&dir, now_unix());
+            assert!(
+                matches!(
+                    asked.as_slice(),
+                    [r] if matches!(&r.ask, ComputerAsk::View { cursor, .. } if *cursor == on)
+                ),
+                "{on}: {asked:?}"
+            );
+        }
+        // A new ask forgets the last view's pointer.
+        let mut state = State::default();
+        state
+            .cursor
+            .apply(pocketdesk_core::protocol::cursor::CursorMessage::Mode { separate: true });
+        ask_with(&dir, &mut state, wanted(), Some(false)).unwrap();
+        assert!(!state.cursor.separate);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -4979,7 +5136,7 @@ mod tests {
         assert!(
             matches!(
                 asked.as_slice(),
-                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: false, window: 0, fit: None, borrow: None }
+                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: false, cursor: false, window: 0, fit: None, borrow: None }
             ),
             "{asked:?}"
         );
@@ -6541,6 +6698,7 @@ mod tests {
                 device_id: "desk".into(),
                 monitor: 0,
                 hevc: false,
+                cursor: false,
                 window: 0,
                 fit: None,
                 borrow: None,
@@ -6869,6 +7027,7 @@ mod tests {
                 device_id: "desk".into(),
                 monitor: 1,
                 hevc: false,
+                cursor: false,
                 window: 2,
                 fit: None,
                 borrow: None,
@@ -6942,6 +7101,7 @@ mod tests {
                 device_id: "desk".into(),
                 monitor: 0,
                 hevc: false,
+                cursor: false,
                 window: 0,
                 fit: None,
                 borrow: Some("0x5a".into()),
@@ -7102,6 +7262,7 @@ mod tests {
                 device_id: "desk".into(),
                 monitor: 1,
                 hevc: false,
+                cursor: false,
                 window: 1,
                 fit: None,
                 borrow: None,

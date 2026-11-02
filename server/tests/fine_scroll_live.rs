@@ -272,6 +272,7 @@ fn a_touchpads_fine_scroll_lands_in_120ths() {
             device_id: b_id.clone(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window: 0,
             fit: None,
             borrow: None,

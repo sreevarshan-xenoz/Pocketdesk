@@ -81,6 +81,7 @@ fn ask(a_state: &Path, b_id: &str, window: u8, fit: Option<FitSize>) {
             device_id: b_id.to_string(),
             monitor: 0,
             hevc: false,
+            cursor: false,
             window,
             fit,
             borrow: None,

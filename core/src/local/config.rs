@@ -571,6 +571,19 @@ pub struct Config {
     /// as before. Read as each view dials. On by default.
     #[serde(default = "default_true")]
     pub computer_view_no_idle_repeats: bool,
+    /// The window that shows another computer's screen draws that computer's
+    /// pointer itself, as this computer's own pointer, so it moves with no
+    /// wait for the picture (`CODEC_CAP_LOCAL_CURSOR`, the window handoff's
+    /// local cursor). The other computer takes its pointer out of the
+    /// picture where it can (a wlroots compositor such as Sway or Hyprland,
+    /// GNOME, KDE through the screen-sharing portal) and sends the pointer's
+    /// shape apart; where it cannot (Windows, X11, an older version) the
+    /// picture keeps its pointer, as before. While this computer's pointer
+    /// is locked to the window, the pointer is drawn where the other
+    /// computer says it is. Off, the pointer stays as the picture has it.
+    /// Read as each view starts. On by default.
+    #[serde(default = "default_true")]
+    pub computer_view_local_cursor: bool,
     /// The other computer is locked as the window that shows its screen
     /// closes (PC8), with that computer's own lock, which its "Lock, sleep,
     /// privacy and wake others" switch for this one allows. Off until
@@ -928,6 +941,7 @@ impl Default for Config {
             computer_view_hw_decode: true,
             computer_view_hevc: true,
             computer_view_no_idle_repeats: true,
+            computer_view_local_cursor: true,
             computer_view_lock_on_close: false,
             computer_view_fit: false,
             computer_view_scancodes: false,
@@ -1228,6 +1242,7 @@ impl Config {
         "computer_view_hw_decode",
         "computer_view_hevc",
         "computer_view_no_idle_repeats",
+        "computer_view_local_cursor",
         "computer_view_lock_on_close",
         "computer_view_fit",
         "computer_view_scancodes",
@@ -1872,6 +1887,28 @@ phone_battery = \"x\"
         assert_eq!(
             Config::default().changed_keys(&chosen),
             ["computer_view_no_idle_repeats"]
+        );
+    }
+
+    /// The window draws the other computer's pointer itself until turned
+    /// off, and the choice saves and reads back.
+    #[test]
+    fn a_computers_window_draws_its_pointer_until_turned_off() {
+        let path = temp("computer-view-local-cursor");
+        std::fs::write(&path, "").unwrap();
+        assert!(Config::load_from(&path).unwrap().computer_view_local_cursor);
+        assert!(Config::default().computer_view_local_cursor);
+        let chosen = Config {
+            computer_view_local_cursor: false,
+            ..Config::default()
+        };
+        chosen
+            .save_keys_to(&path, &["computer_view_local_cursor"])
+            .unwrap();
+        assert!(!Config::load_from(&path).unwrap().computer_view_local_cursor);
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["computer_view_local_cursor"]
         );
     }
 
