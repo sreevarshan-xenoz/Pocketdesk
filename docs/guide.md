@@ -38,12 +38,12 @@ Tailscale is not required. It carries everything, adds a second encrypted layer 
 
 ## What works where
 
-The desktop end runs on Linux and Windows; the phone end is the Android app. It describes 0.8.3 and what has merged to `main` since (PRs #592 onward, among them: the portable Linux tarball, the Linux firewall row, shared input, the OpenH264 fallback, the phone's camera as a webcam, approving sudo with the phone, the phone's location, the direct link, phone apps on the computer, kept folders and the wake helper), which ships with the next release. The last row says what a person has run on real hardware (dates and details in [the checklist](device-verification-checklist.md)); everything else is unit- or integration-tested only.
+The desktop end runs on Linux and Windows; the phone end is the Android app. It describes 0.9.0. The last row says what a person has run on real hardware (dates and details in [the checklist](device-verification-checklist.md)); everything else is unit- or integration-tested only.
 
 | | Linux host | Windows host |
 |---|---|---|
 | Screen capture | wlroots screencopy (Hyprland, Sway), the portal (GNOME, KDE; it asks at each session, or with Settings "Remember the screen-sharing grant" on, off by default, once until you revoke it, so sessions start with no one at the desk; on KDE Plasma 6 it can be [allowed ahead](#kde-plasma-no-dialog-at-all), so it never asks), X11 | Windows.Graphics.Capture, DXGI duplication |
-| Hardware encoding | VAAPI (in process), NVENC (through `ffmpeg`); software is libx264, or on Fedora's `ffmpeg-free` Cisco's OpenH264 (after 0.8.3) | NVENC, AMF, Quick Sync, Media Foundation (every encoder, software too, through `ffmpeg.exe` on `PATH`) |
+| Hardware encoding | VAAPI (in process), NVENC (through `ffmpeg`); software is libx264, or on Fedora's `ffmpeg-free` Cisco's OpenH264 (0.9.0 on) | NVENC, AMF, Quick Sync, Media Foundation (every encoder, software too, through `ffmpeg.exe` on `PATH`) |
 | Remote input | uinput (Wayland), else the compositor's virtual pointer and keyboard on wlroots (Sway, Hyprland) when uinput is root-only, or GNOME's and KDE's RemoteDesktop portal through the session's screen sharing (one grant for both; a remote without the screen gets no input there; GNOME also has the off-by-default "Unattended on GNOME", mutter's own D-Bus with no dialog), XTEST (X11); text typed from the phone goes through the compositor's virtual keyboard on wlroots (Sway, Hyprland), so any character arrives on any layout, else as US-layout keys with Shift | `SendInput`: elevated windows need `install --elevated`; the UAC prompt and the lock screen are never reachable |
 | Clipboard: text and images, anywhere | `wl-clipboard` on Wayland, `xclip` on X11 | Win32 clipboard |
 | Files both ways, remote browsing (anywhere) | yes | yes |
@@ -54,7 +54,7 @@ The desktop end runs on Linux and Windows; the phone end is the Android app. It 
 | Privacy mode | `EVIOCGRAB` and an on-screen ring (wlroots) | low-level hooks and a ring hidden from the stream |
 | Single-window streaming | Hyprland (the window itself, even when covered) | a crop of the window as it shows on screen |
 | Window and workspace HUD | Hyprland | windows (polled) |
-| Firewall check (Diagnostics, and the Pair page when it is why a pairing times out; after 0.8.3) | ufw, firewalld, nftables and iptables, read only | the Windows firewall rules, and the Pair page says when the network is marked Public |
+| Firewall check (Diagnostics, and the Pair page when it is why a pairing times out; 0.9.0 on) | ufw, firewalld, nftables and iptables, read only | the Windows firewall rules, and the Pair page says when the network is marked Public |
 | Start at login | systemd user unit | `pocketdesk install` (a logon task and firewall rules) |
 | Links from the phone open in | `xdg-open` | the default browser (`ShellExecute`) |
 | Now playing on the computer, from the phone | MPRIS through `playerctl` | the system media controls |
