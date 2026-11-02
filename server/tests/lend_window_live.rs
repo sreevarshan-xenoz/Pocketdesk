@@ -651,14 +651,14 @@ fn a_window_is_lent_to_a_screen_of_its_size_and_returned() {
     );
     assert!(lent.get("error").is_none(), "{lent}");
     let there = [BORROWER.to_string()];
-    let mut missing = std::collections::BTreeMap::new();
+    let mut looks = lend_window::Looks::default();
     assert_eq!(
-        lend_window::sweep_once(true, &there, &mut missing),
+        lend_window::sweep_once(true, &there, &mut looks),
         0,
         "switch on, borrower there: nothing to do"
     );
     assert_eq!(
-        lend_window::sweep_once(false, &there, &mut missing),
+        lend_window::sweep_once(false, &there, &mut looks),
         1,
         "switch off: the window goes back"
     );
@@ -715,13 +715,13 @@ fn a_window_is_lent_to_a_screen_of_its_size_and_returned() {
         window_of(sway, pid).is_none().then_some(())
     });
     assert_eq!(
-        lend_window::sweep_once(true, &there, &mut missing),
+        lend_window::sweep_once(true, &there, &mut looks),
         0,
         "one look only notes it"
     );
     std::thread::sleep(Duration::from_millis(200));
     assert_eq!(
-        lend_window::sweep_once(true, &there, &mut missing),
+        lend_window::sweep_once(true, &there, &mut looks),
         1,
         "the second look removes its screen"
     );

@@ -68,6 +68,8 @@ struct Entry {
 #[derive(Default)]
 struct Registry {
     sessions: HashMap<u64, Entry>,
+    /// The monitor index each session that sends a picture captures.
+    monitors: HashMap<u64, u32>,
 }
 
 static REGISTRY: OnceLock<Mutex<Registry>> = OnceLock::new();
@@ -124,14 +126,38 @@ impl SessionHandle {
     pub(crate) fn id(&self) -> u64 {
         self.id
     }
+
+    /// Say which monitor index this session captures (a session that sends
+    /// a picture), for [`captures`].
+    pub(crate) fn set_monitor(&self, monitor: u32) {
+        if let Ok(mut reg) = registry().lock() {
+            reg.monitors.insert(self.id, monitor);
+        }
+    }
 }
 
 impl Drop for SessionHandle {
     fn drop(&mut self) {
         if let Ok(mut reg) = registry().lock() {
             reg.sessions.remove(&self.id);
+            reg.monitors.remove(&self.id);
         }
     }
+}
+
+/// The monitor index each live session captures, by the device that
+/// announced it: a window lent to a computer is held while one of its
+/// sessions captures that window's screen.
+pub fn captures() -> Vec<(String, u32)> {
+    registry()
+        .lock()
+        .map(|reg| {
+            reg.sessions
+                .iter()
+                .filter_map(|(id, e)| Some((e.info.device_id.clone()?, *reg.monitors.get(id)?)))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// All live sessions, oldest first.
@@ -407,6 +433,18 @@ mod tests {
                 .any(|s| s.device_id.as_deref() == Some("removed-dev-2"))
         );
         kick_device("removed-dev-2");
+    }
+
+    #[test]
+    fn a_session_is_counted_as_capturing_its_monitor_while_it_lives() {
+        let _guard = test_lock();
+        let (conn, _) = dummy(true, 250);
+        let handle = register(Some("capturing-dev".into()), &conn, Streamed::default());
+        assert!(!captures().iter().any(|(d, _)| d == "capturing-dev"));
+        handle.set_monitor(3);
+        assert!(captures().contains(&("capturing-dev".to_string(), 3)));
+        drop(handle);
+        assert!(!captures().iter().any(|(d, _)| d == "capturing-dev"));
     }
 
     #[test]
