@@ -337,7 +337,10 @@ mod tests {
         assert!(still.heartbeat(&b), "and then the new picture is still");
         assert!(!still.heartbeat(&b[..32]), "a different size differs");
         still.changed();
-        assert!(!still.heartbeat(&b[..32]), "a frame for damage went between");
+        assert!(
+            !still.heartbeat(&b[..32]),
+            "a frame for damage went between"
+        );
     }
 
     /// A copy that filled the buffer with pixels no frame carried: the buffer

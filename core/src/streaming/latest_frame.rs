@@ -144,12 +144,24 @@ impl<T> FrameReceiver<T> {
                 .is_none()
     }
 
-    fn take(&self) -> Option<T> {
-        self.0
-            .waiting
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take()
+    fn take(&mut self) -> Option<T> {
+        let mut waiting = self.slot.waiting.lock().unwrap_or_else(|e| e.into_inner());
+        let frame = waiting.take();
+        if frame.is_some() {
+            // Read under the lock the senders count under.
+            let replaced = self.slot.replaced.load(Ordering::Relaxed);
+            self.last_replaced = replaced != self.seen_replaced;
+            self.seen_replaced = replaced;
+        }
+        frame
+    }
+
+    /// Whether the frame last taken replaced one still waiting, since the
+    /// take before it: a heartbeat marked as a repeat of the last frame can
+    /// have replaced a changed frame with the same pixels this way, and then
+    /// stands for the change.
+    pub fn last_replaced(&self) -> bool {
+        self.last_replaced
     }
 
     /// How many frames were replaced by a newer one before the encoder
