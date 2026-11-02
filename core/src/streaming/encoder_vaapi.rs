@@ -7,9 +7,16 @@
 //! does *not* expose as safe bindings — so this module hand-rolls it through
 //! `ffmpeg::ffi` (the re-exported `ffmpeg_sys_next`).
 //!
-//! Pipeline (per the FFmpeg `hw_transfer`/vaapi-encode reference):
-//! `BGRA → sws_scale → NV12 → av_hwframe_transfer_data (hwupload) →
-//! avcodec_send_frame → h264_vaapi / hevc_vaapi`.
+//! Pipeline (per the FFmpeg `hw_transfer`/vaapi-encode reference), by
+//! default with the colour conversion on the card:
+//! `BGRA → av_hwframe_transfer_data (hwupload, a BGR0 surface) →
+//! scale_vaapi (the VA-API video processor, to NV12) → avcodec_send_frame →
+//! h264_vaapi / hevc_vaapi`. The processor does no conversion; the frame's
+//! bytes go from the capture's buffer to the surface without a copy of ours.
+//! Where the card's processor cannot take that (a driver without BGR0
+//! surfaces or without `scale_vaapi`) the encoder logs once and converts on
+//! the processor as it always did: `BGRA → sws_scale → NV12 → hwupload`.
+//! `POCKETDESK_VAAPI_CPU_CONVERT=1` forces that path (for A/B timing).
 //!
 //! Device selection (the real blocker on hybrid-GPU laptops): FFmpeg's VAAPI
 //! backend binds to a specific DRM render node, and only nodes whose driver
@@ -22,10 +29,11 @@
 //! here instead of dying on the hardcoded `renderD128` the sidecar used.
 
 use std::collections::VecDeque;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::os::raw::c_int;
 use std::path::PathBuf;
 use std::sync::Once;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use tracing::{debug, info, warn};
@@ -160,15 +168,12 @@ pub struct VaapiEncoder {
     encoder: *mut ffmpeg::ffi::AVCodecContext,
     hw_device_ref: *mut ffmpeg::ffi::AVBufferRef,
     hw_frames_ref: *mut ffmpeg::ffi::AVBufferRef,
-    /// Reusable VAAPI upload target (hardware format).
+    /// Reusable VAAPI NV12 frame handed to the codec (the upload target on
+    /// the processor path, the video processor's output on the card path).
     hw_frame: *mut ffmpeg::ffi::AVFrame,
     /// Reusable Annex-B output packet.
     packet: *mut ffmpeg::ffi::AVPacket,
-    /// BGRA scratch frame fed to the scaler.
-    bgra: ffmpeg::frame::Video,
-    /// NV12 scaler output, source for `av_hwframe_transfer_data`.
-    nv12: ffmpeg::frame::Video,
-    scaler: ffmpeg::software::scaling::Context,
+    convert: Convert,
     queue: VecDeque<(u64, Instant)>,
     pending: VecDeque<EncodedPacket>,
     sequence: u64,
@@ -181,6 +186,270 @@ pub struct VaapiEncoder {
 // `video_encode` task. FFmpeg contexts are thread-affine but move-safe
 // between sequential uses — same posture as `InProcessEncoder`.
 unsafe impl Send for VaapiEncoder {}
+
+/// How a captured BGRA frame becomes the NV12 surface the codec takes.
+enum Convert {
+    /// `sws_scale` on the processor, then `hwupload` of the NV12.
+    Cpu(CpuConvert),
+    /// Upload of the BGRA and the conversion by the card's video processor.
+    Gpu(GpuConvert),
+}
+
+/// The conversion on the processor (the path every host can take).
+struct CpuConvert {
+    /// BGRA scratch frame fed to the scaler.
+    bgra: ffmpeg::frame::Video,
+    /// NV12 scaler output, source for `av_hwframe_transfer_data`.
+    nv12: ffmpeg::frame::Video,
+    scaler: ffmpeg::software::scaling::Context,
+}
+
+impl CpuConvert {
+    /// Copy the capture's rows into the scaler's own BGRA frame.
+    fn copy_frame(&mut self, frame: &VideoFrame, width: u32, height: u32) {
+        let width = width as usize;
+        let height = height as usize;
+        let src_stride = frame.stride as usize;
+        let dst_stride = self.bgra.stride(0);
+        let row = width * 4;
+        let dst = self.bgra.data_mut(0);
+        for y in 0..height {
+            let src_range = y * src_stride..y * src_stride + row;
+            let dst_range = y * dst_stride..y * dst_stride + row;
+            if src_range.end > frame.data.len() || dst_range.end > dst.len() {
+                break;
+            }
+            dst[dst_range].copy_from_slice(&frame.data[src_range]);
+        }
+    }
+}
+
+/// The conversion on the card: the capture's BGRA bytes are uploaded to a
+/// BGR0 VA surface (the alpha byte is ignored) and FFmpeg's `scale_vaapi`
+/// runs the VA-API video processor from there to an NV12 surface, which is
+/// what the codec takes. The processor does no per-pixel work.
+struct GpuConvert {
+    graph: *mut ffmpeg::ffi::AVFilterGraph,
+    src: *mut ffmpeg::ffi::AVFilterContext,
+    sink: *mut ffmpeg::ffi::AVFilterContext,
+    /// The BGR0 surface pool the bytes are uploaded to.
+    upload_frames_ref: *mut ffmpeg::ffi::AVBufferRef,
+    /// Reusable BGR0 surface (handed to the graph, which takes it).
+    upload: *mut ffmpeg::ffi::AVFrame,
+    /// A host-memory view of the capture's bytes: pointers only, no buffer.
+    view: *mut ffmpeg::ffi::AVFrame,
+    /// Set when a frame went into the graph but none came out: the graph
+    /// may still hold it, and every later frame would come out one behind.
+    /// Each call then fails, so the streamer opens a new encoder.
+    stuck: bool,
+}
+
+/// The conversion matrix and range the processor path has always produced:
+/// swscale's default for RGB to YUV is BT.601, limited range. The stream
+/// carries no colour tags, so a viewer reads it as it always did.
+const VPP_ARGS: &CStr = c"format=nv12:out_color_matrix=smpte170m:out_range=tv";
+
+impl GpuConvert {
+    /// Build the graph on `device_ref` and push one blank frame through it,
+    /// so a driver that cannot do this fails here and not on the first frame.
+    /// Returns the converter and a new reference to the NV12 frames context
+    /// the processor makes its output in, which the codec must be opened
+    /// with (the caller owns that reference).
+    fn new(
+        device_ref: *mut ffmpeg::ffi::AVBufferRef,
+        width: u32,
+        height: u32,
+        fps: u32,
+    ) -> anyhow::Result<(Self, *mut ffmpeg::ffi::AVBufferRef)> {
+        use ffmpeg::ffi;
+        let mut gc = Self {
+            graph: std::ptr::null_mut(),
+            src: std::ptr::null_mut(),
+            sink: std::ptr::null_mut(),
+            upload_frames_ref: std::ptr::null_mut(),
+            upload: std::ptr::null_mut(),
+            view: std::ptr::null_mut(),
+            stuck: false,
+        };
+        unsafe {
+            gc.upload_frames_ref = ffi::av_hwframe_ctx_alloc(device_ref);
+            anyhow::ensure!(
+                !gc.upload_frames_ref.is_null(),
+                "av_hwframe_ctx_alloc failed"
+            );
+            let frames = (*gc.upload_frames_ref).data as *mut ffi::AVHWFramesContext;
+            (*frames).format = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI;
+            (*frames).sw_format = ffi::AVPixelFormat::AV_PIX_FMT_BGR0;
+            (*frames).width = width as c_int;
+            (*frames).height = height as c_int;
+            (*frames).initial_pool_size = 4;
+            let r = ffi::av_hwframe_ctx_init(gc.upload_frames_ref);
+            anyhow::ensure!(r >= 0, "BGR0 surfaces: {}", describe_err(r));
+
+            gc.graph = ffi::avfilter_graph_alloc();
+            anyhow::ensure!(!gc.graph.is_null(), "avfilter_graph_alloc failed");
+            let buffer = ffi::avfilter_get_by_name(c"buffer".as_ptr());
+            let scale = ffi::avfilter_get_by_name(c"scale_vaapi".as_ptr());
+            let buffersink = ffi::avfilter_get_by_name(c"buffersink".as_ptr());
+            anyhow::ensure!(
+                !buffer.is_null() && !scale.is_null() && !buffersink.is_null(),
+                "this FFmpeg has no scale_vaapi filter"
+            );
+
+            // The source says its frames are surfaces of the BGR0 pool.
+            gc.src = ffi::avfilter_graph_alloc_filter(gc.graph, buffer, c"in".as_ptr());
+            anyhow::ensure!(!gc.src.is_null(), "buffer filter not allocated");
+            let params = ffi::av_buffersrc_parameters_alloc();
+            anyhow::ensure!(!params.is_null(), "av_buffersrc_parameters_alloc failed");
+            (*params).format = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI as c_int;
+            (*params).width = width as c_int;
+            (*params).height = height as c_int;
+            (*params).time_base = ffi::AVRational {
+                num: 1,
+                den: fps as c_int,
+            };
+            (*params).frame_rate = ffi::AVRational {
+                num: fps as c_int,
+                den: 1,
+            };
+            (*params).hw_frames_ctx = gc.upload_frames_ref;
+            let r = ffi::av_buffersrc_parameters_set(gc.src, params);
+            ffi::av_free(params as *mut _);
+            anyhow::ensure!(r >= 0, "buffer source: {}", describe_err(r));
+            let r = ffi::avfilter_init_str(gc.src, std::ptr::null());
+            anyhow::ensure!(r >= 0, "buffer source: {}", describe_err(r));
+
+            let mut convert: *mut ffi::AVFilterContext = std::ptr::null_mut();
+            let r = ffi::avfilter_graph_create_filter(
+                &mut convert,
+                scale,
+                c"convert".as_ptr(),
+                VPP_ARGS.as_ptr(),
+                std::ptr::null_mut(),
+                gc.graph,
+            );
+            anyhow::ensure!(r >= 0, "scale_vaapi: {}", describe_err(r));
+            let r = ffi::avfilter_graph_create_filter(
+                &mut gc.sink,
+                buffersink,
+                c"out".as_ptr(),
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                gc.graph,
+            );
+            anyhow::ensure!(r >= 0, "buffer sink: {}", describe_err(r));
+            let r = ffi::avfilter_link(gc.src, 0, convert, 0);
+            anyhow::ensure!(r >= 0, "link: {}", describe_err(r));
+            let r = ffi::avfilter_link(convert, 0, gc.sink, 0);
+            anyhow::ensure!(r >= 0, "link: {}", describe_err(r));
+            let r = ffi::avfilter_graph_config(gc.graph, std::ptr::null_mut());
+            anyhow::ensure!(r >= 0, "graph config: {}", describe_err(r));
+
+            let out = ffi::av_buffersink_get_hw_frames_ctx(gc.sink);
+            anyhow::ensure!(!out.is_null(), "the processor made no output surfaces");
+            gc.upload = ffi::av_frame_alloc();
+            gc.view = ffi::av_frame_alloc();
+            anyhow::ensure!(
+                !gc.upload.is_null() && !gc.view.is_null(),
+                "av_frame_alloc failed"
+            );
+
+            // The probe: one blank frame, upload, convert, take it back.
+            let blank = vec![0u8; width as usize * 4 * height as usize];
+            let mut probe = ffi::av_frame_alloc();
+            anyhow::ensure!(!probe.is_null(), "av_frame_alloc failed");
+            let r = gc.convert(&blank, width * 4, width, height, 0, probe, None);
+            ffi::av_frame_free(&mut probe);
+            r?;
+            let out_ref = ffi::av_buffer_ref(out);
+            anyhow::ensure!(!out_ref.is_null(), "av_buffer_ref failed");
+            Ok((gc, out_ref))
+        }
+    }
+
+    /// Upload `data` (BGRA, `stride` bytes a row) and convert it into `out`
+    /// as an NV12 surface stamped `pts`. `ts` is the frame the trace names.
+    ///
+    /// # Safety
+    /// `out` is a live, reusable `AVFrame`.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn convert(
+        &mut self,
+        data: &[u8],
+        stride: u32,
+        width: u32,
+        height: u32,
+        pts: i64,
+        out: *mut ffmpeg::ffi::AVFrame,
+        ts: Option<Instant>,
+    ) -> anyhow::Result<()> {
+        use ffmpeg::ffi;
+        anyhow::ensure!(
+            !self.stuck,
+            "video processor out of step: a frame went in and none came out"
+        );
+        let needed = (height as usize).saturating_sub(1) * stride as usize + width as usize * 4;
+        anyhow::ensure!(
+            stride >= width * 4 && data.len() >= needed,
+            "frame of {} bytes does not hold {width}x{height} at stride {stride}",
+            data.len()
+        );
+        unsafe {
+            let view = &mut *self.view;
+            view.format = ffi::AVPixelFormat::AV_PIX_FMT_BGR0 as c_int;
+            view.width = width as c_int;
+            view.height = height as c_int;
+            view.data[0] = data.as_ptr() as *mut u8;
+            view.linesize[0] = stride as c_int;
+
+            ffi::av_frame_unref(self.upload);
+            let r = ffi::av_hwframe_get_buffer(self.upload_frames_ref, self.upload, 0);
+            anyhow::ensure!(r >= 0, "BGR0 surface: {}", describe_err(r));
+            let r = ffi::av_hwframe_transfer_data(self.upload, self.view, 0);
+            anyhow::ensure!(r >= 0, "upload of the BGRA: {}", describe_err(r));
+            if let Some(ts) = ts {
+                latency_trace::encoder_step(ts, Step::Uploaded);
+            }
+            (*self.upload).pts = pts;
+            // The graph takes the surface (no KEEP_REF), so `upload` is empty
+            // again for the next frame.
+            let r = ffi::av_buffersrc_add_frame_flags(self.src, self.upload, 0);
+            anyhow::ensure!(r >= 0, "video processor in: {}", describe_err(r));
+            ffi::av_frame_unref(out);
+            let r = ffi::av_buffersink_get_frame(self.sink, out);
+            self.stuck = r < 0;
+            anyhow::ensure!(r >= 0, "video processor out: {}", describe_err(r));
+            if let Some(ts) = ts {
+                latency_trace::encoder_step(ts, Step::Converted);
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Drop for GpuConvert {
+    fn drop(&mut self) {
+        use ffmpeg::ffi;
+        unsafe {
+            ffi::av_frame_free(&mut self.view);
+            ffi::av_frame_free(&mut self.upload);
+            ffi::avfilter_graph_free(&mut self.graph);
+            ffi::av_buffer_unref(&mut self.upload_frames_ref);
+        }
+    }
+}
+
+/// Whether the card path was refused and said so: the reason is a warning
+/// once, then a debug line for the encoders opened after (a resolution
+/// change opens another).
+static GPU_CONVERT_REFUSED: AtomicBool = AtomicBool::new(false);
+
+/// The variable that forces the processor path.
+pub const CPU_CONVERT_ENV: &str = "POCKETDESK_VAAPI_CPU_CONVERT";
+
+fn cpu_convert_forced() -> bool {
+    std::env::var(CPU_CONVERT_ENV).is_ok_and(|v| !v.is_empty() && v != "0")
+}
 
 fn h264_profile_vaapi(profile: &H264Profile) -> &'static str {
     match profile {
@@ -207,7 +476,28 @@ fn codec_options(is_hevc: bool, h264_profile: &str) -> Vec<(&'static str, String
 }
 
 impl VaapiEncoder {
+    /// Open the encoder with the colour conversion on the card, or on the
+    /// processor where the card's video processor cannot take it.
     pub fn new(config: StreamingConfig) -> anyhow::Result<Self> {
+        if !cpu_convert_forced() {
+            match Self::open(config.clone(), true) {
+                Ok(encoder) => return Ok(encoder),
+                Err(e) => {
+                    if GPU_CONVERT_REFUSED.swap(true, Ordering::Relaxed) {
+                        debug!("VAAPI conversion on the card unavailable ({e:#})");
+                    } else {
+                        warn!(
+                            "VAAPI conversion on the card unavailable ({e:#}); \
+                             converting on the processor"
+                        );
+                    }
+                }
+            }
+        }
+        Self::open(config, false)
+    }
+
+    fn open(config: StreamingConfig, gpu_convert: bool) -> anyhow::Result<Self> {
         FFMPEG_INIT.call_once(|| {
             if let Err(e) = ffmpeg::init() {
                 warn!("FFmpeg init failed (continuing): {}", e);
@@ -257,33 +547,71 @@ impl VaapiEncoder {
             (*ctx).hw_device_ctx = ffi::av_buffer_ref(device_ref);
         }
 
-        // --- hardware frames context (NV12 surfaces on the VA device) ---
-        let mut hw_frames_ref = unsafe { ffi::av_hwframe_ctx_alloc(device_ref) };
-        if hw_frames_ref.is_null() {
-            unsafe {
-                ffi::avcodec_free_context(&mut ctx);
-                ffi::av_buffer_unref(&mut device_ref);
+        // --- the conversion, and the hardware frames context the codec takes
+        // (NV12 surfaces on the VA device) ---
+        let (convert, mut hw_frames_ref) = if gpu_convert {
+            match GpuConvert::new(device_ref, config.width, config.height, config.fps) {
+                Ok((gc, frames)) => (Convert::Gpu(gc), frames),
+                Err(e) => {
+                    unsafe {
+                        ffi::avcodec_free_context(&mut ctx);
+                        ffi::av_buffer_unref(&mut device_ref);
+                    }
+                    return Err(e.context("video processor"));
+                }
             }
-            anyhow::bail!("av_hwframe_ctx_alloc failed");
-        }
-        let pool_size: c_int = if is_hevc { 32 } else { 20 };
-        let init_ret = unsafe {
-            let frames = (*hw_frames_ref).data as *mut ffi::AVHWFramesContext;
-            (*frames).format = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI;
-            (*frames).sw_format = ffi::AVPixelFormat::AV_PIX_FMT_NV12;
-            (*frames).width = config.width as c_int;
-            (*frames).height = config.height as c_int;
-            (*frames).initial_pool_size = pool_size;
-            ffi::av_hwframe_ctx_init(hw_frames_ref)
+        } else {
+            let mut frames_ref = unsafe { ffi::av_hwframe_ctx_alloc(device_ref) };
+            if frames_ref.is_null() {
+                unsafe {
+                    ffi::avcodec_free_context(&mut ctx);
+                    ffi::av_buffer_unref(&mut device_ref);
+                }
+                anyhow::bail!("av_hwframe_ctx_alloc failed");
+            }
+            let pool_size: c_int = if is_hevc { 32 } else { 20 };
+            let init_ret = unsafe {
+                let frames = (*frames_ref).data as *mut ffi::AVHWFramesContext;
+                (*frames).format = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI;
+                (*frames).sw_format = ffi::AVPixelFormat::AV_PIX_FMT_NV12;
+                (*frames).width = config.width as c_int;
+                (*frames).height = config.height as c_int;
+                (*frames).initial_pool_size = pool_size;
+                ffi::av_hwframe_ctx_init(frames_ref)
+            };
+            if init_ret < 0 {
+                unsafe {
+                    ffi::av_buffer_unref(&mut frames_ref);
+                    ffi::avcodec_free_context(&mut ctx);
+                    ffi::av_buffer_unref(&mut device_ref);
+                }
+                anyhow::bail!("av_hwframe_ctx_init failed ({init_ret})");
+            }
+            let bgra =
+                ffmpeg::frame::Video::new(ffmpeg::format::Pixel::BGRA, config.width, config.height);
+            let nv12 =
+                ffmpeg::frame::Video::new(ffmpeg::format::Pixel::NV12, config.width, config.height);
+            let scaler = match ffmpeg::software::scaling::Context::get(
+                ffmpeg::format::Pixel::BGRA,
+                config.width,
+                config.height,
+                ffmpeg::format::Pixel::NV12,
+                config.width,
+                config.height,
+                ffmpeg::software::scaling::flag::Flags::BILINEAR,
+            ) {
+                Ok(scaler) => scaler,
+                Err(e) => {
+                    unsafe {
+                        ffi::av_buffer_unref(&mut frames_ref);
+                        ffi::avcodec_free_context(&mut ctx);
+                        ffi::av_buffer_unref(&mut device_ref);
+                    }
+                    return Err(e.into());
+                }
+            };
+            (Convert::Cpu(CpuConvert { bgra, nv12, scaler }), frames_ref)
         };
-        if init_ret < 0 {
-            unsafe {
-                ffi::av_buffer_unref(&mut hw_frames_ref);
-                ffi::avcodec_free_context(&mut ctx);
-                ffi::av_buffer_unref(&mut device_ref);
-            }
-            anyhow::bail!("av_hwframe_ctx_init failed ({init_ret})");
-        }
         unsafe {
             (*ctx).hw_frames_ctx = ffi::av_buffer_ref(hw_frames_ref);
         }
@@ -339,22 +667,14 @@ impl VaapiEncoder {
             (*hw_frame).format = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI as c_int;
         }
 
-        // --- CPU-side scaler + scratch frames ---
-        let bgra =
-            ffmpeg::frame::Video::new(ffmpeg::format::Pixel::BGRA, config.width, config.height);
-        let nv12 =
-            ffmpeg::frame::Video::new(ffmpeg::format::Pixel::NV12, config.width, config.height);
-        let scaler = ffmpeg::software::scaling::Context::get(
-            ffmpeg::format::Pixel::BGRA,
-            config.width,
-            config.height,
-            ffmpeg::format::Pixel::NV12,
-            config.width,
-            config.height,
-            ffmpeg::software::scaling::flag::Flags::BILINEAR,
-        )?;
-
-        info!("Video encoder: in-process VAAPI ({codec_name}) on {device_path}");
+        info!(
+            "Video encoder: in-process VAAPI ({codec_name}) on {device_path}, colour conversion on {}",
+            if gpu_convert {
+                "the card"
+            } else {
+                "the processor"
+            }
+        );
 
         Ok(Self {
             config,
@@ -365,9 +685,7 @@ impl VaapiEncoder {
             hw_frames_ref,
             hw_frame,
             packet,
-            bgra,
-            nv12,
-            scaler,
+            convert,
             queue: VecDeque::new(),
             pending: VecDeque::new(),
             sequence: 0,
@@ -394,32 +712,53 @@ impl VaapiEncoder {
             self.frames_since_keyframe = 0;
         }
 
-        self.copy_frame(frame);
-        latency_trace::encoder_step(frame.timestamp, Step::Copied);
-        self.scaler.run(&self.bgra, &mut self.nv12)?;
-        latency_trace::encoder_step(frame.timestamp, Step::Scaled);
-
-        // Upload NV12 → VAAPI surface: reset the reusable hw_frame, attach the
-        // frames context, grab a buffer, then hwupload via transfer_data.
         let hw = self.hw_frame;
-        let sw_ptr = unsafe { self.nv12.as_mut_ptr() };
         let sequence = self.sequence;
+        match &mut self.convert {
+            Convert::Gpu(gc) => unsafe {
+                // The capture's bytes go straight to a surface; the card
+                // converts them (it says its own steps).
+                gc.convert(
+                    &frame.data,
+                    frame.stride,
+                    self.config.width,
+                    self.config.height,
+                    sequence as i64,
+                    hw,
+                    Some(frame.timestamp),
+                )?;
+            },
+            Convert::Cpu(cc) => {
+                cc.copy_frame(frame, self.config.width, self.config.height);
+                latency_trace::encoder_step(frame.timestamp, Step::Copied);
+                cc.scaler.run(&cc.bgra, &mut cc.nv12)?;
+                latency_trace::encoder_step(frame.timestamp, Step::Scaled);
+
+                // Upload NV12 → VAAPI surface: reset the reusable hw_frame,
+                // attach the frames context, grab a buffer, then hwupload via
+                // transfer_data.
+                let sw_ptr = unsafe { cc.nv12.as_mut_ptr() };
+                unsafe {
+                    ffi::av_frame_unref(hw);
+                    // Allocate a fresh VAAPI surface from the pool via the
+                    // purpose-built helper; it sets format/geometry/
+                    // hw_frames_ctx itself.
+                    let gb = ffi::av_hwframe_get_buffer(self.hw_frames_ref, hw, 0);
+                    if gb < 0 {
+                        anyhow::bail!(
+                            "av_hwframe_get_buffer(hw) failed ({gb}: {})",
+                            describe_err(gb)
+                        );
+                    }
+                    let tr = ffi::av_hwframe_transfer_data(hw, sw_ptr, 0);
+                    if tr < 0 {
+                        anyhow::bail!("av_hwframe_transfer_data (hwupload) failed ({tr})");
+                    }
+                }
+                latency_trace::encoder_step(frame.timestamp, Step::Uploaded);
+            }
+        }
         unsafe {
-            ffi::av_frame_unref(hw);
-            // Allocate a fresh VAAPI surface from the pool via the purpose-built
-            // helper; it sets format/geometry/hw_frames_ctx itself.
-            let gb = ffi::av_hwframe_get_buffer(self.hw_frames_ref, hw, 0);
-            if gb < 0 {
-                anyhow::bail!(
-                    "av_hwframe_get_buffer(hw) failed ({gb}: {})",
-                    describe_err(gb)
-                );
-            }
-            let tr = ffi::av_hwframe_transfer_data(hw, sw_ptr, 0);
-            if tr < 0 {
-                anyhow::bail!("av_hwframe_transfer_data (hwupload) failed ({tr})");
-            }
-            latency_trace::encoder_step(frame.timestamp, Step::Uploaded);
             (*hw).pts = sequence as i64;
             (*hw).pict_type = if force_key {
                 ffi::AVPictureType::AV_PICTURE_TYPE_I
@@ -460,23 +799,6 @@ impl VaapiEncoder {
 
     pub fn config(&self) -> &StreamingConfig {
         &self.config
-    }
-
-    fn copy_frame(&mut self, frame: &VideoFrame) {
-        let width = self.config.width as usize;
-        let height = self.config.height as usize;
-        let src_stride = frame.stride as usize;
-        let dst_stride = self.bgra.stride(0);
-        let row = width * 4;
-        let dst = self.bgra.data_mut(0);
-        for y in 0..height {
-            let src_range = y * src_stride..y * src_stride + row;
-            let dst_range = y * dst_stride..y * dst_stride + row;
-            if src_range.end > frame.data.len() || dst_range.end > dst.len() {
-                break;
-            }
-            dst[dst_range].copy_from_slice(&frame.data[src_range]);
-        }
     }
 
     fn receive_packets(&mut self) -> anyhow::Result<()> {
@@ -717,6 +1039,159 @@ mod tests {
                 .expect("a packet for the frame");
             assert!(p.is_keyframe, "{codec:?}: the asked-for keyframe is next");
         }
+    }
+
+    /// A frame of one colour (B, G, R) with the alpha byte `alpha`.
+    fn flat_frame(w: u32, h: u32, bgr: [u8; 3], alpha: u8) -> VideoFrame {
+        let mut frame = gradient_frame(w, h, 0);
+        for i in (0..frame.data.len()).step_by(4) {
+            frame.data[i..i + 3].copy_from_slice(&bgr);
+            frame.data[i + 3] = alpha;
+        }
+        frame
+    }
+
+    /// The mean of each plane (Y, U, V) of the last picture the software
+    /// decoder makes from `packets`.
+    fn decoded_means(packets: &[EncodedPacket]) -> [f64; 3] {
+        let codec = ffmpeg::decoder::find(ffmpeg::codec::Id::H264).expect("an H.264 decoder");
+        let mut decoder = ffmpeg::codec::context::Context::new_with_codec(codec)
+            .decoder()
+            .video()
+            .expect("decoder opens");
+        let mut picture = ffmpeg::frame::Video::empty();
+        let mut means = None;
+        let mut take = |decoder: &mut ffmpeg::decoder::Video| {
+            while decoder.receive_frame(&mut picture).is_ok() {
+                let mut m = [0.0; 3];
+                for (plane, mean) in m.iter_mut().enumerate() {
+                    let (w, h) = (
+                        picture.plane_width(plane as _),
+                        picture.plane_height(plane as _),
+                    );
+                    let stride = picture.stride(plane);
+                    let data = picture.data(plane);
+                    let sum: u64 = (0..h as usize)
+                        .flat_map(|y| data[y * stride..y * stride + w as usize].iter())
+                        .map(|&b| u64::from(b))
+                        .sum();
+                    *mean = sum as f64 / f64::from(w * h);
+                }
+                means = Some(m);
+            }
+        };
+        for p in packets {
+            decoder
+                .send_packet(&ffmpeg::Packet::copy(&p.data))
+                .expect("packet decodes");
+            take(&mut decoder);
+        }
+        let _ = decoder.send_eof();
+        take(&mut decoder);
+        means.expect("a decoded picture")
+    }
+
+    /// The card and the processor make the same colours: a flat frame
+    /// through each path, decoded, has the same Y, U and V (alpha is not
+    /// read: a capture's alpha byte may be 0 or 255). Self-skips where no
+    /// VA-API device opens or the card's processor cannot take BGR0.
+    #[test]
+    fn card_and_processor_make_the_same_colours() {
+        if !vaapi_available() {
+            eprintln!("skipping VAAPI colour test: no usable device on this host");
+            return;
+        }
+        let config = StreamingConfig {
+            width: 1280,
+            height: 720,
+            fps: 30,
+            bitrate_bps: 4_000_000,
+            codec: VideoCodec::H264,
+            ..StreamingConfig::default()
+        };
+        let encode = |gpu: bool, bgr: [u8; 3], alpha: u8| -> anyhow::Result<[f64; 3]> {
+            let mut encoder = VaapiEncoder::open(config.clone(), gpu)?;
+            let mut packets = Vec::new();
+            for _ in 0..12 {
+                packets.extend(encoder.encode_frame(&flat_frame(1280, 720, bgr, alpha))?);
+            }
+            packets.extend(encoder.drain()?);
+            Ok(decoded_means(&packets))
+        };
+        for (bgr, alpha) in [
+            ([30, 110, 200], 255),
+            ([30, 110, 200], 0),
+            ([220, 40, 90], 255),
+        ] {
+            let cpu = encode(false, bgr, alpha).expect("the processor path opens");
+            let Ok(card) = encode(true, bgr, alpha) else {
+                eprintln!("skipping VAAPI colour test: the card path is not available here");
+                return;
+            };
+            eprintln!("bgr={bgr:?} alpha={alpha}: processor {cpu:.1?}, card {card:.1?}");
+            for plane in 0..3 {
+                assert!(
+                    (cpu[plane] - card[plane]).abs() <= 4.0,
+                    "plane {plane} differs: processor {cpu:?}, card {card:?}"
+                );
+            }
+        }
+    }
+
+    /// The card path hands every frame back at once and over a long run
+    /// keeps its surfaces (the pools are not drained), and the processor
+    /// path does the same: the paths are interchangeable to the caller.
+    #[test]
+    fn both_paths_run_many_frames() {
+        if !vaapi_available() {
+            eprintln!("skipping VAAPI long-run test: no usable device on this host");
+            return;
+        }
+        for gpu in [true, false] {
+            let config = StreamingConfig {
+                width: 1920,
+                height: 1080,
+                fps: 60,
+                bitrate_bps: 8_000_000,
+                codec: VideoCodec::H264,
+                ..StreamingConfig::default()
+            };
+            let Ok(mut encoder) = VaapiEncoder::open(config, gpu) else {
+                assert!(gpu, "the processor path must open");
+                eprintln!("skipping: the card path is not available here");
+                continue;
+            };
+            assert_eq!(matches!(encoder.convert, Convert::Gpu(_)), gpu);
+            for i in 0..300 {
+                let p = encoder
+                    .encode_frame(&gradient_frame(1920, 1080, i))
+                    .unwrap()
+                    .unwrap_or_else(|| panic!("gpu={gpu}: frame {i} held"));
+                assert_eq!(p.sequence, i as u64);
+            }
+        }
+    }
+
+    /// A frame too small for the encoder's size is refused by the card path
+    /// (the streamer opens another encoder when the size changes).
+    #[test]
+    fn card_path_refuses_a_short_frame() {
+        if !vaapi_available() {
+            return;
+        }
+        let config = StreamingConfig {
+            width: 1280,
+            height: 720,
+            fps: 30,
+            bitrate_bps: 2_000_000,
+            codec: VideoCodec::H264,
+            ..StreamingConfig::default()
+        };
+        let Ok(mut encoder) = VaapiEncoder::open(config, true) else {
+            return;
+        };
+        let small = gradient_frame(640, 360, 0);
+        assert!(encoder.encode_frame(&small).is_err());
     }
 
     fn gradient_frame(w: u32, h: u32, shift: usize) -> VideoFrame {
