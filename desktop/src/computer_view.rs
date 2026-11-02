@@ -38,7 +38,7 @@ use pocketdesk_core::local::config::{COMPUTER_VIEW_QUALITIES, Config};
 use pocketdesk_core::local::view::{
     self as wire, Message, Phase, ViewFile, ViewFit, ViewPrivacy, ViewStatus,
 };
-use pocketdesk_core::protocol::cursor::CursorState;
+use pocketdesk_core::protocol::cursor::{CursorMessage, CursorState};
 use pocketdesk_core::streaming::InputPacket;
 
 use crate::video::{
@@ -3471,6 +3471,24 @@ fn follow_pointer(
     }
 }
 
+/// What the other computer said of its pointer, into the window's state
+/// (local cursor). Whether the window needs a pass to show it.
+///
+/// Each time the computer says it sends the pointer apart (`Mode`, which it
+/// does again every second or two, and anew on a new session after a
+/// redial), the places are asked for again if they are wanted: the ask may
+/// have been lost, or have gone to a session that has since ended. A mode
+/// of no (the relay says it as a redial begins, and a host says it when it
+/// can no longer leave the pointer out) clears what was held, so the window
+/// goes back to its own pointer.
+fn take_cursor_message(state: &mut State, message: CursorMessage) -> bool {
+    let apart = matches!(message, CursorMessage::Mode { separate: true });
+    if apart {
+        state.cursor_places = false;
+    }
+    state.cursor.apply(message) || apart
+}
+
 /// The other computer's pointer, each pass (local cursor): as this
 /// window's own system pointer while the pointer is free over the picture,
 /// hidden when that computer hides its own, and, while this pointer is
@@ -4048,13 +4066,7 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
             // by the window's next pass.
             Message::Cursor(message) => {
                 let mut state = lock(shared);
-                let was = state.cursor.separate;
-                if state.cursor.apply(message) {
-                    // A computer that sends the pointer apart again (a new
-                    // session): the places asked for are asked again.
-                    if state.cursor.separate && !was {
-                        state.cursor_places = false;
-                    }
+                if take_cursor_message(&mut state, message) {
                     ctx.request_repaint_of(viewport_id(state.slot));
                 }
             }
@@ -5110,6 +5122,48 @@ mod tests {
         ask_with(&dir, &mut state, wanted(), Some(false)).unwrap();
         assert!(!state.cursor.separate);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Local cursor, a redial: the relay tells the window the other
+    /// computer's pointer is gone as a redial begins (mode of no), which
+    /// puts the window back to its own pointer; the new session's mode of
+    /// yes then has the places asked for again, as the new session knows
+    /// nothing of the old one's ask. Said again every second or two, the
+    /// mode also repairs an ask that was lost.
+    #[test]
+    fn a_redial_resets_the_window_and_the_places_are_asked_for_again() {
+        use pocketdesk_core::protocol::cursor::CursorShape;
+        let mut state = State::default();
+        let shape = CursorShape::new(2, 2, 0, 0, vec![5; 16]).unwrap();
+        assert!(take_cursor_message(
+            &mut state,
+            CursorMessage::Mode { separate: true }
+        ));
+        take_cursor_message(&mut state, CursorMessage::Shape(shape));
+        // The window asked for places while locked, and the session ended.
+        state.cursor_places = true;
+        assert!(take_cursor_message(
+            &mut state,
+            CursorMessage::Mode { separate: false }
+        ));
+        assert!(!state.cursor.separate && state.cursor.shape.is_none());
+        assert!(
+            !view_cursor::wants_places(&state.cursor, true),
+            "it no longer wants places of a computer that is gone"
+        );
+        // The new session says it sends the pointer apart: places are asked
+        // for afresh, though the window believed it already had.
+        state.cursor_places = true;
+        assert!(take_cursor_message(
+            &mut state,
+            CursorMessage::Mode { separate: true }
+        ));
+        assert!(!state.cursor_places, "the next pass asks again");
+        assert!(view_cursor::wants_places(&state.cursor, true));
+        // The same mode repeated, with nothing else changed, still asks.
+        state.cursor_places = true;
+        take_cursor_message(&mut state, CursorMessage::Mode { separate: true });
+        assert!(!state.cursor_places);
     }
 
     /// PR #562 review I3: the ask says HEVC as the window offers it.

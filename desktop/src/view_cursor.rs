@@ -52,9 +52,13 @@ pub fn plan(
         return Draw::Leave;
     }
     if locked {
-        return match (&state.shape, state.place, state.visible) {
-            (Some(shape), Some((x, y)), true) => Draw::Paint {
-                shape: shape.clone(),
+        // This computer's own pointer is locked away, so what is painted is
+        // all there is of a pointer: a shape that has not come stands in as
+        // an arrow, rather than leave none. Only a pointer the other
+        // computer hides, or one it has not said a place for, is not drawn.
+        return match (state.place, state.visible) {
+            (Some((x, y)), true) => Draw::Paint {
+                shape: state.shape.clone().unwrap_or_else(fallback_shape),
                 at: place_in(picture, x, y),
             },
             _ => Draw::Leave,
@@ -70,6 +74,52 @@ pub fn plan(
         // stands in.
         (None, true) => Draw::Leave,
     }
+}
+
+/// A plain arrow, hotspot at its tip: painted for a pointer that is locked
+/// away here when the other computer has not sent its shape (yet, or at
+/// all), so that no pointer is ever missing from the window.
+pub fn fallback_shape() -> Arc<CursorShape> {
+    static ARROW: std::sync::OnceLock<Arc<CursorShape>> = std::sync::OnceLock::new();
+    ARROW
+        .get_or_init(|| {
+            // X is the outline, O the fill, a space is clear.
+            const ROWS: [&str; 17] = [
+                "X          ",
+                "XX         ",
+                "XOX        ",
+                "XOOX       ",
+                "XOOOX      ",
+                "XOOOOX     ",
+                "XOOOOOX    ",
+                "XOOOOOOX   ",
+                "XOOOOOOOX  ",
+                "XOOOOOOOOX ",
+                "XOOOOOXXXXX",
+                "XOOXOOX    ",
+                "XOX XOOX   ",
+                "XX  XOOX   ",
+                "X    XOOX  ",
+                "     XOOX  ",
+                "      XX   ",
+            ];
+            let mut rgba = Vec::with_capacity(11 * ROWS.len() * 4);
+            for row in ROWS {
+                let row = row.as_bytes();
+                for x in 0..11 {
+                    rgba.extend_from_slice(match row.get(x) {
+                        Some(b'X') => &[0, 0, 0, 255],
+                        Some(b'O') => &[255, 255, 255, 255],
+                        _ => &[0, 0, 0, 0],
+                    });
+                }
+            }
+            Arc::new(
+                CursorShape::new(11, ROWS.len() as u32, 0, 0, rgba)
+                    .expect("the arrow's pixels add up"),
+            )
+        })
+        .clone()
 }
 
 /// Where the hotspot at `x`, `y` (`0..=65535` over the picture) is in the
@@ -202,6 +252,19 @@ mod tests {
             Draw::Leave,
             "no place told yet"
         );
+        // The shape has not come: an arrow stands in, never no pointer.
+        match plan(
+            &state(true, true, false, Some((65535, 0))),
+            Some(rect()),
+            None,
+            true,
+        ) {
+            Draw::Paint { shape, at } => {
+                assert_eq!(shape.id, fallback_shape().id);
+                assert_eq!(at, egui::pos2(900.0, 50.0), "the picture's top right");
+            }
+            other => panic!("{other:?}"),
+        }
         assert_eq!(
             plan(
                 &state(true, false, true, Some((5, 5))),
@@ -212,6 +275,16 @@ mod tests {
             Draw::Leave,
             "hidden there"
         );
+    }
+
+    #[test]
+    fn the_stand_in_arrow_is_a_real_image_with_its_tip_as_the_hotspot() {
+        let arrow = fallback_shape();
+        assert_eq!((arrow.width, arrow.height), (11, 17));
+        assert_eq!((arrow.hot_x, arrow.hot_y), (0, 0));
+        assert_eq!(arrow.rgba.len(), 11 * 17 * 4);
+        assert_eq!(&arrow.rgba[..4], &[0, 0, 0, 255], "the tip is outlined");
+        assert!(Arc::ptr_eq(&arrow, &fallback_shape()), "made once");
     }
 
     #[test]
