@@ -1302,7 +1302,7 @@ async fn apply_borrow(
 }
 
 /// What the window says when the computer would not lend the window picked.
-fn borrow_failed(name: &str, why: &crate::borrow_window::LendError) -> String {
+fn borrow_failed(name: &str, why: &dyn std::fmt::Display) -> String {
     format!("Could not borrow that window from {name}: {why}")
 }
 
