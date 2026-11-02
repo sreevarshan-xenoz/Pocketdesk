@@ -1,5 +1,5 @@
 * Your phone's apps on your computer: open, pin, share files into them; optional separate windows and keys to taps with Shizuku.
 * Use the phone as a webcam and for location (Linux); keep folders on your computer.
-* Wake a computer through a spare phone; approve sudo with your fingerprint; a Wear OS tile.
+* Wake a computer through a spare phone; approve sudo with your fingerprint.
 * A direct link for when no Wi-Fi is shared; fine scrolling.
 * Updates 0.8.3 in place. Shizuku features are off by default; no root or wireless debugging.

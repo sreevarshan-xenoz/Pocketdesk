@@ -66,7 +66,7 @@ A server for Linux (Wayland-native, Hyprland first) and Windows 10/11, a desktop
 - **A spare phone as the wake helper:** an old phone on a charger at home sends the magic packet, so waking the computer from outside needs no router setting ([how](docs/guide.md#a-spare-phone-at-home-as-the-wake-helper)).
 - **Fit the screen to the window** (a Linux computer on Hyprland or Sway shows a screen the size of the window on another) and **Unattended on GNOME** (no dialog, off by default; [how](docs/guide.md#gnome-unattended-with-no-dialog)).
 - **Optional, with Shizuku** (off by default; never wireless debugging or root): each phone app in a window of its own, several at once; **keys to taps** for playing a phone game from the computer's keyboard and mouse; and the computer turning on the phone's hotspot for its internet.
-- **A Wear OS tile:** wake the computer, ring the phone, the computer's music and deck buttons from the watch, over Bluetooth with no Google Play services.
+- **A Wear OS tile:** wake the computer, ring the phone, the computer's music and deck buttons from the watch, over Bluetooth with no Google Play services. The watch app is not in the release downloads yet: build it from `android/wear` ([how](docs/guide.md#watch-controls-a-wear-os-tile)).
 - **On Linux hosts:** a firewall check (Diagnostics reads ufw, firewalld, nftables and iptables and says which Pocketdesk ports get in; the Pair page says so when the firewall is why a pairing times out; it only reads the rules), and software encoding on stock Fedora through Cisco's OpenH264, where `ffmpeg-free` has no libx264 (tested in a container; a phone session on real Fedora is still owed).
 
 ## Quickstart
