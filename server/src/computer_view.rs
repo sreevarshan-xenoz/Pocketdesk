@@ -118,7 +118,11 @@ pub fn codec_caps(asked: bool, wanted: bool, quiet: bool) -> u8 {
 fn view_codec_caps(asked: bool) -> Option<u8> {
     let config = crate::events::current_config();
     let wanted = config.computer_view_hevc && config.computer_view_hw_decode;
-    Some(codec_caps(asked, wanted, config.computer_view_no_idle_repeats))
+    Some(codec_caps(
+        asked,
+        wanted,
+        config.computer_view_no_idle_repeats,
+    ))
 }
 
 /// What a keyframe says the stream is (PC5): H.264 of the size its SPS
