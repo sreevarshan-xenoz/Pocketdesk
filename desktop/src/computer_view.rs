@@ -552,11 +552,12 @@ pub fn stats_lines(
         None => "Picture: not yet".to_string(),
     };
     // A still screen sends this window nothing (the other computer repeats
-    // none for a window): said as a screen at rest, not as frames missing.
+    // none for a window): said as a screen at rest, not as frames missing. A
+    // host that has stalled reads the same, so the line says why, not "still".
     let still = size.is_some() && stats.fps == 0 && shown.fps == 0;
     let unseen = if still { "idle" } else { "not yet" };
     let frames = if still {
-        "Frames: none, the screen is still".to_string()
+        "Frames: none (a still screen sends nothing)".to_string()
     } else {
         format!("Frames: {} a second in, {} shown", stats.fps, shown.fps)
     };
@@ -4580,7 +4581,7 @@ mod tests {
         // A still screen sends nothing: said as at rest, not as missing.
         status.stats.as_mut().unwrap().fps = 0;
         let still = stats_lines(&status, Some((1920, 1080)), Shown::default(), "d3d11va");
-        assert_eq!(still[2], "Frames: none, the screen is still");
+        assert_eq!(still[2], "Frames: none (a still screen sends nothing)");
         assert_eq!(still[5], "Decode: idle \u{b7} d3d11va");
         assert_eq!(still[6], "Pipe: idle");
         // Pictures still being shown, or none yet: the numbers as before.
