@@ -50,10 +50,14 @@ pub enum Step {
     Copied = 1,
     /// BGRA converted to NV12 on the processor.
     Scaled = 2,
-    /// NV12 uploaded to a surface on the card.
+    /// The frame uploaded to a surface on the card: NV12 when the processor
+    /// converted it, BGRA when the card does.
     Uploaded = 3,
     /// The frame handed to the codec (`avcodec_send_frame` returned).
     Sent = 4,
+    /// BGRA converted to NV12 by the card's video processor, after the
+    /// upload (the card path has no `Copied` or `Scaled`).
+    Converted = 5,
 }
 
 impl Step {
@@ -63,6 +67,7 @@ impl Step {
             2 => Self::Scaled,
             3 => Self::Uploaded,
             4 => Self::Sent,
+            5 => Self::Converted,
             _ => return None,
         })
     }
@@ -395,7 +400,7 @@ mod tests {
             "pat 5 1 2",
             "wrote 5",
             "encstep 5 6 0",
-            "encstep 5 6 5",
+            "encstep 5 6 6",
             "encout 1 2 3 4",
             "later 1 2",
             "in 5 6 and a torn",
