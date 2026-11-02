@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1296 open items.
+1300 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 91 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 198 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 199 |
 | A phone with a SIM | 40 |
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
 | A second computer | 171 |
-| A Linux desktop (the Azure VM serves for some) | 239 |
+| A Linux desktop (the Azure VM serves for some) | 242 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 80 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
 
@@ -708,6 +708,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **273. The window's wait for the display (phase 1d of the window handoff: a setting to draw without vsync, and the window's stage trace)**
 
 - Windows: the setting on tears at most, never freezes the window, and an animating page (a spinner) does not pin a core for long; off is as before. (where: owner)
+
+**274. A window the compositor does not show no longer stops the app (the swap never waits on Wayland, and the windows are paced)**
+
+- Windows: the swap still waits by default; with the Settings switch on, an animating page (a spinner) does not pin a core and the pictures show no worse than before (the pacing sleeps in ticks of the Windows timer, up to 15 ms, only for a window that asks for frames closer than half a refresh). (where: owner)
 
 ## A phone with a SIM
 
@@ -1915,8 +1919,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - On a real Hyprland desktop (and a real GNOME and KDE session), the setting off then on, the window showing a moving screen at the display's refresh: the picture is a frame sooner (a high-speed camera or the probe's marker against a stopwatch shows it), and Wayland shows no tearing. (where: linux)
 - X11 (an X11 session, or XWayland with the window forced onto it): the setting on can tear, and the setting says so; off never tears. (where: linux)
 - The app's other windows with the setting on: the main window's animations do not run at hundreds of frames a second for long, and the tray, the other computer windows and the notices are as before. (where: linux)
-- The stall with the setting off: move a computer's screen window to a workspace that is not shown (Sway, Hyprland), or cover the main window with it: with vsync on, every window of the app stops drawing until the hidden one shows again (seen on Sway, headless; a fully covered window's surfaces get no frame callbacks); on Hyprland, GNOME and KDE say whether it happens there too and whether the setting on avoids it. (where: linux)
 - The same measurement between two real computers over Wi-Fi: `view_present_live` cannot cross a network, so read the window's own Stats (frames in and shown, decode time) with the setting off and on. (where: linux)
+
+**274. A window the compositor does not show no longer stops the app (the swap never waits on Wayland, and the windows are paced)**
+
+- On the owner's Hyprland desktop (and a real GNOME and KDE Wayland session): a computer's screen window moved to a workspace that is not shown, and one covered by another window, leave the main window and the other windows drawing (the app's window animates, its tray works), and the window draws again when shown. (where: linux)
+- Hyprland, GNOME and KDE: no tearing and no visible judder in a computer's screen at the display's refresh with the swap not waiting (a moving screen at 60 and 120 Hz), and the main window's animations are smooth. (where: linux)
+- A computer's screen window that is not shown on Wayland keeps decoding and drawing its pictures (the compositor shows no signal of it): its cost on the processor and the card is about the same as shown, so say what a long hidden window costs on a battery. (where: linux)
+- X11 (an X11 session, or XWayland with the window forced onto it): the swap still waits by default (no tearing), a window covered or on another workspace does not stop the app (X11 reports it covered, and eframe stops drawing it), and the Settings switch on makes pictures sooner and tears at most. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
