@@ -252,7 +252,11 @@ mod tests {
         assert_eq!(find(&luma, 640, 360), Some(200));
         assert_eq!(find(&[], 0, 0), None);
         assert_eq!(find(&[0; 10], 640, 360), None, "a plane too short");
-        assert_eq!(find(&plane(64, 40, None), 64, 40), None, "too low a picture");
+        assert_eq!(
+            find(&plane(64, 40, None), 64, 40),
+            None,
+            "too low a picture"
+        );
         // A marker at the right edge runs to the row's end.
         let edge = plane(640, 360, Some(640 - SIZE));
         assert_eq!(find(&edge, 640, 360), Some(640 - SIZE));

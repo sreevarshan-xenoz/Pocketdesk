@@ -245,7 +245,7 @@ mod tests {
     /// The luma the probe's finder reads, from a BGRA frame (the pattern's
     /// band and marker are grey, so one channel is their luma).
     fn luma(f: &VideoFrame) -> Vec<u8> {
-        f.data.chunks_exact(4).map(|px| px[1]).collect()
+        f.data.as_chunks::<4>().0.iter().map(|px| px[1]).collect()
     }
 
     #[test]

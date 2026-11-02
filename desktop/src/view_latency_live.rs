@@ -419,7 +419,10 @@ mod tests {
             latency_probe::marker_left(1280, place(0)),
             latency_probe::marker_left(1280, place(1)),
         );
-        assert!(a.abs_diff(b) > 100 * TOLERANCE, "{a} and {b} are told apart");
+        assert!(
+            a.abs_diff(b) > 100 * TOLERANCE,
+            "{a} and {b} are told apart"
+        );
     }
 
     #[test]
@@ -455,7 +458,11 @@ mod tests {
             ..Shared::default()
         });
         // The marker is still at the old place: the move is not seen yet.
-        on_picture(&shared, &picture(data.clone()), sent + Duration::from_millis(9));
+        on_picture(
+            &shared,
+            &picture(data.clone()),
+            sent + Duration::from_millis(9),
+        );
         assert!(shared.lock().unwrap().seen.is_none());
         assert_eq!(shared.lock().unwrap().pictures, 1);
         // At the new place it is, with the time since the send.
@@ -479,8 +486,14 @@ mod tests {
         };
         let line = report.line("auto, NV12");
         assert!(line.contains("H.264, auto, NV12"), "{line}");
-        assert!(line.contains("p50 50.0 ms p95 95.0 ms max 100.0 ms"), "{line}");
-        assert!(line.contains("100 moves seen, 2 misses, 900 pictures"), "{line}");
+        assert!(
+            line.contains("p50 50.0 ms p95 95.0 ms max 100.0 ms"),
+            "{line}"
+        );
+        assert!(
+            line.contains("100 moves seen, 2 misses, 900 pictures"),
+            "{line}"
+        );
         let mut none = Report::default();
         assert!(none.line("x").contains("p50 -"));
     }

@@ -406,7 +406,12 @@ pub(crate) struct Pair {
 /// without asking: with `input` B takes A's input (and only B's pattern
 /// is touched by it, in the probe's mode), else it stays view-only. A's
 /// Audio is off either way (no sound).
-pub(crate) fn start_pair(ports: (u16, u16), pattern: Option<&str>, hevc: bool, input: bool) -> Pair {
+pub(crate) fn start_pair(
+    ports: (u16, u16),
+    pattern: Option<&str>,
+    hevc: bool,
+    input: bool,
+) -> Pair {
     let exe = PathBuf::from(
         std::env::var_os("POCKETDESK_SERVER_EXE").expect("POCKETDESK_SERVER_EXE, the server"),
     );
@@ -418,8 +423,7 @@ pub(crate) fn start_pair(ports: (u16, u16), pattern: Option<&str>, hevc: bool, i
         );
     }
     let (a_base, a_config, a_state) = folders("a", a_control, "");
-    let b_extra = if hevc { "allow_hevc = true
-" } else { "" };
+    let b_extra = if hevc { "allow_hevc = true\n" } else { "" };
     let (b_base, b_config, b_state) = folders("b", b_control, b_extra);
     let mut run = Cleanup {
         servers: Vec::new(),
