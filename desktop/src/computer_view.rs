@@ -4139,7 +4139,12 @@ fn publisher(
         state.picture = Some(picture);
         let slot = state.slot;
         drop(state);
-        ctx.request_repaint_of(viewport_id(slot));
+        // One frame for the picture. egui answers an immediate request
+        // with a second frame "to let things settle", which a swap that
+        // waits for the display hides (the two merge into the next
+        // refresh) and a swap that does not wait draws, twice the
+        // frames for the same pictures; a delay of any length asks once.
+        ctx.request_repaint_after_for(Duration::from_micros(1), viewport_id(slot));
     })
 }
 
