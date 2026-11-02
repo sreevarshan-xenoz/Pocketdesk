@@ -53,10 +53,15 @@ pub fn session_options(remote_session_id: Option<&str>) -> HashMap<&'static str,
 /// The options for `RecordMonitor`: the cursor stays out of the picture (as
 /// through the portal, where it is asked for hidden), and the stream says
 /// it is a recording, which makes GNOME show its screen-sharing indicator
-/// for as long as it runs.
-pub fn record_options() -> HashMap<&'static str, Value<'static>> {
+/// for as long as it runs. With `metadata` (a viewer that draws the
+/// pointer itself, local cursor) the cursor is still out of the picture and
+/// comes as the stream's cursor metadata (mutter's mode 2).
+pub fn record_options(metadata: bool) -> HashMap<&'static str, Value<'static>> {
     HashMap::from([
-        ("cursor-mode", Value::from(0u32)),
+        (
+            "cursor-mode",
+            Value::from(if metadata { 2u32 } else { 0u32 }),
+        ),
         ("is-recording", Value::from(true)),
     ])
 }
@@ -290,7 +295,13 @@ pub async fn start_capture(
     frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
     input: bool,
+    cursor: Option<super::cursor_feed::CursorFeed>,
 ) -> Result<CaptureSession> {
+    // The pointer as metadata for a viewer that draws it: said to the feed
+    // before the session starts, so the streamer's answer is right.
+    if let Some(feed) = &cursor {
+        feed.set_separate(true);
+    }
     let conn = tokio::time::timeout(CALL_WAIT, Connection::session())
         .await
         .map_err(|_| anyhow::anyhow!("the session bus did not answer"))?
@@ -385,7 +396,7 @@ pub async fn start_capture(
             &cast,
             SCREENCAST_SESSION,
             "RecordMonitor",
-            &(connector.as_str(), record_options()),
+            &(connector.as_str(), record_options(cursor.is_some())),
         )
         .await?;
         let stream = object_path(&reply)?;
@@ -502,6 +513,7 @@ pub async fn start_capture(
         config.clone(),
         frame_tx,
         cancel.clone(),
+        cursor,
     ) {
         abandon.cancel();
         return Err(e);
@@ -563,8 +575,13 @@ mod tests {
 
     #[test]
     fn a_recording_hides_the_cursor_and_shows_gnomes_indicator() {
-        let options = record_options();
+        let options = record_options(false);
         assert_eq!(options["cursor-mode"], Value::from(0u32), "hidden");
+        assert_eq!(options["is-recording"], Value::from(true));
+        // A viewer that draws the pointer gets it as metadata, still out of
+        // the picture.
+        let options = record_options(true);
+        assert_eq!(options["cursor-mode"], Value::from(2u32), "metadata");
         assert_eq!(options["is-recording"], Value::from(true));
     }
 

@@ -8,12 +8,14 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use ashpd::desktop::PersistMode;
-use ashpd::desktop::screencast::{Screencast, SelectSourcesOptions, SourceType};
+use ashpd::desktop::screencast::{CursorMode, Screencast, SelectSourcesOptions, SourceType};
 use pipewire::stream::StreamFlags;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 
 use super::capture::{CaptureSession, monitor_rect};
+use super::capture_cursor_pw::PwCursor;
+use super::cursor_feed::CursorFeed;
 use super::{StreamingConfig, VideoFrame};
 
 /// Shared state between the PipeWire thread and stream callbacks.
@@ -26,6 +28,33 @@ struct StreamUserData {
     height: AtomicU32,
     /// Frame counter for logging.
     frame_count: AtomicU64,
+    /// The pointer's metadata, read from each buffer, when the stream was
+    /// asked for it (local cursor).
+    cursor: Option<std::sync::Mutex<PwCursor>>,
+}
+
+/// Whether the screencast portal can leave the pointer out of the picture
+/// and send it as metadata, and the session wants that: the portal offers
+/// [`CursorMode::Metadata`]. When it does, the feed is told the picture has
+/// no pointer in it (before the session starts, so the answer to the
+/// viewer is right), and the stream is asked for the metadata; otherwise
+/// the capture is as it was and the viewer keeps whatever pointer there is
+/// in the picture.
+async fn metadata_cursor(
+    screencast: &Screencast,
+    cursor: Option<&CursorFeed>,
+) -> Option<(CursorMode, CursorFeed)> {
+    let feed = cursor?;
+    let modes = tokio::time::timeout(Duration::from_secs(3), screencast.available_cursor_modes())
+        .await
+        .ok()?
+        .ok()?;
+    if !modes.contains(CursorMode::Metadata) {
+        info!("The screencast portal offers no cursor metadata: the pointer stays as it was");
+        return None;
+    }
+    feed.set_separate(true);
+    Some((CursorMode::Metadata, feed.clone()))
 }
 
 /// Choose the PipeWire stream for the requested monitor from
@@ -60,6 +89,7 @@ pub async fn start_capture(
     frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
     screen_grant: Option<std::path::PathBuf>,
+    cursor: Option<CursorFeed>,
 ) -> Result<CaptureSession> {
     info!(
         "Starting screen capture: {}x{}@{}fps",
@@ -74,6 +104,7 @@ pub async fn start_capture(
             frame_tx.clone(),
             cancel.clone(),
             crate::streaming::portal_input::wanted(),
+            cursor.clone(),
         )
         .await
         {
@@ -95,6 +126,7 @@ pub async fn start_capture(
             frame_tx.clone(),
             cancel.clone(),
             screen_grant.clone(),
+            cursor.clone(),
         )
         .await
         {
@@ -148,6 +180,8 @@ pub async fn start_capture(
         let (persist, token) =
             crate::portal_grant::request(screen_grant.is_some(), saved.as_deref());
         let persist_mode = persist_mode(persist);
+        let metadata = metadata_cursor(&screencast, cursor.as_ref()).await;
+        let pointer = metadata.as_ref().map(|(_, feed)| feed.clone());
         tokio::time::timeout(
             Duration::from_secs(10),
             screencast.select_sources(
@@ -155,6 +189,7 @@ pub async fn start_capture(
                 SelectSourcesOptions::default()
                     .set_sources(Some(source_types))
                     .set_multiple(Some(true))
+                    .set_cursor_mode(metadata.map(|(mode, _)| mode))
                     .set_persist_mode(persist_mode)
                     .set_restore_token(token),
             ),
@@ -221,11 +256,11 @@ pub async fn start_capture(
             "Selected node_id={} for monitor_index={}",
             node_id, config.monitor_index
         );
-        Ok::<u32, anyhow::Error>(node_id)
+        Ok::<(u32, Option<CursorFeed>), anyhow::Error>((node_id, pointer))
     }
     .await;
-    let node_id = match picked {
-        Ok(node_id) => node_id,
+    let (node_id, pointer) = match picked {
+        Ok(picked) => picked,
         Err(e) => {
             let _ = session.close().await;
             return Err(e);
@@ -239,7 +274,7 @@ pub async fn start_capture(
     });
 
     // Step 5: Spawn the PipeWire capture thread
-    spawn_pipewire_capture(node_id, config.clone(), frame_tx, cancel.clone())?;
+    spawn_pipewire_capture(node_id, config.clone(), frame_tx, cancel.clone(), pointer)?;
 
     Ok(CaptureSession::new(config, cancel))
 }
@@ -250,11 +285,12 @@ pub(super) fn spawn_pipewire_capture(
     config: StreamingConfig,
     frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
+    cursor: Option<CursorFeed>,
 ) -> Result<()> {
     std::thread::Builder::new()
         .name("pipewire-capture".into())
         .spawn(move || {
-            if let Err(e) = run_pipewire_capture(node_id, &config, frame_tx, cancel) {
+            if let Err(e) = run_pipewire_capture(node_id, &config, frame_tx, cancel, cursor) {
                 error!("PipeWire capture thread exited with error: {e}");
             } else {
                 info!("PipeWire capture thread exited normally");
@@ -346,6 +382,7 @@ async fn start_remote_desktop_capture(
     frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
     screen_grant: Option<std::path::PathBuf>,
+    cursor: Option<CursorFeed>,
 ) -> Result<CaptureSession> {
     use ashpd::desktop::remote_desktop::{DeviceType, RemoteDesktop, SelectDevicesOptions};
     let unavailable =
@@ -386,13 +423,16 @@ async fn start_remote_desktop_capture(
         .await
         .map_err(|_| unavailable())?
         .context("Failed to select the keyboard and pointer")?;
+        let metadata = metadata_cursor(&screencast, cursor.as_ref()).await;
+        let pointer = metadata.as_ref().map(|(_, feed)| feed.clone());
         tokio::time::timeout(
             Duration::from_secs(10),
             screencast.select_sources(
                 &session,
                 SelectSourcesOptions::default()
                     .set_sources(Some(ashpd::enumflags2::BitFlags::from(SourceType::Monitor)))
-                    .set_multiple(Some(true)),
+                    .set_multiple(Some(true))
+                    .set_cursor_mode(metadata.map(|(mode, _)| mode)),
             ),
         )
         .await
@@ -435,10 +475,10 @@ async fn start_remote_desktop_capture(
             "Remote desktop session: node_id={node_id}, {}x{}, input through the portal",
             size.0, size.1
         );
-        Ok::<(u32, (u32, u32)), anyhow::Error>((node_id, size))
+        Ok::<(u32, (u32, u32), Option<CursorFeed>), anyhow::Error>((node_id, size, pointer))
     }
     .await;
-    let (node_id, size) = match picked {
+    let (node_id, size, pointer) = match picked {
         Ok(picked) => picked,
         Err(e) => {
             let _ = session.close().await;
@@ -487,7 +527,7 @@ async fn start_remote_desktop_capture(
         let _ = session.close().await;
     });
 
-    spawn_pipewire_capture(node_id, config.clone(), frame_tx, cancel.clone())?;
+    spawn_pipewire_capture(node_id, config.clone(), frame_tx, cancel.clone(), pointer)?;
     Ok(CaptureSession::new(config, cancel).with_input_refused(refused_rx))
 }
 
@@ -594,6 +634,7 @@ fn run_pipewire_capture(
     config: &StreamingConfig,
     frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
+    cursor: Option<CursorFeed>,
 ) -> Result<()> {
     info!("PipeWire capture thread started, connecting to node {node_id}");
 
@@ -632,7 +673,9 @@ fn run_pipewire_capture(
         width: AtomicU32::new(config.width),
         height: AtomicU32::new(config.height),
         frame_count: AtomicU64::new(0),
+        cursor: cursor.map(|feed| std::sync::Mutex::new(PwCursor::new(feed))),
     };
+    let wants_cursor = user_data.cursor.is_some();
 
     // Create local listener with param_changed and process callbacks
     let _listener = stream
@@ -663,7 +706,21 @@ fn run_pipewire_capture(
     let format = video_format_pod(config)?;
     let format =
         libspa::pod::Pod::from_bytes(&format).context("The capture's video format is not a pod")?;
-    let mut params = [format];
+    // With the pointer as metadata (local cursor): the buffers are asked to
+    // carry its record too.
+    let meta = if wants_cursor {
+        Some(super::capture_cursor_pw::meta_param_pod()?)
+    } else {
+        None
+    };
+    let meta = meta
+        .as_deref()
+        .map(|bytes| {
+            libspa::pod::Pod::from_bytes(bytes).context("The pointer's meta param is not a pod")
+        })
+        .transpose()?;
+    let mut params = vec![format];
+    params.extend(meta);
     stream
         .connect(
             libspa::utils::Direction::Input,
@@ -840,16 +897,78 @@ fn chunk_pixels(
     Some((start..end, stride))
 }
 
+/// A buffer taken from the stream, handed back as it is dropped. The safe
+/// `pipewire::buffer::Buffer` does the same but shows no metadata, which
+/// the pointer's record (local cursor) is.
+struct Dequeued<'s> {
+    stream: &'s pipewire::stream::Stream,
+    raw: *mut pipewire::sys::pw_buffer,
+}
+
+impl<'s> Dequeued<'s> {
+    fn take(stream: &'s pipewire::stream::Stream) -> Option<Self> {
+        // SAFETY: the pointer is checked for null, and handed back to the
+        // same stream exactly once, by `Drop`.
+        let raw = unsafe { stream.dequeue_raw_buffer() };
+        (!raw.is_null()).then_some(Self { stream, raw })
+    }
+
+    fn spa(&self) -> *mut libspa::sys::spa_buffer {
+        // SAFETY: `raw` is a valid `pw_buffer` until it is queued again.
+        unsafe { (*self.raw).buffer }
+    }
+
+    fn datas_mut(&mut self) -> &mut [libspa::buffer::Data] {
+        let buffer = self.spa();
+        // SAFETY: the same reading of the `spa_buffer` as
+        // `pipewire::buffer::Buffer::datas_mut` makes: `Data` is a
+        // transparent wrapper of `spa_data`.
+        unsafe {
+            if !buffer.is_null() && (*buffer).n_datas > 0 && !(*buffer).datas.is_null() {
+                std::slice::from_raw_parts_mut(
+                    (*buffer).datas as *mut libspa::buffer::Data,
+                    (*buffer).n_datas as usize,
+                )
+            } else {
+                &mut []
+            }
+        }
+    }
+
+    /// The pointer's record in this buffer, if it carries one.
+    fn cursor_record(&self) -> Option<&[u8]> {
+        // SAFETY: the buffer is valid and not queued while `self` lives.
+        unsafe { super::capture_cursor_pw::cursor_meta(self.spa()) }
+    }
+}
+
+impl Drop for Dequeued<'_> {
+    fn drop(&mut self) {
+        // SAFETY: `raw` came from this stream's `dequeue_raw_buffer`.
+        unsafe { self.stream.queue_raw_buffer(self.raw) };
+    }
+}
+
 /// Handle the process callback -- dequeue frames and send them through the channel.
 fn on_process(stream: &pipewire::stream::Stream, user_data: &StreamUserData) {
     // Dequeue an available buffer
-    let mut buffer = match stream.dequeue_buffer() {
-        Some(b) => b,
-        None => {
-            trace!("No buffer available in process callback");
-            return;
-        }
+    let Some(mut buffer) = Dequeued::take(stream) else {
+        trace!("No buffer available in process callback");
+        return;
     };
+
+    // The pointer's record comes before the picture is looked at: a buffer
+    // that only moved the pointer carries no picture (local cursor).
+    if let Some(cursor) = &user_data.cursor
+        && let Some(record) = buffer.cursor_record()
+    {
+        let width = user_data.width.load(Ordering::Relaxed);
+        let height = user_data.height.load(Ordering::Relaxed);
+        cursor
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .update(record, width, height);
+    }
 
     // Access the buffer data
     let datas = buffer.datas_mut();

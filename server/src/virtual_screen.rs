@@ -1608,6 +1608,7 @@ mod tests {
                 tokio_util::sync::CancellationToken::new(),
                 window_rx,
                 Arc::new(AtomicBool::new(false)),
+                None,
             )
             .expect("screencopy starts on the new screen");
             let frame = rx.blocking_recv().expect("a frame");

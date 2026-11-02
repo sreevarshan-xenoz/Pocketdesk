@@ -226,10 +226,15 @@ pub async fn start_capture_auto(
     window_mode: std::sync::Arc<std::sync::atomic::AtomicBool>,
     backend: CaptureBackend,
     screen_grant: Option<std::path::PathBuf>,
+    cursor: Option<super::cursor_feed::CursorFeed>,
 ) -> Result<CaptureSession> {
     // Only the portal asks anyone; the other backends need no grant.
     #[cfg(not(target_os = "linux"))]
     let _ = &screen_grant;
+    // Only the Linux backends can take the pointer out of the picture so
+    // far; a feed the others never report to says the picture keeps it.
+    #[cfg(not(target_os = "linux"))]
+    let _ = &cursor;
     // A moving pattern instead of the screen (benches, throwaways).
     if super::test_pattern::wanted() {
         return Ok(super::test_pattern::start(config, frame_tx, cancel));
@@ -242,6 +247,11 @@ pub async fn start_capture_auto(
         // the session's, so the next backend started already cancelled and
         // the fallback never worked.
         let attempt = cancel.child_token();
+        // Each backend says whether it takes the pointer out of the picture:
+        // what an attempt that failed said does not stand.
+        if let Some(feed) = &cursor {
+            feed.set_separate(false);
+        }
         let result = match backend_tried {
             CaptureBackend::Auto => continue,
             // window_rx/window_mode are cheap to clone (watch Receiver + Arc)
@@ -253,6 +263,7 @@ pub async fn start_capture_auto(
                 attempt.clone(),
                 window_rx.clone(),
                 window_mode.clone(),
+                cursor.clone(),
             ),
             #[cfg(target_os = "linux")]
             CaptureBackend::Portal => {
@@ -261,6 +272,7 @@ pub async fn start_capture_auto(
                     frame_tx.clone(),
                     attempt.clone(),
                     screen_grant.clone(),
+                    cursor.clone(),
                 )
                 .await
             }

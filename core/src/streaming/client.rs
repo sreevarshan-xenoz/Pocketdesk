@@ -259,6 +259,16 @@ pub const CODEC_CAP_HEVC: u8 = 0b0000_0001;
 /// repeating, and a client that never sets it gets the repeats as before.
 pub const CODEC_CAP_NO_IDLE_REPEATS: u8 = 0b0000_0010;
 
+/// `CODEC_CAPS_MARKER` bit 2: the client draws the other computer's pointer
+/// itself (local cursor). A host that can take its pointer out of the
+/// picture does, and sends the pointer's shape and visibility on streams of
+/// their own ([`super::transport::STREAM_KIND_CURSOR`],
+/// [`crate::protocol::cursor`]), first saying with a `Mode` message whether
+/// it has. A host that does not know the bit ignores it and keeps the
+/// pointer in the picture; a client that never sets it gets the picture it
+/// always did, and no cursor stream.
+pub const CODEC_CAP_LOCAL_CURSOR: u8 = 0b0000_0100;
+
 /// R4 E3 — compositor-true end-to-end latency probe.
 ///
 /// Every video packet header carries the frame's *age at send* measured on
@@ -483,6 +493,9 @@ pub struct RemoteFlags {
     pub too_old: Arc<std::sync::atomic::AtomicBool>,
     /// Control batches the computer sent a cast (C8), for the phone to take.
     pub control: Arc<ControlInbox>,
+    /// What the computer says of its pointer, when this session asked it to
+    /// ([`CODEC_CAP_LOCAL_CURSOR`]): shapes, whether it shows, where it is.
+    pub cursor: Arc<super::cursor_feed::CursorInbox>,
 }
 
 /// Control batches waiting for the phone's control service (C8): bounded,
@@ -827,6 +840,9 @@ impl StreamingClient {
                 ),
                 phone_sound: mode == SessionMode::PhoneSound,
                 sound: mode == SessionMode::Sound,
+                cursor: Arc::new(super::cursor_feed::CursorInbox::new(
+                    !input_only && codec_caps.is_some_and(|c| c & CODEC_CAP_LOCAL_CURSOR != 0),
+                )),
                 ..Default::default()
             },
         };
@@ -1032,6 +1048,10 @@ fn remote_stream(kind: u8, input_only: bool, sound: bool) -> RemoteStream {
         RemoteStream::Media
     }
 }
+
+/// How long a pointer message may take to arrive whole: it holds up the
+/// streams behind it, which it must not for a link that lost it.
+const CURSOR_READ: Duration = Duration::from_millis(500);
 
 /// The largest control batch a cast reads (C8).
 const CONTROL_STREAM_MAX: usize = 16 * 1024;
@@ -1338,6 +1358,30 @@ async fn recv_with_cancel(
                                 continue;
                             }
                         };
+
+                        // The other computer's pointer (local cursor):
+                        // read only by a session that asked for it, and
+                        // never as a picture. A message that is cut short
+                        // or late is dropped; the next says it again.
+                        if header.stream_kind == transport::STREAM_KIND_CURSOR {
+                            if remote.cursor.wanted()
+                                && let Ok(Ok(data)) = tokio::time::timeout(
+                                    CURSOR_READ,
+                                    recv_stream.read_to_end(crate::protocol::cursor::MAX_MESSAGE),
+                                )
+                                .await
+                            {
+                                match crate::protocol::cursor::CursorMessage::decode(&data) {
+                                    Ok(Some(message)) => {
+                                        remote.cursor.push(header.sequence, message);
+                                    }
+                                    // A kind a newer computer sends: skipped.
+                                    Ok(None) => {}
+                                    Err(e) => debug!(error = %e, "Pointer message not read"),
+                                }
+                            }
+                            continue;
+                        }
 
                         // T10i: an input-only session is admitted, or met a
                         // computer that streams to it anyway (too old to know
