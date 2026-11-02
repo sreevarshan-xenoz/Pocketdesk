@@ -570,7 +570,13 @@ fn run_capture_loop(
             p.buffer.unwrap()
         };
         let (w, h, stride, format) = meta;
-        if !matches!(format, wl_shm::Format::Argb8888 | wl_shm::Format::Xrgb8888) {
+        if !matches!(
+            format,
+            wl_shm::Format::Argb8888
+                | wl_shm::Format::Xrgb8888
+                | wl_shm::Format::Abgr8888
+                | wl_shm::Format::Xbgr8888
+        ) {
             capture.destroy();
             bail!("unsupported screencopy shm format {format:?}");
         }
@@ -906,10 +912,18 @@ pub(super) fn poll_fd(fd: i32, timeout: Duration) {
     unsafe { libc::poll(&mut pfd, 1, ms) };
 }
 
+/// Whether an shm format keeps red first in memory (R,G,B,x), which a
+/// renderer's preferred read-back format is (wlroots' GLES2 on Intel gives
+/// `Xbgr8888`): the capture swaps red and blue to the BGRA the pipeline takes.
+fn red_first(format: wl_shm::Format) -> bool {
+    matches!(format, wl_shm::Format::Abgr8888 | wl_shm::Format::Xbgr8888)
+}
+
 /// Copy shm pixels into a tightly packed BGRA frame, flipping rows when the
 /// compositor requested y-inversion. ARGB8888 memory (little-endian) is
-/// already B,G,R,A — no byte shuffling needed for our BGRA pipeline.
-fn repack_shm(src: &[u8], invert: bool, w: u32, h: u32, stride: u32) -> Vec<u8> {
+/// already B,G,R,A — no byte shuffling needed for our BGRA pipeline; a
+/// format with red first (`swap_rb`) has its red and blue bytes swapped.
+fn repack_shm(src: &[u8], invert: bool, swap_rb: bool, w: u32, h: u32, stride: u32) -> Vec<u8> {
     let row = (w as usize) * 4;
     let rows = h as usize;
     let stride = stride as usize;
@@ -921,6 +935,11 @@ fn repack_shm(src: &[u8], invert: bool, w: u32, h: u32, stride: u32) -> Vec<u8> 
             break; // defensive: short buffer, keep the zero tail
         }
         out[y * row..y * row + row].copy_from_slice(&src[from..from + row]);
+        if swap_rb {
+            for px in out[y * row..y * row + row].chunks_mut(4) {
+                px.swap(0, 2);
+            }
+        }
     }
     out
 }
@@ -996,7 +1015,7 @@ impl ShmBuffer {
         // SAFETY: the mmap covers stride*height, and the compositor wrote
         // the full buffer before signaling ready.
         let src = unsafe { std::slice::from_raw_parts(self.ptr as *const u8, self.len) };
-        repack_shm(src, invert, w, h, stride)
+        repack_shm(src, invert, red_first(self.format), w, h, stride)
     }
 }
 
@@ -1038,12 +1057,24 @@ mod tests {
         src[4..8].copy_from_slice(&[2, 2, 2, 255]); // row0 px1
         src[stride..stride + 4].copy_from_slice(&[3, 3, 3, 255]); // row1 px0
         src[stride + 4..stride + 8].copy_from_slice(&[4, 4, 4, 255]);
-        let out = repack_shm(&src, false, 2, 2, stride as u32);
+        let out = repack_shm(&src, false, false, 2, 2, stride as u32);
         assert_eq!(&out[0..8], &[1, 1, 1, 255, 2, 2, 2, 255]);
         assert_eq!(&out[8..16], &[3, 3, 3, 255, 4, 4, 4, 255]);
-        let flipped = repack_shm(&src, true, 2, 2, stride as u32);
+        let flipped = repack_shm(&src, true, false, 2, 2, stride as u32);
         assert_eq!(&flipped[0..8], &[3, 3, 3, 255, 4, 4, 4, 255]);
         assert_eq!(&flipped[8..16], &[1, 1, 1, 255, 2, 2, 2, 255]);
+    }
+
+    #[test]
+    fn a_picture_with_red_first_is_swapped_to_blue_first() {
+        // Two pixels of R,G,B,x memory (what an `Xbgr8888` buffer holds).
+        let src = [10u8, 20, 30, 255, 40, 50, 60, 255];
+        let out = repack_shm(&src, false, true, 2, 1, 8);
+        assert_eq!(out, [30, 20, 10, 255, 60, 50, 40, 255]);
+        assert!(red_first(wl_shm::Format::Xbgr8888));
+        assert!(red_first(wl_shm::Format::Abgr8888));
+        assert!(!red_first(wl_shm::Format::Xrgb8888));
+        assert!(!red_first(wl_shm::Format::Argb8888));
     }
 
     /// Real capture against the running compositor (developer machines).
