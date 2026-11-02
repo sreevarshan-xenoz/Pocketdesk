@@ -47,7 +47,7 @@ fn open(path: &Path) -> Option<Mutex<File>> {
 
 /// Trace to `path` whatever the variable says; a test's way in. Only the
 /// first call or use of the trace counts.
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 pub fn start(path: &Path) {
     let _ = TRACE.set(open(path));
 }
