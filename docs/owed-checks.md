@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1283 open items.
+1284 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
 | A second computer | 171 |
-| A Linux desktop (the Azure VM serves for some) | 228 |
+| A Linux desktop (the Azure VM serves for some) | 229 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 80 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
 
@@ -1891,6 +1891,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A browser (or any program that hides its toolbars when it is told it is full screen) lent on Hyprland keeps its toolbars: the program is not told it fills the screen. (where: linux)
 - A window closed while lent leaves its empty screen, and no more than that: a return or the computer going takes it away, and the window list no longer shows the window. (where: linux)
 - A tiled window lent from a workspace with others comes back to that workspace; it may not come back to its old slot among them (the limit the guide names). (where: linux)
+- A window that will not go back stays lent and is retried: on a throwaway Sway or Hyprland make the compositor refuse the move back (a workspace name the record cannot use, or the compositor socket briefly unreachable), then ask `return`: the answer is an error, the window and its screen are still there, and once the compositor works again the next `return`, or the sweep after the borrower is gone, puts it back and takes the screen away. (where: linux)
 - An X11 (Xwayland) program's window on Sway lent and returned: its title and class are in the window list, and it moves and returns like a Wayland one. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android

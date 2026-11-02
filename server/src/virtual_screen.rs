@@ -519,8 +519,12 @@ fn wait_for_size(
 }
 
 pub(crate) fn remove(name: &str) {
-    // A window lent onto it goes back first.
-    crate::lend_window::give_back_for_output(name);
+    // A window lent onto it goes back first; one that will not go stays on
+    // its screen (the sweep tries again), not lost with it.
+    if !crate::lend_window::give_back_for_output(name) {
+        tracing::warn!("Keeping the screen {name}: the window lent on it would not go back");
+        return;
+    }
     let removed = match desk() {
         Some(Desk::Hyprland) if this_tag().is_some_and(|tag| is_hypr_screen(name, &tag)) => {
             hypr(&format!("output remove {name}")).and_then(|r| hypr_ok(&r))
@@ -952,6 +956,18 @@ fn answer(key: &str, action: &str, width: u32, height: u32) -> serde_json::Value
 /// screen's, and swept as any screen is.
 pub(crate) fn add_for_lend(key: &str, width: u32, height: u32) -> serde_json::Value {
     answer_with(screens(), &Live, key, "lend", width, height)
+}
+
+/// Record the screen `name` under `key` again (see [`add_for_lend`]): its
+/// removal was refused because the window on it would not go back, and the
+/// record the sweep or a remove just took must stay for the next sweep.
+pub(crate) fn keep_for_lend(key: &str, name: &str) {
+    let mut made = made().lock().unwrap_or_else(|e| e.into_inner());
+    let names = made.phones.entry(key.to_string()).or_default();
+    if !names.iter().any(|n| n == name) {
+        names.push(name.to_string());
+    }
+    save(&made);
 }
 
 /// Take away the screen of `key` (see [`add_for_lend`]).

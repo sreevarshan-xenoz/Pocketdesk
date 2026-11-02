@@ -132,6 +132,13 @@ impl Lent {
         }
     }
 
+    /// Whether a record read back from disk names a window and a screen that
+    /// may reach a command: the file is the owner's, but is trusted no more
+    /// than an ask is.
+    fn is_sound(&self) -> bool {
+        is_window_id(&self.window) && is_plain(&self.output)
+    }
+
     /// The key of its screen in the virtual screens' record.
     fn key(&self) -> String {
         lend_key(&self.device, &self.window)
@@ -223,8 +230,13 @@ pub fn sway_place(id: i64, x: i32, y: i32, width: i32, height: i32) -> Vec<Strin
 
 /// The commands that put a lent window back: onto its workspace (by name,
 /// else number, else its output), tiled again if it was, with its border,
-/// and, if it floated, its size and place; full screen again if it was.
+/// and, if it floated, its size and place; full screen again if it was. `None`
+/// when the record names no window or no place that is safe to send.
 pub fn sway_back(lent: &Lent) -> Option<Vec<String>> {
+    // A record read from disk is checked like an ask is.
+    if !is_window_id(&lent.window) {
+        return None;
+    }
     let id: i64 = lent.window.parse().ok()?;
     let c = format!("[con_id={id}]");
     let target = if is_plain(&lent.workspace) {
@@ -232,7 +244,7 @@ pub fn sway_back(lent: &Lent) -> Option<Vec<String>> {
     } else if lent.workspace_id >= 0 {
         format!("workspace number {}", lent.workspace_id)
     } else if is_plain(&lent.from_output) {
-        format!("output {}", lent.from_output)
+        format!("output \"{}\"", lent.from_output)
     } else {
         return None;
     };
@@ -405,9 +417,12 @@ trait Env: Sync {
     fn output(&self, name: &str) -> Option<Output>;
     /// Put the window alone on `to`, `width`×`height`.
     fn send(&self, lent: &Lent, to: &Output, width: u32, height: u32) -> std::io::Result<()>;
-    /// Put the window back where `lent` says.
+    /// Put the window back where `lent` says. `Ok` also when the window is
+    /// gone; an `InvalidInput` error says the record can never be put back
+    /// (no place it names is safe to send), any other that it may yet.
     fn back(&self, lent: &Lent) -> std::io::Result<()>;
-    fn save(&self, lent: &[Lent]);
+    /// Write what is lent to the state file (or remove it when nothing is).
+    fn save(&self, lent: &[Lent]) -> std::io::Result<()>;
 }
 
 /// The windows lent, and the lock one ask at a time holds.
@@ -428,15 +443,59 @@ impl Lends {
         self.lent.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Take out (and save without) the windows `matching` says.
-    fn take(&self, env: &dyn Env, matching: impl Fn(&Lent) -> bool) -> Vec<Lent> {
+    /// Forget (and save without) the windows `matching` says, with no move:
+    /// for a record whose screen is already gone.
+    fn forget(&self, env: &dyn Env, matching: impl Fn(&Lent) -> bool) {
         let mut all = self.all();
-        let (taken, kept): (Vec<Lent>, Vec<Lent>) = all.drain(..).partition(|l| matching(l));
-        *all = kept;
-        if !taken.is_empty() {
-            env.save(&all);
+        let before = all.len();
+        all.retain(|l| !matching(l));
+        if all.len() != before
+            && let Err(e) = env.save(&all)
+        {
+            tracing::warn!("Could not write the list of lent windows: {e}");
         }
-        taken
+    }
+
+    /// Put back the windows `matching` says. A window's record goes (and the
+    /// file follows) only once it is back, or is not there to put back; one
+    /// that would not go back keeps its record, so it is not lost and a later
+    /// try (a sweep, a second `return`, the next start) can put it back. No
+    /// lock is held while the compositor is asked.
+    fn put_back(&self, env: &dyn Env, matching: impl Fn(&Lent) -> bool) -> Released {
+        let candidates: Vec<Lent> = self.all().iter().filter(|l| matching(l)).cloned().collect();
+        let mut released = Released::default();
+        for lent in candidates {
+            match settle(env, &lent) {
+                Ok(()) => {
+                    self.forget(env, |l| l.window == lent.window);
+                    released.done.push(lent);
+                }
+                Err(e) => released.failed.push((lent, e)),
+            }
+        }
+        released
+    }
+}
+
+/// What putting windows back came to.
+#[derive(Default)]
+struct Released {
+    /// Back (or gone), their records dropped.
+    done: Vec<Lent>,
+    /// Still lent, and why.
+    failed: Vec<(Lent, std::io::Error)>,
+}
+
+/// Put `lent` back; `Ok` when it is, or when it cannot ever be (a record
+/// that names no safe place, which a retry would only repeat: the compositor
+/// places the window when its screen goes).
+fn settle(env: &dyn Env, lent: &Lent) -> std::io::Result<()> {
+    match env.back(lent) {
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidInput => {
+            tracing::warn!("A lent window cannot be put back exactly: {e}");
+            Ok(())
+        }
+        other => other,
     }
 }
 
@@ -478,7 +537,7 @@ fn lend_with(lends: &Lends, env: &dyn Env, device: &str, window: &str) -> Value 
             return reply;
         }
         // Its screen is gone: forget it and lend afresh.
-        lends.take(env, |l| l.window == window);
+        lends.forget(env, |l| l.window == window);
         env.drop_screen(&key);
     }
     let seen = match env.seen(window) {
@@ -503,9 +562,15 @@ fn lend_with(lends: &Lends, env: &dyn Env, device: &str, window: &str) -> Value 
     let lent = Lent::new(device, &seen, &name);
     {
         // Written before the move: a crash between leaves what returns it.
+        // Unwritten, the window is not moved: nothing could return it.
         let mut all = lends.all();
         all.push(lent.clone());
-        env.save(&all);
+        if let Err(e) = env.save(&all) {
+            all.pop();
+            drop(all);
+            env.drop_screen(&key);
+            return error(format!("Could not record the lent window: {e}"));
+        }
     }
     match env.send(&lent, &screen, width, height) {
         Ok(()) => {
@@ -514,52 +579,68 @@ fn lend_with(lends: &Lends, env: &dyn Env, device: &str, window: &str) -> Value 
             reply
         }
         Err(e) => {
-            lends.take(env, |l| l.window == window);
-            let _ = env.back(&lent);
-            env.drop_screen(&key);
+            // Back where it was, or, if that fails too, still lent (its
+            // record and screen kept) for a sweep to try again.
+            let released = lends.put_back(env, |l| l.window == window);
+            if released.failed.is_empty() {
+                env.drop_screen(&key);
+            }
             error(format!("Could not move the window: {e}"))
         }
     }
 }
 
 /// Take back `window` from `device`, or, with none, all it has: `{returned:
-/// n}`, or `{error, returned}` when one could not be put back exactly (its
-/// screen is taken away all the same, and the compositor places the
-/// window).
+/// n}`, or `{error, returned}` when one would not go back: it stays lent
+/// (with its screen) for a sweep or another `return` to try again, and
+/// `returned` counts the ones that did.
 fn return_with(lends: &Lends, env: &dyn Env, device: &str, window: Option<&str>) -> Value {
     let _one = lends.one.lock().unwrap_or_else(|e| e.into_inner());
-    let taken = lends.take(env, |l| {
+    let released = lends.put_back(env, |l| {
         l.device == device && window.is_none_or(|w| l.window == w)
     });
-    let (mut returned, mut failed) = (0, None);
-    for lent in &taken {
-        match env.back(lent) {
-            Ok(()) => returned += 1,
-            Err(e) => failed = failed.or(Some(format!("Could not put a window back: {e}"))),
-        }
+    for lent in &released.done {
         env.drop_screen(&lent.key());
     }
-    match failed {
-        Some(why) => json!({ "error": why, "returned": returned }),
+    let returned = released.done.len();
+    match released.failed.first() {
+        Some((_, e)) => json!({
+            "error": format!("Could not put a window back: {e} (it stays lent; try again)"),
+            "returned": returned,
+        }),
         None => json!({ "returned": returned }),
     }
 }
 
-/// Put back what is lent on `output`, as it is about to be removed.
-fn give_back_output_with(lends: &Lends, env: &dyn Env, output: &str) {
-    for lent in lends.take(env, |l| l.output == output) {
-        if let Err(e) = env.back(&lent) {
-            tracing::warn!("Could not put a lent window back: {e}");
-        }
+/// Put back what is lent on `output`, as it is about to be removed; the
+/// windows that would not go (still lent, their records kept).
+fn give_back_output_with(lends: &Lends, env: &dyn Env, output: &str) -> Vec<Lent> {
+    let released = lends.put_back(env, |l| l.output == output);
+    for (_, e) in &released.failed {
+        tracing::warn!("Could not put a lent window back: {e}");
     }
+    released.failed.into_iter().map(|(lent, _)| lent).collect()
 }
 
 /// Called as the screen `output` is removed (a borrowing computer gone, a
 /// return, a sweep): its window, if one is lent on it, goes back first.
-pub fn give_back_for_output(output: &str) {
-    if lends().all().iter().any(|l| l.output == output) {
-        give_back_output_with(lends(), &Live, output);
+/// `false` when it would not go back: the screen must then stay, so the
+/// window is not lost with it (and its record is put back among the virtual
+/// screens', for the next sweep to try again).
+///
+/// This does not take the lock one ask holds (`Lends::one`): the removal is
+/// often run inside such an ask (`lend` and `return` make and drop screens),
+/// which would then wait for itself. A record leaves the list only when its
+/// window is back, so the few moves that could cross are repeats.
+pub fn give_back_for_output(output: &str) -> bool {
+    if !lends().all().iter().any(|l| l.output == output) {
+        return true;
     }
+    let failed = give_back_output_with(lends(), &Live, output);
+    for lent in &failed {
+        crate::virtual_screen::keep_for_lend(&lent.key(), &lent.output);
+    }
+    failed.is_empty()
 }
 
 /// What the file says was lent by a server in `instance`: all of it in the
@@ -572,8 +653,10 @@ fn left_by(file: &File, instance: Option<&str>) -> Vec<Lent> {
 }
 
 /// Put back the windows a server that stopped left lent (at start), and
-/// take their screens away; the names of the screens it removed. Holds
-/// nothing: run inside the virtual screens' own sweep.
+/// take their screens away; the names of the screens it removed. One that
+/// would not go back stays lent (its record loaded, its screen kept) for a
+/// sweep to try again. Holds nothing: run inside the virtual screens' own
+/// sweep.
 pub fn return_left_over() -> Vec<String> {
     let Ok(dir) = crate::state::state_dir() else {
         return Vec::new();
@@ -586,28 +669,45 @@ pub fn return_left_over() -> Vec<String> {
         return Vec::new();
     };
     let mut removed = Vec::new();
+    let mut kept = Vec::new();
     for lent in left_by(&file, crate::virtual_screen::this_instance().as_deref()) {
-        tracing::info!("Putting back a window a stopped server left lent");
-        if let Err(e) = Live.back(&lent) {
-            tracing::warn!("Could not put a left-over lent window back: {e}");
+        if !lent.is_sound() {
+            tracing::warn!("Ignoring a lent-window record that names no window");
+            continue;
         }
-        crate::virtual_screen::remove(&lent.output);
-        removed.push(lent.output);
+        tracing::info!("Putting back a window a stopped server left lent");
+        match settle(&Live, &lent) {
+            Ok(()) => {
+                crate::virtual_screen::remove(&lent.output);
+                removed.push(lent.output);
+            }
+            Err(e) => {
+                tracing::warn!("Could not put a left-over lent window back (will retry): {e}");
+                kept.push(lent);
+            }
+        }
     }
-    let _ = std::fs::remove_file(path);
+    let mut all = lends().all();
+    all.extend(kept);
+    if let Err(e) = Live.save(&all) {
+        tracing::warn!("Could not write the list of lent windows: {e}");
+    }
     removed
 }
 
-/// Put back everything lent, as the server stops. Waits at most 5 s.
+/// Put back everything lent, as the server stops. Waits at most 5 s. A window
+/// that would not go back is only logged: its record stays in the state file,
+/// and the next server's start puts it back.
 pub async fn return_all_on_stop() {
     let work = || {
         let lends = lends();
         let _one = lends.one.lock().unwrap_or_else(|e| e.into_inner());
-        for lent in lends.take(&Live, |_| true) {
-            if let Err(e) = Live.back(&lent) {
-                tracing::warn!("Could not put a lent window back at stop: {e}");
-            }
+        let released = lends.put_back(&Live, |_| true);
+        for lent in &released.done {
             Live.drop_screen(&lent.key());
+        }
+        for (_, e) in &released.failed {
+            tracing::warn!("Could not put a lent window back at stop: {e}");
         }
     };
     if tokio::time::timeout(Duration::from_secs(5), tokio::task::spawn_blocking(work))
@@ -685,6 +785,12 @@ fn wait_for<T>(wait: Duration, mut look: impl FnMut() -> Option<T>) -> Option<T>
 
 fn other(why: impl Into<String>) -> std::io::Error {
     std::io::Error::other(why.into())
+}
+
+/// A record that names no place that is safe to send a window back to: no
+/// retry would do better (see [`Env::back`]).
+fn no_place() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidInput, "no place to put it back")
 }
 
 /// The window now, whichever compositor this is.
@@ -830,15 +936,13 @@ impl Env for Live {
         }
         let wait = Duration::from_secs(2);
         match crate::virtual_screen::desk() {
-            Some(Desk::Sway) => {
-                sway_all(sway_back(lent).ok_or_else(|| other("no place to put it back"))?)?
-            }
+            Some(Desk::Sway) => sway_all(sway_back(lent).ok_or_else(no_place)?)?,
             Some(Desk::Hyprland) => {
                 let a = lent.window.as_str();
                 hypr_all(hypr_fullscreen(a, 0, 0))?;
                 let place = hypr_workspace(lent.workspace_id, &lent.workspace)
                     .and_then(|ws| hypr_to_workspace(a, &ws))
-                    .ok_or_else(|| other("no place to put it back"))?;
+                    .ok_or_else(no_place)?;
                 hypr_all([place])?;
                 if lent.floating
                     && let Some(place) =
@@ -873,25 +977,23 @@ impl Env for Live {
         Ok(())
     }
 
-    fn save(&self, lent: &[Lent]) {
-        let Ok(dir) = crate::state::state_dir() else {
-            return;
-        };
+    fn save(&self, lent: &[Lent]) -> std::io::Result<()> {
+        let dir = crate::state::state_dir().map_err(|e| other(e.to_string()))?;
         let path = dir.join(STATE_FILE);
         if lent.is_empty() {
-            let _ = std::fs::remove_file(path);
-            return;
+            return match std::fs::remove_file(path) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            };
         }
         let file = File {
             instance: crate::virtual_screen::this_instance(),
             lent: lent.to_vec(),
         };
-        if let Ok(json) = serde_json::to_string(&file) {
-            let tmp = pocketdesk_core::atomic_file::temp_beside(&path);
-            if pocketdesk_core::secure_fs::write_private(&tmp, json.as_bytes()).is_ok() {
-                let _ = pocketdesk_core::atomic_file::replace(&tmp, path);
-            }
-        }
+        let json = serde_json::to_string(&file).map_err(std::io::Error::other)?;
+        let tmp = pocketdesk_core::atomic_file::temp_beside(&path);
+        pocketdesk_core::secure_fs::write_private(&tmp, json.as_bytes())?;
+        pocketdesk_core::atomic_file::replace(&tmp, path)
     }
 }
 
@@ -928,7 +1030,12 @@ mod tests {
         calls: Mutex<Vec<String>>,
         saved: Mutex<Vec<Lent>>,
         fail_send: bool,
-        fail_back: bool,
+        /// Whether the window will not go back (set and cleared as a test
+        /// likes).
+        fail_back: std::sync::atomic::AtomicBool,
+        /// What a failed move back says: `InvalidInput` is for good.
+        back_is_for_good: bool,
+        fail_save: bool,
     }
 
     impl Fake {
@@ -940,6 +1047,10 @@ mod tests {
         }
         fn calls(&self) -> Vec<String> {
             self.calls.lock().unwrap().clone()
+        }
+        fn back_fails(&self, fails: bool) {
+            self.fail_back
+                .store(fails, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
@@ -1001,13 +1112,54 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(format!("back {} to {}", lent.window, lent.workspace));
-            if self.fail_back {
-                return Err(other("stuck"));
+            if self.fail_back.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(if self.back_is_for_good {
+                    no_place()
+                } else {
+                    other("stuck")
+                });
             }
             Ok(())
         }
-        fn save(&self, lent: &[Lent]) {
+        fn save(&self, lent: &[Lent]) -> std::io::Result<()> {
+            if self.fail_save {
+                return Err(other("disk full"));
+            }
             *self.saved.lock().unwrap() = lent.to_vec();
+            Ok(())
+        }
+    }
+
+    /// A [`Fake`] whose window `.1` will not go back.
+    struct StuckWindow<'a>(&'a Fake, String);
+
+    impl Env for StuckWindow<'_> {
+        fn cannot(&self) -> Option<&'static str> {
+            self.0.cannot()
+        }
+        fn seen(&self, window: &str) -> std::io::Result<Option<Seen>> {
+            self.0.seen(window)
+        }
+        fn add_screen(&self, key: &str, width: u32, height: u32) -> Value {
+            self.0.add_screen(key, width, height)
+        }
+        fn drop_screen(&self, key: &str) {
+            self.0.drop_screen(key)
+        }
+        fn output(&self, name: &str) -> Option<Output> {
+            self.0.output(name)
+        }
+        fn send(&self, lent: &Lent, to: &Output, width: u32, height: u32) -> std::io::Result<()> {
+            self.0.send(lent, to, width, height)
+        }
+        fn back(&self, lent: &Lent) -> std::io::Result<()> {
+            if lent.window == self.1 {
+                return Err(other("stuck"));
+            }
+            self.0.back(lent)
+        }
+        fn save(&self, lent: &[Lent]) -> std::io::Result<()> {
+            self.0.save(lent)
         }
     }
 
@@ -1138,13 +1290,29 @@ mod tests {
         lent.workspace_id = -1;
         assert_eq!(
             sway_back(&lent).unwrap()[0],
-            "[con_id=5] move container to output OUT-1"
+            "[con_id=5] move container to output \"OUT-1\""
         );
         lent.from_output = "a;b".into();
         assert!(sway_back(&lent).is_none());
         let mut lent = lent_tiled();
-        lent.window = "0x5".into();
-        assert!(sway_back(&lent).is_none(), "not a Sway id");
+        lent.from_output = "Virtual 1".into();
+        lent.workspace = String::new();
+        lent.workspace_id = -1;
+        assert_eq!(
+            sway_back(&lent).unwrap()[0],
+            "[con_id=5] move container to output \"Virtual 1\"",
+            "an output name with a space is quoted"
+        );
+        for window in ["0x5", "+5", "5; exec true", "", "-5"] {
+            let mut lent = lent_tiled();
+            lent.window = window.into();
+            assert!(sway_back(&lent).is_none(), "not a Sway id: {window:?}");
+            // A Hyprland address is a window id, only not a Sway one.
+            assert_eq!(lent.is_sound(), window == "0x5", "{window:?}");
+        }
+        let mut lent = lent_tiled();
+        lent.output = "X; exec true".into();
+        assert!(!lent.is_sound(), "a screen name that is not plain");
     }
 
     #[test]
@@ -1376,11 +1544,11 @@ mod tests {
     }
 
     #[test]
-    fn a_window_that_will_not_go_back_still_loses_its_screen_and_says_so() {
-        let mut fake = Fake::with(vec![seen("5", 1280, 720)]);
-        fake.fail_back = true;
+    fn a_window_that_will_not_go_back_keeps_its_record_and_screen_and_says_so() {
+        let fake = Fake::with(vec![seen("5", 1280, 720)]);
         let lends = Lends::new();
         lend_with(&lends, &fake, DEVICE, "5");
+        fake.back_fails(true);
         let reply = return_with(&lends, &fake, DEVICE, Some("5"));
         assert!(
             reply["error"]
@@ -1389,8 +1557,116 @@ mod tests {
                 .contains("Could not put a window back")
         );
         assert_eq!(reply["returned"], 0);
-        assert!(fake.screens.lock().unwrap().is_empty());
+        assert_eq!(fake.screens.lock().unwrap().len(), 1, "its screen stays");
+        assert_eq!(lends.all().len(), 1, "its record stays");
+        assert_eq!(fake.saved.lock().unwrap().len(), 1, "and the file");
+        assert!(
+            !fake.calls().iter().any(|c| c.starts_with("drop")),
+            "{:?}",
+            fake.calls()
+        );
+        // Asked again once the compositor can: it goes.
+        fake.back_fails(false);
+        let again = return_with(&lends, &fake, DEVICE, Some("5"));
+        assert_eq!(again, json!({ "returned": 1 }));
         assert!(lends.all().is_empty());
+        assert!(fake.saved.lock().unwrap().is_empty());
+        assert!(fake.screens.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_return_of_all_counts_those_that_went_and_keeps_the_rest() {
+        let fake = Fake::with(vec![seen("5", 1280, 720), seen("6", 800, 600)]);
+        let lends = Lends::new();
+        lend_with(&lends, &fake, DEVICE, "5");
+        lend_with(&lends, &fake, DEVICE, "6");
+        // Only 5 will not go back.
+        let one_stuck = StuckWindow(&fake, "5".to_string());
+        let reply = return_with(&lends, &one_stuck, DEVICE, None);
+        assert_eq!(reply["returned"], 1, "{reply}");
+        assert!(reply["error"].is_string());
+        assert_eq!(lends.all().len(), 1);
+        assert_eq!(lends.all()[0].window, "5");
+    }
+
+    #[test]
+    fn a_later_sweep_puts_a_window_back_that_would_not_go_before() {
+        let fake = Fake::with(vec![seen("5", 1280, 720), seen("6", 800, 600)]);
+        let lends = Lends::new();
+        let name = lend_with(&lends, &fake, DEVICE, "5")["name"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        lend_with(&lends, &fake, DEVICE, "6");
+        fake.back_fails(true);
+        let failed = give_back_output_with(&lends, &fake, &name);
+        assert_eq!(failed.len(), 1, "told: the screen must stay");
+        assert_eq!(failed[0].window, "5");
+        assert_eq!(lends.all().len(), 2, "both still lent");
+        assert_eq!(fake.saved.lock().unwrap().len(), 2);
+        // The next sweep.
+        fake.back_fails(false);
+        assert!(give_back_output_with(&lends, &fake, &name).is_empty());
+        assert_eq!(lends.all().len(), 1, "the other stays lent");
+        assert_eq!(lends.all()[0].window, "6");
+        assert_eq!(fake.saved.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_record_that_can_never_be_put_back_is_let_go_not_retried() {
+        let mut fake = Fake::with(vec![seen("5", 1280, 720)]);
+        fake.back_is_for_good = true;
+        let lends = Lends::new();
+        let name = lend_with(&lends, &fake, DEVICE, "5")["name"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        fake.back_fails(true);
+        assert!(give_back_output_with(&lends, &fake, &name).is_empty());
+        assert!(lends.all().is_empty());
+        assert!(fake.saved.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_move_that_fails_and_cannot_be_undone_leaves_the_window_lent() {
+        let mut fake = Fake::with(vec![seen("5", 1280, 720)]);
+        fake.fail_send = true;
+        let lends = Lends::new();
+        // The undo fails too.
+        fake.back_fails(true);
+        let reply = lend_with(&lends, &fake, DEVICE, "5");
+        assert!(
+            reply["error"].as_str().unwrap().contains("Could not move"),
+            "{reply}"
+        );
+        assert_eq!(lends.all().len(), 1, "kept for a sweep");
+        assert_eq!(fake.screens.lock().unwrap().len(), 1, "with its screen");
+        fake.back_fails(false);
+        let name = lends.all()[0].output.clone();
+        assert!(give_back_output_with(&lends, &fake, &name).is_empty());
+        assert!(lends.all().is_empty());
+    }
+
+    #[test]
+    fn a_window_is_not_moved_when_what_returns_it_cannot_be_written() {
+        let mut fake = Fake::with(vec![seen("5", 1280, 720)]);
+        fake.fail_save = true;
+        let lends = Lends::new();
+        let reply = lend_with(&lends, &fake, DEVICE, "5");
+        assert!(
+            reply["error"]
+                .as_str()
+                .unwrap()
+                .contains("Could not record"),
+            "{reply}"
+        );
+        assert!(lends.all().is_empty());
+        assert!(fake.screens.lock().unwrap().is_empty(), "its screen goes");
+        assert!(
+            !fake.calls().iter().any(|c| c.starts_with("send")),
+            "never moved: {:?}",
+            fake.calls()
+        );
     }
 
     #[test]
@@ -1400,7 +1676,7 @@ mod tests {
         let reply = lend_with(&lends, &fake, DEVICE, "5");
         lend_with(&lends, &fake, DEVICE, "6");
         let name = reply["name"].as_str().unwrap();
-        give_back_output_with(&lends, &fake, name);
+        assert!(give_back_output_with(&lends, &fake, name).is_empty());
         assert!(fake.calls().contains(&"back 5 to 3".to_string()));
         assert!(!fake.calls().iter().any(|c| c.starts_with("back 6")));
         assert_eq!(lends.all().len(), 1, "the other stays lent");

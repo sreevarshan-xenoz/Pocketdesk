@@ -3709,6 +3709,7 @@ Built 2026-11-02: `server/src/lend_window.rs` and `server/src/sway_tree.rs`; the
 - [ ] A browser (or any program that hides its toolbars when it is told it is full screen) lent on Hyprland keeps its toolbars: the program is not told it fills the screen. (where: linux)
 - [ ] A window closed while lent leaves its empty screen, and no more than that: a return or the computer going takes it away, and the window list no longer shows the window. (where: linux)
 - [ ] A tiled window lent from a workspace with others comes back to that workspace; it may not come back to its old slot among them (the limit the guide names). (where: linux)
+- [ ] A window that will not go back stays lent and is retried: on a throwaway Sway or Hyprland make the compositor refuse the move back (a workspace name the record cannot use, or the compositor socket briefly unreachable), then ask `return`: the answer is an error, the window and its screen are still there, and once the compositor works again the next `return`, or the sweep after the borrower is gone, puts it back and takes the screen away. (where: linux)
 - [ ] An X11 (Xwayland) program's window on Sway lent and returned: its title and class are in the window list, and it moves and returns like a Wayland one. (where: linux)
 
 ## Recording results
