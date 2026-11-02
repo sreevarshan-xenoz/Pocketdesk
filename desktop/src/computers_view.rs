@@ -738,10 +738,7 @@ impl ComputersView {
                     // A window lent to this computer already is shown once:
                     // another view of it would give it back under the first.
                     if ui
-                        .add_enabled(
-                            server_running && !window.lent,
-                            egui::Button::new("Borrow"),
-                        )
+                        .add_enabled(server_running && !window.lent, egui::Button::new("Borrow"))
                         .on_hover_text(borrow_hover(&name))
                         .on_disabled_hover_text(if window.lent {
                             ALREADY_BORROWED
@@ -2404,7 +2401,10 @@ mod tests {
                 .filter(|a| matches!(a, ComputerAsk::WindowsThere { .. }))
                 .count()
         };
-        assert!(lists(&asked) >= 1, "a stale list is asked for again: {asked:?}");
+        assert!(
+            lists(&asked) >= 1,
+            "a stale list is asked for again: {asked:?}"
+        );
     }
 
     /// Borrowing a window: a computer whose link is down offers no picker.

@@ -551,7 +551,9 @@ mod tests {
         .await;
         assert_eq!(
             no_link,
-            Err(LendError::Unreached("it was not asked: no link".to_string()))
+            Err(LendError::Unreached(
+                "it was not asked: no link".to_string()
+            ))
         );
         let silent = lend_via(
             |_: NetworkPacket| std::future::ready(Ok(())),

@@ -1061,7 +1061,14 @@ pub async fn run_watcher() {
                 captures: &captures,
                 linked: &crate::peer_computers::is_linked,
             };
-            let ended = sweep_with(lends(), &Live, looking, &present, &mut looks, Instant::now());
+            let ended = sweep_with(
+                lends(),
+                &Live,
+                looking,
+                &present,
+                &mut looks,
+                Instant::now(),
+            );
             (ended, looks)
         })
         .await;
@@ -2203,7 +2210,14 @@ mod tests {
         live: &[String],
         looks: &mut Looks,
     ) -> Vec<Ended> {
-        look_at(lends, env, enabled, live, looks, Instant::now() + Duration::from_secs(10))
+        look_at(
+            lends,
+            env,
+            enabled,
+            live,
+            looks,
+            Instant::now() + Duration::from_secs(10),
+        )
     }
 
     fn look_at(
@@ -2344,11 +2358,27 @@ mod tests {
         let mut looks = Looks::default();
         let at = |secs: u64| t0 + Duration::from_secs(secs);
         for secs in [10, 40, 69] {
-            let ended = look_with(&lends, &fake, &both, &captures, &|_| true, &mut looks, at(secs));
+            let ended = look_with(
+                &lends,
+                &fake,
+                &both,
+                &captures,
+                &|_| true,
+                &mut looks,
+                at(secs),
+            );
             assert!(ended.is_empty(), "within the lease, at {secs} s");
         }
         // 60 s after the first look that found 7's screen not captured.
-        let ended = look_with(&lends, &fake, &both, &captures, &|_| true, &mut looks, at(71));
+        let ended = look_with(
+            &lends,
+            &fake,
+            &both,
+            &captures,
+            &|_| true,
+            &mut looks,
+            at(71),
+        );
         assert_eq!(windows_of(&ended, Gone::BorrowerAway), [(OTHER, "7")]);
         let lent: Vec<String> = lends.all().iter().map(|l| l.window.clone()).collect();
         assert_eq!(lent, ["5", "6"], "the captured ones stay lent");
@@ -2365,9 +2395,25 @@ mod tests {
         // windows are on; OTHER's session does capture its window's.
         let captures = vec![(DEVICE.to_string(), 2), (OTHER.to_string(), 1)];
         let at = |secs: u64| t0 + Duration::from_secs(secs);
-        let first = look_with(&lends, &fake, &both, &captures, &|_| true, &mut looks, at(10));
+        let first = look_with(
+            &lends,
+            &fake,
+            &both,
+            &captures,
+            &|_| true,
+            &mut looks,
+            at(10),
+        );
         assert!(first.is_empty());
-        let later = look_with(&lends, &fake, &both, &captures, &|_| true, &mut looks, at(80));
+        let later = look_with(
+            &lends,
+            &fake,
+            &both,
+            &captures,
+            &|_| true,
+            &mut looks,
+            at(80),
+        );
         assert_eq!(
             windows_of(&later, Gone::BorrowerAway),
             [(DEVICE, "5"), (DEVICE, "6")]
@@ -2406,7 +2452,15 @@ mod tests {
         // A look a few seconds on, with the link to DEVICE up now (asked
         // inside the look, not read before it), takes only OTHER's.
         let later = now + Duration::from_secs(4);
-        let ended = look_with(&lends, &fake, &[], &all, &|d| d == DEVICE, &mut looks, later);
+        let ended = look_with(
+            &lends,
+            &fake,
+            &[],
+            &all,
+            &|d| d == DEVICE,
+            &mut looks,
+            later,
+        );
         assert_eq!(windows_of(&ended, Gone::BorrowerAway), [(OTHER, "7")]);
     }
 
