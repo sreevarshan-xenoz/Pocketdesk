@@ -1993,6 +1993,7 @@ mod tests {
             stride,
             timestamp: Instant::now(),
             gpu: None,
+            repeat: false,
         };
 
         // Encode several frames — first few may be empty due to encoder latency
@@ -2142,6 +2143,7 @@ mod tests {
             stride,
             timestamp: Instant::now(),
             gpu: None,
+            repeat: false,
         };
 
         for _ in 0..10 {
@@ -2181,6 +2183,7 @@ mod tests {
             stride,
             timestamp: Instant::now(),
             gpu: None,
+            repeat: false,
         };
 
         // Encode enough frames to trigger the keyframe interval (2 seconds = 60 frames)
@@ -2227,6 +2230,7 @@ mod tests {
             stride,
             timestamp: Instant::now(),
             gpu: None,
+            repeat: false,
         };
 
         // Encode a few frames then request a keyframe
@@ -2280,6 +2284,7 @@ mod tests {
             stride,
             timestamp: Instant::now(),
             gpu: None,
+            repeat: false,
         };
         let _ = encoder.encode_frame(&frame);
 
@@ -2436,6 +2441,7 @@ mod tests {
                 stride,
                 timestamp: Instant::now(),
                 gpu: None,
+                repeat: false,
             };
             packets.extend(sidecar.encode_frame(&frame).expect("encode"));
         }
@@ -2545,6 +2551,7 @@ mod tests {
             stride,
             timestamp: Instant::now(),
             gpu: None,
+            repeat: false,
         };
 
         for _ in 0..60 {

@@ -564,7 +564,7 @@ fn run_capture_loop(
             // writes into the buffer, so the last frame in it can be read.
             queue.roundtrip(&mut state)?;
             if let Some(inverted) = last_inverted {
-                if !send_frame(&frame_tx, fb.repack(inverted, w, h, stride), w, h) {
+                if !send_frame(&frame_tx, fb.repack(inverted, w, h, stride), w, h, true) {
                     debug!("Frame channel closed, stopping screencopy capture");
                     break;
                 }
@@ -632,7 +632,8 @@ fn run_capture_loop(
         }
         if emit || heartbeat {
             last_inverted = Some(inverted);
-            if !send_frame(&frame_tx, fb.repack(inverted, w, h, stride), w, h) {
+            // Only the heartbeat, with no damage, repeats the last frame.
+            if !send_frame(&frame_tx, fb.repack(inverted, w, h, stride), w, h, !emit) {
                 debug!("Frame channel closed, stopping screencopy capture");
                 break;
             }
@@ -659,12 +660,14 @@ fn run_capture_loop(
 
 /// Hand one frame to the encoder. It replaces one still waiting (the
 /// encoder is behind; this one has newer pixels, BG2). Returns false once
-/// the encoder side is gone.
+/// the encoder side is gone. `repeat`: the frame is the heartbeat's, the
+/// last one again.
 fn send_frame(
     frame_tx: &crate::streaming::latest_frame::FrameSender<VideoFrame>,
     data: Vec<u8>,
     width: u32,
     height: u32,
+    repeat: bool,
 ) -> bool {
     let frame = VideoFrame {
         data,
@@ -673,6 +676,7 @@ fn send_frame(
         stride: width * 4,
         timestamp: Instant::now(),
         gpu: None,
+        repeat,
     };
     !matches!(
         frame_tx.try_send(frame),

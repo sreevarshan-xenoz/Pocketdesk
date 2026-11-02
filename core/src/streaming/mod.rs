@@ -21,6 +21,7 @@ pub mod h264_sps;
 #[cfg(all(windows, feature = "capture", feature = "inproc-windows"))]
 pub use gpu_frame::GpuFrame;
 pub mod gnome_unattended;
+pub mod idle_repeats;
 pub mod in_flight;
 pub mod input_packet;
 #[cfg(feature = "wan")]
@@ -366,6 +367,11 @@ pub struct VideoFrame {
     /// an NVIDIA adapter with `inproc-windows`. Read back with
     /// [`VideoFrame::downloaded`] where the pixels are needed.
     pub gpu: Option<GpuFrame>,
+    /// The capture sent the last frame again, only to show it is alive (the
+    /// idle heartbeat): the screen has not changed since. A session that
+    /// needs no idle repeats (`client::CODEC_CAP_NO_IDLE_REPEATS`) has them
+    /// dropped before the encoder (`idle_repeats::RepeatGate`).
+    pub repeat: bool,
 }
 
 /// Without zero-copy (BG10) no frame is on the GPU.
@@ -392,6 +398,13 @@ impl Drop for VideoFrame {
 }
 
 impl VideoFrame {
+    /// This frame marked as the idle heartbeat's repeat of the last one (see
+    /// [`VideoFrame::repeat`]).
+    pub fn as_repeat(mut self) -> Self {
+        self.repeat = true;
+        self
+    }
+
     /// This frame read back to the CPU when it is on the GPU (BG10), for an
     /// encoder that needs its pixels; `None` when it already holds them.
     pub fn downloaded(&self) -> anyhow::Result<Option<VideoFrame>> {
@@ -405,6 +418,7 @@ impl VideoFrame {
             stride: self.width * 4,
             timestamp: self.timestamp,
             gpu: None,
+            repeat: self.repeat,
         }))
     }
 
@@ -503,6 +517,7 @@ mod tests {
             stride,
             timestamp: Instant::now(),
             gpu: None,
+            repeat: false,
         }
     }
 

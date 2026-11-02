@@ -397,6 +397,7 @@ pub fn create_test_frame(width: u32, height: u32) -> VideoFrame {
         stride,
         timestamp: std::time::Instant::now(),
         gpu: None,
+        repeat: false,
     }
 }
 

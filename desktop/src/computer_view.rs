@@ -551,10 +551,19 @@ pub fn stats_lines(
         Some((w, h)) => format!("Picture: {w}\u{d7}{h} {codec}"),
         None => "Picture: not yet".to_string(),
     };
+    // A still screen sends this window nothing (the other computer repeats
+    // none for a window): said as a screen at rest, not as frames missing.
+    let still = size.is_some() && stats.fps == 0 && shown.fps == 0;
+    let unseen = if still { "idle" } else { "not yet" };
+    let frames = if still {
+        "Frames: none, the screen is still".to_string()
+    } else {
+        format!("Frames: {} a second in, {} shown", stats.fps, shown.fps)
+    };
     vec![
         road,
         picture,
-        format!("Frames: {} a second in, {} shown", stats.fps, shown.fps),
+        frames,
         format!("Bitrate: {}", bitrate_words(stats.kbps)),
         format!(
             "Round trip: {}",
@@ -562,11 +571,11 @@ pub fn stats_lines(
                 .rtt_ms
                 .map_or_else(|| "not known".to_string(), |ms| format!("{ms} ms"))
         ),
-        decode_words(shown, decoding),
+        decode_words(shown, decoding, unseen),
         format!(
             "Pipe: {}",
             if shown.bytes == 0 {
-                "not yet".to_string()
+                unseen.to_string()
             } else {
                 format!("{} a picture", bytes_words(shown.bytes))
             }
@@ -579,13 +588,14 @@ pub fn stats_lines(
 }
 
 /// The decoder's line: its median time over a picture in the last second,
-/// its 95th percentile, and the way it decodes (PC5).
-fn decode_words(shown: Shown, decoding: &str) -> String {
+/// its 95th percentile, and the way it decodes (PC5); `unseen` is what it
+/// says when no picture was decoded in that second.
+fn decode_words(shown: Shown, decoding: &str, unseen: &str) -> String {
     let ms = |d: Duration| format!("{:.1} ms", d.as_secs_f64() * 1000.0);
     let time = match (shown.decode, shown.decode_p95) {
         (Some(p50), Some(p95)) => format!("{} (p95 {})", ms(p50), ms(p95)),
         (Some(p50), None) => ms(p50),
-        _ => "not yet".to_string(),
+        _ => unseen.to_string(),
     };
     if decoding.is_empty() {
         format!("Decode: {time}")
@@ -4567,6 +4577,18 @@ mod tests {
         assert_eq!(lines[4], "Round trip: not known");
         assert_eq!(lines[5], "Decode: not yet");
         assert_eq!(lines[6], "Pipe: not yet");
+        // A still screen sends nothing: said as at rest, not as missing.
+        status.stats.as_mut().unwrap().fps = 0;
+        let still = stats_lines(&status, Some((1920, 1080)), Shown::default(), "d3d11va");
+        assert_eq!(still[2], "Frames: none, the screen is still");
+        assert_eq!(still[5], "Decode: idle \u{b7} d3d11va");
+        assert_eq!(still[6], "Pipe: idle");
+        // Pictures still being shown, or none yet: the numbers as before.
+        let moving = Shown { fps: 1, ..shown };
+        let lines = stats_lines(&status, Some((1920, 1080)), moving, "d3d11va");
+        assert_eq!(lines[2], "Frames: 0 a second in, 1 shown");
+        let lines = stats_lines(&status, None, Shown::default(), "d3d11va");
+        assert_eq!(lines[2], "Frames: 0 a second in, 0 shown");
         assert_eq!(bitrate_words(950), "950 kb/s");
         assert_eq!(bytes_words(8_294_400), "8.3 MB");
         assert_eq!(bytes_words(4_200), "4 KB");

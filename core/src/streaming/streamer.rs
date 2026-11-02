@@ -92,6 +92,10 @@ struct ClientClaim {
     /// A cast of app windows only (Phone apps tier 2), no screen of the
     /// phone's. Said with [`super::client::CAST_WINDOWS_FLAG`].
     windows: bool,
+    /// The client needs no idle repeats of a screen that has not changed
+    /// (another computer's window). Said with
+    /// [`super::client::CODEC_CAP_NO_IDLE_REPEATS`], in the codec caps.
+    no_idle_repeats: bool,
 }
 
 /// Tells the relay a cast ended, however its session ends (T10k).
@@ -748,6 +752,9 @@ impl StreamingServer {
         let casting = cast || phone_sound_only;
         // No capture, encode, video or arbiter for any of those.
         let no_picture = input_only || sound;
+        // Another computer's window needs no repeat of a still screen: the
+        // encode task drops the capture's idle heartbeat for it.
+        let no_idle_repeats = claim.no_idle_repeats && !no_picture;
 
         // R4 A2 session telemetry: a shared recorder observes the connection
         // on a slow poll and an RAII guard emits the outcome report when the
@@ -1237,6 +1244,9 @@ impl StreamingServer {
             const ERR_END_AT: u64 = 90;
             const STALL_FRAMES: u64 = 30;
             const STALL_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
+            // A still screen sends nothing to a client that needs no idle
+            // repeats; a fresh picture owed to it goes through (`idle_repeats`).
+            let mut repeat_gate = super::idle_repeats::RepeatGate::new(no_idle_repeats);
 
             loop {
                 tokio::select! {
@@ -1251,6 +1261,7 @@ impl StreamingServer {
                     Ok(()) = keyframe_rx.changed() => {
                         info!("Forcing IDR on encoder");
                         encoder.request_keyframe();
+                        repeat_gate.refresh();
                     }
 
                     // Window crop changes. Size changes are handled by the
@@ -1267,6 +1278,7 @@ impl StreamingServer {
                                 encoder.request_keyframe();
                             }
                             crop = new;
+                            repeat_gate.refresh();
                         }
                     }
 
@@ -1279,6 +1291,7 @@ impl StreamingServer {
                         let addr = *window_rx.borrow_and_update();
                         info!(addr, "Window capture target changed");
                         encoder.request_keyframe();
+                        repeat_gate.refresh();
                     }
 
                     // Bitrate changes (R4 A3 relay floor / E5 HUD preset)
@@ -1405,6 +1418,12 @@ impl StreamingServer {
                         }
                     } => {
                         let from_hold = held.is_none() && held_due.is_some();
+                        // The capture's idle heartbeat, for a client that
+                        // needs none: dropped before the encoder, so the
+                        // picture chain and its sequence numbers go on whole.
+                        if !from_hold && !repeat_gate.admit(frame.repeat) {
+                            continue;
+                        }
                         // R6f: at a lower frame rate than the capture's, pass
                         // frames on at the encoder's rate, holding the newest
                         // early one.
@@ -1633,6 +1652,7 @@ impl StreamingServer {
             info!(
                 packets_encoded,
                 frames_dropped,
+                repeats_skipped = repeat_gate.skipped(),
                 capture_replaced = frame_rx.replaced(),
                 "Encoding task complete"
             );
@@ -2461,9 +2481,11 @@ async fn read_client_config(
             if let Some(codec) = negotiate_codec(caps[0], hevc_allowed, config.codec) {
                 config.codec = codec;
             }
+            claim.no_idle_repeats = wants_no_idle_repeats(caps[0]);
             info!(
                 caps = caps[0],
                 codec = config.codec.display_name(),
+                no_idle_repeats = claim.no_idle_repeats,
                 "Client codec caps negotiated"
             );
         } else if marker == SESSION_MODE_MARKER {
@@ -2511,6 +2533,13 @@ fn webcam_refusal(allowed: bool, offered: bool) -> Option<&'static [u8]> {
     } else {
         None
     }
+}
+
+/// Whether the client's capability bits say it needs no idle repeats of a
+/// screen that has not changed (another computer's window). Bits an older
+/// client never sets read as no, so a phone gets the repeats as before.
+fn wants_no_idle_repeats(caps: u8) -> bool {
+    caps & super::client::CODEC_CAP_NO_IDLE_REPEATS != 0
 }
 
 /// R4 C1: pick the session codec from the client's capability bits and the
@@ -3197,6 +3226,48 @@ mod tests {
         assert_eq!(config.monitor_index, 2);
         assert_eq!(config.codec, VideoCodec::H265);
         assert!(!claim.input_only);
+        assert!(!claim.no_idle_repeats, "a phone's caps: repeats go on");
+    }
+
+    /// Another computer's window says it needs no idle repeats in its codec
+    /// caps, with no stream of its own; the host reads it beside HEVC.
+    #[tokio::test]
+    async fn a_computers_window_says_it_needs_no_idle_repeats_over_loopback() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        use super::super::client::{CODEC_CAP_HEVC, CODEC_CAP_NO_IDLE_REPEATS, StreamingClient};
+
+        let certs = std::sync::Arc::new(CertManager::new().expect("certs"));
+        let alpn = vec![StreamTransportConfig::default().alpn];
+        let server_endpoint = quinn::Endpoint::server(
+            certs.server_config(alpn.clone()).expect("server config"),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .expect("bind");
+        let addr = server_endpoint.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let incoming = server_endpoint.accept().await.expect("incoming");
+            QuinnConnection::shared(incoming.await.expect("accept"))
+        });
+
+        let (_client, _frames, _audio) = StreamingClient::connect(
+            &addr.to_string(),
+            certs,
+            Some(0),
+            Some("device-pc"),
+            None,
+            Some(CODEC_CAP_HEVC | CODEC_CAP_NO_IDLE_REPEATS),
+            super::super::client::SessionMode::Screen,
+        )
+        .await
+        .expect("connect");
+
+        let server_conn = accept.await.expect("accept task");
+        let mut config = StreamingConfig::default();
+        let claim = read_client_config(&server_conn, &mut config, true).await;
+
+        assert!(claim.no_idle_repeats);
+        assert_eq!(config.codec, VideoCodec::H265, "HEVC read beside it");
+        assert!(!claim.input_only);
     }
 
     /// T10i: a remote says it is input only, and sends neither a monitor
@@ -3642,7 +3713,27 @@ mod tests {
         );
         // A server already configured for H.265 is untouched; unknown future
         // capability bits alone must not change anything.
-        assert_eq!(negotiate_codec(0b10, true, VideoCodec::H265), None);
-        assert_eq!(negotiate_codec(0b10, true, VideoCodec::H264), None);
+        assert_eq!(negotiate_codec(0b1000, true, VideoCodec::H265), None);
+        assert_eq!(negotiate_codec(0b1000, true, VideoCodec::H264), None);
+    }
+
+    /// The no-idle-repeats bit rides beside the HEVC bit without changing
+    /// the codec negotiated, and an absent bit is the old behaviour.
+    #[test]
+    fn the_no_idle_repeats_bit_is_read_beside_the_codec_bits() {
+        use super::super::client::{CODEC_CAP_HEVC, CODEC_CAP_NO_IDLE_REPEATS};
+        let still = CODEC_CAP_NO_IDLE_REPEATS;
+        let both = CODEC_CAP_HEVC | still;
+        assert_ne!(CODEC_CAP_HEVC, still, "a bit of its own");
+        assert!(!wants_no_idle_repeats(0), "absent: the repeats go on");
+        assert!(!wants_no_idle_repeats(CODEC_CAP_HEVC), "a phone's caps");
+        assert!(wants_no_idle_repeats(still));
+        assert!(wants_no_idle_repeats(both));
+        // Not a codec: the negotiation ignores it.
+        assert_eq!(negotiate_codec(still, true, VideoCodec::H264), None);
+        assert_eq!(
+            negotiate_codec(both, true, VideoCodec::H264),
+            Some(VideoCodec::H265)
+        );
     }
 }
