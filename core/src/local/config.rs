@@ -41,6 +41,15 @@ pub struct Config {
     /// phone's "Full quality" turns it off for its session.
     #[serde(default = "default_true")]
     pub slow_link_frame_rate: bool,
+    /// Smooth keyframes: no whole keyframe every two seconds, which is a
+    /// hitch in the picture's timing each time (it is several times the size
+    /// of any other frame). An encoder that can (libx264, NVENC) spreads it
+    /// over the stream instead, the rest send one every ten seconds, and a
+    /// viewer that loses a frame still gets a whole one at once. Off by
+    /// default until a phone has been checked with it
+    /// (`streaming::keyframes`). The server reads it at its start.
+    #[serde(default)]
+    pub smooth_keyframes: bool,
     /// Draw a phone's laser dot (G4): the air mouse in Remote moves a red
     /// dot on the screen instead of the pointer. On by default; drawn on
     /// Windows and on wlroots compositors (N10).
@@ -824,6 +833,7 @@ impl Default for Config {
             pairing_required: true,
             allow_hevc: false,
             slow_link_frame_rate: true,
+            smooth_keyframes: false,
             laser_pointer: true,
             internet_files: true,
             keep_file_dates: true,
@@ -1125,6 +1135,7 @@ impl Config {
         "pairing_required",
         "allow_hevc",
         "slow_link_frame_rate",
+        "smooth_keyframes",
         "laser_pointer",
         "internet_files",
         "keep_file_dates",
@@ -2097,6 +2108,18 @@ phone_battery = \"x\"
         config.save_to(&path).unwrap();
         assert!(!Config::load_from(&path).unwrap().slow_link_frame_rate);
         assert!(Config::default().laser_pointer, "G4: on by default");
+    }
+
+    #[test]
+    fn smooth_keyframes_are_off_by_default_and_the_choice_saves() {
+        assert!(!Config::default().smooth_keyframes);
+        let path = temp("smooth-keyframes");
+        let mut config = Config::load_from(&path).unwrap();
+        assert!(!config.smooth_keyframes, "a file without the key");
+        config.smooth_keyframes = true;
+        config.save_to(&path).unwrap();
+        assert!(Config::load_from(&path).unwrap().smooth_keyframes);
+        assert!(Config::KNOWN_KEYS.contains(&"smooth_keyframes"));
     }
 
     #[test]

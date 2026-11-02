@@ -495,6 +495,8 @@ pub async fn run(config: Config) -> Result<()> {
     let (input_tx, mut input_rx) =
         tokio::sync::broadcast::channel::<pocketdesk_core::streaming::SessionInput>(16);
     let streaming_config = config.video_quality.to_streaming_config();
+    // Read as each session opens its encoder.
+    pocketdesk_core::streaming::keyframes::set_smooth(config.smooth_keyframes);
     // T10k: phones' casts are handed to the desktop app through one relay.
     let cast_tx = match crate::state::state_dir() {
         Ok(dir) => Some(crate::cast_relay::spawn(dir)),
