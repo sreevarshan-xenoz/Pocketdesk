@@ -100,19 +100,29 @@ const STATS_EVERY: Duration = Duration::from_secs(1);
 /// I3: the app's sidecar decodes, not this process) and
 /// `computer_view_hevc` and `computer_view_hw_decode` are on here
 /// (`wanted`; review M10: HEVC on the processor is slower than H.264);
-/// else H.264 alone, said by sending none. An app before PC5 never asks,
-/// so it never hears HEVC.
-pub fn codec_caps(asked: bool, wanted: bool) -> Option<u8> {
-    (asked && wanted).then_some(pocketdesk_core::streaming::client::CODEC_CAP_HEVC)
+/// else H.264 alone. An app before PC5 never asks, so it never hears HEVC.
+/// With the bit that says the window needs no idle repeats when `quiet`
+/// (`computer_view_no_idle_repeats`, on by default): the window keeps a
+/// still screen's last picture and holds the link by the connection's own
+/// keepalive, so the other computer sends nothing while the screen is still
+/// (a host before it ignores the bit and goes on repeating). Off, the bit
+/// stays clear and the other computer repeats a still screen as before.
+pub fn codec_caps(asked: bool, wanted: bool, quiet: bool) -> u8 {
+    use pocketdesk_core::streaming::client::{CODEC_CAP_HEVC, CODEC_CAP_NO_IDLE_REPEATS};
+    let hevc = if asked && wanted { CODEC_CAP_HEVC } else { 0 };
+    let still = if quiet { CODEC_CAP_NO_IDLE_REPEATS } else { 0 };
+    still | hevc
 }
 
 /// The codecs a view the app asked for (`asked` HEVC or not) offers now.
 fn view_codec_caps(asked: bool) -> Option<u8> {
     let config = crate::events::current_config();
-    codec_caps(
+    let wanted = config.computer_view_hevc && config.computer_view_hw_decode;
+    Some(codec_caps(
         asked,
-        config.computer_view_hevc && config.computer_view_hw_decode,
-    )
+        wanted,
+        config.computer_view_no_idle_repeats,
+    ))
 }
 
 /// What a keyframe says the stream is (PC5): H.264 of the size its SPS
@@ -3244,10 +3254,11 @@ mod tests {
     /// before PC5 never asks.
     #[test]
     fn hevc_is_offered_only_when_the_app_asks_and_the_setting_lets_it() {
-        let hevc = pocketdesk_core::streaming::client::CODEC_CAP_HEVC;
-        assert_eq!(codec_caps(true, true), Some(hevc));
-        assert_eq!(codec_caps(true, false), None, "turned off here");
-        assert_eq!(codec_caps(false, true), None, "the app did not ask");
+        use pocketdesk_core::streaming::client::{CODEC_CAP_HEVC, CODEC_CAP_NO_IDLE_REPEATS};
+        let (hevc, still) = (CODEC_CAP_HEVC, CODEC_CAP_NO_IDLE_REPEATS);
+        assert_eq!(codec_caps(true, true, true), hevc | still);
+        assert_eq!(codec_caps(true, false, true), still, "turned off here");
+        assert_eq!(codec_caps(false, true, true), still, "the app did not ask");
         let older: pocketdesk_core::local::computers::ComputerRequest = serde_json::from_str(
             r#"{"id":"a","ask":"view","device_id":"desk","monitor":0,"created_unix":1}"#,
         )
@@ -3256,7 +3267,25 @@ mod tests {
         else {
             panic!("a view");
         };
-        assert_eq!(codec_caps(asked, true), None, "an app before PC5");
+        assert_eq!(codec_caps(asked, true, true), still, "an app before PC5");
+    }
+
+    /// With "Send nothing while the other screen is still" on (the default),
+    /// every view says its window needs no idle repeats, whatever codecs it
+    /// offers: a still screen is shown by its last picture. Off, the bit is
+    /// clear for every view and the codecs are unchanged.
+    #[test]
+    fn a_view_says_it_needs_no_idle_repeats_only_while_the_setting_is_on() {
+        use pocketdesk_core::streaming::client::{CODEC_CAP_HEVC, CODEC_CAP_NO_IDLE_REPEATS};
+        for asked in [false, true] {
+            for wanted in [false, true] {
+                let on = codec_caps(asked, wanted, true);
+                assert_ne!(on & CODEC_CAP_NO_IDLE_REPEATS, 0);
+                let off = codec_caps(asked, wanted, false);
+                assert_eq!(off & CODEC_CAP_NO_IDLE_REPEATS, 0);
+                assert_eq!(off, on & CODEC_CAP_HEVC, "only the bit differs");
+            }
+        }
     }
 
     fn computer(addresses: &[&str], endpoint: Option<serde_json::Value>) -> PeerComputer {

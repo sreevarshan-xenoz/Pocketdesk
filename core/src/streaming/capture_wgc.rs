@@ -323,7 +323,7 @@ fn run_capture_loop(
             }
             None if have_last && last_sent.is_some_and(|t| t.elapsed() >= IDLE_HEARTBEAT) => {
                 match gpu.copier.copy_again() {
-                    Some(frame) => frame?,
+                    Some(frame) => frame?.as_repeat(),
                     None => continue,
                 }
             }

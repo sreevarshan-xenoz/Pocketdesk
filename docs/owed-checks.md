@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1256 open items.
+1268 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 88 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 89 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 197 |
 | A phone with a SIM | 40 |
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
-| A second computer | 161 |
-| A Linux desktop (the Azure VM serves for some) | 213 |
+| A second computer | 170 |
+| A Linux desktop (the Azure VM serves for some) | 215 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 80 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
 
@@ -208,6 +208,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The owner's own hotspot: turn the hotspot on yourself in Android, then press "Use my phone's hotspot": nothing is started, and neither the timer, the cap nor the switch ever turns it off; only "Turn its hotspot off" from the computer ends it. A USB tether you started does not stop the hotspot from being started. (where: here)
 - A helper that hangs: with Shizuku stopped half way (or its service unresponsive) an ask ends within about 45 seconds and the next ask works (nothing stays "busy"). (where: here)
 - The Settings rows by hand: the phone's switch, summary and auto-off row (light, dark, narrow, Spanish and Tamil), and the desktop's Phones row on Linux (the field limits at 32 characters; the row is not drawn on Windows). (where: here)
+
+**268. A still screen sends nothing to another computer's window (the window's stats, a still desktop)**
+
+- The phone is unchanged: the OPPO against a throwaway server on a still screen still gets its frame every second (the phone's decoder reads 10 silent seconds as a dead link), a session that stays up for a minute, and the server's log says `no_idle_repeats=false` for it. (where: here)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -1303,6 +1307,18 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Across 5 GHz Wi-Fi: a throwaway server on one computer with `POCKETDESK_TEST_PATTERN=probe` (its trust entry for the viewing computer allows Input; a throwaway state folder), the other computer a viewer paired with it, then `PD_LIVE_A_STATE=<the viewer's state folder> PD_LIVE_B_ID=<the shown computer's id> cargo test -p pocketdesk-desktop input_to_picture_on_a_running_pair -- --ignored --nocapture` on the viewer: p50, p95 and max for H.264 and, with `PD_LIVE_HEVC=1`, HEVC, with no more than 2% misses; the numbers go in `docs/status-history.md` beside the loopback ones. Never against a server that shows a real screen. (where: second computer)
 - Probe mode injects nothing: while that run goes, the pointer, windows and typing of the computer running the probe-mode server are not touched at all (watch it for the minute), and its log says "Latency probe: no input is injected". (where: second computer)
 
+**268. A still screen sends nothing to another computer's window (the window's stats, a still desktop)**
+
+- Before and after, numbers only: with a Windows computer as the host (a mostly still screen: nothing moving, the cursor left alone) and a Linux computer showing it in a window, once with a build from before this change on the host and once with one from after, read the window's stats (Ctrl+Alt+Shift+S) or the view relay's status for a minute of stillness each way: frames a second in and the bitrate. Record both pairs in the status history. After: within about 4 seconds of stillness the line reads "Frames: none (a still screen sends nothing)" with "Decode: idle" and "Pipe: idle", the bitrate near 0, and "Lost 0 \· late 0 \· dropped 0" stays 0; before: about 1 frame a second from the repeats (more only where something on the screen really moves). (where: second computer)
+- A change shows at once: from the still state, move the mouse on the host or type into a text editor there; the window shows it with no more delay than before (compare against the old build's feel and the stats' delay), and a second later the picture is as sharp as the old build's (the two settling repeats let the encoder refine it); no blur stays on text typed and left alone. (where: second computer)
+- A keyframe on a still screen: leave the host still for a minute, close the window and open it again (a rejoin asks for a keyframe), and press "Fit" or switch screens: the picture is back within about 2 seconds each time and never stays grey or empty. (where: second computer)
+- The link is not taken for dead: leave a window on a still screen for 10 minutes: it does not say "Reconnecting", the host's log (`pocketdesk logs`) shows the session unbroken, and "Encoding task complete" at the end names `repeats_skipped` above 0. (where: second computer)
+- The stats overlay on a still screen says the screen is at rest, not that frames are missing, and returns to the numbers ("Frames: 24 a second in, 24 shown") as soon as the host moves. (where: second computer)
+- Both directions of the mix: a window from after this change on a host from before it still gets its repeats (about 1 frame a second on a still screen; nothing breaks), and a window from before on a host from after still works (it sends no bit, so repeats go on). (where: second computer)
+- The switch: Settings → Other computers → "Send nothing while the other screen is still" (`computer_view_no_idle_repeats`, on) turned off, then a new window on the same still host: from the next view the stats read about 1 frame a second again ("Frames: 1 a second in", no "the screen is still") and `repeats_skipped` stays 0 in the host's "Encoding task complete"; turned on again, the next new window is quiet as above. The switch is read as each view dials, so an open window keeps what it started with. (where: second computer)
+- A keyframe on a still screen, with the FFmpeg sidecar encoder (a Windows host on its default NVENC, AMF, QSV or Media Foundation rung, not the opt-in `inproc-windows`): the sidecar cannot be told to emit a keyframe, so after one is asked for (the window's gap recovery, or a crop moved at the same size) the host keeps sending the capture's once-a-second repeats until its next scheduled keyframe goes out (the log's "Keyframe encoded" line), then they stop again ("Encoding task complete" names `repeats_skipped` above 0 for the whole run); the window never stays grey. (where: second computer)
+- An encoder that holds frames, on a still screen: a Windows host on an AMD card (AMF holds one frame) and one on Media Foundation (holds several; the debug log's "holds N frame(s) until the next input" names the lag). At session start on a still desktop the first picture comes out (never a blank window), and after a change the last picture is whole and sharp, not the one before it: the repeats go on for about N + 2 more after a change, then stop. (where: second computer)
+
 ## A Linux desktop (the Azure VM serves for some)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1844,6 +1860,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Joining on Linux with NetworkManager: with "Join my phone's hotspot network" set to the phone's saved Wi-Fi name, "Use my phone's hotspot" says "Joining ..." and the computer joins it once it appears (the notice says "Joined"); with a name that is not saved here it says so and joins nothing and asks for no password; with the setting empty it only tells you to connect. No password prompt appears and none is stored by Pocketdesk. (where: linux)
 - Two saved networks of one name on Linux: with the phone's name saved twice in NetworkManager, nothing is joined and the notice says so; with one, it is joined by UUID (`ps` while it joins shows `nmcli ... connection up uuid ...`, no name or password). (where: linux)
+
+**268. A still screen sends nothing to another computer's window (the window's stats, a still desktop)**
+
+- A Linux host on Hyprland or another wlroots desktop (screencopy's heartbeat), viewed from another computer: the same stillness numbers as the first item and a change shown at once. (where: linux)
+- Hyprland, a change the compositor did not report: Hyprland says "no damage" at once, so the capture's once-a-second copy is the only way some changes get out. Change the screen (type, play a video, drag a window) and let it rest: the window shows each new picture within about a second, none is dropped as a repeat, and a screen that then stays the same goes silent after the settling repeats. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

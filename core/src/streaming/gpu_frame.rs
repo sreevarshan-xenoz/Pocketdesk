@@ -291,6 +291,7 @@ fn frame(gpu: GpuFrame, width: u32, height: u32) -> VideoFrame {
         stride: width * 4,
         timestamp: Instant::now(),
         gpu: Some(gpu),
+        repeat: false,
     }
 }
 

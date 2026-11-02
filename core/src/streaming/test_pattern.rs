@@ -116,6 +116,7 @@ fn background(width: u32, height: u32) -> VideoFrame {
         stride,
         timestamp: Instant::now(),
         gpu: None,
+        repeat: false,
     }
 }
 
