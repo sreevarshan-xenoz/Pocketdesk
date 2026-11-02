@@ -5,7 +5,14 @@
 //! program's window; the compositor makes a screen of the window's size, the
 //! window sits alone on it, one frame of that screen is the window's size,
 //! and a `return` puts the window on the screen and workspace it came from
-//! and takes the screen away. A second lend is ended by the stop path and
+//! and takes the screen away. The window list (`list`) names the test
+//! program's window with its size and workspace and marks it once lent, and
+//! one absolute pointer move and click, sent to the compositor's virtual
+//! pointer as the host's input backend sends them, aimed at the lent screen,
+//! land on the window (the test program, `wev`, logs where). The switch turned
+//! off, the borrowing computer gone (the server's own watcher, run here) and a
+//! lent window that is closed each end the loan with no sweep's minute to
+//! wait for. A second lend is ended by the stop path and
 //! a third by the start-up sweep of a server that stopped, each putting the
 //! window back.
 //!
@@ -28,6 +35,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use pocketdesk_core::input::wlr_input::WlrInput;
 use pocketdesk_core::local::computers::{self, PeerComputer};
 use pocketdesk_core::local::paths::TRUST_FILE;
 use pocketdesk_core::protocol::kdeconnect::TrustStore;
@@ -109,6 +117,48 @@ fn png_size(path: &Path) -> (u32, u32) {
     assert!(head.starts_with(b"\x89PNG"), "not a PNG");
     let be = |at: usize| u32::from_be_bytes(head[at..at + 4].try_into().unwrap());
     (be(16), be(20))
+}
+
+/// Where each left press landed in the test program's log: the pointer's
+/// last place on its surface.
+fn presses(log: &Path) -> Vec<(f64, f64)> {
+    let text = std::fs::read_to_string(log).unwrap_or_default();
+    let mut object: Option<String> = None;
+    let mut at: Option<(f64, f64)> = None;
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let Some(rest) = line.strip_prefix('[') else {
+            continue;
+        };
+        let Some((head, event)) = rest.split_once("] ") else {
+            continue;
+        };
+        let Some((id, interface)) = head.split_once(':') else {
+            continue;
+        };
+        if interface.trim() != "wl_pointer" {
+            continue;
+        }
+        // wev binds the pointer twice; one object's events are enough.
+        let id = id.trim().to_string();
+        if object.get_or_insert_with(|| id.clone()) != &id {
+            continue;
+        }
+        if event.starts_with("enter:") || event.starts_with("motion:") {
+            at = event.split_once("x, y: ").and_then(|(_, xy)| {
+                let (x, y) = xy.split_once(", ")?;
+                Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+            });
+        } else if event.starts_with("leave:") {
+            at = None;
+        } else if event.starts_with("button:")
+            && event.contains("(pressed)")
+            && let Some(at) = at
+        {
+            out.push(at);
+        }
+    }
+    out
 }
 
 fn ask(runtime: &tokio::runtime::Runtime, device: &str, body: Value) -> Value {
@@ -210,14 +260,20 @@ fn a_window_is_lent_to_a_screen_of_its_size_and_returned() {
         .build()
         .unwrap();
 
-    // The test program's window, on the compositor's first screen.
-    let child = Command::new(&client)
+    // The test program's window, on the compositor's first screen. It logs
+    // the pointer's events (`wev` does), read back for the click.
+    let program_log = base.join("program.log");
+    // (Line-buffered, as a log read while the program runs needs: stdbuf
+    // execs the program, so the pid is the window's.)
+    let child = Command::new("stdbuf")
+        .arg("-oL")
+        .arg(&client)
         .env("WAYLAND_DISPLAY", &nested)
         .env_remove("DISPLAY")
         .env_remove("SWAYSOCK")
         .env_remove("HYPRLAND_INSTANCE_SIGNATURE")
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdout(Stdio::from(std::fs::File::create(&program_log).unwrap()))
         .stderr(Stdio::null())
         .spawn()
         .unwrap_or_else(|e| panic!("could not start {client}: {e}"));
@@ -237,17 +293,47 @@ fn a_window_is_lent_to_a_screen_of_its_size_and_returned() {
     // Who may not ask, is not let: a phone, a computer paired one way, a
     // computer paired both ways while the switch is off.
     for device in ["lend-test-phone", "lend-test-one-way", "lend-test-stranger"] {
-        let said = ask(
-            &runtime,
-            device,
-            json!({ "action": "lend", "id": 1, "window": before.address }),
-        );
-        assert!(
-            said["error"].as_str().unwrap().contains("paired both ways"),
-            "{device}: {said}"
-        );
-        assert_eq!(said["id"], 1, "the ask's id is said back");
+        for action in ["lend", "list"] {
+            let said = ask(
+                &runtime,
+                device,
+                json!({ "action": action, "id": 1, "window": before.address }),
+            );
+            assert!(
+                said["error"].as_str().unwrap().contains("paired both ways"),
+                "{device} {action}: {said}"
+            );
+            assert!(said.get("windows").is_none(), "no list for {device}");
+            assert_eq!(said["id"], 1, "the ask's id is said back");
+        }
     }
+
+    // The window list names the test program's window, as it is now.
+    let listed = ask(&runtime, BORROWER, json!({ "action": "list", "id": 20 }));
+    assert!(listed.get("error").is_none(), "{listed}");
+    assert_eq!(listed["id"], 20);
+    let mine = listed["windows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["address"] == before.address.as_str())
+        .unwrap_or_else(|| panic!("the window is not listed: {} windows", listed["windows"]))
+        .clone();
+    assert_eq!(mine["width"], before.size[0]);
+    assert_eq!(mine["height"], before.size[1]);
+    assert_eq!(mine["workspace"], before.workspace.name.as_str());
+    assert_eq!(mine["lent"], false);
+    assert!(
+        !mine["title"].as_str().unwrap().is_empty() || !mine["class"].as_str().unwrap().is_empty(),
+        "it has a title or an app"
+    );
+    println!(
+        "list: {} window(s); ours {}x{} on workspace {:?}",
+        listed["windows"].as_array().unwrap().len(),
+        mine["width"],
+        mine["height"],
+        mine["workspace"]
+    );
     std::fs::write(config.join("config.toml"), "lend_windows = false\n").unwrap();
     // The config is read again when its mtime changes.
     std::thread::sleep(Duration::from_millis(1100));
@@ -263,6 +349,14 @@ fn a_window_is_lent_to_a_screen_of_its_size_and_returned() {
             .unwrap()
             .contains("Let my computers borrow my windows"),
         "{said}"
+    );
+    let said = ask(&runtime, BORROWER, json!({ "action": "list", "id": 21 }));
+    assert!(
+        said["error"]
+            .as_str()
+            .unwrap()
+            .contains("Let my computers borrow my windows"),
+        "the switch off also refuses the list: {said}"
     );
     assert_eq!(
         window_of(sway, pid).unwrap().1,
@@ -357,6 +451,73 @@ fn a_window_is_lent_to_a_screen_of_its_size_and_returned() {
         "the frame is the window's size"
     );
     println!("frame: {}x{}", width, height);
+
+    // The window list now marks it lent.
+    let listed = ask(&runtime, BORROWER, json!({ "action": "list", "id": 22 }));
+    let marked = listed["windows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["address"] == before.address.as_str())
+        .map(|w| w["lent"].clone());
+    assert_eq!(marked, Some(json!(true)), "{listed}");
+
+    // One absolute pointer move and click aimed at the lent screen land on
+    // the window: the virtual pointer spans the layout (the box round every
+    // screen), so the screen's centre and a point near its corner are those
+    // places' share of the box.
+    let (_, all_screens) = snapshot(sway);
+    let (left, top) = (
+        all_screens.iter().map(|m| m.x).min().unwrap(),
+        all_screens.iter().map(|m| m.y).min().unwrap(),
+    );
+    let (right, bottom) = (
+        all_screens.iter().map(|m| m.x + m.width).max().unwrap(),
+        all_screens.iter().map(|m| m.y + m.height).max().unwrap(),
+    );
+    let norm = |at: i32, from: i32, span: i32| -> u16 {
+        // The pointer's extent is 65536; the middle of the pixel.
+        let v = (i64::from(at - from) * 2 + 1) * 65_536 / (i64::from(span) * 2);
+        u16::try_from(v.clamp(0, 65_535)).unwrap()
+    };
+    let mut pointer = WlrInput::connect().expect("the compositor's virtual pointer");
+    let aims = [
+        ("middle", width / 2, height / 2),
+        ("near the corner", 20, 15),
+    ];
+    for (n, (name, dx, dy)) in aims.iter().enumerate() {
+        pointer
+            .motion_absolute(
+                norm(screen.x + dx, left, right - left),
+                norm(screen.y + dy, top, bottom - top),
+            )
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        pointer.button(0x110, true).unwrap();
+        pointer.button(0x110, false).unwrap();
+        let clicked = Instant::now();
+        let landed = loop {
+            let all = presses(&program_log);
+            if all.len() > n {
+                break all[n];
+            }
+            let log = std::fs::read_to_string(&program_log).unwrap_or_default();
+            assert!(
+                clicked.elapsed() < Duration::from_secs(10),
+                "no click reached the window ({name}); its log ends: {:?}",
+                log.lines().rev().take(12).collect::<Vec<_>>()
+            );
+            std::thread::sleep(Duration::from_millis(200));
+        };
+        println!(
+            "click {name}: aimed at ({dx}, {dy}) of the screen, landed at {landed:?} on the window"
+        );
+        assert!(
+            (landed.0 - f64::from(*dx)).abs() <= 2.5 && (landed.1 - f64::from(*dy)).abs() <= 2.5,
+            "{name}: aimed ({dx}, {dy}), landed {landed:?}"
+        );
+    }
+    drop(pointer);
 
     // Asked again, the same screen, nothing moved twice.
     let again = ask(
@@ -481,6 +642,95 @@ fn a_window_is_lent_to_a_screen_of_its_size_and_returned() {
         "floating returned: window {:?} at {:?} on {back_screen}",
         back.size, back.at
     );
+
+    // The switch turned off with a window lent: it goes back, its screen goes.
+    let lent = ask(
+        &runtime,
+        BORROWER,
+        json!({ "action": "lend", "id": 11, "window": before.address }),
+    );
+    assert!(lent.get("error").is_none(), "{lent}");
+    let there = [BORROWER.to_string()];
+    let mut missing = std::collections::BTreeMap::new();
+    assert_eq!(
+        lend_window::sweep_once(true, &there, &mut missing),
+        0,
+        "switch on, borrower there: nothing to do"
+    );
+    assert_eq!(
+        lend_window::sweep_once(false, &there, &mut missing),
+        1,
+        "switch off: the window goes back"
+    );
+    let (_, off_screen) = wait_for(10, "the window back with the switch off", || {
+        window_of(sway, pid).filter(|(w, s)| *s == home_screen && w.size == floating.size)
+    });
+    assert_eq!(snapshot(sway).1.len(), screens_before.len(), "screen gone");
+    assert!(!state.join(lend_window::STATE_FILE).exists());
+    println!("switch off: window back on {off_screen}, screen gone");
+
+    // The borrowing computer gone (no session, connection or link): the
+    // watcher, as the server runs it, has the window back within seconds.
+    let lent = ask(
+        &runtime,
+        BORROWER,
+        json!({ "action": "lend", "id": 12, "window": before.address }),
+    );
+    assert!(lent.get("error").is_none(), "{lent}");
+    let started = Instant::now();
+    let watcher_runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let watcher = watcher_runtime.spawn(lend_window::run_watcher());
+    let (_, away_screen) = wait_for(15, "the window back with its borrower away", || {
+        window_of(sway, pid).filter(|(w, s)| *s == home_screen && w.size == floating.size)
+    });
+    let took = started.elapsed();
+    watcher.abort();
+    drop(watcher_runtime);
+    assert!(
+        took < Duration::from_secs(8),
+        "back in {took:?}, not a sweep's minute"
+    );
+    assert_eq!(snapshot(sway).1.len(), screens_before.len(), "screen gone");
+    assert!(!state.join(lend_window::STATE_FILE).exists());
+    println!("borrower away: window back on {away_screen} after {took:?}, screen gone");
+
+    // A lent window that is closed: its empty screen goes (after two looks),
+    // and nothing is put back.
+    let lent = ask(
+        &runtime,
+        BORROWER,
+        json!({ "action": "lend", "id": 13, "window": before.address }),
+    );
+    assert!(lent.get("error").is_none(), "{lent}");
+    let lent_name = lent["name"].as_str().unwrap().to_string();
+    if let Some(mut child) = run.child.take() {
+        child.kill().unwrap();
+        child.wait().unwrap();
+    }
+    wait_for(15, "the lent window to close", || {
+        window_of(sway, pid).is_none().then_some(())
+    });
+    assert_eq!(
+        lend_window::sweep_once(true, &there, &mut missing),
+        0,
+        "one look only notes it"
+    );
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(
+        lend_window::sweep_once(true, &there, &mut missing),
+        1,
+        "the second look removes its screen"
+    );
+    wait_for(10, "the closed window's screen to go", || {
+        (!snapshot(sway).1.iter().any(|m| m.name == lent_name)).then_some(())
+    });
+    assert_eq!(snapshot(sway).1.len(), screens_before.len(), "screen gone");
+    assert!(!state.join(lend_window::STATE_FILE).exists());
+    println!("closed: the empty screen {lent_name} is gone");
 
     drop(run);
 }
