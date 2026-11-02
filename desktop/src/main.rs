@@ -58,6 +58,10 @@ mod view_latency_stages;
 mod view_live;
 mod view_mic;
 mod view_pointer;
+// Opens a window under Wayland: a Linux test.
+#[cfg(all(test, target_os = "linux"))]
+mod view_present_live;
+mod view_present_trace;
 mod widgets;
 
 use eframe::egui;
@@ -148,7 +152,16 @@ fn main() -> eframe::Result {
         },
     };
 
+    // The swap waits for the display's refresh (vsync) unless Settings say
+    // not to: a picture then comes about a frame sooner, and can tear
+    // where the compositor does not keep frames whole.
+    let vsync =
+        !pocketdesk_core::local::config::Config::load().is_ok_and(|config| config.display_no_vsync);
     let options = eframe::NativeOptions {
+        glow_options: eframe::egui_glow::GlowConfiguration {
+            vsync,
+            ..Default::default()
+        },
         viewport: egui::ViewportBuilder::default()
             .with_title(TITLE)
             // Room for the navigation and a page's widest rows (U1 review:

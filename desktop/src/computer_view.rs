@@ -2586,6 +2586,7 @@ fn drop_words(shared: &Mutex<State>, state_dir: &Path, ctx: &egui::Context) -> O
 
 fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
+    let _built = crate::view_present_trace::Ends("vui");
     let mut state = lock(shared);
     let Some(wanted) = state.wanted.clone() else {
         return;
@@ -2627,6 +2628,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         if let Some((_, since)) = state.switching.take() {
             state.last_switch = Some(since.elapsed());
         }
+        crate::view_present_trace::pass(&picture);
         let picture = Arc::new(picture);
         if picture.planes == Planes::Nv12 && crate::nv12::planes() == Planes::Nv12 {
             // PC5: its planes go up as they are, and the GPU turns them to
@@ -3917,6 +3919,7 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                     recorder = None;
                     end_recording(shared, Some(&format!("it stopped ({e})")));
                 }
+                crate::view_present_trace::au(seq);
                 lock(shared).clock.fed(Instant::now());
                 ladder.fed(Instant::now());
                 if let Err(e) = d.feed(&data) {
@@ -4240,6 +4243,7 @@ fn publisher(
             return;
         }
         state.clock.decoded(Instant::now(), picture.data.len());
+        crate::view_present_trace::picture(&picture);
         // HEVC's size is the first picture's (PC5).
         if state.size.is_none()
             && let (Ok(w), Ok(h)) = (u16::try_from(picture.width), u16::try_from(picture.height))

@@ -603,6 +603,14 @@ pub struct Config {
     /// two. On by default.
     #[serde(default = "default_true")]
     pub smooth_scrolling: bool,
+    /// The app's windows show a picture the moment it is drawn, not at the
+    /// display's next refresh: the swap does not wait for vsync, so a
+    /// computer's screen in a window comes about a frame sooner (on
+    /// Wayland the compositor still shows whole frames; elsewhere the
+    /// picture can tear, and an animation draws as fast as it can). Read
+    /// as the app starts. Off by default.
+    #[serde(default)]
+    pub display_no_vsync: bool,
     /// The microphone a computer's screen window sends to that computer
     /// with "Send my mic" (PC10): part of its name as Windows lists it, or
     /// the source's name on Linux. None (blank) is the system's default
@@ -923,6 +931,7 @@ impl Default for Config {
             computer_view_fit: false,
             computer_view_scancodes: false,
             smooth_scrolling: true,
+            display_no_vsync: false,
             computer_view_mic_device: None,
             computer_wake_facts: true,
             version_hints: true,
@@ -1222,6 +1231,7 @@ impl Config {
         "computer_view_fit",
         "computer_view_scancodes",
         "smooth_scrolling",
+        "display_no_vsync",
         "computer_view_mic_device",
         "computer_wake_facts",
         "version_hints",
@@ -1768,6 +1778,26 @@ phone_battery = \"x\"
         assert_eq!(
             Config::default().changed_keys(&chosen),
             ["smooth_scrolling"]
+        );
+    }
+
+    /// The app waits for the display's refresh to show a picture until
+    /// told not to, and the choice saves and reads back.
+    #[test]
+    fn the_app_waits_for_the_displays_refresh_until_told_not_to() {
+        let path = temp("display-no-vsync");
+        std::fs::write(&path, "").unwrap();
+        assert!(!Config::load_from(&path).unwrap().display_no_vsync);
+        assert!(!Config::default().display_no_vsync);
+        let chosen = Config {
+            display_no_vsync: true,
+            ..Config::default()
+        };
+        chosen.save_keys_to(&path, &["display_no_vsync"]).unwrap();
+        assert!(Config::load_from(&path).unwrap().display_no_vsync);
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["display_no_vsync"]
         );
     }
 

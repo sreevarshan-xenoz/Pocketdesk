@@ -248,6 +248,10 @@ impl Gpu {
             }
         }
         let pending = inner.pending.take();
+        let tracing = crate::view_present_trace::on();
+        if tracing {
+            crate::view_present_trace::mark("vcb");
+        }
         let Some(drawn) = inner.gl.as_mut() else {
             return;
         };
@@ -255,8 +259,17 @@ impl Gpu {
         unsafe {
             if let Some(picture) = pending {
                 drawn.upload(gl, &picture);
+                if tracing {
+                    gl.finish();
+                    crate::view_present_trace::mark("vupl");
+                }
             }
             drawn.draw(gl, tint);
+            if tracing {
+                // Only while tracing: the GPU's own time, to the trace.
+                gl.finish();
+                crate::view_present_trace::mark("vpaint");
+            }
         }
     }
 }
