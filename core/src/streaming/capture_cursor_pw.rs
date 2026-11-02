@@ -25,24 +25,57 @@ const BITMAP_HEADER: usize = 20;
 
 /// The pointer's record in a buffer, as the compositor wrote it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MetaCursor {
+pub struct MetaCursor<'a> {
     /// 0: there is no pointer in this buffer.
     pub id: u32,
     pub x: i32,
     pub y: i32,
     pub hot_x: i32,
     pub hot_y: i32,
-    pub bitmap: Option<MetaBitmap>,
+    pub bitmap: Option<MetaBitmap<'a>>,
 }
 
-/// A pointer image in a record, premultiplied, in its own format.
+/// A pointer image in a record, premultiplied, in its own format. It
+/// borrows the record's pixels (up to a quarter of a megabyte a buffer), so
+/// a pointer that did not change is compared in place and never copied.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MetaBitmap {
+pub struct MetaBitmap<'a> {
     pub format: u32,
     pub width: u32,
     pub height: u32,
     pub stride: u32,
-    pub pixels: Vec<u8>,
+    pub pixels: &'a [u8],
+}
+
+impl MetaBitmap<'_> {
+    fn to_owned(&self) -> OwnedBitmap {
+        OwnedBitmap {
+            format: self.format,
+            width: self.width,
+            height: self.height,
+            stride: self.stride,
+            pixels: self.pixels.to_vec(),
+        }
+    }
+}
+
+/// The last bitmap seen, kept to tell a repeat from a new image.
+struct OwnedBitmap {
+    format: u32,
+    width: u32,
+    height: u32,
+    stride: u32,
+    pixels: Vec<u8>,
+}
+
+impl OwnedBitmap {
+    fn is(&self, other: &MetaBitmap<'_>) -> bool {
+        self.format == other.format
+            && self.width == other.width
+            && self.height == other.height
+            && self.stride == other.stride
+            && self.pixels == other.pixels
+    }
 }
 
 fn u32_at(data: &[u8], at: usize) -> Option<u32> {
@@ -58,7 +91,7 @@ fn i32_at(data: &[u8], at: usize) -> Option<i32> {
 /// bounds-checked: the buffer is another process's). `None` when it is too
 /// short to hold the header. A bitmap that does not fit the record is left
 /// out, not guessed at.
-pub fn parse(data: &[u8]) -> Option<MetaCursor> {
+pub fn parse(data: &[u8]) -> Option<MetaCursor<'_>> {
     if data.len() < CURSOR_HEADER {
         return None;
     }
@@ -92,7 +125,7 @@ pub fn parse(data: &[u8]) -> Option<MetaCursor> {
                     width,
                     height,
                     stride: stride as u32,
-                    pixels: pixels.to_vec(),
+                    pixels,
                 });
             }
         }
@@ -102,7 +135,7 @@ pub fn parse(data: &[u8]) -> Option<MetaCursor> {
 
 /// Straight RGBA from a record's bitmap, when it is in a format read here
 /// (BGRA, BGRx, RGBA, RGBx; every compositor's pointer is one of them).
-fn rgba_of(bitmap: &MetaBitmap) -> Option<Vec<u8>> {
+fn rgba_of(bitmap: &MetaBitmap<'_>) -> Option<Vec<u8>> {
     use libspa::param::video::VideoFormat as F;
     let f = bitmap.format;
     let (swap, alpha) = if f == F::BGRA.as_raw() {
@@ -118,7 +151,7 @@ fn rgba_of(bitmap: &MetaBitmap) -> Option<Vec<u8>> {
     };
     if !swap {
         return rgba_from_premultiplied_bgra(
-            &bitmap.pixels,
+            bitmap.pixels,
             bitmap.width,
             bitmap.height,
             bitmap.stride,
@@ -126,7 +159,7 @@ fn rgba_of(bitmap: &MetaBitmap) -> Option<Vec<u8>> {
         );
     }
     // R, G, B, A in memory: swap R and B, then read it as B, G, R, A.
-    let mut swapped = bitmap.pixels.clone();
+    let mut swapped = bitmap.pixels.to_vec();
     for row in swapped.chunks_mut(bitmap.stride as usize) {
         for x in 0..bitmap.width as usize {
             row.swap(x * 4, x * 4 + 2);
@@ -204,42 +237,40 @@ pub unsafe fn cursor_meta<'a>(buffer: *const spa::spa_buffer) -> Option<&'a [u8]
 pub struct PwCursor {
     feed: CursorFeed,
     /// The last bitmap's pixels, to tell a repeat from a new image.
-    last: Option<MetaBitmap>,
+    last: Option<OwnedBitmap>,
 }
 
 impl PwCursor {
     /// `feed` is the session's. The capture that asked for the metadata
-    /// said so to it already ([`CursorFeed::set_separate`]), before its
-    /// session started, so the streamer knows whether the picture has the
-    /// pointer in it.
+    /// holds the pointer out of the picture for as long as its stream runs
+    /// ([`CursorFeed::apart`]), which tells the streamer whether the
+    /// picture has the pointer in it.
     pub fn new(feed: CursorFeed) -> Self {
         Self { feed, last: None }
     }
 
-    /// One buffer's record, over a picture of `width` by `height`.
+    /// One buffer's record, over a picture of `width` by `height`. A
+    /// bitmap equal to the last is compared in place and copied never; the
+    /// feed is locked once.
     pub fn update(&mut self, record: &[u8], width: u32, height: u32) {
         let Some(cursor) = parse(record) else { return };
-        if let Some(bitmap) = cursor.bitmap
-            && self.last.as_ref() != Some(&bitmap)
+        let mut shape = None;
+        if let Some(bitmap) = &cursor.bitmap
+            && !self.last.as_ref().is_some_and(|last| last.is(bitmap))
         {
-            if let Some(rgba) = rgba_of(&bitmap)
-                && let Some(shape) = CursorShape::fitted(
+            shape = rgba_of(bitmap).and_then(|rgba| {
+                CursorShape::fitted(
                     bitmap.width,
                     bitmap.height,
                     cursor.hot_x.max(0) as u32,
                     cursor.hot_y.max(0) as u32,
                     rgba,
                 )
-            {
-                self.feed.set_shape(shape);
-            }
-            self.last = Some(bitmap);
+            });
+            self.last = Some(bitmap.to_owned());
         }
-        self.feed.set_visible(cursor.id != 0);
-        if cursor.id != 0 {
-            let (x, y) = normalized(cursor.x, cursor.y, width, height);
-            self.feed.set_place(x, y);
-        }
+        let place = (cursor.id != 0).then(|| normalized(cursor.x, cursor.y, width, height));
+        self.feed.report(shape, cursor.id != 0, place);
     }
 }
 
