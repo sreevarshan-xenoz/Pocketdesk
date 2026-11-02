@@ -27,6 +27,7 @@ pub mod in_flight;
 pub mod input_packet;
 #[cfg(feature = "wan")]
 pub mod iroh_connection;
+pub mod keyframes;
 pub mod latency_probe;
 pub mod latency_trace;
 pub mod latest_frame;

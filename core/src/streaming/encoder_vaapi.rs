@@ -39,6 +39,7 @@ use std::time::Instant;
 use tracing::{debug, info, warn};
 
 use super::encoder::detect_keyframe;
+use super::keyframes::Plan;
 use super::latency_trace::{self, Step};
 use super::{H264Profile, StreamingConfig, VideoCodec, VideoFrame};
 use crate::streaming::EncodedPacket;
@@ -479,8 +480,17 @@ impl VaapiEncoder {
     /// Open the encoder with the colour conversion on the card, or on the
     /// processor where the card's video processor cannot take it.
     pub fn new(config: StreamingConfig) -> anyhow::Result<Self> {
+        // FFmpeg's VA-API encoders have no intra refresh (the card's driver
+        // may: see `keyframes`), so the setting here is a longer wait
+        // between whole keyframes, which come at once on request.
+        let plan = Plan::new(config.fps, false);
+        Self::with_plan(config, plan)
+    }
+
+    /// As [`Self::new`], with the keyframe plan given.
+    pub fn with_plan(config: StreamingConfig, plan: Plan) -> anyhow::Result<Self> {
         if !cpu_convert_forced() {
-            match Self::open(config.clone(), true) {
+            match Self::open(config.clone(), plan, true) {
                 Ok(encoder) => return Ok(encoder),
                 Err(e) => {
                     if GPU_CONVERT_REFUSED.swap(true, Ordering::Relaxed) {
@@ -494,10 +504,10 @@ impl VaapiEncoder {
                 }
             }
         }
-        Self::open(config, false)
+        Self::open(config, plan, false)
     }
 
-    fn open(config: StreamingConfig, gpu_convert: bool) -> anyhow::Result<Self> {
+    fn open(config: StreamingConfig, plan: Plan, gpu_convert: bool) -> anyhow::Result<Self> {
         FFMPEG_INIT.call_once(|| {
             if let Err(e) = ffmpeg::init() {
                 warn!("FFmpeg init failed (continuing): {}", e);
@@ -509,7 +519,7 @@ impl VaapiEncoder {
 
         let is_hevc = matches!(config.codec, VideoCodec::H265);
         let codec_name: &'static str = if is_hevc { "hevc_vaapi" } else { "h264_vaapi" };
-        let keyframe_interval = (config.fps as u64) * 2;
+        let keyframe_interval = plan.idr_every;
 
         let (mut device_ref, device_path) = unsafe { open_vaapi_device()? };
 
@@ -541,7 +551,7 @@ impl VaapiEncoder {
                 num: config.fps as c_int,
                 den: 1,
             };
-            (*ctx).gop_size = keyframe_interval.min(c_int::MAX as u64) as c_int;
+            (*ctx).gop_size = plan.gop().min(c_int::MAX as u64) as c_int;
             (*ctx).max_b_frames = 0; // zero-latency
             (*ctx).pix_fmt = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI;
             (*ctx).hw_device_ctx = ffi::av_buffer_ref(device_ref);
@@ -1041,6 +1051,67 @@ mod tests {
         }
     }
 
+    /// The keyframes' places, by frame number, of `frames` frames through
+    /// VA-API at 30 fps under `plan`, with a keyframe asked for at frame
+    /// `ask`; `None` where no VA-API device opens.
+    fn vaapi_keyframes(
+        codec: VideoCodec,
+        plan: Plan,
+        frames: usize,
+        ask: usize,
+    ) -> Option<Vec<u64>> {
+        if !vaapi_available() {
+            eprintln!("skipping the VAAPI keyframe plan test: no usable device on this host");
+            return None;
+        }
+        let config = StreamingConfig {
+            width: 640,
+            height: 360,
+            fps: 30,
+            bitrate_bps: 2_000_000,
+            codec,
+            ..StreamingConfig::default()
+        };
+        let mut encoder = match VaapiEncoder::with_plan(config, plan) {
+            Ok(e) => e,
+            Err(e) if codec == VideoCodec::H265 => {
+                eprintln!("skipping HEVC: {e:#}");
+                return None;
+            }
+            Err(e) => panic!("{codec:?} VAAPI encoder must open: {e:#}"),
+        };
+        let mut keys = Vec::new();
+        for i in 0..frames {
+            if i == ask {
+                encoder.request_keyframe();
+            }
+            let p = encoder
+                .encode_frame(&gradient_frame(640, 360, i))
+                .unwrap()
+                .unwrap_or_else(|| panic!("frame {i} held until the next"));
+            if p.is_keyframe {
+                keys.push(p.sequence);
+            }
+        }
+        Some(keys)
+    }
+
+    /// The keyframe plan reaches the card's encoder: every two seconds as
+    /// before, and with smooth keyframes the first, the one asked for, and
+    /// the safety net's (10 s: 300 frames after the last) and no other. Self-
+    /// skips where no VA-API device opens.
+    #[test]
+    fn vaapi_keyframes_follow_the_plan_and_the_ask() {
+        for codec in [VideoCodec::H264, VideoCodec::H265] {
+            if let Some(keys) = vaapi_keyframes(codec, Plan::choose(false, 30, false), 150, 100) {
+                assert_eq!(keys, vec![0, 59, 100], "{codec:?}: every two seconds");
+            }
+            if let Some(keys) = vaapi_keyframes(codec, Plan::choose(true, 30, false), 420, 100) {
+                assert_eq!(keys, vec![0, 100, 400], "{codec:?}: smooth");
+            }
+        }
+    }
+
     /// A frame of one colour (B, G, R) with the alpha byte `alpha`.
     fn flat_frame(w: u32, h: u32, bgr: [u8; 3], alpha: u8) -> VideoFrame {
         let mut frame = gradient_frame(w, h, 0);
@@ -1110,7 +1181,8 @@ mod tests {
             ..StreamingConfig::default()
         };
         let encode = |gpu: bool, bgr: [u8; 3], alpha: u8| -> anyhow::Result<[f64; 3]> {
-            let mut encoder = VaapiEncoder::open(config.clone(), gpu)?;
+            let mut encoder =
+                VaapiEncoder::open(config.clone(), Plan::choose(false, 30, false), gpu)?;
             let mut packets = Vec::new();
             for _ in 0..12 {
                 packets.extend(encoder.encode_frame(&flat_frame(1280, 720, bgr, alpha))?);
@@ -1156,7 +1228,8 @@ mod tests {
                 codec: VideoCodec::H264,
                 ..StreamingConfig::default()
             };
-            let Ok(mut encoder) = VaapiEncoder::open(config, gpu) else {
+            let Ok(mut encoder) = VaapiEncoder::open(config, Plan::choose(false, 30, false), gpu)
+            else {
                 assert!(gpu, "the processor path must open");
                 eprintln!("skipping: the card path is not available here");
                 continue;
@@ -1187,7 +1260,8 @@ mod tests {
             codec: VideoCodec::H264,
             ..StreamingConfig::default()
         };
-        let Ok(mut encoder) = VaapiEncoder::open(config, true) else {
+        let Ok(mut encoder) = VaapiEncoder::open(config, Plan::choose(false, 30, false), true)
+        else {
             return;
         };
         let small = gradient_frame(640, 360, 0);

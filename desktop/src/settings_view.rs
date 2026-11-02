@@ -137,6 +137,7 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     ("video_quality", "Video quality", Section::Phones),
     ("allow_hevc", "H.265 (HEVC)", Section::Phones),
     ("slow_link_frame_rate", "Slow links", Section::Phones),
+    ("smooth_keyframes", "Smooth keyframes", Section::Phones),
     (
         "laser_pointer",
         "Laser pointer from phones",
@@ -1504,6 +1505,20 @@ impl SettingsForm {
                     ui.checkbox(
                         &mut e.slow_link_frame_rate,
                         "lower the frame rate to keep the picture moving",
+                    );
+                });
+                row(ui, "smooth_keyframes", |ui| {
+                    ui.checkbox(
+                        &mut e.smooth_keyframes,
+                        "no whole picture every two seconds: fewer hitches in the video",
+                    )
+                    .on_hover_text(
+                        "A whole picture (a keyframe) is several times the size of any other \
+                         frame, so it arrives a little late, every two seconds. With this on, \
+                         the encoders that can (the software one, NVIDIA's on Windows) spread \
+                         it over the stream; the rest send one every ten seconds. A viewer that \
+                         loses a frame still gets a whole picture at once. Read when the \
+                         server starts.",
                     );
                 });
                 row(ui, "laser_pointer", |ui| {

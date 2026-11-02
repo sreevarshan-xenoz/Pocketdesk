@@ -8,14 +8,18 @@
 //! number. For every picture the window painted the table gives each step
 //! from the host's frame to the GPU finishing the picture, in milliseconds
 //! (p50 and p95). What it leaves out is the display itself: the compositor's
-//! pass and the scan-out after the swap.
+//! pass and the scan-out after the swap. Below it the keyframes and the other
+//! frames are told apart (size, and the host's frame to the GPU's finish, p50 /
+//! p95 / max): a keyframe is a few pictures in a hundred, so the whole run's
+//! 95th percentile never shows it.
 //!
 //! Ignored: it starts two real servers (`POCKETDESK_SERVER_EXE`) and opens a
 //! window, so it needs a Wayland compositor and a GPU. Run it only in a
 //! compositor of its own, never the owner's session: a headless sway
 //! (`WLR_BACKENDS=headless`, its own `XDG_RUNTIME_DIR`, no D-Bus; every
 //! window floating) is what the numbers in `docs/status-history.md` used.
-//! `PD_LIVE_SECS` (15) is how long it runs, `PD_LIVE_HEVC=1` lets B send
+//! `PD_LIVE_SECS` (15) is how long it runs, `PD_LIVE_WARMUP` (3) the seconds
+//! at its start left out of the numbers, `PD_LIVE_HEVC=1` lets B send
 //! HEVC, `PD_LIVE_HW=0` decodes on the processor (the app's own default is
 //! the card first), `PD_LIVE_VSYNC=1` or `0` makes the window's swap wait for
 //! the display or not, whatever the session.
@@ -60,6 +64,10 @@ struct Steps {
     callback: Option<u64>,
     uploaded: Option<u64>,
     painted: Option<u64>,
+    /// The access unit's size, and whether it was a keyframe, as the host's
+    /// encoder said.
+    bytes: Option<usize>,
+    key: Option<bool>,
 }
 
 /// The nearest-rank `p`th of `v`.
@@ -91,15 +99,21 @@ fn viewer_lines(text: &str) -> Vec<(&str, u64, &str)> {
 /// the pictures painted after `began` (wall clock microseconds).
 fn join(host: &[Event], viewer: &str, began: u64) -> (Vec<Steps>, usize) {
     let mut frame_at: HashMap<u16, (u64, u64)> = HashMap::new();
-    let mut out_of: HashMap<u64, (u64, u64)> = HashMap::new();
+    let mut out_of: HashMap<u64, (u64, u64, usize, bool)> = HashMap::new();
     let mut wrote: HashMap<u64, u64> = HashMap::new();
     for e in host {
         match *e {
             Event::Pattern { at, n, ts, .. } => {
                 frame_at.insert(n as u16, (at, ts));
             }
-            Event::EncoderOut { at, ts, seq, .. } => {
-                out_of.insert(ts, (at, seq));
+            Event::EncoderOut {
+                at,
+                ts,
+                seq,
+                bytes,
+                key,
+            } => {
+                out_of.insert(ts, (at, seq, bytes, key));
             }
             Event::Written { at, seq } => {
                 wrote.insert(seq, at);
@@ -148,13 +162,12 @@ fn join(host: &[Event], viewer: &str, began: u64) -> (Vec<Steps>, usize) {
     }
     let mut steps = Vec::new();
     for (n, mut s) in by_n {
-        if s.painted.is_none() {
-            continue;
-        }
         if let Some(&(at, ts)) = frame_at.get(&n) {
             s.frame = Some(at);
-            if let Some(&(out, seq)) = out_of.get(&ts) {
+            if let Some(&(out, seq, bytes, key)) = out_of.get(&ts) {
                 s.encoded = Some(out);
+                s.bytes = Some(bytes);
+                s.key = Some(key);
                 s.written = wrote.get(&seq).copied();
                 s.au = au_at.get(&seq).copied();
             }
@@ -190,7 +203,179 @@ fn table(steps: &[Steps], decoded: usize) -> Vec<String> {
     for (name, (p50, p95)) in STAGES.iter().zip(rows) {
         lines.push(format!("{name}: {} / {}", ms(p50), ms(p95)));
     }
-    lines.push(format!("{}: {} / {}", STAGES[11], steps.len(), decoded));
+    let painted = steps.iter().filter(|s| s.painted.is_some()).count();
+    lines.push(format!("{}: {} / {}", STAGES[11], painted, decoded));
+    lines.extend(by_kind(steps));
+    lines
+}
+
+/// Frame size and the host's frame to the GPU's finish, p50 / p95 / max,
+/// for the keyframes and for the other frames apart: a keyframe is a few
+/// pictures in a hundred, so the whole run's p95 never shows it.
+fn by_kind(steps: &[Steps]) -> Vec<String> {
+    let spread = |v: &mut Vec<i64>, scale: f64| {
+        let at = |v: &mut Vec<i64>, p| {
+            percentile(v, p).map_or_else(|| "-".to_string(), |x| format!("{:.1}", x as f64 / scale))
+        };
+        format!("{} / {} / {}", at(v, 0.5), at(v, 0.95), at(v, 1.0))
+    };
+    let mut lines = Vec::new();
+    for (name, key) in [("keyframes", true), ("other frames", false)] {
+        let of: Vec<&Steps> = steps.iter().filter(|s| s.key == Some(key)).collect();
+        let mut kib: Vec<i64> = of.iter().filter_map(|s| Some(s.bytes? as i64)).collect();
+        let mut made: Vec<i64> = of
+            .iter()
+            .filter_map(|s| Some(s.encoded? as i64 - s.frame? as i64))
+            .collect();
+        let mut total: Vec<i64> = of
+            .iter()
+            .filter_map(|s| Some(s.painted? as i64 - s.frame? as i64))
+            .collect();
+        lines.push(format!(
+            "{name} ({}): KiB {}; host frame > encoder out ms {}; frame > GPU done ms {}",
+            of.len(),
+            spread(&mut kib, 1024.0),
+            spread(&mut made, 1000.0),
+            spread(&mut total, 1000.0),
+        ));
+    }
+    lines
+}
+
+/// How many of the access units the host sent after `from` (wall clock
+/// microseconds), keyframes and others, the window read off the relay, and
+/// how many pictures it decoded in all.
+fn delivered(host: &[Event], viewer: &str, from: u64) -> String {
+    let lines = viewer_lines(viewer);
+    let read: std::collections::HashSet<u64> = lines
+        .iter()
+        .filter(|(kind, at, _)| *kind == "vau" && *at >= from)
+        .filter_map(|(_, _, what)| what.parse().ok())
+        .collect();
+    let decoded = lines
+        .iter()
+        .filter(|(kind, at, _)| *kind == "vpic" && *at >= from)
+        .count();
+    let (mut sent, mut got) = ([0usize; 2], [0usize; 2]);
+    for e in host {
+        if let Event::EncoderOut { at, seq, key, .. } = *e
+            && at >= from
+        {
+            sent[usize::from(key)] += 1;
+            got[usize::from(key)] += usize::from(read.contains(&seq));
+        }
+    }
+    format!(
+        "sent / read by the window: keyframes {} / {}, other frames {} / {}; pictures decoded {decoded}",
+        sent[1], got[1], sent[0], got[0]
+    )
+}
+
+/// The pictures the window decoded, matched in order to the access units it
+/// read (the decoder gives one picture for each, in order), whose counting
+/// strip it did not read as the frame number the host drew into them: a
+/// picture so cramped that its strip is blurred past reading, which is a
+/// picture the owner sees blurred. Those of the access units sent after
+/// `from` (wall clock microseconds): (pictures, misread, keyframes among the
+/// pictures, keyframes misread).
+fn misread(host: &[Event], viewer: &str, from: u64) -> (usize, usize, usize, usize) {
+    let drawn: HashMap<u64, u16> = host
+        .iter()
+        .filter_map(|e| match *e {
+            Event::Pattern { n, ts, .. } => Some((ts, n as u16)),
+            _ => None,
+        })
+        .collect();
+    // seq -> (the frame number drawn, a keyframe, the host's time)
+    let mut sent: HashMap<u64, (Option<u16>, bool, u64)> = HashMap::new();
+    for e in host {
+        if let Event::EncoderOut {
+            at, ts, seq, key, ..
+        } = *e
+        {
+            sent.insert(seq, (drawn.get(&ts).copied(), key, at));
+        }
+    }
+    let lines = viewer_lines(viewer);
+    let mut aus: Vec<(u64, u64)> = lines
+        .iter()
+        .filter(|(kind, _, _)| *kind == "vau")
+        .filter_map(|(_, at, what)| Some((*at, what.parse().ok()?)))
+        .collect();
+    aus.sort_unstable();
+    let pictures: Vec<(u64, Option<u16>)> = {
+        let mut v: Vec<_> = lines
+            .iter()
+            .filter(|(kind, _, _)| *kind == "vpic")
+            .map(|(_, at, what)| (*at, what.parse().ok()))
+            .collect();
+        v.sort_unstable();
+        v
+    };
+    let mut out = (0, 0, 0, 0);
+    for ((_, seq), (_, read)) in aus.iter().zip(&pictures) {
+        let Some(&(drew, key, at)) = sent.get(seq) else {
+            continue;
+        };
+        if at < from {
+            continue;
+        }
+        let wrong = drew.is_none() || *read != drew;
+        out.0 += 1;
+        out.1 += usize::from(wrong);
+        out.2 += usize::from(key);
+        out.3 += usize::from(key && wrong);
+    }
+    out
+}
+
+/// What the host's encoder sent after `from` (wall clock microseconds), by
+/// kind and whatever reached the window: a keyframe a cramped encoder makes
+/// poorly may never be painted as a picture the join can number, so the
+/// window's table can miss the very frames this is about.
+fn sent_by_kind(host: &[Event], from: u64) -> Vec<String> {
+    let made: HashMap<u64, u64> = host
+        .iter()
+        .filter_map(|e| match *e {
+            Event::Pattern { at, ts, .. } => Some((ts, at)),
+            _ => None,
+        })
+        .collect();
+    let mut lines = Vec::new();
+    for (name, key) in [("keyframes", true), ("other frames", false)] {
+        let mut kib = Vec::new();
+        let mut late = Vec::new();
+        for e in host {
+            if let Event::EncoderOut {
+                at,
+                ts,
+                bytes,
+                key: k,
+                ..
+            } = *e
+                && k == key
+                && at >= from
+            {
+                kib.push(bytes as i64);
+                if let Some(&frame) = made.get(&ts) {
+                    late.push(at as i64 - frame as i64);
+                }
+            }
+        }
+        let spread = |v: &mut Vec<i64>, scale: f64| {
+            let mut at = |p| {
+                percentile(v, p)
+                    .map_or_else(|| "-".to_string(), |x| format!("{:.1}", x as f64 / scale))
+            };
+            format!("{} / {} / {}", at(0.5), at(0.95), at(1.0))
+        };
+        lines.push(format!(
+            "sent {name} ({}): KiB {}; host frame > encoder out ms {}",
+            kib.len(),
+            spread(&mut kib, 1024.0),
+            spread(&mut late, 1000.0),
+        ));
+    }
     lines
 }
 
@@ -303,7 +488,17 @@ fn present_stages() {
     assert!(DONE.load(Ordering::Relaxed), "the window ran its time");
     let host = latency_trace::read(&trace_file(&pair.b_base));
     let text = std::fs::read_to_string(&viewer).unwrap_or_default();
-    let (steps, decoded) = join(&host, &text, began);
+    let (mut steps, decoded) = join(&host, &text, began);
+    // The first seconds are the session starting (the first keyframe, the
+    // decoder and the window opening): left out of the numbers.
+    let warmup = std::env::var("PD_LIVE_WARMUP")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(3);
+    let first = steps.iter().filter_map(|s| s.frame).min();
+    if let Some(first) = first {
+        steps.retain(|s| s.frame.is_some_and(|f| f >= first + warmup * 1_000_000));
+    }
     println!(
         "window stages ({}, {}, vsync {}), p50 / p95 ms over {} pictures:",
         if hevc { "HEVC" } else { "H.264" },
@@ -314,6 +509,15 @@ fn present_stages() {
     for line in table(&steps, decoded) {
         println!("  {line}");
     }
+    let from = first.unwrap_or(0) + warmup * 1_000_000;
+    for line in sent_by_kind(&host, from) {
+        println!("  {line}");
+    }
+    println!("  {}", delivered(&host, &text, from));
+    let (pictures, wrong, keys, keys_wrong) = misread(&host, &text, from);
+    println!(
+        "  pictures whose frame number was read wrong (a cramped, blurred picture): {wrong} of {pictures}; of the keyframes' pictures: {keys_wrong} of {keys}"
+    );
     assert!(steps.len() > 100, "pictures were painted");
     drop(pair);
 }
@@ -357,6 +561,31 @@ mod tests {
         let lines = table(&steps, decoded);
         assert!(lines[10].ends_with("11.0 / 11.0"), "{lines:?}");
         assert!(lines[11].ends_with("1 / 2"), "{lines:?}");
+        assert!(
+            lines[12].starts_with("keyframes (0): KiB - / - / -"),
+            "{lines:?}"
+        );
+        assert!(
+            lines[13].starts_with("other frames (1): KiB 0.0 / 0.0 / 0.0; host frame > encoder out ms 3.0 / 3.0 / 3.0; frame > GPU done ms 11.0 / 11.0 / 11.0"),
+            "{lines:?}"
+        );
+        let sent = sent_by_kind(&host, 0);
+        assert_eq!(
+            sent[0],
+            "sent keyframes (0): KiB - / - / -; host frame > encoder out ms - / - / -"
+        );
+        assert_eq!(
+            sent[1],
+            "sent other frames (1): KiB 0.0 / 0.0 / 0.0; host frame > encoder out ms 3.0 / 3.0 / 3.0"
+        );
+        assert!(sent_by_kind(&host, 5_000)[1].starts_with("sent other frames (0)"));
+        assert_eq!(
+            delivered(&host, viewer, 0),
+            "sent / read by the window: keyframes 0 / 0, other frames 1 / 1; pictures decoded 2"
+        );
+        // The one access unit's picture says 4465 (as the host drew it): read right.
+        assert_eq!(misread(&host, viewer, 0), (1, 0, 0, 0));
+        assert_eq!(misread(&host, viewer, 5_000), (0, 0, 0, 0));
         // A picture before the run began is left out.
         assert_eq!(join(&host, viewer, 20_000).0.len(), 0);
     }
