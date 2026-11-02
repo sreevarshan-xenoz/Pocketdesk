@@ -238,6 +238,10 @@ struct GpuConvert {
     upload: *mut ffmpeg::ffi::AVFrame,
     /// A host-memory view of the capture's bytes: pointers only, no buffer.
     view: *mut ffmpeg::ffi::AVFrame,
+    /// Set when a frame went into the graph but none came out: the graph
+    /// may still hold it, and every later frame would come out one behind.
+    /// Each call then fails, so the streamer opens a new encoder.
+    stuck: bool,
 }
 
 /// The conversion matrix and range the processor path has always produced:
@@ -265,6 +269,7 @@ impl GpuConvert {
             upload_frames_ref: std::ptr::null_mut(),
             upload: std::ptr::null_mut(),
             view: std::ptr::null_mut(),
+            stuck: false,
         };
         unsafe {
             gc.upload_frames_ref = ffi::av_hwframe_ctx_alloc(device_ref);
@@ -379,6 +384,10 @@ impl GpuConvert {
         ts: Option<Instant>,
     ) -> anyhow::Result<()> {
         use ffmpeg::ffi;
+        anyhow::ensure!(
+            !self.stuck,
+            "video processor out of step: a frame went in and none came out"
+        );
         let needed = (height as usize).saturating_sub(1) * stride as usize + width as usize * 4;
         anyhow::ensure!(
             stride >= width * 4 && data.len() >= needed,
@@ -408,6 +417,7 @@ impl GpuConvert {
             anyhow::ensure!(r >= 0, "video processor in: {}", describe_err(r));
             ffi::av_frame_unref(out);
             let r = ffi::av_buffersink_get_frame(self.sink, out);
+            self.stuck = r < 0;
             anyhow::ensure!(r >= 0, "video processor out: {}", describe_err(r));
             if let Some(ts) = ts {
                 latency_trace::encoder_step(ts, Step::Converted);
