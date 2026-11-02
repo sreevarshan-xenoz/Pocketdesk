@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1274 open items.
+1280 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 90 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 91 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 197 |
 | A phone with a SIM | 40 |
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
 | A second computer | 171 |
-| A Linux desktop (the Azure VM serves for some) | 219 |
+| A Linux desktop (the Azure VM serves for some) | 224 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 80 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
 
@@ -216,6 +216,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **269. VA-API encodes each frame as it comes (phase 1b of the window handoff: `async_depth` 1, a yield after each packet send)**
 
 - The phone on a real device is unchanged or better: the OPPO against a throwaway server on this laptop's VA-API encoder at 1080p60 and 1080p30, H.264 and HEVC (`allow_hevc`): a smooth picture for a minute, the HUD's delay no higher than before, no drop in the frames a second, a keyframe after a pause and a rejoin comes within about 2 seconds, and the server's log has no "ignored async_depth" warning. (where: here)
+
+**271. VA-API converts BGRA to NV12 on the card (phase 1c of the window handoff: `scale_vaapi`, no processor conversion)**
+
+- The phone on a real device: the OPPO against a throwaway server on this laptop's VA-API encoder at 1080p60 and 1080p30, H.264 and HEVC (`allow_hevc`): a smooth picture for a minute, colours as before (compare a known test picture on the phone's screen with the old build's), the HUD's delay no higher, and a keyframe after a pause and a rejoin within about 2 seconds. (where: here)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -1880,6 +1884,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - An Intel host newer than Ice Lake, and a slower one (an Atom or Celeron iGPU): the same at 1080p60 and at 1440p or 4K at 60, where the sum of the copy, conversion and encode may pass the frame period; if it does, the session's picture rate falls below the asked rate (the stats overlay's frames a second in). (where: linux)
 - A host whose FFmpeg lacks `async_depth` on the VA-API encoders (an older FFmpeg, or a vendor build without it): the open logs "ignored async_depth: it may hold a frame until the next" and the stream works as before. (where: linux)
 - The sidecar VA-API rung (a host where the in-process VA-API open fails and the ladder falls to the sidecar, or a build without the `inproc` feature): the stream starts and the FFmpeg child accepts `-async_depth 1` with both `h264_vaapi` and `hevc_vaapi`. (where: linux)
+
+**271. VA-API converts BGRA to NV12 on the card (phase 1c of the window handoff: `scale_vaapi`, no processor conversion)**
+
+- An AMD host with VA-API (Mesa radeonsi): the encoder's open logs "colour conversion on the card" (not the "unavailable ... converting on the processor" warning); `pocketdesk bench --target vaapi --frames 300` with and without `POCKETDESK_VAAPI_CPU_CONVERT=1`: the card path's encode call p50 no higher, the CPU use of the server lower; the probe (`POCKETDESK_TEST_PATTERN=probe`, `POCKETDESK_LATENCY_TRACE`) shows "enc: upload to card" and "enc: BGRA > NV12 (card)" and no copy or processor-conversion rows. Colours as before: a picture of a colour test card (or the probe's pattern) next to the old path's, no shift in skin tones, greys or saturated reds and blues (the card path is asked for BT.601, limited range, as the processor path always produced). Record both in the status history. (where: linux)
+- An Intel host newer than Ice Lake (Tiger Lake, Alder Lake, Arc) and an older or slower one (Skylake to Comet Lake, an Atom or Celeron iGPU): the same, at 1080p60, and at 1440p or 4K where the processor path could not keep the rate; on a very old driver (i965) the log may say the card's conversion is unavailable and the stream must still work on the processor path. (where: linux)
+- A driver or FFmpeg that cannot do it: the open logs "conversion on the card unavailable (...); converting on the processor" once (later opens, for a resolution change or a new session, log it at debug only) and the stream works as before. Try an FFmpeg without `scale_vaapi` (a vendor build) or a VA-API driver without BGR0 surfaces. (where: linux)
+- A host with two GPUs (Intel and NVIDIA, as the laptop): the encoder opens on the render node whose driver has VA-API, and the card path works there; with `POCKETDESK_VAAPI_DEVICE` pointing at a node with no VA driver the open fails as before and the ladder goes on to the sidecar. (where: linux)
+- A resolution change in a live session (the host's display changes mode, or the viewer asks for another size): the encoder is rebuilt at the new size and the picture continues on the card path, no restart of the session and no "does not hold" error in the log. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
