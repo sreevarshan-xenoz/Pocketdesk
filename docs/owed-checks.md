@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1254 open items.
+1256 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 40 |
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
-| A second computer | 159 |
+| A second computer | 161 |
 | A Linux desktop (the Azure VM serves for some) | 213 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 80 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
@@ -1297,6 +1297,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Only its own computer: another paired computer's `hotspot_on` (sent by hand) is logged "NOT_OWN" and does nothing, and a paired computer with "Screenshot, lock and open its apps" turned off in Devices on the computer cannot ask at all. (where: second computer)
 - The asking computer gone: with the hotspot on, turn off the computer's Wi-Fi or stop its server for over 2 minutes: the phone turns the hotspot off (and not before 2 minutes); unpair the phone on the computer, or remove the computer on the phone: it goes off at once. (where: second computer)
+
+**267. Input to picture on a real link (the latency probe, phase 0 of the window handoff)**
+
+- Across 5 GHz Wi-Fi: a throwaway server on one computer with `POCKETDESK_TEST_PATTERN=probe` (its trust entry for the viewing computer allows Input; a throwaway state folder), the other computer a viewer paired with it, then `PD_LIVE_A_STATE=<the viewer's state folder> PD_LIVE_B_ID=<the shown computer's id> cargo test -p pocketdesk-desktop input_to_picture_on_a_running_pair -- --ignored --nocapture` on the viewer: p50, p95 and max for H.264 and, with `PD_LIVE_HEVC=1`, HEVC, with no more than 2% misses; the numbers go in `docs/status-history.md` beside the loopback ones. Never against a server that shows a real screen. (where: second computer)
+- Probe mode injects nothing: while that run goes, the pointer, windows and typing of the computer running the probe-mode server are not touched at all (watch it for the minute), and its log says "Latency probe: no input is injected". (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 

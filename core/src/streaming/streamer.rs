@@ -383,6 +383,11 @@ impl PointerSource {
     /// The source for a session showing monitor `index`, and whether its
     /// moves land on that screen now (Windows: always).
     fn start(index: u32) -> (Self, bool) {
+        // The latency probe's pattern is the whole picture and its marker
+        // reads the move as it came.
+        if super::latency_probe::mode() {
+            return (Self::Off, false);
+        }
         if cfg!(windows) {
             let source = PointerSpace::for_monitor(index).map_or(Self::Off, Self::Fixed);
             return (source, true);

@@ -38,9 +38,9 @@ use crate::computer_view::percentile;
 use crate::video::{Accel, Admit, Codec, DecodeWanted, Decoder, KeyGate, Planes};
 
 /// Stops the servers and removes their folders however the run ends.
-struct Cleanup {
-    servers: Vec<Child>,
-    folders: Vec<PathBuf>,
+pub(crate) struct Cleanup {
+    pub(crate) servers: Vec<Child>,
+    pub(crate) folders: Vec<PathBuf>,
 }
 
 impl Drop for Cleanup {
@@ -55,7 +55,7 @@ impl Drop for Cleanup {
     }
 }
 
-fn wait_for<T>(secs: u64, what: &str, mut ready: impl FnMut() -> Option<T>) -> T {
+pub(crate) fn wait_for<T>(secs: u64, what: &str, mut ready: impl FnMut() -> Option<T>) -> T {
     let start = Instant::now();
     loop {
         if let Some(value) = ready() {
@@ -71,7 +71,7 @@ fn wait_for<T>(secs: u64, what: &str, mut ready: impl FnMut() -> Option<T>) -> T
 
 /// A throwaway server's base, config and state folders, under `pd-pc5-…`
 /// in the temporary folder.
-fn folders(name: &str, control: u16, extra: &str) -> (PathBuf, PathBuf, PathBuf) {
+pub(crate) fn folders(name: &str, control: u16, extra: &str) -> (PathBuf, PathBuf, PathBuf) {
     let base = std::env::temp_dir().join(format!("pd-pc5-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     let (config, state) = (base.join("config"), base.join("state"));
@@ -88,7 +88,16 @@ fn folders(name: &str, control: u16, extra: &str) -> (PathBuf, PathBuf, PathBuf)
     (base, config, state)
 }
 
-fn server(exe: &Path, base: &Path, config: &Path, state: &Path, pattern: bool) -> Child {
+/// A throwaway server; `pattern` is the value of `POCKETDESK_TEST_PATTERN`
+/// when its screen is the test pattern (`1`, or `probe` for the latency
+/// probe's marker and no injected input).
+pub(crate) fn server(
+    exe: &Path,
+    base: &Path,
+    config: &Path,
+    state: &Path,
+    pattern: Option<&str>,
+) -> Child {
     let mut command = Command::new(exe);
     command
         .env("POCKETDESK_CONFIG_DIR", config)
@@ -109,8 +118,8 @@ fn server(exe: &Path, base: &Path, config: &Path, state: &Path, pattern: bool) -
     } else {
         command.stdout(Stdio::null()).stderr(Stdio::null());
     }
-    if pattern {
-        command.env("POCKETDESK_TEST_PATTERN", "1");
+    if let Some(value) = pattern {
+        command.env("POCKETDESK_TEST_PATTERN", value);
     }
     command.spawn().unwrap()
 }
@@ -251,7 +260,7 @@ fn measure(
     Some(measured)
 }
 
-fn ms(d: Option<Duration>) -> String {
+pub(crate) fn ms(d: Option<Duration>) -> String {
     d.map_or("-".into(), |d| {
         format!("{:.1} ms", d.as_secs_f64() * 1000.0)
     })
@@ -260,7 +269,7 @@ fn ms(d: Option<Duration>) -> String {
 /// The ways this platform's window tries (PC5): the processor before and
 /// after PC5, the platform's card (Direct3D 11 on Windows, VA-API at each
 /// render node on Linux) and ffmpeg's own pick.
-fn ways() -> Vec<(String, Accel, Planes)> {
+pub(crate) fn ways() -> Vec<(String, Accel, Planes)> {
     let mut ways = vec![
         (
             "software, RGBA (before PC5)".to_string(),
@@ -289,7 +298,7 @@ fn ways() -> Vec<(String, Accel, Planes)> {
 
 /// Sends StopView for A's view as it goes, however the test ends (PC9a
 /// review N4): a panicking measure leaves no view running on A.
-struct StopViewOnDrop<'a>(&'a Path);
+pub(crate) struct StopViewOnDrop<'a>(pub(crate) &'a Path);
 
 impl Drop for StopViewOnDrop<'_> {
     fn drop(&mut self) {
@@ -381,16 +390,32 @@ fn the_decoder_on_a_running_pairs_view() {
     assert!(!gave.is_empty(), "some way gave pictures");
 }
 
-#[test]
-#[ignore = "starts two real servers and a real encoder, which reach iroh's relays"]
-fn the_windows_decoder_on_a_real_view() {
+/// Two throwaway servers, A paired with B, as every live test here starts.
+pub(crate) struct Pair {
+    /// Stops the servers and removes their folders when dropped.
+    pub(crate) _run: Cleanup,
+    pub(crate) a_base: PathBuf,
+    pub(crate) b_base: PathBuf,
+    pub(crate) a_state: PathBuf,
+    pub(crate) b_id: String,
+}
+
+/// Start A and B on `ports` (their control ports; each streaming port is
+/// the next), B showing the test pattern as `pattern` says (see
+/// [`server`]) and allowing HEVC when `hevc`, pair A with B, and let A in
+/// without asking: with `input` B takes A's input (and only B's pattern
+/// is touched by it, in the probe's mode), else it stays view-only. A's
+/// Audio is off either way (no sound).
+pub(crate) fn start_pair(
+    ports: (u16, u16),
+    pattern: Option<&str>,
+    hevc: bool,
+    input: bool,
+) -> Pair {
     let exe = PathBuf::from(
         std::env::var_os("POCKETDESK_SERVER_EXE").expect("POCKETDESK_SERVER_EXE, the server"),
     );
-    let pattern = std::env::var("PD_LIVE_PATTERN").is_ok_and(|v| v == "1");
-    let hevc = std::env::var("PD_LIVE_HEVC").is_ok_and(|v| v == "1");
-    let secs = 10;
-    let (a_control, b_control) = (19316u16, 19416u16);
+    let (a_control, b_control) = ports;
     for port in [a_control, b_control] {
         assert!(
             TcpStream::connect(("127.0.0.1", port)).is_err(),
@@ -405,7 +430,7 @@ fn the_windows_decoder_on_a_real_view() {
         folders: vec![a_base.clone(), b_base.clone()],
     };
     run.servers
-        .push(server(&exe, &a_base, &a_config, &a_state, false));
+        .push(server(&exe, &a_base, &a_config, &a_state, None));
     run.servers
         .push(server(&exe, &b_base, &b_config, &b_state, pattern));
     for (port, state) in [(a_control, &a_state), (b_control, &b_state)] {
@@ -449,15 +474,50 @@ fn the_windows_decoder_on_a_real_view() {
             .map(|p| p.outcome)
     });
     assert_eq!(paired, "paired");
-    // B lets A in without asking, and keeps A's Input and Audio off.
+    // B lets A in without asking, and keeps A's Audio off (and its Input,
+    // unless this run sends input).
     let mut trust = TrustStore::read(b_state.join(TRUST_FILE)).unwrap();
     let mut permissions = trust.permissions(&a_id);
     assert!(!permissions.allows(Capability::Input));
     assert!(!permissions.allows(Capability::Audio));
+    if input {
+        permissions.set(Capability::Input, true);
+    }
     permissions.ask_first = false;
     trust.set_permissions(&a_id, permissions).unwrap();
+    Pair {
+        _run: run,
+        a_base,
+        b_base,
+        a_state,
+        b_id,
+    }
+}
+
+/// Print the servers' codec lines from their logs (`PD_LIVE_LOG=1`).
+pub(crate) fn print_codec_lines(bases: &[&Path]) {
+    for base in bases {
+        let log = std::fs::read_to_string(base.join("server.log")).unwrap_or_default();
+        for line in log.lines().filter(|l| {
+            let l = l.to_ascii_lowercase();
+            l.contains("hevc") || l.contains("codec") || l.contains("showing another")
+        }) {
+            let at = line.find("pocketdesk").unwrap_or(0);
+            println!("log: {}", &line[at..]);
+        }
+    }
+}
+
+#[test]
+#[ignore = "starts two real servers and a real encoder, which reach iroh's relays"]
+fn the_windows_decoder_on_a_real_view() {
+    let pattern = std::env::var("PD_LIVE_PATTERN").is_ok_and(|v| v == "1");
+    let hevc = std::env::var("PD_LIVE_HEVC").is_ok_and(|v| v == "1");
+    let secs = 10;
+    let pair = start_pair((19316, 19416), pattern.then_some("1"), hevc, false);
+    let (a_state, b_id) = (&pair.a_state, &pair.b_id);
     computers::request(
-        &a_state,
+        a_state,
         ComputerAsk::View {
             device_id: b_id.clone(),
             monitor: 0,
@@ -476,22 +536,13 @@ fn the_windows_decoder_on_a_real_view() {
         "this screen"
     };
     {
-        let _stop = StopViewOnDrop(&a_state);
-        measure_ways(&a_state, &b_id, secs, screen);
+        let _stop = StopViewOnDrop(a_state);
+        measure_ways(a_state, b_id, secs, screen);
     }
-    for base in [&a_base, &b_base] {
-        let log = std::fs::read_to_string(base.join("server.log")).unwrap_or_default();
-        for line in log.lines().filter(|l| {
-            let l = l.to_ascii_lowercase();
-            l.contains("hevc") || l.contains("codec") || l.contains("showing another")
-        }) {
-            let at = line.find("pocketdesk").unwrap_or(0);
-            println!("log: {}", &line[at..]);
-        }
-    }
+    print_codec_lines(&[&pair.a_base, &pair.b_base]);
     assert!(
-        !a_base.join("view-sound.wav").exists(),
+        !pair.a_base.join("view-sound.wav").exists(),
         "no sound came to A"
     );
-    drop(run);
+    drop(pair);
 }
