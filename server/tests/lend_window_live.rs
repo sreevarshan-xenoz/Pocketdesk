@@ -698,6 +698,87 @@ fn a_window_is_lent_to_a_screen_of_its_size_and_returned() {
     assert!(!state.join(lend_window::STATE_FILE).exists());
     println!("borrower away: window back on {away_screen} after {took:?}, screen gone");
 
+    // The lease: a borrowed window whose view is still capturing its screen
+    // stays lent past the lease, a gap in the capture shorter than the lease
+    // costs nothing, and it goes back about a lease after the capture stops.
+    // (No real session runs here, so the watcher is told who is there and
+    // what they capture, as the server reads them from its sessions.)
+    let lent = ask(
+        &runtime,
+        BORROWER,
+        json!({ "action": "lend", "id": 14, "window": before.address }),
+    );
+    assert!(lent.get("error").is_none(), "{lent}");
+    let lent_screen = lent["name"].as_str().unwrap().to_string();
+    let lent_index = u32::try_from(lent["index"].as_u64().unwrap()).unwrap();
+    // (the borrower there, whether it captures)
+    let who = std::sync::Arc::new(std::sync::Mutex::new((true, true)));
+    let lease_runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let said = who.clone();
+    let lease_watcher = lease_runtime.spawn(lend_window::watch_with(move || {
+        let said = said.clone();
+        async move {
+            let (there, capturing) = *said.lock().unwrap();
+            (
+                if there {
+                    vec![BORROWER.to_string()]
+                } else {
+                    Vec::new()
+                },
+                if capturing {
+                    vec![(BORROWER.to_string(), lent_index)]
+                } else {
+                    Vec::new()
+                },
+            )
+        }
+    }));
+    let on_lent_screen = || window_of(sway, pid).is_some_and(|(_, screen)| screen == lent_screen);
+    let hold = |secs: u64, what: &str| {
+        let until = Instant::now() + Duration::from_secs(secs);
+        while Instant::now() < until {
+            assert!(on_lent_screen(), "taken back while {what}");
+            std::thread::sleep(Duration::from_secs(2));
+        }
+    };
+    let started = Instant::now();
+    hold(
+        lend_window::LEASE.as_secs() + 10,
+        "its view was still capturing (past the lease)",
+    );
+    println!(
+        "lease: still lent after {:?} while captured",
+        started.elapsed()
+    );
+    who.lock().unwrap().1 = false;
+    hold(20, "the capture had paused for less than the lease");
+    who.lock().unwrap().1 = true;
+    hold(
+        lend_window::LEASE.as_secs() + 5,
+        "the capture had resumed (the lease starts again)",
+    );
+    println!("lease: a 20 s gap in the capture cost nothing");
+    who.lock().unwrap().1 = false;
+    let stopped = Instant::now();
+    let (_, lease_screen) = wait_for(120, "the window back once nothing captured it", || {
+        window_of(sway, pid).filter(|(w, s)| *s == home_screen && w.size == floating.size)
+    });
+    let lapsed = stopped.elapsed();
+    lease_watcher.abort();
+    drop(lease_runtime);
+    assert!(
+        lapsed >= lend_window::LEASE - Duration::from_secs(5)
+            && lapsed < lend_window::LEASE + Duration::from_secs(15),
+        "back after {lapsed:?}, about a lease"
+    );
+    assert_eq!(snapshot(sway).1.len(), screens_before.len(), "screen gone");
+    assert!(!state.join(lend_window::STATE_FILE).exists());
+    println!("lease: back on {lease_screen} {lapsed:?} after the capture stopped, screen gone");
+
     // A lent window that is closed: its empty screen goes (after two looks),
     // and nothing is put back.
     let lent = ask(

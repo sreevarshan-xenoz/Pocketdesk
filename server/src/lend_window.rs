@@ -1038,6 +1038,23 @@ async fn tell(ended: &Ended) {
 /// Watch what is lent, for the server's life: asleep while nothing is lent
 /// (a lend wakes it), a look a second while something is ([`sweep_with`]).
 pub async fn run_watcher() {
+    watch_with(|| async {
+        (
+            crate::virtual_screen::live_devices().await,
+            pocketdesk_core::streaming::sessions::captures(),
+        )
+    })
+    .await;
+}
+
+/// [`run_watcher`] with who is there (the devices with a session or a
+/// connection, and the monitor each captures) read by `who`: the live test
+/// says them itself, as no real session runs there.
+pub async fn watch_with<F, Fut>(who: F)
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = (Vec<String>, Vec<(String, u32)>)>,
+{
     let mut looks = Looks::default();
     loop {
         if lends().all().is_empty() {
@@ -1052,8 +1069,7 @@ pub async fn run_watcher() {
         // A computer counts while it has a session or a connection here
         // (read now; the links this computer keeps are asked inside the
         // look, for the windows lent by then).
-        let live = crate::virtual_screen::live_devices().await;
-        let captures = pocketdesk_core::streaming::sessions::captures();
+        let (live, captures) = who().await;
         let looking = enabled();
         let swept = tokio::task::spawn_blocking(move || {
             let present = Present {
