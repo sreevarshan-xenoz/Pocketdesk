@@ -498,6 +498,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     ),
     ("smooth_scrolling", "Smooth scrolling", Section::Computers),
     (
+        "display_no_vsync",
+        "Show pictures without waiting for the display",
+        Section::Computers,
+    ),
+    (
         "computer_view_mic_device",
         "Microphone for computer windows",
         Section::Computers,
@@ -2888,6 +2893,17 @@ impl SettingsForm {
                         "That computer scrolls by it as finely as it can, so a slow two-finger scroll moves a little at a time instead of a notch at a time. Off, the window sends what it sent before this setting came. A computer older than this gets whole notches either way. The phone has its own switch.",
                     );
                 });
+                // Window handoff 1d: the swap does not wait for the display.
+                row(ui, "display_no_vsync", |ui| {
+                    ui.checkbox(
+                        &mut e.display_no_vsync,
+                        "show pictures without waiting for the display: a computer's screen in a window comes about a frame sooner",
+                    );
+                    note(
+                        ui,
+                        "Off, a picture waits for the display's next refresh before it is drawn, which never tears. On, it is drawn at once: on Wayland the compositor still shows whole frames, but on X11 and Windows a picture can tear, and anything that animates draws as fast as it can, which uses more power. Applies after the app restarts.",
+                    );
+                });
                 // PC10: the microphone "Send my mic" sends.
                 if drawn_here("computer_view_mic_device") {
                     let mic = &mut self.view_mic_text;
@@ -3682,6 +3698,18 @@ mod tests {
         let key = "computer_wake_facts";
         assert!(SETTINGS.iter().any(|(k, n, s)| *k == key
             && *n == "Let my computers wake this one"
+            && *s == Section::Computers));
+        assert!(!applies_live(key));
+        assert!(drawn_here(key));
+    }
+
+    /// Window handoff 1d: showing pictures without waiting for the display is
+    /// with the computers, and the app reads it as it starts.
+    #[test]
+    fn showing_pictures_without_waiting_for_the_display_waits_for_a_restart() {
+        let key = "display_no_vsync";
+        assert!(SETTINGS.iter().any(|(k, n, s)| *k == key
+            && *n == "Show pictures without waiting for the display"
             && *s == Section::Computers));
         assert!(!applies_live(key));
         assert!(drawn_here(key));
