@@ -3723,6 +3723,17 @@ Built 2026-11-02: the in-process VA-API encoder uploads the capture's BGRA bytes
 - [ ] A host with two GPUs (Intel and NVIDIA, as the laptop): the encoder opens on the render node whose driver has VA-API, and the card path works there; with `POCKETDESK_VAAPI_DEVICE` pointing at a node with no VA driver the open fails as before and the ladder goes on to the sidecar. (where: linux)
 - [ ] A resolution change in a live session (the host's display changes mode, or the viewer asks for another size): the encoder is rebuilt at the new size and the picture continues on the card path, no restart of the session and no "does not hold" error in the log. (where: linux)
 
+## 273. The window's wait for the display (phase 1d of the window handoff: a setting to draw without vsync, and the window's stage trace)
+
+Built 2026-11-02. Settings, Other computers, "Show pictures without waiting for the display" (`display_no_vsync`, off by default, read as the app starts) asks the app's windows to swap without waiting for the display's refresh. Measured on the Linux laptop in a headless Sway, a computer's screen window waited 7 to 10 ms at the median (15 ms at the 95th percentile) between a picture being decoded and the window's pass drawing it, because the vsync swap holds the whole event loop until the compositor's frame callback; with the setting on that wait is under half a millisecond. The window's stage trace is `POCKETDESK_VIEWER_TRACE=<file>`, the harness is the ignored test `view_present_live::present_stages` (Linux, a Wayland compositor of its own, never the owner's session).
+
+- [ ] On a real Hyprland desktop (and a real GNOME and KDE session), the setting off then on, the window showing a moving screen at the display's refresh: the picture is a frame sooner (a high-speed camera or the probe's marker against a stopwatch shows it), and Wayland shows no tearing. (where: linux)
+- [ ] X11 (an X11 session, or XWayland with the window forced onto it): the setting on can tear, and the setting says so; off never tears. (where: linux)
+- [ ] Windows: the setting on tears at most, never freezes the window, and an animating page (a spinner) does not pin a core for long; off is as before. (where: owner)
+- [ ] The app's other windows with the setting on: the main window's animations do not run at hundreds of frames a second for long, and the tray, the other computer windows and the notices are as before. (where: linux)
+- [ ] The stall with the setting off: move a computer's screen window to a workspace that is not shown (Sway, Hyprland), or cover the main window with it: with vsync on, every window of the app stops drawing until the hidden one shows again (seen on Sway, headless; a fully covered window's surfaces get no frame callbacks); on Hyprland, GNOME and KDE say whether it happens there too and whether the setting on avoids it. (where: linux)
+- [ ] The same measurement between two real computers over Wi-Fi: `view_present_live` cannot cross a network, so read the window's own Stats (frames in and shown, decode time) with the setting off and on. (where: linux)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

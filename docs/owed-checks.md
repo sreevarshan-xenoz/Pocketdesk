@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1290 open items.
+1296 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 91 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 197 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 198 |
 | A phone with a SIM | 40 |
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
 | A second computer | 171 |
-| A Linux desktop (the Azure VM serves for some) | 234 |
+| A Linux desktop (the Azure VM serves for some) | 239 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 80 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
 
@@ -704,6 +704,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Held fingers survive nothing: hold a mapped key, then pull the desktop's network cable or kill the desktop app, stop the control stream (stop the relay), turn the phone's "Separate windows" off, stop Shizuku, and just stay still with a key held for longer than two seconds (it stays down, kept by the half-second keep-alive in "Pointer location"): after a dropped stream, the switch off or two seconds of silence the touch is gone; with a helper killed (`kill` its process) the next open window works without a phantom touch. (where: OPPO)
 - The limits: a desktop test loop sending 1000 finger downs a second to one window lets about 100 through a second (the rest are not seen in "Pointer location"), finger lifts of fingers that were down always arrive, no finger stays down afterwards, and ordinary aiming at 144 Hz is not cut. (where: OPPO)
 - The typing rule: with keys on, letters typed in the window go nowhere (not to the phone's text fields), Backspace and Enter and Escape (Back) still work when not mapped, and Ctrl+key shortcuts are not taken as keys. (where: OPPO)
+
+**273. The window's wait for the display (phase 1d of the window handoff: a setting to draw without vsync, and the window's stage trace)**
+
+- Windows: the setting on tears at most, never freezes the window, and an animating page (a spinner) does not pin a core for long; off is as before. (where: owner)
 
 ## A phone with a SIM
 
@@ -1905,6 +1909,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A driver or FFmpeg that cannot do it: the open logs "conversion on the card unavailable (...); converting on the processor" once (later opens, for a resolution change or a new session, log it at debug only) and the stream works as before. Try an FFmpeg without `scale_vaapi` (a vendor build) or a VA-API driver without BGR0 surfaces. (where: linux)
 - A host with two GPUs (Intel and NVIDIA, as the laptop): the encoder opens on the render node whose driver has VA-API, and the card path works there; with `POCKETDESK_VAAPI_DEVICE` pointing at a node with no VA driver the open fails as before and the ladder goes on to the sidecar. (where: linux)
 - A resolution change in a live session (the host's display changes mode, or the viewer asks for another size): the encoder is rebuilt at the new size and the picture continues on the card path, no restart of the session and no "does not hold" error in the log. (where: linux)
+
+**273. The window's wait for the display (phase 1d of the window handoff: a setting to draw without vsync, and the window's stage trace)**
+
+- On a real Hyprland desktop (and a real GNOME and KDE session), the setting off then on, the window showing a moving screen at the display's refresh: the picture is a frame sooner (a high-speed camera or the probe's marker against a stopwatch shows it), and Wayland shows no tearing. (where: linux)
+- X11 (an X11 session, or XWayland with the window forced onto it): the setting on can tear, and the setting says so; off never tears. (where: linux)
+- The app's other windows with the setting on: the main window's animations do not run at hundreds of frames a second for long, and the tray, the other computer windows and the notices are as before. (where: linux)
+- The stall with the setting off: move a computer's screen window to a workspace that is not shown (Sway, Hyprland), or cover the main window with it: with vsync on, every window of the app stops drawing until the hidden one shows again (seen on Sway, headless; a fully covered window's surfaces get no frame callbacks); on Hyprland, GNOME and KDE say whether it happens there too and whether the setting on avoids it. (where: linux)
+- The same measurement between two real computers over Wi-Fi: `view_present_live` cannot cross a network, so read the window's own Stats (frames in and shown, decode time) with the setting off and on. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
