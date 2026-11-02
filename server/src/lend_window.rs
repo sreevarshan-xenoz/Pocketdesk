@@ -25,12 +25,26 @@
 //!   says `ok` even to a window that is not there, so each step is checked
 //!   in `j/clients`.
 //!
+//! **The list:** `list` answers the windows this computer would lend (id,
+//! title, app, size, workspace; [`listed`]) so the other computer's owner can
+//! pick one. Titles are personal: they are sent to the asker and never
+//! logged.
+//!
 //! **Who may ask:** only a computer paired both ways ("both are mine"), with
 //! the Input permission (held to it before this runs, on a connection and on
 //! the link), and only while "Let my computers borrow my windows"
-//! (`lend_windows`, off by default) is on; taking a window back is never
-//! refused. Window ids are digits (Sway's container id) or `0x` and hex
+//! (`lend_windows`, off by default) is on, for `lend` and `list` alike;
+//! taking a window back is never refused. Window ids are digits (Sway's container id) or `0x` and hex
 //! (Hyprland's address), and nothing else reaches a command or the Lua.
+//!
+//! **Watching what is lent** ([`run_watcher`], awake only while a window is
+//! lent, once a second): turning `lend_windows` off puts every lent window
+//! back; a borrowing computer with no session, connection or link goes
+//! straight away (the virtual screens' sweep, two 5 s checks and a minute's
+//! grace, stays as the backstop); a lent window that is gone (two looks in
+//! a row) has its empty screen removed and its borrower told
+//! (`{lent_gone: <window>, reason}`, [`crate::borrow_window`]), so the view
+//! of it ends.
 //!
 //! What was lent, from where, is kept in `lent_windows.json` (written before
 //! the window is moved) so the next server in the same compositor puts them
@@ -40,12 +54,17 @@
 //! [`give_back_for_output`], run as any screen is removed, returns the window
 //! first.
 
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use pocketdesk_core::local::computers::LendableWindow;
+use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
+
+use crate::hyprland::HyprWindow;
 use crate::virtual_screen::{Desk, Output};
 
 /// The file what is lent is kept in.
@@ -109,6 +128,10 @@ pub struct Lent {
     pub fullscreen: i32,
     #[serde(default)]
     pub fullscreen_client: i32,
+    /// The monitor index a session captures its screen by, when the host
+    /// said it (a record from before has none).
+    #[serde(default)]
+    pub index: Option<u32>,
 }
 
 impl Lent {
@@ -129,6 +152,7 @@ impl Lent {
             border_width: seen.border_width,
             fullscreen: seen.fullscreen,
             fullscreen_client: seen.fullscreen_client,
+            index: None,
         }
     }
 
@@ -180,10 +204,10 @@ pub fn lend_size(size: [i32; 2]) -> Option<(u32, u32)> {
 }
 
 /// Why `action` is refused: only an owner's computer, paired both ways,
-/// borrows a window, and only while the owner's switch is on. Taking one
-/// back is never refused.
+/// borrows a window or sees which there are, and only while the owner's
+/// switch is on. Taking one back is never refused.
 pub fn refusal(action: &str, enabled: bool, owner_computer: bool) -> Option<&'static str> {
-    if action != "lend" {
+    if !matches!(action, "lend" | "list") {
         return None;
     }
     if !owner_computer {
@@ -195,6 +219,53 @@ pub fn refusal(action: &str, enabled: bool, owner_computer: bool) -> Option<&'st
         );
     }
     None
+}
+
+// ---- The list ----
+
+/// The most windows a list names.
+const MOST_LISTED: usize = 100;
+
+/// `text` without control characters, at most `most` characters.
+fn clean(text: &str, most: usize) -> String {
+    text.chars()
+        .filter(|c| !c.is_control())
+        .take(most)
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+/// The windows `device` may borrow, from the compositor's window list and
+/// what is lent now: those a screen can be made for, not on a special
+/// workspace (Hyprland's scratch ones, Sway's hidden one) and not lent to
+/// another computer; one lent to `device` is marked.
+pub fn listed(windows: Vec<HyprWindow>, lent: &[Lent], device: &str) -> Vec<LendableWindow> {
+    windows
+        .into_iter()
+        .filter(|w| w.mapped && !w.hidden && is_window_id(&w.address))
+        .filter(|w| {
+            !w.workspace.name.starts_with("special") && !w.workspace.name.starts_with("__i3")
+        })
+        .filter(|w| lend_size(w.size).is_some())
+        .filter(|w| {
+            lent.iter()
+                .find(|l| l.window == w.address)
+                .is_none_or(|l| l.device == device)
+        })
+        .take(MOST_LISTED)
+        .map(|w| LendableWindow {
+            lent: lent
+                .iter()
+                .any(|l| l.window == w.address && l.device == device),
+            title: clean(&w.title, 200),
+            class: clean(&w.class, 64),
+            width: u32::try_from(w.size[0]).unwrap_or(0),
+            height: u32::try_from(w.size[1]).unwrap_or(0),
+            workspace: clean(&w.workspace.name, 64),
+            address: w.address,
+        })
+        .collect()
 }
 
 // ---- Sway's commands ----
@@ -410,6 +481,8 @@ trait Env: Sync {
     /// Why no window can be lent here, if none can.
     fn cannot(&self) -> Option<&'static str>;
     fn seen(&self, window: &str) -> std::io::Result<Option<Seen>>;
+    /// The windows on this computer's screens now.
+    fn windows(&self) -> std::io::Result<Vec<HyprWindow>>;
     /// The screen of the key, made at `width`×`height` or the one it has:
     /// `{name, index, width, height}` or `{error}`.
     fn add_screen(&self, key: &str, width: u32, height: u32) -> Value;
@@ -429,6 +502,9 @@ trait Env: Sync {
 struct Lends {
     lent: Mutex<Vec<Lent>>,
     one: Mutex<()>,
+    /// When each lend was made (not kept across a restart: a record read
+    /// back is old).
+    at: Mutex<BTreeMap<String, Instant>>,
 }
 
 impl Lends {
@@ -436,6 +512,7 @@ impl Lends {
         Self {
             lent: Mutex::new(Vec::new()),
             one: Mutex::new(()),
+            at: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -559,12 +636,19 @@ fn lend_with(lends: &Lends, env: &dyn Env, device: &str, window: &str) -> Value 
         env.drop_screen(&key);
         return error("The computer made a screen but does not show it");
     };
-    let lent = Lent::new(device, &seen, &name);
+    let mut lent = Lent::new(device, &seen, &name);
+    lent.index = reply["index"].as_u64().and_then(|i| u32::try_from(i).ok());
     {
         // Written before the move: a crash between leaves what returns it.
         // Unwritten, the window is not moved: nothing could return it.
         let mut all = lends.all();
         all.push(lent.clone());
+        lends
+            .at
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(window.to_string(), Instant::now());
+        WATCH_NOTE.notify_one();
         if let Err(e) = env.save(&all) {
             all.pop();
             drop(all);
@@ -587,6 +671,23 @@ fn lend_with(lends: &Lends, env: &dyn Env, device: &str, window: &str) -> Value 
             }
             error(format!("Could not move the window: {e}"))
         }
+    }
+}
+
+/// The windows `device` may borrow: `{windows: [..]}` or `{error}`. Read
+/// only; the titles in it are not logged.
+fn list_with(lends: &Lends, env: &dyn Env, device: &str) -> Value {
+    if let Some(why) = env.cannot() {
+        return error(why);
+    }
+    match env.windows() {
+        Ok(windows) => {
+            let lent = lends.all().clone();
+            let windows = listed(windows, &lent, device);
+            tracing::debug!("Listed {} windows a computer may borrow", windows.len());
+            json!({ "windows": windows })
+        }
+        Err(e) => error(format!("Could not read this computer's windows: {e}")),
     }
 }
 
@@ -688,6 +789,9 @@ pub fn return_left_over() -> Vec<String> {
         }
     }
     let mut all = lends().all();
+    if !kept.is_empty() {
+        WATCH_NOTE.notify_one();
+    }
     all.extend(kept);
     if let Err(e) = Live.save(&all) {
         tracing::warn!("Could not write the list of lent windows: {e}");
@@ -718,6 +822,284 @@ pub async fn return_all_on_stop() {
     }
 }
 
+// ---- Watching what is lent ----
+
+/// How often what is lent is looked at, while anything is.
+const WATCH_EVERY: Duration = Duration::from_secs(1);
+
+/// Wakes [`run_watcher`] when a window is lent: it sleeps while none is.
+static WATCH_NOTE: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// Why a lent window is lent no more, without its borrower asking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Gone {
+    /// The window was closed here.
+    Closed,
+    /// "Let my computers borrow my windows" was turned off.
+    SwitchOff,
+    /// The borrowing computer has no session, connection or link.
+    BorrowerAway,
+}
+
+impl Gone {
+    /// What the borrower is told, if it can hear: a computer that is away
+    /// is not told.
+    fn said(self) -> Option<&'static str> {
+        match self {
+            Self::Closed => Some("closed"),
+            Self::SwitchOff => Some("off"),
+            Self::BorrowerAway => None,
+        }
+    }
+}
+
+/// A window that is lent no more, and why.
+#[derive(Debug, PartialEq, Eq)]
+struct Ended {
+    device: String,
+    window: String,
+    why: Gone,
+}
+
+/// How long a window just lent is left alone by the look for a borrower that
+/// is not there: the lend itself proves it was, and what shows who is there
+/// is read a moment before the look.
+const NEWLY_LENT: Duration = Duration::from_secs(3);
+
+/// How long a lent window may go with no session capturing its screen
+/// before it is taken back: longer than a view's tries to dial again take
+/// to get going, so a short gap costs nothing, but a `return` that was lost
+/// (the packet dropped on a link that stays up) does not strand the window.
+pub const LEASE: Duration = Duration::from_secs(60);
+
+/// Who is there, for a look at what is lent.
+pub struct Present<'a> {
+    /// The devices with a session, a connection or a link, as read just
+    /// before the look.
+    pub live: &'a [String],
+    /// The monitor each device's sessions capture.
+    pub captures: &'a [(String, u32)],
+    /// Whether the link to a computer is up now: asked inside the look, for
+    /// the windows lent as it runs, not those lent when `live` was read.
+    pub linked: &'a dyn Fn(&str) -> bool,
+}
+
+/// What the looks at what is lent remember between them.
+#[derive(Debug, Default)]
+pub struct Looks {
+    /// How many looks running found a window gone.
+    missing: BTreeMap<String, u32>,
+    /// Since when no session has captured a window's screen.
+    unheld: BTreeMap<String, Instant>,
+}
+
+/// One look at what is lent: the windows to give back, and those gone.
+///
+/// - With `enabled` false, every lent window goes back.
+/// - A lent window whose computer is not there (no session, connection or
+///   link; not for [`NEWLY_LENT`]) goes back, and so does one that no
+///   session has captured the screen of for [`LEASE`].
+/// - A lent window the compositor no longer shows, twice running, has its
+///   screen removed: there is nothing to put back.
+///
+/// A window that will not go back stays lent for the next look. Holds the
+/// lock one ask holds, so it never crosses a lend or a return.
+fn sweep_with(
+    lends: &Lends,
+    env: &dyn Env,
+    enabled: bool,
+    present: &Present,
+    looks: &mut Looks,
+    now: Instant,
+) -> Vec<Ended> {
+    let _one = lends.one.lock().unwrap_or_else(|e| e.into_inner());
+    let mut ended = Vec::new();
+    let mut give_back = |why: Gone, matching: &dyn Fn(&Lent) -> bool| {
+        let released = lends.put_back(env, matching);
+        for (_, e) in &released.failed {
+            tracing::warn!("Could not put a lent window back (will retry): {e}");
+        }
+        for lent in released.done {
+            env.drop_screen(&lent.key());
+            ended.push(Ended {
+                device: lent.device,
+                window: lent.window,
+                why,
+            });
+        }
+    };
+    if !enabled {
+        give_back(Gone::SwitchOff, &|_| true);
+        *looks = Looks::default();
+        return ended;
+    }
+    // Who is there is judged on the windows lent now.
+    let lent_now: Vec<Lent> = lends.all().clone();
+    let at = lends.at.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    for l in &lent_now {
+        let held = present
+            .captures
+            .iter()
+            .any(|(d, m)| *d == l.device && l.index.is_none_or(|i| i == *m));
+        if held {
+            looks.unheld.remove(&l.window);
+        } else {
+            looks.unheld.entry(l.window.clone()).or_insert(now);
+        }
+    }
+    let unheld = looks.unheld.clone();
+    give_back(Gone::BorrowerAway, &|l| {
+        let settled = at
+            .get(&l.window)
+            .is_none_or(|lent_at| now.saturating_duration_since(*lent_at) >= NEWLY_LENT);
+        let there = present.live.contains(&l.device) || (present.linked)(&l.device);
+        let lapsed = unheld
+            .get(&l.window)
+            .is_some_and(|since| now.saturating_duration_since(*since) >= LEASE);
+        (settled && !there) || lapsed
+    });
+    let lent: Vec<Lent> = lends.all().clone();
+    for l in &lent {
+        match env.seen(&l.window) {
+            Ok(None) => {
+                let times = looks.missing.entry(l.window.clone()).or_default();
+                *times += 1;
+                if *times >= 2 {
+                    looks.missing.remove(&l.window);
+                    // Nothing to put back: its record goes, then its screen
+                    // (the record first, so the screen's removal does not
+                    // look for a window to give back).
+                    lends.forget(env, |m| m.window == l.window);
+                    env.drop_screen(&l.key());
+                    ended.push(Ended {
+                        device: l.device.clone(),
+                        window: l.window.clone(),
+                        why: Gone::Closed,
+                    });
+                }
+            }
+            // Shown, or the compositor could not be read this time: a look
+            // that finds nothing wrong forgets an earlier one that did.
+            Ok(Some(_)) | Err(_) => {
+                looks.missing.remove(&l.window);
+            }
+        }
+    }
+    let kept: Vec<String> = lends.all().iter().map(|l| l.window.clone()).collect();
+    looks.missing.retain(|window, _| kept.contains(window));
+    looks.unheld.retain(|window, _| kept.contains(window));
+    lends
+        .at
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|window, _| kept.contains(window));
+    ended
+}
+
+/// One look at what is lent in this computer's own compositor, as the
+/// watcher takes it, with the devices that count as there (`live`, each
+/// capturing what it was lent) and whether lending is on given: how many
+/// windows ended. For the live test, which drives each rule with no timing
+/// to wait out.
+pub fn sweep_once(enabled: bool, live: &[String], looks: &mut Looks) -> usize {
+    let captures: Vec<(String, u32)> = lends()
+        .all()
+        .iter()
+        .filter(|l| live.contains(&l.device))
+        .filter_map(|l| Some((l.device.clone(), l.index?)))
+        .collect();
+    let present = Present {
+        live,
+        captures: &captures,
+        linked: &|_| false,
+    };
+    // A window lent a moment ago is judged as one lent a while ago.
+    let now = Instant::now() + NEWLY_LENT;
+    sweep_with(lends(), &Live, enabled, &present, looks, now).len()
+}
+
+/// Tell the computer a window was lent to that it is gone, if the way to it
+/// is up. The window's title is not in it.
+async fn tell(ended: &Ended) {
+    tracing::info!(
+        "A lent window is back ({:?}); its borrower is told if it can hear",
+        ended.why
+    );
+    let Some(reason) = ended.why.said() else {
+        return;
+    };
+    let packet = NetworkPacket::new(crate::virtual_screen::PACKET)
+        .with_body(json!({ "lent_gone": ended.window, "reason": reason }));
+    if !crate::remote_devices::send_to_computer(&ended.device, packet).await {
+        tracing::debug!("A borrower could not be told its window is gone");
+    }
+}
+
+/// Watch what is lent, for the server's life: asleep while nothing is lent
+/// (a lend wakes it), a look a second while something is ([`sweep_with`]).
+pub async fn run_watcher() {
+    watch_with(|| async {
+        (
+            crate::virtual_screen::live_devices().await,
+            pocketdesk_core::streaming::sessions::captures(),
+        )
+    })
+    .await;
+}
+
+/// [`run_watcher`] with who is there (the devices with a session or a
+/// connection, and the monitor each captures) read by `who`: the live test
+/// says them itself, as no real session runs there.
+pub async fn watch_with<F, Fut>(who: F)
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = (Vec<String>, Vec<(String, u32)>)>,
+{
+    let mut looks = Looks::default();
+    loop {
+        if lends().all().is_empty() {
+            looks = Looks::default();
+            WATCH_NOTE.notified().await;
+        } else {
+            tokio::time::sleep(WATCH_EVERY).await;
+        }
+        if lends().all().is_empty() {
+            continue;
+        }
+        // A computer counts while it has a session or a connection here
+        // (read now; the links this computer keeps are asked inside the
+        // look, for the windows lent by then).
+        let (live, captures) = who().await;
+        let looking = enabled();
+        let swept = tokio::task::spawn_blocking(move || {
+            let present = Present {
+                live: &live,
+                captures: &captures,
+                linked: &crate::peer_computers::is_linked,
+            };
+            let ended = sweep_with(
+                lends(),
+                &Live,
+                looking,
+                &present,
+                &mut looks,
+                Instant::now(),
+            );
+            (ended, looks)
+        })
+        .await;
+        match swept {
+            Ok((ended, kept)) => {
+                looks = kept;
+                for gone in &ended {
+                    tell(gone).await;
+                }
+            }
+            Err(_) => looks = Looks::default(),
+        }
+    }
+}
+
 /// What the state file holds.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct File {
@@ -743,7 +1125,7 @@ fn is_owner_computer(device: &str) -> bool {
         && crate::remote_devices::is_owner_device(&store, &computers::read(&dir), device)
 }
 
-/// The answer to the `lend` or `return` request `body` from `device`: see
+/// The answer to the `lend`, `list` or `return` request `body` from `device`: see
 /// [`lend_with`] and [`return_with`].
 pub async fn answer(device: &str, body: &Value) -> Value {
     let action = body["action"].as_str().unwrap_or("").to_string();
@@ -759,6 +1141,7 @@ pub async fn answer(device: &str, body: &Value) -> Value {
         match (action.as_str(), window.as_deref()) {
             ("lend", Some(window)) => lend_with(lends(), &Live, &device, window),
             ("lend", None) => error("no window named"),
+            ("list", _) => list_with(lends(), &Live, &device),
             ("return", window) => return_with(lends(), &Live, &device, window),
             _ => error("unknown action"),
         }
@@ -856,6 +1239,17 @@ impl Env for Live {
 
     fn seen(&self, window: &str) -> std::io::Result<Option<Seen>> {
         seen_now(window)
+    }
+
+    fn windows(&self) -> std::io::Result<Vec<HyprWindow>> {
+        match crate::virtual_screen::desk() {
+            Some(Desk::Sway) => Ok(crate::sway_tree::list()?.0),
+            Some(Desk::Hyprland) => {
+                serde_json::from_str(&crate::virtual_screen::hypr("j/clients")?)
+                    .map_err(std::io::Error::other)
+            }
+            None => Err(other("not running under Sway or Hyprland")),
+        }
     }
 
     fn add_screen(&self, key: &str, width: u32, height: u32) -> Value {
@@ -1026,6 +1420,8 @@ mod tests {
     #[derive(Default)]
     struct Fake {
         windows: Mutex<Vec<Seen>>,
+        /// What the compositor lists (for `list`).
+        listing: Mutex<Vec<HyprWindow>>,
         screens: Mutex<Vec<(String, String, u32, u32)>>,
         calls: Mutex<Vec<String>>,
         saved: Mutex<Vec<Lent>>,
@@ -1057,6 +1453,9 @@ mod tests {
     impl Env for Fake {
         fn cannot(&self) -> Option<&'static str> {
             None
+        }
+        fn windows(&self) -> std::io::Result<Vec<HyprWindow>> {
+            Ok(self.listing.lock().unwrap().clone())
         }
         fn seen(&self, window: &str) -> std::io::Result<Option<Seen>> {
             Ok(self
@@ -1139,6 +1538,9 @@ mod tests {
         }
         fn seen(&self, window: &str) -> std::io::Result<Option<Seen>> {
             self.0.seen(window)
+        }
+        fn windows(&self) -> std::io::Result<Vec<HyprWindow>> {
+            self.0.windows()
         }
         fn add_screen(&self, key: &str, width: u32, height: u32) -> Value {
             self.0.add_screen(key, width, height)
@@ -1681,6 +2083,484 @@ mod tests {
         assert!(!fake.calls().iter().any(|c| c.starts_with("back 6")));
         assert_eq!(lends.all().len(), 1, "the other stays lent");
         assert_eq!(lends.all()[0].window, "6");
+    }
+
+    fn client(address: &str, title: &str, size: [i32; 2], workspace: &str) -> HyprWindow {
+        HyprWindow {
+            address: address.into(),
+            title: title.into(),
+            class: "app.example".into(),
+            pid: 1,
+            mapped: true,
+            hidden: false,
+            at: [0, 0],
+            size,
+            monitor: 0,
+            fullscreen: 0,
+            workspace: crate::hyprland::HyprWorkspaceRef {
+                id: 1,
+                name: workspace.into(),
+            },
+        }
+    }
+
+    #[test]
+    fn list_is_gated_like_lend_and_returns_are_not() {
+        assert!(refusal("list", true, true).is_none());
+        assert!(
+            refusal("list", true, false)
+                .unwrap()
+                .contains("paired both ways")
+        );
+        assert!(
+            refusal("list", false, true)
+                .unwrap()
+                .contains("Let my computers borrow my windows")
+        );
+        assert!(refusal("list", false, false).is_some());
+    }
+
+    #[test]
+    fn the_list_names_the_windows_a_screen_can_be_made_for() {
+        let mut hidden = client("0x2", "Hidden", [800, 600], "1");
+        hidden.hidden = true;
+        let mut unmapped = client("0x3", "Unmapped", [800, 600], "1");
+        unmapped.mapped = false;
+        let windows = vec![
+            client("0x1", "Notes\u{7}\n", [1280, 720], "main"),
+            hidden,
+            unmapped,
+            client("0x4", "Scratch", [800, 600], "special:scratch"),
+            client("7", "Sway window", [640, 480], "2"),
+            client("5; exec true", "Odd id", [640, 480], "2"),
+            client("0x6", "No size", [0, 480], "2"),
+        ];
+        let listed = listed(windows, &[], DEVICE);
+        let addresses: Vec<&str> = listed.iter().map(|w| w.address.as_str()).collect();
+        assert_eq!(addresses, ["0x1", "7"]);
+        assert_eq!(listed[0].title, "Notes", "control characters go");
+        assert_eq!(
+            (
+                listed[0].width,
+                listed[0].height,
+                listed[0].workspace.as_str()
+            ),
+            (1280, 720, "main")
+        );
+        assert_eq!(listed[0].class, "app.example");
+        assert!(!listed[0].lent);
+    }
+
+    #[test]
+    fn a_window_lent_to_another_computer_is_not_listed_and_ones_lent_to_the_asker_are_marked() {
+        let windows = vec![
+            client("5", "Mine", [800, 600], "1"),
+            client("6", "Theirs", [800, 600], "1"),
+            client("7", "Free", [800, 600], "1"),
+        ];
+        let lent = vec![
+            Lent::new(DEVICE, &seen("5", 800, 600), "PD-a-1"),
+            Lent::new("fedcba9876543210", &seen("6", 800, 600), "PD-a-2"),
+        ];
+        let listed = listed(windows, &lent, DEVICE);
+        let seen: Vec<(&str, bool)> = listed
+            .iter()
+            .map(|w| (w.address.as_str(), w.lent))
+            .collect();
+        assert_eq!(seen, [("5", true), ("7", false)]);
+    }
+
+    #[test]
+    fn a_long_title_and_a_long_list_are_cut() {
+        let long = "x".repeat(500);
+        let many: Vec<HyprWindow> = (1..=150)
+            .map(|n| client(&n.to_string(), &long, [800, 600], "1"))
+            .collect();
+        let listed = listed(many, &[], DEVICE);
+        assert_eq!(listed.len(), MOST_LISTED);
+        assert_eq!(listed[0].title.chars().count(), 200);
+    }
+
+    #[test]
+    fn hyprlands_client_list_reads_into_the_windows_a_computer_may_borrow() {
+        // As `j/clients` gives them, with fields this does not read.
+        let clients = r#"[
+          {"address":"0x560a772079f0","mapped":true,"hidden":false,"at":[10,40],"size":[1280,720],
+           "workspace":{"id":2,"name":"2"},"floating":false,"monitor":0,"class":"foot","title":"Terminal",
+           "initialClass":"foot","pid":4242,"xwayland":false,"pinned":false,"fullscreen":0,"fullscreenClient":0},
+          {"address":"0x560a77207a10","mapped":true,"hidden":false,"at":[0,0],"size":[800,600],
+           "workspace":{"id":-99,"name":"special:magic"},"monitor":0,"class":"kitty","title":"Scratch","pid":1},
+          {"address":"0x560a77207a20","mapped":false,"hidden":false,"at":[0,0],"size":[800,600],
+           "workspace":{"id":1,"name":"1"},"monitor":0,"class":"x","title":"Not shown yet","pid":2}
+        ]"#;
+        let parsed: Vec<HyprWindow> = serde_json::from_str(clients).unwrap();
+        let listed = listed(parsed, &[], DEVICE);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].address, "0x560a772079f0");
+        assert_eq!(listed[0].title, "Terminal");
+        assert_eq!(listed[0].class, "foot");
+        assert_eq!((listed[0].width, listed[0].height), (1280, 720));
+    }
+
+    #[test]
+    fn list_answers_the_windows_and_changes_nothing() {
+        let fake = Fake::with(vec![seen("5", 1280, 720)]);
+        *fake.listing.lock().unwrap() = vec![client("5", "Notes", [1280, 720], "1")];
+        let lends = Lends::new();
+        let reply = list_with(&lends, &fake, DEVICE);
+        assert_eq!(reply["windows"][0]["address"], "5");
+        assert_eq!(reply["windows"][0]["title"], "Notes");
+        assert_eq!(reply["windows"][0]["width"], 1280);
+        assert!(fake.calls().is_empty(), "nothing moved or made");
+        assert!(lends.all().is_empty());
+    }
+
+    const OTHER: &str = "fedcba9876543210";
+
+    /// A look as the watcher takes it, a good while after the lends, with
+    /// every device in `live` capturing the window lent to it.
+    fn look(
+        lends: &Lends,
+        env: &dyn Env,
+        enabled: bool,
+        live: &[String],
+        looks: &mut Looks,
+    ) -> Vec<Ended> {
+        look_at(
+            lends,
+            env,
+            enabled,
+            live,
+            looks,
+            Instant::now() + Duration::from_secs(10),
+        )
+    }
+
+    fn look_at(
+        lends: &Lends,
+        env: &dyn Env,
+        enabled: bool,
+        live: &[String],
+        looks: &mut Looks,
+        now: Instant,
+    ) -> Vec<Ended> {
+        let captures: Vec<(String, u32)> = lends
+            .all()
+            .iter()
+            .filter(|l| live.contains(&l.device))
+            .filter_map(|l| Some((l.device.clone(), l.index?)))
+            .collect();
+        let present = Present {
+            live,
+            captures: &captures,
+            linked: &|_| false,
+        };
+        sweep_with(lends, env, enabled, &present, looks, now)
+    }
+
+    /// A fake computer with windows 5 and 6 lent to `DEVICE` and 7 to `OTHER`.
+    fn lent_three() -> (Fake, Lends) {
+        let fake = Fake::with(vec![
+            seen("5", 1280, 720),
+            seen("6", 800, 600),
+            seen("7", 640, 480),
+        ]);
+        let lends = Lends::new();
+        for (device, window) in [(DEVICE, "5"), (DEVICE, "6"), (OTHER, "7")] {
+            let reply = lend_with(&lends, &fake, device, window);
+            assert!(reply.get("error").is_none(), "{reply}");
+        }
+        (fake, lends)
+    }
+
+    fn windows_of(ended: &[Ended], why: Gone) -> Vec<(&str, &str)> {
+        let mut found: Vec<(&str, &str)> = ended
+            .iter()
+            .filter(|e| e.why == why)
+            .map(|e| (e.device.as_str(), e.window.as_str()))
+            .collect();
+        found.sort();
+        found
+    }
+
+    #[test]
+    fn turning_the_switch_off_gives_every_lent_window_back() {
+        let (fake, lends) = lent_three();
+        let both = vec![DEVICE.to_string(), OTHER.to_string()];
+        let mut looks = Looks::default();
+        // On, with both computers there: nothing changes.
+        assert!(look(&lends, &fake, true, &both, &mut looks).is_empty());
+        assert_eq!(lends.all().len(), 3);
+        // Off: all three go back, their screens go, and their borrowers are named.
+        let ended = look(&lends, &fake, false, &both, &mut looks);
+        assert_eq!(
+            windows_of(&ended, Gone::SwitchOff),
+            [(DEVICE, "5"), (DEVICE, "6"), (OTHER, "7")]
+        );
+        assert!(lends.all().is_empty());
+        assert!(fake.screens.lock().unwrap().is_empty());
+        let calls = fake.calls();
+        for window in ["5", "6", "7"] {
+            assert!(calls.contains(&format!("back {window} to 3")), "{calls:?}");
+        }
+        assert!(fake.saved.lock().unwrap().is_empty(), "the file follows");
+        // Off again with none lent: nothing.
+        assert!(look(&lends, &fake, false, &both, &mut looks).is_empty());
+    }
+
+    #[test]
+    fn a_window_that_will_not_go_back_when_the_switch_goes_off_is_tried_again() {
+        let (fake, lends) = lent_three();
+        let live = vec![DEVICE.to_string(), OTHER.to_string()];
+        let mut looks = Looks::default();
+        fake.back_fails(true);
+        assert!(look(&lends, &fake, false, &live, &mut looks).is_empty());
+        assert_eq!(lends.all().len(), 3, "still lent, so not lost");
+        assert_eq!(fake.screens.lock().unwrap().len(), 3, "with their screens");
+        fake.back_fails(false);
+        let ended = look(&lends, &fake, false, &live, &mut looks);
+        assert_eq!(ended.len(), 3);
+        assert!(lends.all().is_empty());
+    }
+
+    #[test]
+    fn a_borrower_with_no_session_or_link_gets_its_windows_back_at_once() {
+        let (fake, lends) = lent_three();
+        let mut looks = Looks::default();
+        // Only the other computer is there: DEVICE's two windows go, 7 stays.
+        let live = vec![OTHER.to_string()];
+        let ended = look(&lends, &fake, true, &live, &mut looks);
+        assert_eq!(
+            windows_of(&ended, Gone::BorrowerAway),
+            [(DEVICE, "5"), (DEVICE, "6")]
+        );
+        assert_eq!(lends.all().len(), 1);
+        assert_eq!(lends.all()[0].window, "7");
+        let calls = fake.calls();
+        assert!(calls.contains(&"back 5 to 3".to_string()));
+        assert!(!calls.iter().any(|c| c.starts_with("back 7")), "{calls:?}");
+        assert_eq!(fake.screens.lock().unwrap().len(), 1, "only 7's screen");
+        // The one still there is not told, and a computer away cannot be.
+        assert_eq!(Gone::BorrowerAway.said(), None);
+        assert_eq!(Gone::Closed.said(), Some("closed"));
+        assert_eq!(Gone::SwitchOff.said(), Some("off"));
+    }
+
+    fn look_with(
+        lends: &Lends,
+        fake: &Fake,
+        live: &[String],
+        captures: &[(String, u32)],
+        linked: &dyn Fn(&str) -> bool,
+        looks: &mut Looks,
+        now: Instant,
+    ) -> Vec<Ended> {
+        let present = Present {
+            live,
+            captures,
+            linked,
+        };
+        sweep_with(lends, fake, true, &present, looks, now)
+    }
+
+    #[test]
+    fn a_window_no_session_captures_goes_back_after_the_lease_whatever_the_link_says() {
+        let (fake, lends) = lent_three();
+        let t0 = Instant::now();
+        let both = vec![DEVICE.to_string(), OTHER.to_string()];
+        // Both computers are linked the whole time, but only DEVICE has a
+        // session capturing its windows' screen (monitor 1 in the fake).
+        let captures = vec![(DEVICE.to_string(), 1)];
+        let mut looks = Looks::default();
+        let at = |secs: u64| t0 + Duration::from_secs(secs);
+        for secs in [10, 40, 69] {
+            let ended = look_with(
+                &lends,
+                &fake,
+                &both,
+                &captures,
+                &|_| true,
+                &mut looks,
+                at(secs),
+            );
+            assert!(ended.is_empty(), "within the lease, at {secs} s");
+        }
+        // 60 s after the first look that found 7's screen not captured.
+        let ended = look_with(
+            &lends,
+            &fake,
+            &both,
+            &captures,
+            &|_| true,
+            &mut looks,
+            at(71),
+        );
+        assert_eq!(windows_of(&ended, Gone::BorrowerAway), [(OTHER, "7")]);
+        let lent: Vec<String> = lends.all().iter().map(|l| l.window.clone()).collect();
+        assert_eq!(lent, ["5", "6"], "the captured ones stay lent");
+        assert!(fake.calls().contains(&"back 7 to 3".to_string()));
+    }
+
+    #[test]
+    fn a_session_capturing_another_screen_does_not_hold_a_window() {
+        let (fake, lends) = lent_three();
+        let t0 = Instant::now();
+        let both = vec![DEVICE.to_string(), OTHER.to_string()];
+        let mut looks = Looks::default();
+        // DEVICE views monitor 2 (the host's own screen, say), not the 1 its
+        // windows are on; OTHER's session does capture its window's.
+        let captures = vec![(DEVICE.to_string(), 2), (OTHER.to_string(), 1)];
+        let at = |secs: u64| t0 + Duration::from_secs(secs);
+        let first = look_with(
+            &lends,
+            &fake,
+            &both,
+            &captures,
+            &|_| true,
+            &mut looks,
+            at(10),
+        );
+        assert!(first.is_empty());
+        let later = look_with(
+            &lends,
+            &fake,
+            &both,
+            &captures,
+            &|_| true,
+            &mut looks,
+            at(80),
+        );
+        assert_eq!(
+            windows_of(&later, Gone::BorrowerAway),
+            [(DEVICE, "5"), (DEVICE, "6")]
+        );
+        assert_eq!(lends.all().len(), 1);
+    }
+
+    #[test]
+    fn a_capture_that_resumes_within_the_lease_starts_it_afresh() {
+        let (fake, lends) = lent_three();
+        let t0 = Instant::now();
+        let live = vec![DEVICE.to_string(), OTHER.to_string()];
+        let all = vec![(DEVICE.to_string(), 1), (OTHER.to_string(), 1)];
+        let none: Vec<(String, u32)> = Vec::new();
+        let mut looks = Looks::default();
+        let at = |secs: u64| t0 + Duration::from_secs(secs);
+        assert!(look_with(&lends, &fake, &live, &none, &|_| true, &mut looks, at(10)).is_empty());
+        // The view dialled again at 50 s: held, the clock is forgotten.
+        assert!(look_with(&lends, &fake, &live, &all, &|_| true, &mut looks, at(50)).is_empty());
+        // Gone again at 60 s: the lease runs from there, not from 10 s.
+        assert!(look_with(&lends, &fake, &live, &none, &|_| true, &mut looks, at(60)).is_empty());
+        assert!(look_with(&lends, &fake, &live, &none, &|_| true, &mut looks, at(100)).is_empty());
+        let ended = look_with(&lends, &fake, &live, &none, &|_| true, &mut looks, at(121));
+        assert_eq!(ended.len(), 3);
+    }
+
+    #[test]
+    fn a_window_just_lent_is_not_taken_for_an_absent_borrowers_and_a_link_up_now_counts() {
+        let (fake, lends) = lent_three();
+        let all = vec![(DEVICE.to_string(), 1), (OTHER.to_string(), 1)];
+        let mut looks = Looks::default();
+        // `live` was read before these were lent, so no one is in it: a look
+        // at once leaves them alone.
+        let now = Instant::now();
+        assert!(look_with(&lends, &fake, &[], &all, &|_| false, &mut looks, now).is_empty());
+        // A look a few seconds on, with the link to DEVICE up now (asked
+        // inside the look, not read before it), takes only OTHER's.
+        let later = now + Duration::from_secs(4);
+        let ended = look_with(
+            &lends,
+            &fake,
+            &[],
+            &all,
+            &|d| d == DEVICE,
+            &mut looks,
+            later,
+        );
+        assert_eq!(windows_of(&ended, Gone::BorrowerAway), [(OTHER, "7")]);
+    }
+
+    #[test]
+    fn a_closed_window_loses_its_empty_screen_and_its_borrower_is_named() {
+        let (fake, lends) = lent_three();
+        let live = vec![DEVICE.to_string(), OTHER.to_string()];
+        let mut looks = Looks::default();
+        // Window 5 closes.
+        fake.windows.lock().unwrap().retain(|w| w.id != "5");
+        // The first look only notes it (a window mid-move is not gone).
+        assert!(look(&lends, &fake, true, &live, &mut looks).is_empty());
+        assert_eq!(lends.all().len(), 3);
+        // Seen again: forgotten.
+        fake.windows.lock().unwrap().push(seen("5", 1280, 720));
+        assert!(look(&lends, &fake, true, &live, &mut looks).is_empty());
+        assert!(looks.missing.is_empty());
+        // Closed for good: the second look in a row.
+        fake.windows.lock().unwrap().retain(|w| w.id != "5");
+        assert!(look(&lends, &fake, true, &live, &mut looks).is_empty());
+        let ended = look(&lends, &fake, true, &live, &mut looks);
+        assert_eq!(windows_of(&ended, Gone::Closed), [(DEVICE, "5")]);
+        let lent: Vec<String> = lends.all().iter().map(|l| l.window.clone()).collect();
+        assert_eq!(lent, ["6", "7"]);
+        assert_eq!(fake.screens.lock().unwrap().len(), 2, "its screen is gone");
+        let calls = fake.calls();
+        assert!(
+            !calls.iter().any(|c| c.starts_with("back 5")),
+            "nothing to put back: {calls:?}"
+        );
+        assert!(
+            calls
+                .iter()
+                .any(|c| c.starts_with("drop ") && c.ends_with("#lend-5"))
+        );
+        let saved: Vec<String> = fake
+            .saved
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|l| l.window.clone())
+            .collect();
+        assert_eq!(saved, ["6", "7"], "the file follows");
+    }
+
+    #[test]
+    fn a_compositor_that_cannot_be_read_closes_nothing() {
+        struct Blind<'a>(&'a Fake);
+        impl Env for Blind<'_> {
+            fn cannot(&self) -> Option<&'static str> {
+                self.0.cannot()
+            }
+            fn seen(&self, _: &str) -> std::io::Result<Option<Seen>> {
+                Err(other("the compositor's socket is gone"))
+            }
+            fn windows(&self) -> std::io::Result<Vec<HyprWindow>> {
+                self.0.windows()
+            }
+            fn add_screen(&self, key: &str, width: u32, height: u32) -> Value {
+                self.0.add_screen(key, width, height)
+            }
+            fn drop_screen(&self, key: &str) {
+                self.0.drop_screen(key)
+            }
+            fn output(&self, name: &str) -> Option<Output> {
+                self.0.output(name)
+            }
+            fn send(&self, lent: &Lent, to: &Output, w: u32, h: u32) -> std::io::Result<()> {
+                self.0.send(lent, to, w, h)
+            }
+            fn back(&self, lent: &Lent) -> std::io::Result<()> {
+                self.0.back(lent)
+            }
+            fn save(&self, lent: &[Lent]) -> std::io::Result<()> {
+                self.0.save(lent)
+            }
+        }
+        let (fake, lends) = lent_three();
+        let live = vec![DEVICE.to_string(), OTHER.to_string()];
+        let mut looks = Looks::default();
+        for _ in 0..4 {
+            assert!(look(&lends, &Blind(&fake), true, &live, &mut looks).is_empty());
+        }
+        assert_eq!(lends.all().len(), 3);
     }
 
     #[test]

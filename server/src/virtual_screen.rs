@@ -770,6 +770,23 @@ async fn wait_at_most(limit: std::time::Duration, work: impl FnOnce() + Send + '
         .is_ok()
 }
 
+/// The devices that count as there now: a phone counts while it has a
+/// session or a control link (a session switching to the new screen, waiting
+/// at the approval gate or reconnecting has its link the whole time).
+pub(crate) async fn live_devices() -> Vec<String> {
+    let mut live: Vec<String> = pocketdesk_core::streaming::sessions::list()
+        .into_iter()
+        .filter_map(|s| s.device_id)
+        .collect();
+    live.extend(
+        crate::state::clone_clients()
+            .await
+            .iter()
+            .map(|c| c.device_id().to_string()),
+    );
+    live
+}
+
 /// Remove the outputs of phones with no session in `live` twice in a row
 /// (a session switching screens is gone for a moment). Runs every few
 /// seconds for the server's life.
@@ -778,19 +795,7 @@ pub async fn run_sweeper() {
     let mut tick = tokio::time::interval(std::time::Duration::from_secs(5));
     loop {
         tick.tick().await;
-        // A phone counts while it has a session or a control link: a
-        // session switching to the new screen, waiting at the approval gate
-        // or reconnecting has its link the whole time.
-        let mut live: Vec<String> = pocketdesk_core::streaming::sessions::list()
-            .into_iter()
-            .filter_map(|s| s.device_id)
-            .collect();
-        live.extend(
-            crate::state::clone_clients()
-                .await
-                .iter()
-                .map(|c| c.device_id().to_string()),
-        );
+        let live = live_devices().await;
         let gone: Vec<(String, Vec<String>)> = {
             let mut made = made().lock().unwrap_or_else(|e| e.into_inner());
             let phones: Vec<String> = made.phones.keys().cloned().collect();
@@ -903,7 +908,7 @@ pub async fn respond(device: &str, body: &serde_json::Value) -> serde_json::Valu
     let (width, height) = (side("width"), side("height"));
     // A computer's lending of one of its windows (phase 3a of the window
     // handoff) has its own gate and its own state.
-    if matches!(action.as_str(), "lend" | "return") {
+    if matches!(action.as_str(), "lend" | "list" | "return") {
         return said_with(body, crate::lend_window::answer(device, body).await);
     }
     // A computer's window, 0 to 3; a phone says none. One past the last is

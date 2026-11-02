@@ -200,6 +200,9 @@ pub enum ViewFit {
     /// That computer made a headless screen of this size, and the view
     /// shows it.
     Fitted { width: u32, height: u32 },
+    /// A window of that computer was lent (`ComputerAsk::View::borrow`) and
+    /// the view shows the screen it was moved to, this size.
+    Borrowed { width: u32, height: u32 },
     /// Not made, and why (Windows, a compositor with no headless outputs,
     /// its owner's switch, the four-screen limit, an older build, no
     /// answer); the view shows the screen asked for instead.

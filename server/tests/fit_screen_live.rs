@@ -83,6 +83,7 @@ fn ask(a_state: &Path, b_id: &str, window: u8, fit: Option<FitSize>) {
             hevc: false,
             window,
             fit,
+            borrow: None,
         },
         pin::now_unix(),
     )

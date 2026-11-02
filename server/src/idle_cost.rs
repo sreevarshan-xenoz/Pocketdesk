@@ -97,6 +97,10 @@ mod tests {
             ("virtual_screen (sweeper)", || {
                 Box::pin(crate::virtual_screen::run_sweeper())
             }),
+            (
+                "lend_window (watcher, asleep while nothing is lent)",
+                || Box::pin(crate::lend_window::run_watcher()),
+            ),
             ("sms (outbox)", || {
                 Box::pin(crate::plugins::sms::run_watcher())
             }),

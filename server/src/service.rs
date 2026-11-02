@@ -201,6 +201,10 @@ pub async fn run(config: Config) -> Result<()> {
     // Task starts held by an earlier run wait for no one now (ecosystem 1c).
     tokio::task::spawn_blocking(crate::plugins::tasks::clear_left_over);
     tokio::spawn(crate::virtual_screen::run_sweeper());
+    // Windows lent to another computer: given back at once when its owner
+    // turns lending off or the borrower goes, and their screens removed
+    // when a window closes; asleep while none is lent.
+    tokio::spawn(crate::lend_window::run_watcher());
     tokio::spawn(crate::plugins::sms::run_watcher());
 
     // Prepare shared state for v2 multiplexer and v1 streaming.
