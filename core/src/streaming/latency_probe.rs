@@ -46,6 +46,41 @@ pub fn marker_left(width: u32, x_norm: u16) -> u32 {
     ((u64::from(x_norm) * span + 32767) / 65535) as u32
 }
 
+/// The pattern's counting strip: this many blocks of this many pixels,
+/// along the picture's first rows, the frame number in binary (most
+/// significant bit first; a lit block is a 1).
+pub const STRIP_BITS: u32 = 16;
+pub const STRIP_BLOCK: u32 = 16;
+/// A decoded strip block is told by its middle pixel's luma: at most
+/// [`STRIP_DARK`] is a 0, at least [`STRIP_LIT`] a 1, between them is not
+/// read. The pattern draws them at about 33 and 141 to 161 in limited range.
+pub const STRIP_DARK: u8 = 70;
+pub const STRIP_LIT: u8 = 120;
+
+/// The frame number (modulo 65536) the pattern's counting strip says in
+/// `luma` (a plane `width` by `height`, one byte a pixel, rows without
+/// padding), or `None` when the plane has no strip or one of its blocks is
+/// neither lit nor dark. In the probe's mode the strip runs under the
+/// pattern's bar, so every block is there to read.
+pub fn read_frame_number(luma: &[u8], width: usize, height: usize) -> Option<u16> {
+    let block = STRIP_BLOCK as usize;
+    if width < STRIP_BITS as usize * block || height < block || luma.len() < width * height {
+        return None;
+    }
+    let row = &luma[(block / 2) * width..(block / 2 + 1) * width];
+    let mut n = 0u16;
+    for i in 0..STRIP_BITS as usize {
+        let v = row[i * block + block / 2];
+        let bit = match v {
+            v if v <= STRIP_DARK => 0,
+            v if v >= STRIP_LIT => 1,
+            _ => return None,
+        };
+        n = n << 1 | bit;
+    }
+    Some(n)
+}
+
 /// The first column of the marker in `luma` (a plane `width` by `height`,
 /// one byte a pixel, rows without padding), or `None` when it is not in the
 /// picture. A decoded marker is blurred a little at its edges, so it is the
@@ -260,6 +295,54 @@ mod tests {
         // A marker at the right edge runs to the row's end.
         let edge = plane(640, 360, Some(640 - SIZE));
         assert_eq!(find(&edge, 640, 360), Some(640 - SIZE));
+    }
+
+    /// A plane with a strip saying `n`, lit blocks at `lit` luma and dark
+    /// ones at `dark`.
+    fn strip(n: u16, lit: u8, dark: u8) -> Vec<u8> {
+        let (w, h) = (320usize, 64usize);
+        let mut luma = vec![100u8; w * h];
+        for y in 0..STRIP_BLOCK as usize {
+            for i in 0..STRIP_BITS as usize {
+                let v = if (n >> (STRIP_BITS as usize - 1 - i)) & 1 == 1 {
+                    lit
+                } else {
+                    dark
+                };
+                for x in i * STRIP_BLOCK as usize..(i + 1) * STRIP_BLOCK as usize {
+                    luma[y * w + x] = v;
+                }
+            }
+        }
+        luma
+    }
+
+    #[test]
+    fn the_frame_number_is_read_from_the_strip() {
+        for n in [0u16, 1, 0b101, 0x8000, 0xA5A5, 12345, u16::MAX] {
+            assert_eq!(
+                read_frame_number(&strip(n, 150, 33), 320, 64),
+                Some(n),
+                "{n}"
+            );
+        }
+        // The extremes of what the pattern is drawn at, after the encoder.
+        assert_eq!(read_frame_number(&strip(777, 125, 60), 320, 64), Some(777));
+    }
+
+    #[test]
+    fn a_strip_that_is_not_there_or_not_clear_is_not_read() {
+        // No strip: a flat plane at mid grey (neither lit nor dark).
+        assert_eq!(read_frame_number(&vec![100u8; 320 * 64], 320, 64), None);
+        // A block between dark and lit.
+        let mut luma = strip(5, 150, 33);
+        luma[8 * 320 + 3 * 16 + 8] = 90;
+        assert_eq!(read_frame_number(&luma, 320, 64), None);
+        // Too narrow for sixteen blocks, too short, too little data.
+        assert_eq!(read_frame_number(&strip(5, 150, 33), 255, 64), None);
+        assert_eq!(read_frame_number(&strip(5, 150, 33), 320, 8), None);
+        assert_eq!(read_frame_number(&[0; 10], 320, 64), None);
+        assert_eq!(read_frame_number(&[], 0, 0), None);
     }
 
     #[test]

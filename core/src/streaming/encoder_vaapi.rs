@@ -31,6 +31,7 @@ use std::time::Instant;
 use tracing::{debug, info, warn};
 
 use super::encoder::detect_keyframe;
+use super::latency_trace::{self, Step};
 use super::{H264Profile, StreamingConfig, VideoCodec, VideoFrame};
 use crate::streaming::EncodedPacket;
 use ffmpeg_next as ffmpeg;
@@ -373,7 +374,9 @@ impl VaapiEncoder {
         }
 
         self.copy_frame(frame);
+        latency_trace::encoder_step(frame.timestamp, Step::Copied);
         self.scaler.run(&self.bgra, &mut self.nv12)?;
+        latency_trace::encoder_step(frame.timestamp, Step::Scaled);
 
         // Upload NV12 → VAAPI surface: reset the reusable hw_frame, attach the
         // frames context, grab a buffer, then hwupload via transfer_data.
@@ -395,6 +398,7 @@ impl VaapiEncoder {
             if tr < 0 {
                 anyhow::bail!("av_hwframe_transfer_data (hwupload) failed ({tr})");
             }
+            latency_trace::encoder_step(frame.timestamp, Step::Uploaded);
             (*hw).pts = sequence as i64;
             (*hw).pict_type = if force_key {
                 ffi::AVPictureType::AV_PICTURE_TYPE_I
@@ -406,6 +410,7 @@ impl VaapiEncoder {
             if sr < 0 && sr != averror_eagain() {
                 anyhow::bail!("avcodec_send_frame failed ({sr})");
             }
+            latency_trace::encoder_step(frame.timestamp, Step::Sent);
         }
         self.queue.push_back((sequence, frame.timestamp));
         self.sequence += 1;
