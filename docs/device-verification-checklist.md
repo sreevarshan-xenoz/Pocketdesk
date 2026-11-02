@@ -3734,6 +3734,10 @@ Built 2026-11-02: the desktop app's Settings, Other computers, "Borrow a window.
 - [ ] The borrowing computer's link dropped (its network pulled, or its server stopped) with a window borrowed: the window is back on the host within a couple of seconds, not after a minute. (where: second computer)
 - [ ] A borrowed window closed on the host (its program quit): its empty screen is removed within a couple of seconds and the viewing window ends with a note, never a frozen picture. (where: second computer)
 - [ ] "Lock it when I close the window" on, a borrowed window closed: the other computer is not locked (only a screen window locks it). (where: second computer)
+- [ ] A short network gap (the viewing computer's Wi-Fi off for about 10 s, then on) with a window borrowed: the view dims and reconnects and the window is still lent, not ended; the window is back after 60 s if the viewer stays gone, and the host lends it again if the viewer comes back after that. (where: second computer)
+- [ ] A borrowed window's `return` lost (the link up but the packet not delivered, for instance the viewing server killed at the moment the window closes): within about a minute the host takes the window back without the viewer. (where: second computer)
+- [ ] Two windows cannot borrow the same window: its Borrow is greyed in the picker once lent, and a second view asked for by the local API says it is already shown. (where: second computer)
+- [ ] The app quit while the picker is open (or killed): the windows' titles are gone from the state folder's `computers.json` within a minute (and at the server's next start). (where: second computer)
 - [ ] A borrowed window resized on the host (dragged, or its program resizing itself) keeps showing its first size: following the viewer's size and the host's is later (the status history says so). (where: second computer)
 - [ ] A window with a very long or odd title (emoji, right-to-left text) in the picker and in the viewing window's title bar: shown cut and without control characters, never garbled past the picker. (where: second computer)
 
