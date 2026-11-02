@@ -184,6 +184,8 @@ fn a_computers_pointer_reaches_the_window_apart_from_its_picture() {
     let mut step = 0u16;
     let started = Instant::now();
     let mut last_move = Instant::now();
+    let mut refreshing = false;
+    let mut told_places = false;
     while latencies.len() < 20 {
         assert!(
             started.elapsed() < Duration::from_secs(90),
@@ -201,10 +203,23 @@ fn a_computers_pointer_reaches_the_window_apart_from_its_picture() {
         }
         match next(&mut window) {
             Some(Message::Cursor(message)) => {
+                // The host says the whole pointer again every 1.5 s; the
+                // place in that is not a move to time.
+                if matches!(message, CursorMessage::Mode { .. }) {
+                    refreshing = places_asked;
+                }
+                let refreshed = matches!(message, CursorMessage::Move { .. })
+                    && std::mem::take(&mut refreshing);
                 if matches!(message, CursorMessage::Move { .. })
+                    && !refreshed
                     && let Some(at) = sent_at.take()
                 {
-                    latencies.push(at.elapsed());
+                    // The first place after asking is the host's answer to
+                    // the ask (where the pointer already was), not a move
+                    // to time.
+                    if std::mem::replace(&mut told_places, true) {
+                        latencies.push(at.elapsed());
+                    }
                 }
                 state.apply(message.clone());
                 heard.push(message);
@@ -234,18 +249,30 @@ fn a_computers_pointer_reaches_the_window_apart_from_its_picture() {
         "an image with something in it"
     );
     assert!(state.visible, "it shows");
+    // One shape for as many moves: sent again only by the host's refresh
+    // (every 1.5 s), whole, never as another image.
+    let shape_ids: std::collections::HashSet<u32> = heard
+        .iter()
+        .filter_map(|m| match m {
+            CursorMessage::Shape(s) => Some(s.id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(shape_ids.len(), 1, "one image: {shape_ids:?}");
     let shapes = heard
         .iter()
         .filter(|m| matches!(m, CursorMessage::Shape(_)))
         .count();
-    assert_eq!(
-        shapes, 1,
-        "one shape for as many moves: it is not sent again"
+    let refreshes = 2 + started.elapsed().as_millis() / 1500;
+    assert!(
+        shapes as u128 <= refreshes,
+        "the shape is not sent again but by a refresh: {shapes} in {:?}",
+        started.elapsed()
     );
     assert!(frames > 0, "the picture keeps coming");
     latencies.sort();
     println!(
-        "pointer moves ({} of them): shape {}x{} hotspot ({}, {}), sent once; \
+        "pointer moves ({} of them): shape {}x{} hotspot ({}, {}), one image; \
          a move of the host's pointer reaches the window in median {:?}, worst {:?} (loopback)",
         latencies.len(),
         shape.width,

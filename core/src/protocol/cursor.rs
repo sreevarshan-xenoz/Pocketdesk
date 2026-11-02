@@ -366,7 +366,14 @@ impl CursorState {
             // Nothing is drawn until the computer said the picture has no
             // pointer, whatever it sends.
             _ if !self.separate => false,
+            // The host says the current shape whole again now and then (a
+            // message may have been lost): the same one is no change, and
+            // keeps the image the window already made its pointer of.
             CursorMessage::Shape(shape) => {
+                if let Some(held) = self.shape.clone().filter(|s| s.id == shape.id) {
+                    self.cache.put(held);
+                    return false;
+                }
                 let shape = Arc::new(shape);
                 self.cache.put(shape.clone());
                 self.shape = Some(shape);
@@ -569,6 +576,28 @@ mod tests {
         assert!(!state.apply(CursorMessage::Use { id: a.id }), "already so");
         assert!(!state.apply(CursorMessage::Use { id: 12345 }), "never sent");
         assert_eq!(state.shape.as_ref().unwrap().id, a.id);
+    }
+
+    #[test]
+    fn the_current_shape_said_again_is_no_change_and_keeps_the_image_held() {
+        let mut state = CursorState::default();
+        state.apply(CursorMessage::Mode { separate: true });
+        let a = shape(1, 2, 2);
+        assert!(state.apply(CursorMessage::Shape(a.clone())));
+        let held = state.shape.clone().unwrap();
+        assert!(
+            !state.apply(CursorMessage::Shape(a.clone())),
+            "the host's refresh"
+        );
+        assert!(
+            Arc::ptr_eq(&held, state.shape.as_ref().unwrap()),
+            "the window keeps the pointer it made of the image"
+        );
+        // A shape that was lost and came whole by a refresh is then usable
+        // by its name.
+        let b = shape(2, 2, 2);
+        state.apply(CursorMessage::Shape(b.clone()));
+        assert!(state.apply(CursorMessage::Use { id: a.id }));
     }
 
     #[test]

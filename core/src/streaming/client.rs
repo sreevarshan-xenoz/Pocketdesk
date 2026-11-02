@@ -1049,9 +1049,40 @@ fn remote_stream(kind: u8, input_only: bool, sound: bool) -> RemoteStream {
     }
 }
 
-/// How long a pointer message may take to arrive whole: it holds up the
-/// streams behind it, which it must not for a link that lost it.
-const CURSOR_READ: Duration = Duration::from_millis(500);
+/// How long a pointer message may take to arrive whole before it is given
+/// up (the host says it again soon).
+const CURSOR_READ: Duration = Duration::from_secs(2);
+
+/// How many pointer messages wait to be read; a host that opens more has
+/// the rest dropped.
+const CURSOR_QUEUE: usize = 64;
+
+/// The pointer's message streams, each with its number, read one after
+/// another into `inbox` until the receive loop that feeds them ends. A
+/// message cut short, late or not understood is dropped.
+async fn read_cursor_messages(
+    mut streams: mpsc::Receiver<(u64, Box<dyn super::connection::InStream>)>,
+    inbox: Arc<super::cursor_feed::CursorInbox>,
+) {
+    while let Some((sequence, mut stream)) = streams.recv().await {
+        let Ok(Ok(data)) = tokio::time::timeout(
+            CURSOR_READ,
+            stream.read_to_end(crate::protocol::cursor::MAX_MESSAGE),
+        )
+        .await
+        else {
+            continue;
+        };
+        match crate::protocol::cursor::CursorMessage::decode(&data) {
+            Ok(Some(message)) => {
+                inbox.push(sequence, message);
+            }
+            // A kind a newer computer sends: skipped.
+            Ok(None) => {}
+            Err(e) => debug!(error = %e, "Pointer message not read"),
+        }
+    }
+}
 
 /// The largest control batch a cast reads (C8).
 const CONTROL_STREAM_MAX: usize = 16 * 1024;
@@ -1331,6 +1362,13 @@ async fn recv_with_cancel(
 
     let mut audio_dropped = 0u64;
     let mut audio_consumer_gone = false;
+    // The reader of the pointer's messages (local cursor), for a session
+    // that asked for them. It ends with this loop, which owns its queue.
+    let cursor_reader = remote.cursor.wanted().then(|| {
+        let (tx, rx) = mpsc::channel(CURSOR_QUEUE);
+        tokio::spawn(read_cursor_messages(rx, remote.cursor.clone()));
+        tx
+    });
 
     loop {
         tokio::select! {
@@ -1361,24 +1399,15 @@ async fn recv_with_cancel(
 
                         // The other computer's pointer (local cursor):
                         // read only by a session that asked for it, and
-                        // never as a picture. A message that is cut short
-                        // or late is dropped; the next says it again.
+                        // never as a picture. Its messages are read in a
+                        // task of their own, one after another, so one that
+                        // stalls holds up no picture; a message that is cut
+                        // short or late, or past the few waiting, is
+                        // dropped, and the host says it again (it refreshes
+                        // the whole pointer every 1.5 s).
                         if header.stream_kind == transport::STREAM_KIND_CURSOR {
-                            if remote.cursor.wanted()
-                                && let Ok(Ok(data)) = tokio::time::timeout(
-                                    CURSOR_READ,
-                                    recv_stream.read_to_end(crate::protocol::cursor::MAX_MESSAGE),
-                                )
-                                .await
-                            {
-                                match crate::protocol::cursor::CursorMessage::decode(&data) {
-                                    Ok(Some(message)) => {
-                                        remote.cursor.push(header.sequence, message);
-                                    }
-                                    // A kind a newer computer sends: skipped.
-                                    Ok(None) => {}
-                                    Err(e) => debug!(error = %e, "Pointer message not read"),
-                                }
+                            if let Some(readers) = &cursor_reader {
+                                let _ = readers.try_send((header.sequence, recv_stream));
                             }
                             continue;
                         }

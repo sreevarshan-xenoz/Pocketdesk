@@ -1174,16 +1174,15 @@ impl StreamingServer {
             .context("Failed to start screen capture")?;
             info!("Screen capture session started");
             // Said whether or not the capture could take the pointer out:
-            // the client keeps it in the picture on a no.
+            // the client keeps it in the picture on a no. The sender follows
+            // the feed from here, so a capture that gives the pointer up
+            // later (or puts it back in a window's picture) is said too.
             if let Some(feed) = cursor_feed.clone() {
-                let separate = feed.separate();
-                info!(separate, "Pointer sent apart from the picture");
-                tokio::spawn(run_cursor_sender(
-                    connection.clone(),
-                    feed,
-                    separate,
-                    cancel.clone(),
-                ));
+                info!(
+                    separate = feed.separate(),
+                    "Pointer sent apart from the picture"
+                );
+                tokio::spawn(run_cursor_sender(connection.clone(), feed, cancel.clone()));
             }
             // A capture that carries input itself (GNOME's and KDE's portal,
             // mutter) may find it refused only when the first event comes:
@@ -2659,13 +2658,22 @@ async fn send_cast_control(connection: &SharedConnection, batch: &[u8]) {
     }
 }
 
+/// How a pointer message went.
+enum CursorSent {
+    Yes,
+    /// The stream opened but the write failed: the viewer may not have it.
+    Failed,
+    /// The connection is gone.
+    Gone,
+}
+
 /// One pointer message on a stream of its own (local cursor): the header
 /// numbers it, so the viewer drops one that arrives after a newer.
 async fn send_cursor_message(
     connection: &SharedConnection,
     sequence: u64,
     message: &crate::protocol::cursor::CursorMessage,
-) -> bool {
+) -> CursorSent {
     let header = super::transport::PacketHeader {
         sequence,
         stream_kind: super::transport::STREAM_KIND_CURSOR,
@@ -2673,49 +2681,59 @@ async fn send_cursor_message(
         timestamp_us: 0,
     };
     let Ok(mut stream) = connection.open_uni().await else {
-        return false;
+        return CursorSent::Gone;
     };
     let sent = async {
         stream.write_all(&header.as_bytes()).await?;
         stream.write_all(&message.encode()).await
     }
     .await;
-    if let Err(e) = sent {
-        debug!(error = %e, "Could not send the pointer to the viewer");
-    }
     let _ = stream.finish();
-    true
+    match sent {
+        Ok(()) => CursorSent::Yes,
+        Err(e) => {
+            debug!(error = %e, "Could not send the pointer to the viewer");
+            CursorSent::Failed
+        }
+    }
 }
 
-/// The pointer to a viewer that draws it (local cursor): first whether the
-/// picture has it taken out (`separate`), then, if so, its shape, whether
-/// it shows, and, while the viewer asked, where it is, each as it changes
-/// and nothing while it does not. Ends with the session.
+/// The pointer to a viewer that draws it (local cursor): the mode first
+/// (whether the picture has the pointer taken out), then, while it has, the
+/// shape, whether it shows, and, while the viewer asked, where it is, each
+/// as it changes. A mode that changes later (the capture lost the pointer
+/// capture, a window's picture has it drawn in) is said at once. A message
+/// may be lost, so the whole of it is said again every
+/// [`REFRESH_EVERY`](super::cursor_feed::REFRESH_EVERY) once it was ever
+/// apart, and at once after a write that failed. Ends with the session.
 async fn run_cursor_sender(
     connection: SharedConnection,
     feed: super::cursor_feed::CursorFeed,
-    separate: bool,
     cancel: CancellationToken,
 ) {
-    use super::cursor_feed::{Marks, PLACE_EVERY, plan};
-    use crate::protocol::cursor::{CursorMessage, ShapeCache};
-    let mut sequence = 1u64;
-    if !send_cursor_message(&connection, sequence, &CursorMessage::Mode { separate }).await
-        || !separate
-    {
-        return;
-    }
-    let mut held = ShapeCache::default();
-    let mut marks = Marks::default();
+    use super::cursor_feed::{PLACE_EVERY, REFRESH_EVERY, RETRY_AFTER, Sender};
+    use crate::protocol::cursor::CursorMessage;
+    let mut sender = Sender::default();
+    let mut refresh_at = tokio::time::Instant::now() + REFRESH_EVERY;
     loop {
-        let pending = feed.take(&mut marks);
-        for message in plan(&pending, &mut held) {
-            sequence += 1;
-            if !send_cursor_message(&connection, sequence, &message).await {
-                return;
+        let now = tokio::time::Instant::now();
+        let refresh = now >= refresh_at;
+        if refresh {
+            refresh_at = now + REFRESH_EVERY;
+        }
+        let mut moved = false;
+        for (sequence, message) in sender.step(&feed, refresh) {
+            moved |= matches!(message, CursorMessage::Move { .. });
+            match send_cursor_message(&connection, sequence, &message).await {
+                CursorSent::Yes => {}
+                CursorSent::Failed => {
+                    sender.lost();
+                    refresh_at = refresh_at.min(tokio::time::Instant::now() + RETRY_AFTER);
+                }
+                CursorSent::Gone => return,
             }
         }
-        if pending.place.is_some() {
+        if moved {
             tokio::select! {
                 _ = cancel.cancelled() => return,
                 _ = tokio::time::sleep(PLACE_EVERY) => {}
@@ -2724,6 +2742,7 @@ async fn run_cursor_sender(
         tokio::select! {
             _ = cancel.cancelled() => return,
             _ = feed.changed() => {}
+            _ = tokio::time::sleep_until(refresh_at) => {}
         }
     }
 }
@@ -3425,7 +3444,7 @@ mod tests {
         let _ = rustls::crypto::ring::default_provider().install_default();
         use super::super::client::{CODEC_CAP_LOCAL_CURSOR, StreamingClient};
         use super::super::cursor_feed::CursorFeed;
-        use crate::protocol::cursor::{CursorMessage, CursorShape};
+        use crate::protocol::cursor::{CursorMessage, CursorShape, CursorState};
 
         let certs = std::sync::Arc::new(CertManager::new().expect("certs"));
         let alpn = vec![StreamTransportConfig::default().alpn];
@@ -3466,7 +3485,6 @@ mod tests {
         tokio::spawn(run_cursor_sender(
             server_conn.clone(),
             feed.clone(),
-            true,
             cancel.clone(),
         ));
         let mut got = Vec::new();
@@ -3503,6 +3521,42 @@ mod tests {
             frames.try_recv().is_err(),
             "a pointer message is never a frame"
         );
+
+        // Nothing changes, and the host still says the whole pointer again
+        // (a message may have been lost on the way): the mode, the shape
+        // that is current, whether it shows.
+        inbox.drain();
+        let mut again = Vec::new();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(6);
+        while again.len() < 3 && tokio::time::Instant::now() < deadline {
+            let _ = tokio::time::timeout(Duration::from_millis(200), inbox.arrived()).await;
+            again.extend(inbox.drain());
+        }
+        assert_eq!(again.first(), Some(&CursorMessage::Mode { separate: true }));
+        assert!(
+            again
+                .iter()
+                .any(|m| matches!(m, CursorMessage::Shape(s) if s.hot_x == 1)),
+            "the shape whole again: {again:?}"
+        );
+        assert!(again.contains(&CursorMessage::Visible(true)));
+
+        // The capture gives the pointer up: the viewer is told at once,
+        // and forgets what it held.
+        feed.set_separate(false);
+        let mut state = CursorState::default();
+        state.apply(CursorMessage::Mode { separate: true });
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let mut told = false;
+        while !told && tokio::time::Instant::now() < deadline {
+            let _ = tokio::time::timeout(Duration::from_millis(200), inbox.arrived()).await;
+            for message in inbox.drain() {
+                told |= message == (CursorMessage::Mode { separate: false });
+                state.apply(message);
+            }
+        }
+        assert!(told, "the mode of no, said at once");
+        assert!(!state.separate && state.shape.is_none());
         cancel.cancel();
     }
 
@@ -3546,12 +3600,7 @@ mod tests {
 
         let feed = CursorFeed::new();
         let cancel = CancellationToken::new();
-        tokio::spawn(run_cursor_sender(
-            server_conn.clone(),
-            feed,
-            false,
-            cancel.clone(),
-        ));
+        tokio::spawn(run_cursor_sender(server_conn.clone(), feed, cancel.clone()));
         let mut state = CursorState::default();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         let mut said = false;
