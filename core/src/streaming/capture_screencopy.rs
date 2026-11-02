@@ -448,6 +448,10 @@ fn run_capture_loop(
     // When a frame last went to the encoder: a still screen still sends one
     // each STATIC_HEARTBEAT, whichever way the compositor reports it.
     let mut last_sent = Instant::now();
+    // What a heartbeat is compared with: it is a repeat only when its pixels
+    // are the last frame's, or a change the compositor did not report goes
+    // out marked as one (Hyprland reports no damage at once).
+    let mut still = super::idle_repeats::StillPixels::default();
 
     loop {
         if cancel.is_cancelled() {
@@ -538,6 +542,7 @@ fn run_capture_loop(
             shm_buf = Some(ShmBuffer::new(w, h, stride, format)?);
             // New pixels: nothing in them to repeat yet.
             last_inverted = None;
+            still.changed();
         }
         let fb = shm_buf.as_ref().unwrap();
         let (pool, buffer) = fb.attach(&shm, &qh);
@@ -564,7 +569,10 @@ fn run_capture_loop(
             // writes into the buffer, so the last frame in it can be read.
             queue.roundtrip(&mut state)?;
             if let Some(inverted) = last_inverted {
-                if !send_frame(&frame_tx, fb.repack(inverted, w, h, stride), w, h, true) {
+                // The compositor wrote nothing: the buffer holds the last
+                // frame, unless an undamaged copy filled it since.
+                let repeat = still.buffer_repeat();
+                if !send_frame(&frame_tx, fb.repack(inverted, w, h, stride), w, h, repeat) {
                     debug!("Frame channel closed, stopping screencopy capture");
                     break;
                 }
@@ -632,12 +640,24 @@ fn run_capture_loop(
         }
         if emit || heartbeat {
             last_inverted = Some(inverted);
-            // Only the heartbeat, with no damage, repeats the last frame.
-            if !send_frame(&frame_tx, fb.repack(inverted, w, h, stride), w, h, !emit) {
+            let pixels = fb.repack(inverted, w, h, stride);
+            // The heartbeat, with no damage, repeats the last frame only if
+            // its pixels are the same; one that differs is a real change.
+            let repeat = if emit {
+                still.changed();
+                false
+            } else {
+                still.heartbeat(&pixels)
+            };
+            if !send_frame(&frame_tx, pixels, w, h, repeat) {
                 debug!("Frame channel closed, stopping screencopy capture");
                 break;
             }
             last_sent = Instant::now();
+        } else {
+            // Copied, undamaged, and not due: the buffer holds pixels no
+            // frame has carried.
+            still.unsent();
         }
         if !emit && !idle {
             info!("Screencopy: screen static, dropping to {IDLE_FPS} fps idle pacing");
