@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1322 open items.
+1326 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 40 |
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
-| A second computer | 190 |
+| A second computer | 194 |
 | A Linux desktop (the Azure VM serves for some) | 245 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 80 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
@@ -1363,6 +1363,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - An older computer (before this build) as the host, and an older one as the viewer: neither hides or draws anything extra; the view works as before. (where: second computer)
 - "Lock the pointer" on the window (Ctrl+Alt+Shift+M) over a host that sends its pointer apart: the other computer's pointer is painted over the picture where that computer says it is and follows the relative moves; freed, the window's own pointer takes the shape again. (where: second computer)
 - Over the internet and over Wi-Fi: a move of the free pointer is as quick as the mouse (it waits for nothing), and a locked pointer's painted copy follows the host's within about the link's round trip. (where: second computer)
+- A lossy link (Wi-Fi with loss, or `tc netem loss 10%` on the host): a pointer message that is lost does not leave the window with a wrong or no pointer for more than about two seconds (the host says the whole pointer again every 1.5 s), and a shape that changed during the loss shows after the next refresh. (where: second computer)
+- A Hyprland host shown in a window on another computer, a borrowed window of that host (its picture comes from the compositor's toplevel export): the window's picture shows the host's pointer (drawn into it) and the window draws none of its own, so there are never two or none, and showing the whole screen again leaves it out of the picture and draws it in the window. (where: second computer)
+- The host's pointer capture ending mid-view (kill the host's compositor-side client or restart the compositor's capture): the window goes back to its own pointer within a moment and the picture shows the host's pointer again. (where: second computer)
+- A GNOME or KDE host (portal or mutter) with a window of that host cropped in software, with this window's pointer locked: the painted pointer is placed over the whole screen's coordinates, not the crop's, so it is off by the crop's offset (a known gap; the free pointer is not affected). (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
