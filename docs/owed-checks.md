@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1277 open items.
+1283 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 89 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 90 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 197 |
 | A phone with a SIM | 40 |
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
-| A second computer | 170 |
-| A Linux desktop (the Azure VM serves for some) | 224 |
+| A second computer | 171 |
+| A Linux desktop (the Azure VM serves for some) | 228 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 80 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
 
@@ -212,6 +212,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **268. A still screen sends nothing to another computer's window (the window's stats, a still desktop)**
 
 - The phone is unchanged: the OPPO against a throwaway server on a still screen still gets its frame every second (the phone's decoder reads 10 silent seconds as a dead link), a session that stays up for a minute, and the server's log says `no_idle_repeats=false` for it. (where: here)
+
+**269. VA-API encodes each frame as it comes (phase 1b of the window handoff: `async_depth` 1, a yield after each packet send)**
+
+- The phone on a real device is unchanged or better: the OPPO against a throwaway server on this laptop's VA-API encoder at 1080p60 and 1080p30, H.264 and HEVC (`allow_hevc`): a smooth picture for a minute, the HUD's delay no higher than before, no drop in the frames a second, a keyframe after a pause and a rejoin comes within about 2 seconds, and the server's log has no "ignored async_depth" warning. (where: here)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -1319,6 +1323,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A keyframe on a still screen, with the FFmpeg sidecar encoder (a Windows host on its default NVENC, AMF, QSV or Media Foundation rung, not the opt-in `inproc-windows`): the sidecar cannot be told to emit a keyframe, so after one is asked for (the window's gap recovery, or a crop moved at the same size) the host keeps sending the capture's once-a-second repeats until its next scheduled keyframe goes out (the log's "Keyframe encoded" line), then they stop again ("Encoding task complete" names `repeats_skipped` above 0 for the whole run); the window never stays grey. (where: second computer)
 - An encoder that holds frames, on a still screen: a Windows host on an AMD card (AMF holds one frame) and one on Media Foundation (holds several; the debug log's "holds N frame(s) until the next input" names the lag). At session start on a still desktop the first picture comes out (never a blank window), and after a change the last picture is whole and sharp, not the one before it: the repeats go on for about N + 2 more after a change, then stop. (where: second computer)
 
+**269. VA-API encodes each frame as it comes (phase 1b of the window handoff: `async_depth` 1, a yield after each packet send)**
+
+- The other hardware rungs for a held frame, with the stage probe or a stopwatch on the host's side: NVENC in-process and sidecar on a Windows host (`delay 0`), AMF and QSV (`-async_depth 1`) and Media Foundation: the frame's packet comes out at its own frame, not the next (the debug log's "holds N frame(s) until the next input" absent). None of these can run on the laptop. (where: second computer)
+
 ## A Linux desktop (the Azure VM serves for some)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1866,7 +1874,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A Linux host on Hyprland or another wlroots desktop (screencopy's heartbeat), viewed from another computer: the same stillness numbers as the first item and a change shown at once. (where: linux)
 - Hyprland, a change the compositor did not report: Hyprland says "no damage" at once, so the capture's once-a-second copy is the only way some changes get out. Change the screen (type, play a video, drag a window) and let it rest: the window shows each new picture within about a second, none is dropped as a repeat, and a screen that then stays the same goes silent after the settling repeats. (where: linux)
 
-**269. Lending a window to another computer (the host side, phase 3a of the window handoff)**
+**269. VA-API encodes each frame as it comes (phase 1b of the window handoff: `async_depth` 1, a yield after each packet send)**
+
+- An AMD host with VA-API (Mesa radeonsi, `pocketdesk bench --target vaapi --frames 300` before and after, and the input-to-picture probe with `PD_LIVE_HEVC=1` too): the stage table's "enc: sent > packet out" near 0 and "frames in before its out" 0 for H.264 and HEVC, the encode call's p50 within the frame period at 1080p60 (the bench's p50 well under 16 ms), and no more dropped frames than before (the pictures count of the probe's run). Record the numbers in the status history. (where: linux)
+- An Intel host newer than Ice Lake, and a slower one (an Atom or Celeron iGPU): the same at 1080p60 and at 1440p or 4K at 60, where the sum of the copy, conversion and encode may pass the frame period; if it does, the session's picture rate falls below the asked rate (the stats overlay's frames a second in). (where: linux)
+- A host whose FFmpeg lacks `async_depth` on the VA-API encoders (an older FFmpeg, or a vendor build without it): the open logs "ignored async_depth: it may hold a frame until the next" and the stream works as before. (where: linux)
+- The sidecar VA-API rung (a host where the in-process VA-API open fails and the ladder falls to the sidecar, or a build without the `inproc` feature): the stream starts and the FFmpeg child accepts `-async_depth 1` with both `h264_vaapi` and `hevc_vaapi`. (where: linux)
+
+**270. Lending a window to another computer (the host side, phase 3a of the window handoff)**
 
 - On a real desktop session: the Arch laptop's own Hyprland, "Let my computers borrow my windows" on in Settings, Other computers, a computer paired both ways with Input allowed asking for an unimportant window (a terminal): the window leaves the laptop's screen, its picture is on the asking computer at its size, and typing and clicking there reach it; returned, it is on its old workspace, tiled or floating as it was, and the extra screen is gone. (where: linux)
 - The same on a real Sway session, with a window that has a title bar and border (the default `border normal`): put back with the same title bar, border and size. (where: linux)
