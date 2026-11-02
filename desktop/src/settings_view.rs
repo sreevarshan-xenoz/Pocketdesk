@@ -472,6 +472,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "computer_view_no_idle_repeats",
+        "Send nothing while the other screen is still",
+        Section::Computers,
+    ),
+    (
         "computer_view_lock_on_close",
         "Lock it when I close the window",
         Section::Computers,
@@ -796,6 +801,8 @@ pub fn applies_live(key: &str) -> bool {
             // view dials.
             | "computer_view_hw_decode"
             | "computer_view_hevc"
+            // Read by the server as each view dials.
+            | "computer_view_no_idle_repeats"
             // PC8: read by an open window at once.
             | "computer_view_lock_on_close"
             // Item 8: read as a window starts showing a computer.
@@ -2810,6 +2817,17 @@ impl SettingsForm {
                         "HEVC usually needs less bitrate for a moving picture, which helps most over the internet. Only with decoding on the graphics card on too: on the processor HEVC is slower than H.264. The other computer sends it only with H.265 (HEVC) on there, in its Settings under Phones (allow_hevc). Applies from the next view.",
                     );
                 });
+                // Phase 1a of the window handoff: a still screen sends nothing.
+                row(ui, "computer_view_no_idle_repeats", |ui| {
+                    ui.checkbox(
+                        &mut e.computer_view_no_idle_repeats,
+                        "send nothing while the other screen is still: a computer's screen window keeps its last picture, and the other computer stops repeating a screen that does not change",
+                    );
+                    note(
+                        ui,
+                        "Saves bandwidth and decoding, most over the internet or on a battery. A change on that screen shows at once. Turn it off if a still picture ever goes stale or grey; the other computer then repeats it once a second, as before. It needs this version on the other computer too (an older one repeats anyway), and a phone is not affected. Applies from the next view.",
+                    );
+                });
                 row(ui, "computer_view_lock_on_close", |ui| {
                     ui.checkbox(
                         &mut e.computer_view_lock_on_close,
@@ -3665,6 +3683,7 @@ mod tests {
             "computer_view_grab_keys",
             "computer_view_hw_decode",
             "computer_view_hevc",
+            "computer_view_no_idle_repeats",
             "computer_view_lock_on_close",
             "computer_view_fit",
             "computer_view_scancodes",

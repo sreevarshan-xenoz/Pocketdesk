@@ -556,6 +556,15 @@ pub struct Config {
     /// Read as each view dials. On by default.
     #[serde(default = "default_true")]
     pub computer_view_hevc: bool,
+    /// The window that shows another computer's screen asks the other
+    /// computer to send nothing while its screen is still: the window keeps
+    /// the last picture and the link is held by the connection's own
+    /// keepalive, so a still screen costs no bandwidth and no decoding
+    /// (`CODEC_CAP_NO_IDLE_REPEATS`, phase 1a of the window handoff). Off,
+    /// the other computer repeats a still screen's picture once a second,
+    /// as before. Read as each view dials. On by default.
+    #[serde(default = "default_true")]
+    pub computer_view_no_idle_repeats: bool,
     /// The other computer is locked as the window that shows its screen
     /// closes (PC8), with that computer's own lock, which its "Lock, sleep,
     /// privacy and wake others" switch for this one allows. Off until
@@ -902,6 +911,7 @@ impl Default for Config {
             computer_view_grab_keys: true,
             computer_view_hw_decode: true,
             computer_view_hevc: true,
+            computer_view_no_idle_repeats: true,
             computer_view_lock_on_close: false,
             computer_view_fit: false,
             computer_view_scancodes: false,
@@ -1199,6 +1209,7 @@ impl Config {
         "computer_view_grab_keys",
         "computer_view_hw_decode",
         "computer_view_hevc",
+        "computer_view_no_idle_repeats",
         "computer_view_lock_on_close",
         "computer_view_fit",
         "computer_view_scancodes",
@@ -1791,6 +1802,37 @@ phone_battery = \"x\"
         assert_eq!(
             Config::default().changed_keys(&chosen),
             ["computer_view_hevc"]
+        );
+    }
+
+    /// Phase 1a of the window handoff: the window asks the other computer
+    /// to send nothing while its screen is still until turned off, and the
+    /// choice saves and reads back.
+    #[test]
+    fn a_computers_window_asks_for_no_idle_repeats_until_turned_off() {
+        let path = temp("computer-view-no-idle-repeats");
+        std::fs::write(&path, "").unwrap();
+        assert!(
+            Config::load_from(&path)
+                .unwrap()
+                .computer_view_no_idle_repeats
+        );
+        assert!(Config::default().computer_view_no_idle_repeats);
+        let chosen = Config {
+            computer_view_no_idle_repeats: false,
+            ..Config::default()
+        };
+        chosen
+            .save_keys_to(&path, &["computer_view_no_idle_repeats"])
+            .unwrap();
+        assert!(
+            !Config::load_from(&path)
+                .unwrap()
+                .computer_view_no_idle_repeats
+        );
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["computer_view_no_idle_repeats"]
         );
     }
 

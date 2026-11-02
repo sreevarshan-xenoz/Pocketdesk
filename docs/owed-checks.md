@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1262 open items.
+1263 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 40 |
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
-| A second computer | 165 |
+| A second computer | 166 |
 | A Linux desktop (the Azure VM serves for some) | 214 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 80 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
@@ -1310,6 +1310,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The link is not taken for dead: leave a window on a still screen for 10 minutes: it does not say "Reconnecting", the host's log (`pocketdesk logs`) shows the session unbroken, and "Encoding task complete" at the end names `repeats_skipped` above 0. (where: second computer)
 - The stats overlay on a still screen says the screen is at rest, not that frames are missing, and returns to the numbers ("Frames: 24 a second in, 24 shown") as soon as the host moves. (where: second computer)
 - Both directions of the mix: a window from after this change on a host from before it still gets its repeats (about 1 frame a second on a still screen; nothing breaks), and a window from before on a host from after still works (it sends no bit, so repeats go on). (where: second computer)
+- The switch: Settings → Other computers → "Send nothing while the other screen is still" (`computer_view_no_idle_repeats`, on) turned off, then a new window on the same still host: from the next view the stats read about 1 frame a second again ("Frames: 1 a second in", no "the screen is still") and `repeats_skipped` stays 0 in the host's "Encoding task complete"; turned on again, the next new window is quiet as above. The switch is read as each view dials, so an open window keeps what it started with. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
