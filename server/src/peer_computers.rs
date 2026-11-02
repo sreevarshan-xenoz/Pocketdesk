@@ -228,6 +228,16 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     fit,
                     borrow,
                 } => {
+                    // A borrowed window not named by a window id is no view:
+                    // showing `monitor` instead would show the other
+                    // computer's own screen, which was not what was picked.
+                    if borrow
+                        .as_deref()
+                        .is_some_and(|w| !crate::lend_window::is_window_id(w))
+                    {
+                        tracing::warn!("A view of a window that is not a window id was not shown");
+                        continue;
+                    }
                     // PC6: viewed now, for the recents, off the runtime.
                     let (at, id) = (dir.clone(), device_id.clone());
                     tokio::task::spawn_blocking(move || viewed(&at, &id));
@@ -244,7 +254,7 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                         fit: fit
                             .filter(|f| f.width > 0 && f.height > 0)
                             .filter(|_| borrow.is_none()),
-                        borrow: borrow.filter(|w| crate::lend_window::is_window_id(w)),
+                        borrow,
                     };
                     if views.send(start).await.is_err() {
                         tracing::warn!(
