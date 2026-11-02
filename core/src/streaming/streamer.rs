@@ -1553,6 +1553,7 @@ impl StreamingServer {
                         // Only successful encodes are sampled: a failed one tells
                         // the C2 ladder's story, not the frame-pacing story.
                         let encode_started = Instant::now();
+                        super::latency_trace::encoder_in(frame.timestamp);
                         match encoder.encode_frame(&frame) {
                             Ok(packets) if !packets.is_empty() => {
                                 if let Some(recorder) = &encode_recorder {
@@ -1573,6 +1574,12 @@ impl StreamingServer {
                                         debug!("Keyframe encoded (seq={}, size={} bytes)", packet.sequence, packet.data.len());
                                     }
                                     trace_packet_stats(&packet);
+                                    super::latency_trace::encoder_out(
+                                        packet.timestamp,
+                                        packet.sequence,
+                                        packet.data.len(),
+                                        packet.is_keyframe,
+                                    );
 
                                     // Send packet to transport
                                     if packet_tx.send(packet).await.is_err() {
@@ -1763,6 +1770,7 @@ impl StreamingServer {
                                         continue;
                                     }
                                     in_flight.push(send_stream.delivered());
+                                    super::latency_trace::written(packet.sequence);
 
                                     packets_sent += 1;
                                     bytes_sent += data_len as u64;
@@ -1988,6 +1996,11 @@ impl StreamingServer {
                                         // Parse as binary InputPacket
                                         match InputPacket::decode(&data) {
                                             Ok(packet) => {
+                                                if let InputPacket::MouseMoveAbs { x_norm, .. } =
+                                                    &packet
+                                                {
+                                                    super::latency_trace::input(*x_norm);
+                                                }
                                                 // The client's measurements are
                                                 // control-plane: they never reach
                                                 // the injector and are not blocked
