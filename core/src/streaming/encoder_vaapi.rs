@@ -28,16 +28,17 @@
 //! operators who want to pin one. This is why the encoder works out of the box
 //! here instead of dying on the hardcoded `renderD128` the sidecar used.
 
-use std::collections::VecDeque;
-use std::ffi::{CStr, CString};
+use std::collections::{HashMap, VecDeque};
+use std::ffi::{CStr, CString, c_void};
 use std::os::raw::c_int;
 use std::path::PathBuf;
-use std::sync::Once;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Once};
 use std::time::Instant;
 
 use tracing::{debug, info, warn};
 
+use super::dmabuf::{DRM_FORMAT_XRGB8888, DmaBuf};
 use super::encoder::detect_keyframe;
 use super::keyframes::Plan;
 use super::latency_trace::{self, Step};
@@ -239,6 +240,9 @@ struct GpuConvert {
     upload: *mut ffmpeg::ffi::AVFrame,
     /// A host-memory view of the capture's bytes: pointers only, no buffer.
     view: *mut ffmpeg::ffi::AVFrame,
+    /// The capture's DMA-BUFs, each imported as a BGR0 surface once and kept
+    /// while its buffer is in use (the capture reuses a few).
+    maps: HashMap<u64, Mapped>,
     /// Set when a frame went into the graph but none came out: the graph
     /// may still hold it, and every later frame would come out one behind.
     /// Each call then fails, so the streamer opens a new encoder.
@@ -270,6 +274,7 @@ impl GpuConvert {
             upload_frames_ref: std::ptr::null_mut(),
             upload: std::ptr::null_mut(),
             view: std::ptr::null_mut(),
+            maps: HashMap::new(),
             stuck: false,
         };
         unsafe {
@@ -426,11 +431,338 @@ impl GpuConvert {
         }
         Ok(())
     }
+
+    /// Convert the capture's DMA-BUF into `out` as an NV12 surface stamped
+    /// `pts`, with no copy and no upload: the buffer is imported as a BGR0
+    /// surface of the pool's context (once per buffer, kept) and goes into
+    /// the same graph a frame of bytes does. `ts` is the frame the trace
+    /// names.
+    ///
+    /// # Safety
+    /// `out` is a live, reusable `AVFrame`.
+    unsafe fn convert_dmabuf(
+        &mut self,
+        buf: &Arc<DmaBuf>,
+        pts: i64,
+        out: *mut ffmpeg::ffi::AVFrame,
+        ts: Option<Instant>,
+    ) -> anyhow::Result<()> {
+        use ffmpeg::ffi;
+        anyhow::ensure!(
+            !self.stuck,
+            "video processor out of step: a frame went in and none came out"
+        );
+        if !self.maps.contains_key(&buf.id) {
+            // Imports of buffers that are gone (the capture made new ones, or
+            // ended) go first: each frees the card's memory it kept alive.
+            if self.maps.len() >= MAPS_KEPT {
+                self.maps.retain(|_, m| m.buf.strong_count() > 0);
+            }
+            // SAFETY: `upload_frames_ref` is the live BGR0 surface context.
+            let frame = unsafe { map_dmabuf(self.upload_frames_ref, buf)? };
+            self.maps.insert(
+                buf.id,
+                Mapped {
+                    buf: Arc::downgrade(buf),
+                    frame,
+                },
+            );
+        }
+        let mapped = self.maps[&buf.id].frame;
+        // SAFETY: `mapped` is a live import kept in `maps`; `upload`, `src`,
+        // `sink` and `out` are the converter's own live objects, and the graph
+        // takes the reference made here.
+        unsafe {
+            ffi::av_frame_unref(self.upload);
+            let r = ffi::av_frame_ref(self.upload, mapped);
+            anyhow::ensure!(r >= 0, "frame reference: {}", describe_err(r));
+            (*self.upload).pts = pts;
+            // The graph takes this reference, so `upload` is empty again for
+            // the next frame; the kept import is untouched.
+            let r = ffi::av_buffersrc_add_frame_flags(self.src, self.upload, 0);
+            anyhow::ensure!(r >= 0, "video processor in: {}", describe_err(r));
+            ffi::av_frame_unref(out);
+            let r = ffi::av_buffersink_get_frame(self.sink, out);
+            self.stuck = r < 0;
+            anyhow::ensure!(r >= 0, "video processor out: {}", describe_err(r));
+            if let Some(ts) = ts {
+                latency_trace::encoder_step(ts, Step::Converted);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// How many imported buffers a converter keeps before it lets go of those
+/// whose buffer is gone.
+const MAPS_KEPT: usize = 8;
+
+/// A DMA-BUF imported as a BGR0 VA surface. The driver took its own reference
+/// to the memory when it imported it, so the surface outlives the descriptor.
+struct Mapped {
+    buf: std::sync::Weak<DmaBuf>,
+    frame: *mut ffmpeg::ffi::AVFrame,
+}
+
+impl Drop for Mapped {
+    fn drop(&mut self) {
+        // SAFETY: the frame came from `map_dmabuf` and is freed once; that
+        // destroys the VA surface made of the buffer.
+        unsafe { ffmpeg::ffi::av_frame_free(&mut self.frame) };
+    }
+}
+
+/// What the `AV_PIX_FMT_DRM_PRIME` frame points at: the descriptor, which
+/// the mapping keeps a reference to for as long as it lives. The buffer
+/// itself is not held: the driver imports it during the map.
+struct DrmHolder {
+    desc: ffmpeg::ffi::AVDRMFrameDescriptor,
+}
+
+unsafe extern "C" fn free_drm_holder(opaque: *mut c_void, _data: *mut u8) {
+    // SAFETY: `opaque` is the `Box<DrmHolder>` given to `av_buffer_create`
+    // in `map_dmabuf`, which calls this once when the last reference goes.
+    drop(unsafe { Box::from_raw(opaque as *mut DrmHolder) });
+}
+
+/// Import `buf` as a VA surface of `frames_ref` (a BGR0 `AV_PIX_FMT_VAAPI`
+/// context of the buffer's size): FFmpeg's `av_hwframe_map` from a
+/// `AV_PIX_FMT_DRM_PRIME` frame, which has the driver import the dma-buf.
+/// The buffer is declared XRGB8888 whatever alpha it was made with: the
+/// bytes are the same and the surface ignores alpha.
+///
+/// # Safety
+/// `frames_ref` is a live VAAPI frames context.
+unsafe fn map_dmabuf(
+    frames_ref: *mut ffmpeg::ffi::AVBufferRef,
+    buf: &Arc<DmaBuf>,
+) -> anyhow::Result<*mut ffmpeg::ffi::AVFrame> {
+    use ffmpeg::ffi;
+    anyhow::ensure!(
+        buf.fourcc != 0 && buf.stride >= buf.width * 4,
+        "a bad buffer"
+    );
+    // SAFETY: AVDRMFrameDescriptor is plain data; all-zero is a valid empty one.
+    let mut desc: ffi::AVDRMFrameDescriptor = unsafe { std::mem::zeroed() };
+    desc.nb_objects = 1;
+    desc.objects[0].fd = std::os::fd::AsRawFd::as_raw_fd(&buf.fd);
+    desc.objects[0].size = buf.size();
+    desc.objects[0].format_modifier = buf.modifier;
+    desc.nb_layers = 1;
+    desc.layers[0].format = DRM_FORMAT_XRGB8888;
+    desc.layers[0].nb_planes = 1;
+    desc.layers[0].planes[0].object_index = 0;
+    desc.layers[0].planes[0].offset = buf.offset as isize;
+    desc.layers[0].planes[0].pitch = buf.stride as isize;
+    let holder = Box::into_raw(Box::new(DrmHolder { desc }));
+    // SAFETY: the data pointer is the descriptor inside the holder, which
+    // stays put until `free_drm_holder` frees it with the buffer reference.
+    let data_ref = unsafe {
+        ffi::av_buffer_create(
+            &mut (*holder).desc as *mut _ as *mut u8,
+            std::mem::size_of::<ffi::AVDRMFrameDescriptor>(),
+            Some(free_drm_holder),
+            holder as *mut c_void,
+            ffi::AV_BUFFER_FLAG_READONLY,
+        )
+    };
+    if data_ref.is_null() {
+        // SAFETY: the holder was not taken by a buffer; freed here, once.
+        drop(unsafe { Box::from_raw(holder) });
+        anyhow::bail!("av_buffer_create failed");
+    }
+    // SAFETY: plain frame allocation; the descriptor's buffer reference is
+    // handed to `src`, which frees it with the frame.
+    unsafe {
+        let mut src = ffi::av_frame_alloc();
+        let mut dst = ffi::av_frame_alloc();
+        if src.is_null() || dst.is_null() {
+            ffi::av_frame_free(&mut src);
+            ffi::av_frame_free(&mut dst);
+            let mut data_ref = data_ref;
+            ffi::av_buffer_unref(&mut data_ref);
+            anyhow::bail!("av_frame_alloc failed");
+        }
+        (*src).format = ffi::AVPixelFormat::AV_PIX_FMT_DRM_PRIME as c_int;
+        (*src).width = buf.width as c_int;
+        (*src).height = buf.height as c_int;
+        (*src).data[0] = (*data_ref).data;
+        (*src).buf[0] = data_ref;
+        (*dst).format = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI as c_int;
+        (*dst).width = buf.width as c_int;
+        (*dst).height = buf.height as c_int;
+        (*dst).hw_frames_ctx = ffi::av_buffer_ref(frames_ref);
+        let r = if (*dst).hw_frames_ctx.is_null() {
+            -libc::ENOMEM
+        } else {
+            ffi::av_hwframe_map(dst, src, ffi::AV_HWFRAME_MAP_READ as c_int)
+        };
+        // The mapping keeps its own reference to the source.
+        ffi::av_frame_free(&mut src);
+        if r < 0 {
+            ffi::av_frame_free(&mut dst);
+            anyhow::bail!(
+                "importing the dma-buf (modifier {:#x}): {}",
+                buf.modifier,
+                describe_err(r)
+            );
+        }
+        Ok(dst)
+    }
+}
+
+/// A VA-API device and converter the capture tries its buffers on, and reads
+/// them back with: the DMA-BUF capture's check that the card takes what the
+/// compositor will be given, and a frame's read back to the processor
+/// ([`super::dmabuf::GpuFrame::download`]).
+pub(crate) struct Importer {
+    device_ref: *mut ffmpeg::ffi::AVBufferRef,
+    convert: GpuConvert,
+    out: *mut ffmpeg::ffi::AVFrame,
+    node: String,
+    width: u32,
+    height: u32,
+}
+
+// SAFETY: the device, converter and frames are only used through `&mut self`
+// or `&self` by the one thread that owns the importer at a time (the
+// capture's, or the read-back's behind a mutex).
+unsafe impl Send for Importer {}
+
+impl Importer {
+    /// Open the device the in-process encoder opens, and a converter for
+    /// `width`x`height`.
+    pub(crate) fn open(width: u32, height: u32) -> anyhow::Result<Self> {
+        use ffmpeg::ffi;
+        FFMPEG_INIT.call_once(|| {
+            if let Err(e) = ffmpeg::init() {
+                warn!("FFmpeg init failed (continuing): {}", e);
+            }
+            ffmpeg::log::set_level(ffmpeg::log::Level::Warning);
+        });
+        // SAFETY: a fresh device reference, owned by the importer from here
+        // on and released in `Drop` (or below on a failure).
+        let (mut device_ref, node) = unsafe { open_vaapi_device()? };
+        let made = GpuConvert::new(device_ref, width, height, 60);
+        let (convert, mut out_ref) = match made {
+            Ok(m) => m,
+            Err(e) => {
+                // SAFETY: the reference made above, released once.
+                unsafe { ffi::av_buffer_unref(&mut device_ref) };
+                return Err(e);
+            }
+        };
+        // SAFETY: the output context reference is not needed here.
+        unsafe { ffi::av_buffer_unref(&mut out_ref) };
+        // SAFETY: plain frame allocation, freed in `Drop`.
+        let out = unsafe { ffi::av_frame_alloc() };
+        if out.is_null() {
+            drop(convert);
+            // SAFETY: as above.
+            unsafe { ffi::av_buffer_unref(&mut device_ref) };
+            anyhow::bail!("av_frame_alloc failed");
+        }
+        Ok(Self {
+            device_ref,
+            convert,
+            out,
+            node,
+            width,
+            height,
+        })
+    }
+
+    /// The render node the device opened on.
+    pub(crate) fn node(&self) -> &str {
+        &self.node
+    }
+
+    /// Whether this importer was opened for pictures of this size.
+    pub(crate) fn matches(&self, width: u32, height: u32) -> bool {
+        self.width == width && self.height == height
+    }
+
+    /// Whether the card takes `buf`: imports it and runs it through the
+    /// video processor to an NV12 surface, as the encoder will.
+    pub(crate) fn verify(&mut self, buf: &Arc<DmaBuf>) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            buf.width == self.width && buf.height == self.height,
+            "a buffer of another size"
+        );
+        // SAFETY: `out` is a live frame, reused.
+        unsafe { self.convert.convert_dmabuf(buf, 0, self.out, None) }
+    }
+
+    /// The picture in `buf` as NV12 bytes (Y rows, then the interleaved UV
+    /// rows), as the video processor makes it for the encoder. Read from the
+    /// processor's own output surface: a surface made of an imported buffer
+    /// is never read back by the processor's CPU path (the driver's
+    /// detiling of an imported tiled buffer is not reliable).
+    pub(crate) fn nv12_of(&mut self, buf: &Arc<DmaBuf>) -> anyhow::Result<Vec<u8>> {
+        self.verify(buf)?;
+        self.read_out()
+    }
+
+    /// The same for a picture in memory (BGRA rows of `stride` bytes), made
+    /// by the card's upload path: what a buffer's picture is compared with.
+    pub(crate) fn nv12_of_bytes(&mut self, bgra: &[u8], stride: u32) -> anyhow::Result<Vec<u8>> {
+        // SAFETY: `out` is a live frame, reused.
+        unsafe {
+            self.convert
+                .convert(bgra, stride, self.width, self.height, 0, self.out, None)?;
+        }
+        self.read_out()
+    }
+
+    /// The NV12 picture the processor last made, copied to memory.
+    fn read_out(&self) -> anyhow::Result<Vec<u8>> {
+        use ffmpeg::ffi;
+        let (w, h) = (self.width as usize, self.height as usize);
+        // SAFETY: `out` holds the processor's surface; the frame made here is
+        // freed on every path.
+        unsafe {
+            let mut sw = ffi::av_frame_alloc();
+            anyhow::ensure!(!sw.is_null(), "av_frame_alloc failed");
+            (*sw).format = ffi::AVPixelFormat::AV_PIX_FMT_NV12 as c_int;
+            (*sw).width = w as c_int;
+            (*sw).height = h as c_int;
+            let r = ffi::av_hwframe_transfer_data(sw, self.out, 0);
+            let result = if r < 0 {
+                Err(anyhow::anyhow!("read back: {}", describe_err(r)))
+            } else {
+                let mut bytes = Vec::with_capacity(w * h * 3 / 2);
+                for (plane, rows) in [(0usize, h), (1usize, h / 2)] {
+                    let stride = (*sw).linesize[plane] as usize;
+                    for y in 0..rows {
+                        let src = std::slice::from_raw_parts((*sw).data[plane].add(y * stride), w);
+                        bytes.extend_from_slice(src);
+                    }
+                }
+                Ok(bytes)
+            };
+            ffi::av_frame_free(&mut sw);
+            result
+        }
+    }
+}
+
+impl Drop for Importer {
+    fn drop(&mut self) {
+        // SAFETY: the frame and device reference are the importer's own,
+        // released once; the converter (field) drops after and releases its
+        // surfaces, which hold the device too.
+        unsafe {
+            ffmpeg::ffi::av_frame_free(&mut self.out);
+            ffmpeg::ffi::av_buffer_unref(&mut self.device_ref);
+        }
+    }
 }
 
 impl Drop for GpuConvert {
     fn drop(&mut self) {
         use ffmpeg::ffi;
+        // The imported buffers first: each destroys its surface.
+        self.maps.clear();
         unsafe {
             ffi::av_frame_free(&mut self.view);
             ffi::av_frame_free(&mut self.upload);
@@ -713,6 +1045,12 @@ impl VaapiEncoder {
         self.codec_name
     }
 
+    /// Whether this encoder takes a frame still on the card (a DMA-BUF from
+    /// the capture) as it is: only the card's own conversion does.
+    pub fn takes_dmabuf(&self) -> bool {
+        matches!(self.convert, Convert::Gpu(_))
+    }
+
     pub fn encode_frame(&mut self, frame: &VideoFrame) -> anyhow::Result<Option<EncodedPacket>> {
         use ffmpeg::ffi;
 
@@ -725,20 +1063,41 @@ impl VaapiEncoder {
         let hw = self.hw_frame;
         let sequence = self.sequence;
         match &mut self.convert {
-            Convert::Gpu(gc) => unsafe {
+            Convert::Gpu(gc) => match &frame.gpu {
+                // A frame still on the card (the DMA-BUF capture) is imported
+                // as a surface and converted: no copy and no upload.
+                Some(gpu) => {
+                    let buf = gpu.dmabuf();
+                    anyhow::ensure!(
+                        buf.width == self.config.width && buf.height == self.config.height,
+                        "a {}x{} buffer for a {}x{} encoder",
+                        buf.width,
+                        buf.height,
+                        self.config.width,
+                        self.config.height
+                    );
+                    // SAFETY: `hw` is the encoder's live, reusable frame.
+                    unsafe { gc.convert_dmabuf(buf, sequence as i64, hw, Some(frame.timestamp))? }
+                }
                 // The capture's bytes go straight to a surface; the card
                 // converts them (it says its own steps).
-                gc.convert(
-                    &frame.data,
-                    frame.stride,
-                    self.config.width,
-                    self.config.height,
-                    sequence as i64,
-                    hw,
-                    Some(frame.timestamp),
-                )?;
+                None => unsafe {
+                    gc.convert(
+                        &frame.data,
+                        frame.stride,
+                        self.config.width,
+                        self.config.height,
+                        sequence as i64,
+                        hw,
+                        Some(frame.timestamp),
+                    )?;
+                },
             },
             Convert::Cpu(cc) => {
+                // The processor path needs the pixels: a frame on the card is
+                // read back first.
+                let read_back = frame.downloaded()?;
+                let frame = read_back.as_ref().unwrap_or(frame);
                 cc.copy_frame(frame, self.config.width, self.config.height);
                 latency_trace::encoder_step(frame.timestamp, Step::Copied);
                 cc.scaler.run(&cc.bgra, &mut cc.nv12)?;
@@ -901,6 +1260,7 @@ pub fn vaapi_available() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::streaming::dmabuf::DmaBuf;
     use crate::streaming::encoder::find_start_code;
 
     fn nodes(indices: &[u32]) -> Vec<PathBuf> {
@@ -1266,6 +1626,122 @@ mod tests {
         };
         let small = gradient_frame(640, 360, 0);
         assert!(encoder.encode_frame(&small).is_err());
+    }
+
+    /// Write `frame`'s rows into a linear buffer through a mapping.
+    fn fill(buf: &DmaBuf, frame: &VideoFrame) {
+        let len = buf.size();
+        // SAFETY: a shared read-write mapping of the dma-buf's `len` bytes,
+        // written inside its bounds and unmapped below.
+        unsafe {
+            let ptr = libc::mmap(
+                std::ptr::null_mut(),
+                len,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_SHARED,
+                std::os::fd::AsRawFd::as_raw_fd(&buf.fd),
+                0,
+            );
+            assert_ne!(ptr, libc::MAP_FAILED, "mmap");
+            let row = buf.width as usize * 4;
+            for y in 0..buf.height as usize {
+                let to = buf.offset as usize + y * buf.stride as usize;
+                assert!(to + row <= len);
+                std::ptr::copy_nonoverlapping(
+                    frame.data.as_ptr().add(y * frame.stride as usize),
+                    (ptr as *mut u8).add(to),
+                    row,
+                );
+            }
+            libc::munmap(ptr, len);
+        }
+    }
+
+    /// A DMA-BUF through the card's own conversion makes the packets the same
+    /// pixels in memory make, and many frames through a few buffers leave no
+    /// descriptor behind. Self-skips where no VA-API device opens, libgbm is
+    /// missing, or the card cannot import a buffer.
+    #[test]
+    fn a_dma_buf_frame_encodes_as_its_bytes_and_leaks_nothing() {
+        use crate::streaming::dmabuf::{
+            DEVICE_TESTS, DRM_FORMAT_XRGB8888, Gbm, MOD_LINEAR, Pool, dmabuf_fds,
+        };
+        let _only = DEVICE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        if !vaapi_available() {
+            eprintln!("skipping dma-buf test: no usable VAAPI device on this host");
+            return;
+        }
+        let (w, h) = (1280u32, 720u32);
+        let Ok(importer) = Importer::open(w, h) else {
+            eprintln!("skipping dma-buf test: the card's converter does not open");
+            return;
+        };
+        let Ok(gbm) = Gbm::open(importer.node()) else {
+            eprintln!("skipping dma-buf test: no GBM on {}", importer.node());
+            return;
+        };
+        drop(importer);
+        let before = dmabuf_fds();
+        let made: Vec<_> = (0..4)
+            .map(|_| gbm.alloc(w, h, DRM_FORMAT_XRGB8888, MOD_LINEAR))
+            .collect();
+        let Ok(buffers) = made.into_iter().collect::<anyhow::Result<Vec<_>>>() else {
+            eprintln!("skipping dma-buf test: GBM makes no linear buffer here");
+            return;
+        };
+        let mut pool = Pool::new(buffers);
+        assert_eq!(dmabuf_fds(), before + 4);
+        let config = StreamingConfig {
+            width: w,
+            height: h,
+            fps: 60,
+            bitrate_bps: 4_000_000,
+            codec: VideoCodec::H264,
+            ..StreamingConfig::default()
+        };
+        let Ok(mut on_card) =
+            VaapiEncoder::open(config.clone(), Plan::choose(false, 60, false), true)
+        else {
+            eprintln!("skipping dma-buf test: the card path is not available here");
+            return;
+        };
+        let mut in_memory =
+            VaapiEncoder::open(config, Plan::choose(false, 60, false), true).expect("same again");
+        assert!(on_card.takes_dmabuf());
+        for i in 0..300usize {
+            let picture = gradient_frame(w, h, i % 40);
+            let Some(frame) = pool.acquire() else {
+                panic!("frame {i}: every buffer is held, though each frame is let go");
+            };
+            fill(frame.dmabuf(), &picture);
+            let from_buffer = VideoFrame {
+                data: Vec::new(),
+                width: w,
+                height: h,
+                stride: w * 4,
+                timestamp: Instant::now(),
+                gpu: Some(frame),
+                repeat: false,
+            };
+            let a = on_card
+                .encode_frame(&from_buffer)
+                .unwrap()
+                .expect("a packet");
+            let b = in_memory.encode_frame(&picture).unwrap().expect("a packet");
+            assert_eq!(a.sequence, b.sequence);
+            if i < 20 {
+                // The same pixels, the same processor, the same encoder.
+                assert_eq!(a.data, b.data, "frame {i}: the packets differ");
+            }
+        }
+        assert_eq!(
+            dmabuf_fds(),
+            before + 4,
+            "descriptors left over by 300 frames"
+        );
+        drop((on_card, in_memory));
+        drop(pool);
+        assert_eq!(dmabuf_fds(), before, "the buffers' descriptors are closed");
     }
 
     fn gradient_frame(w: u32, h: u32, shift: usize) -> VideoFrame {

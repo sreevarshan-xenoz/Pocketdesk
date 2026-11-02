@@ -26,6 +26,11 @@ pub struct CaptureSession {
     /// Turns true once this session's input is found refused (the portal's
     /// or mutter's "not allowed"); only a capture that carries input has it.
     input_refused: Option<tokio::sync::watch::Receiver<bool>>,
+    /// While true the capture may hand the encoder DMA-BUFs (frames still on
+    /// the card) instead of copies in memory; the streamer sets it false for
+    /// good when its encoder or a crop needs the pixels. Only the wlroots
+    /// capture has one.
+    zero_copy: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl CaptureSession {
@@ -36,7 +41,23 @@ impl CaptureSession {
             config,
             cancel,
             input_refused: None,
+            zero_copy: None,
         }
+    }
+
+    /// Carry the switch that lets the capture send DMA-BUFs.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub(crate) fn with_zero_copy(
+        mut self,
+        switch: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
+        self.zero_copy = Some(switch);
+        self
+    }
+
+    /// The switch for the capture's DMA-BUFs, for a capture that has them.
+    pub fn zero_copy_switch(&self) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+        self.zero_copy.clone()
     }
 
     /// Carry the signal that this session's input is refused.
