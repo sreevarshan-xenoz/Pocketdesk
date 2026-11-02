@@ -16,6 +16,7 @@ mod computers_view;
 mod diagnostics_view;
 mod direct_link_view;
 mod fonts;
+mod frame_pacing;
 mod input_options;
 mod kdeconnect_view;
 mod keymap_view;
@@ -62,6 +63,9 @@ mod view_pointer;
 #[cfg(all(test, target_os = "linux"))]
 mod view_present_live;
 mod view_present_trace;
+// Moves windows about in a Wayland compositor of its own: a Linux test.
+#[cfg(all(test, target_os = "linux"))]
+mod view_stall_live;
 mod widgets;
 
 use eframe::egui;
@@ -152,11 +156,13 @@ fn main() -> eframe::Result {
         },
     };
 
-    // The swap waits for the display's refresh (vsync) unless Settings say
-    // not to: a picture then comes about a frame sooner, and can tear
-    // where the compositor does not keep frames whole.
-    let vsync =
-        !pocketdesk_core::local::config::Config::load().is_ok_and(|config| config.display_no_vsync);
+    // The swap waits for the display's refresh (vsync), which never tears,
+    // except on Wayland (a window the compositor does not show would stop
+    // every window of the app) and where Settings say not to: a picture
+    // then comes about a frame sooner, and the windows are paced instead.
+    let vsync = frame_pacing::swap_waits_here(
+        pocketdesk_core::local::config::Config::load().is_ok_and(|config| config.display_no_vsync),
+    );
     let options = eframe::NativeOptions {
         glow_options: eframe::egui_glow::GlowConfiguration {
             vsync,
@@ -191,6 +197,10 @@ fn main() -> eframe::Result {
             // PC5: a computer's screen is drawn as NV12 by a shader where
             // the app draws with glow.
             nv12::set_glow(cc.gl.is_some());
+            // No swap that waits: no window draws more than twice a refresh.
+            if !vsync {
+                frame_pacing::install(&cc.egui_ctx);
+            }
             // Glyphs for scripts egui's own fonts lack (U1).
             fonts::install(&cc.egui_ctx);
             // Lesser text readable in both themes (U1 review).

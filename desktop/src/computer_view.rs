@@ -52,7 +52,7 @@ use crate::view_pointer::{self, PointerLock, ReleaseChord};
 
 /// The window `slot`'s id among the app's viewports: the first window's
 /// as before PC11, the others' their own.
-fn viewport_id(slot: u8) -> egui::ViewportId {
+pub(crate) fn viewport_id(slot: u8) -> egui::ViewportId {
     if slot == 0 {
         egui::ViewportId::from_hash_of("pocketdesk-computer-view")
     } else {
@@ -4253,7 +4253,12 @@ fn publisher(
         state.picture = Some(picture);
         let slot = state.slot;
         drop(state);
-        ctx.request_repaint_of(viewport_id(slot));
+        // One frame for the picture. egui answers an immediate request
+        // with a second frame "to let things settle", which a swap that
+        // waits for the display hides (the two merge into the next
+        // refresh) and a swap that does not wait draws, twice the
+        // frames for the same pictures; a delay of any length asks once.
+        ctx.request_repaint_after_for(Duration::from_micros(1), viewport_id(slot));
     })
 }
 

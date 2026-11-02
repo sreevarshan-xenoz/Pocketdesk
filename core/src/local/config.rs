@@ -605,10 +605,11 @@ pub struct Config {
     pub smooth_scrolling: bool,
     /// The app's windows show a picture the moment it is drawn, not at the
     /// display's next refresh: the swap does not wait for vsync, so a
-    /// computer's screen in a window comes about a frame sooner (on
-    /// Wayland the compositor still shows whole frames; elsewhere the
-    /// picture can tear, and an animation draws as fast as it can). Read
-    /// as the app starts. Off by default.
+    /// computer's screen in a window comes about a frame sooner (elsewhere
+    /// than Wayland the picture can tear, and no window draws more than
+    /// twice the display's refresh a second). On Wayland it changes
+    /// nothing: the swap never waits there. Read as the app starts. Off by
+    /// default.
     #[serde(default)]
     pub display_no_vsync: bool,
     /// The microphone a computer's screen window sends to that computer
