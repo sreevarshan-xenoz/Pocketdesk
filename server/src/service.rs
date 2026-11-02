@@ -19,6 +19,7 @@ use pocketdesk_core::protocol::{HANDSHAKE_HELLO, HANDSHAKE_OK};
 use pocketdesk_core::streaming::QuinnConnection;
 use pocketdesk_core::streaming::StreamingServer;
 use pocketdesk_core::streaming::input_packet::InputPacket;
+use pocketdesk_core::streaming::latency_probe;
 use pocketdesk_core::streaming::transport::{CertManager, StreamTransportConfig};
 use pocketdesk_core::tailscale::{DiscoveryEvent, DiscoveryService, TailscaleClient};
 use std::path::PathBuf;
@@ -608,22 +609,37 @@ pub async fn run(config: Config) -> Result<()> {
     // A screen session's absolute moves land on its own screen where the
     // input backend spans the compositor's layout (PC11 on Linux).
     #[cfg(target_os = "linux")]
-    crate::pointer_space::install();
+    {
+        // Not in the latency probe's mode: its moves are read as they came.
+        if !latency_probe::mode() {
+            crate::pointer_space::install();
+        }
+    }
     // Spawn input injection task — receives InputPacket from the QUIC
     // streaming channel and injects them into the host system.
     tokio::spawn(async move {
         tracing::info!("Input injection task started");
+        // The latency probe's test pattern is the screen here, so none of
+        // its sessions' input goes to the real desktop: no injector is made,
+        // and each packet below is kept from one (its absolute moves go to
+        // the pattern's marker instead).
+        let probe = latency_probe::mode();
         // Made at once (a device made late misses the first event), and if
         // that fails (no access to /dev/uinput yet, no display) tried again
         // while input arrives, instead of no input until a restart.
         let mut last_try = Some(std::time::Instant::now());
-        let mut injector = match InputInjector::new() {
-            Ok(inj) => Some(inj),
-            Err(e) => {
-                tracing::error!(
-                    "Failed to create InputInjector: {e}; trying again when input arrives"
-                );
-                None
+        let mut injector = if probe {
+            tracing::warn!("Latency probe: no input is injected into this computer");
+            None
+        } else {
+            match InputInjector::new() {
+                Ok(inj) => Some(inj),
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to create InputInjector: {e}; trying again when input arrives"
+                    );
+                    None
+                }
             }
         };
 
@@ -650,6 +666,9 @@ pub async fn run(config: Config) -> Result<()> {
             };
             match received {
                 Ok((session, packet)) => {
+                    if latency_probe::divert(probe, &latency_probe::POINTER, &packet) {
+                        continue;
+                    }
                     if injector.is_none() && retry_injector_now(last_try, std::time::Instant::now())
                     {
                         last_try = Some(std::time::Instant::now());

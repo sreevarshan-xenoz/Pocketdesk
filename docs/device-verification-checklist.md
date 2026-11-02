@@ -3662,6 +3662,13 @@ Built 2026-11-02 (the last item of next-plan-3) on section 263's Shizuku helper.
 - [ ] Two saved networks of one name on Linux: with the phone's name saved twice in NetworkManager, nothing is joined and the notice says so; with one, it is joined by UUID (`ps` while it joins shows `nmcli ... connection up uuid ...`, no name or password). (where: linux)
 - [ ] The Settings rows by hand: the phone's switch, summary and auto-off row (light, dark, narrow, Spanish and Tamil), and the desktop's Phones row on Linux (the field limits at 32 characters; the row is not drawn on Windows). (where: here)
 
+## 267. Input to picture on a real link (the latency probe, phase 0 of the window handoff)
+
+Built 2026-11-02: `desktop/src/view_latency_live.rs` measures the time from a pointer move sent through the computer window's relay to the first decoded picture that shows it. The loopback baseline (both throwaway servers on the Arch laptop) is in `docs/status-history.md`; what is owed is the same number across a real link, which is what the window handoff's budget (p95 of 30 ms on 5 GHz Wi-Fi) is about.
+
+- [ ] Across 5 GHz Wi-Fi: a throwaway server on one computer with `POCKETDESK_TEST_PATTERN=probe` (its trust entry for the viewing computer allows Input; a throwaway state folder), the other computer a viewer paired with it, then `PD_LIVE_A_STATE=<the viewer's state folder> PD_LIVE_B_ID=<the shown computer's id> cargo test -p pocketdesk-desktop input_to_picture_on_a_running_pair -- --ignored --nocapture` on the viewer: p50, p95 and max for H.264 and, with `PD_LIVE_HEVC=1`, HEVC, with no more than 2% misses; the numbers go in `docs/status-history.md` beside the loopback ones. Never against a server that shows a real screen. (where: second computer)
+- [ ] Probe mode injects nothing: while that run goes, the pointer, windows and typing of the computer running the probe-mode server are not touched at all (watch it for the minute), and its log says "Latency probe: no input is injected". (where: second computer)
+
 ## 268. A still screen sends nothing to another computer's window (the window's stats, a still desktop)
 
 Built 2026-11-02 (phase 1a of the window handoff, "ultra-low latency, low resource use"). The window that shows another computer's screen now says in its codec caps that it needs no idle repeats (`CODEC_CAP_NO_IDLE_REPEATS`, bit 1 of the `[0xFD,0x00]` byte), and the host's encode task drops the capture's once-a-second repeat of a still screen for it, before the encoder (a phone is unchanged). Changed frames, a keyframe asked for, and two settling repeats after each change still go. The Linux laptop was offline when it was built, so no live number exists yet: these items give the first.

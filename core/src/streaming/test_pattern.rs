@@ -8,17 +8,24 @@
 //! The picture is a still gradient with a bar that moves across it, a step
 //! each frame, and a strip of blocks counting the frame number in binary, so
 //! every frame differs and a dropped one can be told from the picture.
+//!
+//! With the variable at `probe` (the input-to-picture latency probe, see
+//! [`super::latency_probe`]) the picture's last rows are a dark band, kept
+//! clear of the bar and the strip, and a bright square in it at the last
+//! absolute pointer move a session sent; the server then injects none of its
+//! sessions' input.
 
 use std::time::{Duration, Instant};
 
 use tokio_util::sync::CancellationToken;
 
 use super::capture::CaptureSession;
+use super::latency_probe;
 use super::latest_frame::FrameSender;
 use super::{StreamingConfig, VideoFrame};
 
 /// The seam's variable.
-pub const VAR: &str = "POCKETDESK_TEST_PATTERN";
+pub const VAR: &str = latency_probe::PATTERN_VAR;
 
 /// How far the bar moves each frame, in pixels.
 const BAR_STEP: u32 = 8;
@@ -47,6 +54,41 @@ pub fn frame(width: u32, height: u32, n: u64) -> VideoFrame {
     let mut frame = background(width, height);
     draw(&mut frame, n);
     frame
+}
+
+/// Frame `n` as [`frame`], with the probe's band and, once a pointer is
+/// known (`pointer`: the last absolute move, `x_norm` and `y_norm`), its
+/// marker.
+pub fn frame_probe(width: u32, height: u32, n: u64, pointer: Option<(u16, u16)>) -> VideoFrame {
+    let mut frame = frame(width, height, n);
+    draw_probe(&mut frame, pointer);
+    frame
+}
+
+/// The probe's dark band over the picture's last rows (over the bar too),
+/// and the marker in it at `pointer`'s `x_norm`, white. The marker follows
+/// the pointer's column only; the band is where it moves.
+fn draw_probe(frame: &mut VideoFrame, pointer: Option<(u16, u16)>) {
+    let (width, height, stride) = (frame.width, frame.height, frame.stride);
+    let dark = latency_probe::DARK;
+    for y in latency_probe::band_top(height)..height {
+        let row = (y * stride) as usize;
+        for x in 0..width {
+            let px = row + (x * 4) as usize;
+            frame.data[px..px + 4].copy_from_slice(&[dark, dark, dark, 255]);
+        }
+    }
+    if let Some((x_norm, _)) = pointer {
+        let left = latency_probe::marker_left(width, x_norm);
+        let top = latency_probe::marker_top(height);
+        for y in top..(top + latency_probe::SIZE).min(height) {
+            let row = (y * stride) as usize;
+            for x in left..(left + latency_probe::SIZE).min(width) {
+                let px = row + (x * 4) as usize;
+                frame.data[px..px + 4].copy_from_slice(&[255, 255, 255, 255]);
+            }
+        }
+    }
 }
 
 /// The still gradient every frame starts from.
@@ -120,6 +162,10 @@ pub fn start(
     let period = Duration::from_secs_f64(1.0 / f64::from(config.fps.max(1)));
     let (width, height) = (config.width, config.height);
     let token = cancel.clone();
+    let probe = latency_probe::mode();
+    if probe {
+        tracing::warn!("{VAR}=probe: the pattern draws the latency marker; no input is injected");
+    }
     std::thread::Builder::new()
         .name("test-pattern".into())
         .spawn(move || {
@@ -134,6 +180,9 @@ pub fn start(
                     ..base
                 };
                 draw(&mut current, n);
+                if probe {
+                    draw_probe(&mut current, latency_probe::POINTER.get());
+                }
                 if token.is_cancelled() || frame_tx.try_send(current).is_err() {
                     break;
                 }
@@ -192,6 +241,57 @@ mod tests {
             f.data[(x * 4 + 1) as usize] // green
         };
         assert_eq!((block(2), block(1), block(0)), (220, 20, 220));
+    }
+
+    /// The luma the probe's finder reads, from a BGRA frame (the pattern's
+    /// band and marker are grey, so one channel is their luma).
+    fn luma(f: &VideoFrame) -> Vec<u8> {
+        f.data.as_chunks::<4>().0.iter().map(|px| px[1]).collect()
+    }
+
+    #[test]
+    fn the_probe_draws_a_marker_the_finder_finds_whatever_the_bar_does() {
+        let (w, h) = (640, 360);
+        for x_norm in [0u16, 1000, 32768, 50000, u16::MAX] {
+            // Every bar place, and so the bar over the marker's columns.
+            for n in (0..90).step_by(7) {
+                let f = frame_probe(w, h, n, Some((x_norm, 7)));
+                assert_eq!(
+                    latency_probe::find(&luma(&f), w as usize, h as usize),
+                    Some(latency_probe::marker_left(w, x_norm)),
+                    "x_norm {x_norm}, frame {n}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_probe_shows_no_marker_before_any_pointer_and_leaves_the_rest_alone() {
+        let (w, h) = (640, 360);
+        let f = frame_probe(w, h, 3, None);
+        assert_eq!(latency_probe::find(&luma(&f), w as usize, h as usize), None);
+        // Above the band the picture is the pattern's own, bar and strip.
+        let plain = frame(w, h, 3);
+        let above = (latency_probe::band_top(h) * plain.stride) as usize;
+        assert_eq!(f.data[..above], plain.data[..above]);
+        assert_ne!(f.data[above..], plain.data[above..], "the band is dark");
+        // Without the probe the pattern has no band: its last rows are the
+        // gradient.
+        assert_ne!(plain.data[plain.data.len() - 4..], [16, 16, 16, 255]);
+    }
+
+    #[test]
+    fn a_small_pattern_keeps_its_strip_clear_of_the_band() {
+        // 64 rows: the counting strip (16) and the band (48) just fit.
+        let f = frame_probe(64, 64, 0b101, Some((0, 0)));
+        let plain = frame(64, 64, 0b101);
+        let strip = (COUNT_BLOCK * plain.stride) as usize;
+        assert_eq!(f.data[..strip], plain.data[..strip], "the strip is whole");
+        assert_eq!(
+            latency_probe::find(&luma(&f), 64, 64),
+            Some(0),
+            "found at the smallest size"
+        );
     }
 
     #[tokio::test]
