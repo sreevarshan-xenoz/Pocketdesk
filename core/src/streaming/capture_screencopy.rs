@@ -327,24 +327,20 @@ pub fn start_screencopy_capture(
     {
         bail!("screencopy backend disabled via POCKETDESK_SCREENCOPY=0");
     }
-    // `overlay_cursor`: 1 draws the pointer into the picture.
-    let overlay_cursor = match cursor {
-        Some(feed) => match super::capture_cursor_wl::start(
-            feed.clone(),
-            config.monitor_index,
-            cancel.clone(),
-        ) {
-            Ok(()) => {
-                feed.set_separate(true);
-                0
-            }
+    // The pointer's capture, when there is one: the feed then says the
+    // picture has no pointer in it for as long as that capture runs, and
+    // each picture is asked for with or without the pointer as the feed
+    // says ([`CursorFeed::want_out`](super::cursor_feed::CursorFeed::want_out)). Without one the pointer is drawn into the
+    // picture, as it always was.
+    let pointer = cursor.and_then(|feed| {
+        match super::capture_cursor_wl::start(feed.clone(), config.monitor_index, cancel.clone()) {
+            Ok(()) => Some(feed),
             Err(e) => {
                 info!("The pointer stays in the picture: {e:#}");
-                1
+                None
             }
-        },
-        None => 1,
-    };
+        }
+    });
 
     let (ready_tx, ready_rx) = mpsc::channel::<Result<()>>();
     let thread_config = config.clone();
@@ -359,7 +355,7 @@ pub fn start_screencopy_capture(
                 ready_tx.clone(),
                 window_rx,
                 window_mode,
-                overlay_cursor,
+                pointer,
             ) {
                 let _ = ready_tx.send(Err(e));
             }
@@ -417,8 +413,20 @@ fn run_capture_loop(
     ready_tx: Sender<Result<()>>,
     mut window_rx: watch::Receiver<u64>,
     window_mode: Arc<AtomicBool>,
-    overlay_cursor: u32,
+    pointer: Option<super::cursor_feed::CursorFeed>,
 ) -> Result<()> {
+    // `overlay_cursor` of a request: 1 draws the pointer into the picture,
+    // 0 leaves it out. Out only for the whole output's picture while the
+    // pointer capture runs: a window's picture (Hyprland's toplevel export)
+    // keeps the pointer, as the capture reports its places over the whole
+    // output, which a window's picture does not show; and the moment the
+    // pointer capture ends, the pointer is drawn into the next picture.
+    let overlay_for = |window: bool| -> i32 {
+        match &pointer {
+            Some(feed) if feed.want_out(!window) => 0,
+            _ => 1,
+        }
+    };
     let conn = Connection::connect_to_env().context("no Wayland display")?;
     let (globals, mut queue) =
         registry_queue_init::<WlState>(&conn).context("wayland registry init failed")?;
@@ -499,8 +507,7 @@ fn run_capture_loop(
         let capture = match wanted {
             Some((addr, mgr)) => {
                 let handle = addr as u32;
-                // The same choice as the output path's.
-                let frame = mgr.capture_toplevel(overlay_cursor as i32, handle, &qh, slot.clone());
+                let frame = mgr.capture_toplevel(overlay_for(true), handle, &qh, slot.clone());
                 let staged = pump_until_timeout(
                     &conn,
                     &mut queue,
@@ -529,7 +536,7 @@ fn run_capture_loop(
                     window_mode.store(false, AtomicOrdering::Relaxed);
                     slot = Arc::new(Mutex::new(FramePhase::default()));
                     Capture::Output(manager.capture_output(
-                        overlay_cursor as i32,
+                        overlay_for(false),
                         &output,
                         &qh,
                         slot.clone(),
@@ -539,7 +546,7 @@ fn run_capture_loop(
             None => {
                 window_mode.store(false, AtomicOrdering::Relaxed);
                 Capture::Output(manager.capture_output(
-                    overlay_cursor as i32,
+                    overlay_for(false),
                     &output,
                     &qh,
                     slot.clone(),

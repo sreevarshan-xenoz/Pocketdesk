@@ -35,11 +35,12 @@ struct StreamUserData {
 
 /// Whether the screencast portal can leave the pointer out of the picture
 /// and send it as metadata, and the session wants that: the portal offers
-/// [`CursorMode::Metadata`]. When it does, the feed is told the picture has
-/// no pointer in it (before the session starts, so the answer to the
-/// viewer is right), and the stream is asked for the metadata; otherwise
-/// the capture is as it was and the viewer keeps whatever pointer there is
-/// in the picture.
+/// [`CursorMode::Metadata`]. When it does, the stream is asked for the
+/// metadata; otherwise the capture is as it was and the viewer keeps
+/// whatever pointer there is in the picture. The feed is told the picture
+/// has no pointer in it only once the PipeWire capture thread holds the
+/// stream ([`spawn_pipewire_capture`]), so a session that fails later, or
+/// falls back to another way, never leaves it saying so.
 async fn metadata_cursor(
     screencast: &Screencast,
     cursor: Option<&CursorFeed>,
@@ -53,7 +54,6 @@ async fn metadata_cursor(
         info!("The screencast portal offers no cursor metadata: the pointer stays as it was");
         return None;
     }
-    feed.set_separate(true);
     Some((CursorMode::Metadata, feed.clone()))
 }
 
@@ -279,7 +279,10 @@ pub async fn start_capture(
     Ok(CaptureSession::new(config, cancel))
 }
 
-/// The PipeWire capture thread for the stream `node_id`.
+/// The PipeWire capture thread for the stream `node_id`. A `cursor` feed
+/// means the stream was asked for the pointer as metadata, which leaves it
+/// out of the picture: the feed says so from the moment the thread is
+/// running until it ends, however it ends, and not otherwise.
 pub(super) fn spawn_pipewire_capture(
     node_id: u32,
     config: StreamingConfig,
@@ -287,9 +290,12 @@ pub(super) fn spawn_pipewire_capture(
     cancel: CancellationToken,
     cursor: Option<CursorFeed>,
 ) -> Result<()> {
+    // Held by the thread: dropped when it ends, and when the spawn fails.
+    let apart = cursor.as_ref().map(CursorFeed::apart);
     std::thread::Builder::new()
         .name("pipewire-capture".into())
         .spawn(move || {
+            let _apart = apart;
             if let Err(e) = run_pipewire_capture(node_id, &config, frame_tx, cancel, cursor) {
                 error!("PipeWire capture thread exited with error: {e}");
             } else {

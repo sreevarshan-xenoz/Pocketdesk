@@ -382,13 +382,24 @@ impl Drop for Pixels {
 
 /// Start the pointer capture of the output `monitor_index` names, reporting
 /// to `feed` until `cancel`. `Ok` once the compositor took the session; an
-/// error says why the screencopy must keep the pointer in the picture.
+/// error says why the screencopy must keep the pointer in the picture, and
+/// the thread is stopped.
+///
+/// From the `Ok` until the thread ends, however it ends (the compositor
+/// stopped the session, copies kept failing, any error), the feed holds the
+/// pointer out of the picture ([`CursorFeed::apart`]); when it ends the
+/// feed says no, and the screencopy asks for the pointer in its picture
+/// again ([`CursorFeed::want_out`]).
 pub fn start(feed: CursorFeed, monitor_index: u32, cancel: CancellationToken) -> Result<()> {
     let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<()>>();
+    // Stopped when the answer does not come in time: a thread that took the
+    // session after the screencopy gave up on it must not keep it.
+    let stop = cancel.child_token();
+    let thread_stop = stop.clone();
     std::thread::Builder::new()
         .name("cursor-capture".into())
         .spawn(move || {
-            if let Err(e) = run(feed, monitor_index, cancel, &ready_tx) {
+            if let Err(e) = run(feed, monitor_index, thread_stop, &ready_tx) {
                 // Before the handshake this is the answer; after it, only a
                 // line in the log: the picture is not affected.
                 if ready_tx.send(Err(anyhow::anyhow!("{e:#}"))).is_err() {
@@ -399,7 +410,10 @@ pub fn start(feed: CursorFeed, monitor_index: u32, cancel: CancellationToken) ->
         .context("Failed to spawn the pointer capture thread")?;
     match ready_rx.recv_timeout(SETUP_WAIT) {
         Ok(result) => result,
-        Err(_) => bail!("the compositor did not answer the pointer capture in time"),
+        Err(_) => {
+            stop.cancel();
+            bail!("the compositor did not answer the pointer capture in time")
+        }
     }
 }
 
@@ -455,6 +469,8 @@ fn run(
     let session = cursor_session.get_capture_session(&qh, ());
     queue.roundtrip(&mut state)?;
     info!("Pointer capture: a cursor session on the output, the picture without the pointer");
+    // Held until this function returns, whichever way it does.
+    let _apart = feed.apart();
     let _ = ready_tx.send(Ok(()));
 
     let mut shape_failures = 0u32;
@@ -644,7 +660,7 @@ mod tests {
                 cancel.clone(),
                 window_rx,
                 Arc::new(AtomicBool::new(false)),
-                feed,
+                feed.clone(),
             )
             .expect("screencopy");
             std::thread::sleep(Duration::from_millis(500));
@@ -652,14 +668,15 @@ mod tests {
             input.motion_absolute(nx, ny).unwrap();
             std::thread::sleep(Duration::from_millis(500));
             let frame = rx.blocking_recv().expect("a frame");
+            // Asked before the capture ends: its end puts the pointer back.
+            let separate = feed.as_ref().is_some_and(CursorFeed::separate);
             drop(session);
             cancel.cancel();
-            frame
+            (frame, separate)
         };
-        let embedded = frame_of(None);
-        let apart_feed = CursorFeed::new();
-        let apart = frame_of(Some(apart_feed.clone()));
-        assert!(apart_feed.separate(), "the screencopy took the pointer out");
+        let (embedded, _) = frame_of(None);
+        let (apart, separate) = frame_of(Some(CursorFeed::new()));
+        assert!(separate, "the screencopy took the pointer out");
         let px = (u32::from(nx) * embedded.width) / 65535;
         let py = (u32::from(ny) * embedded.height) / 65535;
         let with = colours_around(&embedded, px, py);

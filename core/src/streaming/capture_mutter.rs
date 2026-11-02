@@ -297,11 +297,9 @@ pub async fn start_capture(
     input: bool,
     cursor: Option<super::cursor_feed::CursorFeed>,
 ) -> Result<CaptureSession> {
-    // The pointer as metadata for a viewer that draws it: said to the feed
-    // before the session starts, so the streamer's answer is right.
-    if let Some(feed) = &cursor {
-        feed.set_separate(true);
-    }
+    // The pointer as metadata for a viewer that draws it (`cursor`): the
+    // feed is told the picture has none in it only once the capture thread
+    // runs (`spawn_pipewire_capture`), so a start that fails says nothing.
     let conn = tokio::time::timeout(CALL_WAIT, Connection::session())
         .await
         .map_err(|_| anyhow::anyhow!("the session bus did not answer"))?
