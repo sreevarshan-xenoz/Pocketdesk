@@ -190,6 +190,22 @@ fn h264_profile_vaapi(profile: &H264Profile) -> &'static str {
     }
 }
 
+/// The AVOptions the VA-API encoders open with. `async_depth` is FFmpeg's
+/// number of frames in flight (default 2): the encoder hands a packet back
+/// only when the next frame arrives, so every picture waits a whole frame
+/// period. One keeps it lock-step, each packet out as its frame is encoded
+/// (the stage trace's "sent > packet out" went from 16.7 ms to about 0 and
+/// the input-to-picture median fell by 9 to 12 ms). `profile` is an AVOption
+/// of h264_vaapi only; hevc_vaapi does not accept the name and would fail to
+/// open.
+fn codec_options(is_hevc: bool, h264_profile: &str) -> Vec<(&'static str, String)> {
+    let mut options = vec![("async_depth", "1".to_string())];
+    if !is_hevc {
+        options.push(("profile", h264_profile.to_string()));
+    }
+    options
+}
+
 impl VaapiEncoder {
     pub fn new(config: StreamingConfig) -> anyhow::Result<Self> {
         FFMPEG_INIT.call_once(|| {
@@ -273,17 +289,22 @@ impl VaapiEncoder {
         }
 
         // --- open codec ---
-        // h264_vaapi honours `profile` as an AVOption; hevc_vaapi does not
-        // accept that name and would fail to open, so only set it for H.264.
         let mut opts: *mut ffi::AVDictionary = std::ptr::null_mut();
-        if !is_hevc {
-            let c_profile = CString::new(h264_profile_vaapi(&config.profile))?;
+        for (key, value) in codec_options(is_hevc, h264_profile_vaapi(&config.profile)) {
+            let (key, value) = (CString::new(key)?, CString::new(value)?);
             unsafe {
-                ffi::av_dict_set(&mut opts, c"profile".as_ptr(), c_profile.as_ptr(), 0);
+                ffi::av_dict_set(&mut opts, key.as_ptr(), value.as_ptr(), 0);
             }
         }
         let open_ret = unsafe { ffi::avcodec_open2(ctx, codec, &mut opts) };
         unsafe {
+            // An option the encoder did not take stays in the dictionary. An
+            // FFmpeg without `async_depth` would hold a frame again, unseen.
+            if !opts.is_null()
+                && !ffi::av_dict_get(opts, c"async_depth".as_ptr(), std::ptr::null(), 0).is_null()
+            {
+                warn!("{codec_name} ignored async_depth: it may hold a frame until the next");
+            }
             if !opts.is_null() {
                 ffi::av_dict_free(&mut opts);
             }
@@ -642,6 +663,60 @@ mod tests {
             packets.len(),
             encoder.device_path()
         );
+    }
+
+    #[test]
+    fn codec_options_keep_one_frame_in_flight() {
+        let h264 = codec_options(false, "high");
+        assert!(h264.contains(&("async_depth", "1".to_string())));
+        assert!(h264.contains(&("profile", "high".to_string())));
+        // hevc_vaapi has no `profile` option; naming it would fail the open.
+        let hevc = codec_options(true, "high");
+        assert_eq!(hevc, vec![("async_depth", "1".to_string())]);
+    }
+
+    /// With one frame in flight each frame's packet is back from its own
+    /// `encode_frame`, none held until the next frame (FFmpeg's default
+    /// `async_depth` of 2 held one), and a keyframe asked for comes out in
+    /// the very next packet. Self-skips where no VA-API device opens; HEVC is
+    /// best-effort as in the round trip above.
+    #[test]
+    fn vaapi_gives_each_frame_back_at_once_and_keeps_keyframe_requests() {
+        if !vaapi_available() {
+            eprintln!("skipping VAAPI held-frame test: no usable device on this host");
+            return;
+        }
+        for codec in [VideoCodec::H264, VideoCodec::H265] {
+            let config = StreamingConfig {
+                width: 1280,
+                height: 720,
+                fps: 30,
+                bitrate_bps: 2_000_000,
+                codec,
+                ..StreamingConfig::default()
+            };
+            let mut encoder = match VaapiEncoder::new(config) {
+                Ok(e) => e,
+                Err(e) if codec == VideoCodec::H265 => {
+                    eprintln!("skipping HEVC: {e:#}");
+                    continue;
+                }
+                Err(e) => panic!("H.264 VAAPI encoder must open: {e:#}"),
+            };
+            for i in 0..8 {
+                let p = encoder
+                    .encode_frame(&gradient_frame(1280, 720, i))
+                    .unwrap()
+                    .unwrap_or_else(|| panic!("{codec:?}: frame {i} held until the next"));
+                assert_eq!(p.sequence, i as u64, "{codec:?}: the packet is its frame's");
+            }
+            encoder.request_keyframe();
+            let p = encoder
+                .encode_frame(&gradient_frame(1280, 720, 9))
+                .unwrap()
+                .expect("a packet for the frame");
+            assert!(p.is_keyframe, "{codec:?}: the asked-for keyframe is next");
+        }
     }
 
     fn gradient_frame(w: u32, h: u32, shift: usize) -> VideoFrame {

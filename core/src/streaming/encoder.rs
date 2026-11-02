@@ -1311,6 +1311,10 @@ fn build_ffmpeg_args(
                 vaapi_device_node(),
                 "-c:v".to_string(),
                 codec_name.to_string(),
+                // One frame in flight: the default of two holds a frame
+                // until the next one is written.
+                "-async_depth".to_string(),
+                "1".to_string(),
                 "-b:v".to_string(),
                 config.bitrate_bps.to_string(),
                 "-maxrate".to_string(),
@@ -1797,6 +1801,7 @@ mod tests {
 
         assert!(args.contains(&"hevc_vaapi".to_string()));
         assert!(args.iter().any(|a| a.contains("hwupload")));
+        assert_eq!(arg_after(&args, "-async_depth"), "1");
         let g = args.iter().position(|a| a == "-g").unwrap();
         assert_eq!(args[g + 1], "60");
         let bf = args.iter().position(|a| a == "-bf").unwrap();

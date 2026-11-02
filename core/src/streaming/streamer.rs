@@ -1617,6 +1617,16 @@ impl StreamingServer {
                                     warn!("Packet receiver dropped, stopping encoder");
                                     break;
                                 }
+                                // Let the transport task that the send just
+                                // woke run now. Encoding blocks this thread,
+                                // and when a frame's encode time nears the
+                                // frame period the loop is back in the next
+                                // encode before the woken task was polled:
+                                // the packet then waited (14 ms at the 95th
+                                // percentile for 1080p60 H.264 VA-API). Only
+                                // the order of tasks changes, never what is
+                                // sent or when a frame is taken.
+                                tokio::task::yield_now().await;
                             }
                             Ok(_) => {
                                 // Encoder has no output yet (latency/drain phase)
