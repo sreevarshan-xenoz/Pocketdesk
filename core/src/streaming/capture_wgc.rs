@@ -211,7 +211,7 @@ fn run_capture_loop(
     }
     let locked = window_lease;
     if let Some(lease) = &locked
-        && !window_target::lease_alive(lease)
+        && (!lease.native.is_empty() || !window_target::lease_alive(lease))
     {
         bail!("That window is not lent any more");
     }
