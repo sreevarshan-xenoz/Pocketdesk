@@ -2,19 +2,19 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1358 open items.
+1372 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 97 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 99 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 200 |
 | A phone with a SIM | 40 |
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
-| A second computer | 201 |
-| A Linux desktop (the Azure VM serves for some) | 252 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 91 |
+| A second computer | 208 |
+| A Linux desktop (the Azure VM serves for some) | 253 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 95 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
@@ -235,6 +235,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **277. Zero-copy capture (low-latency window handoff, phase 2: the screen goes from the compositor to VA-API as a DMA-BUF)**
 
 - The Settings row "Copy the screen through memory" on this Windows box's app: it shows under Phones, saves with the rest, and says the server reads it at its start. (where: here)
+
+**279. Dragging a window past the edge (phase 4 of the window handoff)**
+
+- The window following the pointer while the button is held (the viewing window moving with the pointer until it is let go): not built. The window appears when the button is let go. Wayland gives a program no way to move its own window; X11 and Windows could. (where: here)
+- The Settings rows "Drag windows to my other computers" and "What starts a window drag across the edge" under Other computers on a Linux computer: they save, apply within a couple of seconds without a restart, and are not drawn on Windows. (where: here)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -1400,6 +1405,16 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The OPPO over Wi-Fi with some loss (`tc netem loss 5%` on the host's interface), the setting on, the software encoder: the picture heals within about two seconds of a loss on its own (the refresh wave), with no freeze, and no longer than with the setting off; with VA-API, a loss is healed by the keyframe the phone asks for. (where: second computer)
 - A slow link, the setting on, the software encoder: the queue that waits for a link trims to the newest whole keyframe as before, and with the keyframes far apart the wait is the queue's depth (8 frames), not the keyframe's distance. (where: second computer)
 
+**279. Dragging a window past the edge (phase 4 of the window handoff)**
+
+- Hyprland 0.56 with a real second computer (Linux, the app running): hold Super, drag a floating window with the left button to the edge and over it, let go on the other computer: the window leaves this screen within about a second and opens as a borrowed window there, its picture sharp, and the pointer is where it was. Say how long from letting go to the first picture. (where: second computer)
+- A Windows computer as the other side: the pointer crosses as before, no window moves, nothing is said. Windows source is phase 5. (where: second computer)
+- The other computer's "Let my computers borrow my windows" off, or the computer paired one way, or no link: the pointer crosses, the window stays on its screen, and the borrowed window never opens. (where: second computer)
+- The other computer's app not running when the window is dropped: no window opens after ten seconds, the window is not lent, nothing is stuck. (where: second computer)
+- The dropped window's place on a Linux desktop that honours it (X11, or a Wayland compositor that lets a program place its window) and on one that does not (Sway, Hyprland: the compositor floats it where it likes; say where); its size is the window's own, then follows the viewing window as in section 278. (where: second computer)
+- Drag the borrowed window by its bar back over the edge with Super and the left button held: the window comes home within about a second, put where the pointer comes in with the pointer where it held it, and the viewing window says "The window went back to ..." (it is not closed by itself: say if that is a nuisance). Without the key held, the pointer comes home and nothing returns. (where: second computer)
+- The window dragged out and back twice in a row, and out to one computer and back from it with a second computer in the row. (where: second computer)
+
 ## A Linux desktop (the Azure VM serves for some)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -2011,6 +2026,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - GNOME, KDE (the portal and PipeWire) and X11 hosts: unchanged, the capture copies as before, and the new Settings row is shown and harmless. (where: linux)
 - PipeWire's DMA-BUF negotiation (`SPA_DATA_DmaBuf` with the modifiers the card imports) for GNOME and KDE hosts: not built. (where: linux)
 
+**279. Dragging a window past the edge (phase 4 of the window handoff)**
+
+- Sway as the offering computer: it has no input-capture portal, so no edge is watched; the pick of the window in front and its return were live-tested in a headless Sway (a floating window at the edge picked, a tiled and a full-screen one left, a drag back put the container's top left where asked, 1.0 s). Whether Sway will ever drive the shared input is a separate question. (where: linux)
+
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
 **13. PiP + multitask (Tier-3 #14, DeX)**
@@ -2280,6 +2299,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Other Intel generations (Gen 8 and 9 with i965 or iHD, Xe with its 4-tiled modifiers): the same, and the modifiers with a second plane (compressed ones) are skipped. (where: other hardware)
 - A hybrid laptop whose compositor renders on the discrete card while the encoder opens the integrated one: the log says "the compositor renders on another GPU" once and the capture copies; with both on one card the DMA-BUF capture works. (where: other hardware)
 - NVIDIA (proprietary driver; NVENC or the software encoder as the encoder): no DMA-BUF is made (only the in-process VA-API encoder takes one) and the capture is unchanged. (where: other hardware)
+
+**279. Dragging a window past the edge (phase 4 of the window handoff)**
+
+- xdg-desktop-portal-hyprland with a button held at the barrier: the capture activates (the pointer crosses) while Super and the left button are down, and libei then sends the left button's and Super's release with no press before them, which is what the driver reads. If the compositor ends or refuses the capture while a button is held, or sends no release, say which (the log at debug names "no window to hand over" or nothing). (where: other hardware)
+- The window moved locally before the drag crossed: as the capture takes the pointer, Hyprland's own window drag ends cleanly (no window left half-dragged, stuck to the pointer, or the button stuck down over there). (where: other hardware)
+- A text selection dragged to the edge and over it, with the default trigger: no window is taken. With "Any left-button drag": a selection inside a floating window at the edge takes that window (said in the Settings note). (where: other hardware)
+- A tiled window, a full-screen window, a drag with the right button (Super and right drag resizes): the pointer crosses and nothing is taken or lent. (where: other hardware)
 
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 
