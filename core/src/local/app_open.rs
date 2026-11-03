@@ -26,7 +26,46 @@ pub struct OpenRequest {
     /// The phone's app a [`PHONE_APP`] request opens (its package name).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app: Option<String>,
+    /// The window a [`BORROW_DROP`] request opens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dropped: Option<DroppedWindow>,
     pub created_unix: u64,
+}
+
+/// A window of another computer, dragged here and dropped (window handoff,
+/// phase 4): the app opens it as a borrowed window, its top left at (`x`,
+/// `y`) in this computer's desktop space, `width`x`height` to start with.
+/// The computer is `phone` of the request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DroppedWindow {
+    /// The window's id on the computer it comes from (Sway's container id
+    /// or Hyprland's address).
+    pub window: String,
+    pub title: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl DroppedWindow {
+    /// Whether the window id could be one: digits, or `0x` and hex, as the
+    /// compositors give them. A request is held to it as written and again
+    /// as taken.
+    fn is_sound(&self) -> bool {
+        let sway = (1..=12).contains(&self.window.len())
+            && self.window.bytes().all(|b| b.is_ascii_digit());
+        let hypr = self.window.strip_prefix("0x").is_some_and(|hex| {
+            (1..=16).contains(&hex.len())
+                && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        });
+        (sway || hypr)
+            && (64..=16384).contains(&self.width)
+            && (64..=16384).contains(&self.height)
+            && self.x.unsigned_abs() <= 1_000_000
+            && self.y.unsigned_abs() <= 1_000_000
+            && self.title.chars().count() <= 200
+    }
 }
 
 impl OpenRequest {
@@ -51,9 +90,39 @@ pub const COMPUTER_VIEW: &str = "computer_view";
 /// `app`. It brings up no page and does not raise the window.
 pub const PHONE_APP: &str = "phone_app";
 
+/// The page asked for to open a window of another computer that was dragged
+/// here (window handoff 4), the computer's id in `phone` and the window in
+/// `dropped`. It brings up no page and does not raise the window.
+pub const BORROW_DROP: &str = "borrow_drop";
+
 /// Ask the window to open `page` (for `phone`).
 pub fn request(state_dir: &Path, page: &str, phone: Option<&str>, now_unix: u64) -> io::Result<()> {
-    write(state_dir, page, phone, None, now_unix)
+    write(state_dir, page, phone, None, None, now_unix)
+}
+
+/// Ask the window to open `dropped`, a window of the computer `computer`
+/// dragged here. Both are checked as the packets' are, here and again when
+/// the request is taken.
+pub fn request_borrow_drop(
+    state_dir: &Path,
+    computer: &str,
+    dropped: &DroppedWindow,
+    now_unix: u64,
+) -> io::Result<()> {
+    if !super::approval::is_valid_id(computer) || !dropped.is_sound() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "not a window of a computer",
+        ));
+    }
+    write(
+        state_dir,
+        BORROW_DROP,
+        Some(computer),
+        None,
+        Some(dropped.clone()),
+        now_unix,
+    )
 }
 
 /// Ask the window to open `app` on `phone` (Apps part 2). Both are checked
@@ -67,7 +136,7 @@ pub fn request_phone_app(
     if !is_phone_app(phone, Some(app)) {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "not an app"));
     }
-    write(state_dir, PHONE_APP, Some(phone), Some(app), now_unix)
+    write(state_dir, PHONE_APP, Some(phone), Some(app), None, now_unix)
 }
 
 /// Whether `phone` and `app` can be a [`PHONE_APP`] request's.
@@ -81,12 +150,14 @@ fn write(
     page: &str,
     phone: Option<&str>,
     app: Option<&str>,
+    dropped: Option<DroppedWindow>,
     now_unix: u64,
 ) -> io::Result<()> {
     let request = OpenRequest {
         page: page.to_string(),
         phone: phone.map(str::to_string),
         app: app.map(str::to_string),
+        dropped,
         created_unix: now_unix,
     };
     let path = state_dir.join(APP_OPEN_FILE);
@@ -111,7 +182,14 @@ pub fn take(state_dir: &Path, now_unix: u64) -> Option<OpenRequest> {
             request.phone.as_deref().unwrap_or(""),
             request.app.as_deref(),
         );
-    (fresh && named).then_some(request)
+    // A dropped window names a valid computer and window, or is not one.
+    let dropped = request.page != BORROW_DROP
+        || (super::approval::is_valid_id(request.phone.as_deref().unwrap_or(""))
+            && request
+                .dropped
+                .as_ref()
+                .is_some_and(DroppedWindow::is_sound));
+    (fresh && named && dropped).then_some(request)
 }
 
 #[cfg(test)]
@@ -130,6 +208,7 @@ mod tests {
                 page: "files".into(),
                 phone: Some("phone-a".into()),
                 app: None,
+                dropped: None,
                 created_unix: 100
             })
         );
@@ -179,12 +258,73 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Window handoff 4: a window dragged here is asked for with the
+    /// computer and window named, and held to the same rules when taken.
+    #[test]
+    fn a_dropped_window_names_a_valid_computer_window_and_place() {
+        let dir = std::env::temp_dir().join(format!("pd-app-open-drop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let window = |id: &str| DroppedWindow {
+            window: id.into(),
+            title: "A title".into(),
+            x: -20,
+            y: 30,
+            width: 800,
+            height: 600,
+        };
+        assert!(request_borrow_drop(&dir, "desk-1", &window("0x55d1"), 100).is_ok());
+        let taken = take(&dir, 101).unwrap();
+        assert_eq!(taken.page, BORROW_DROP);
+        assert_eq!(taken.phone.as_deref(), Some("desk-1"));
+        assert_eq!(taken.dropped, Some(window("0x55d1")));
+        assert!(request_borrow_drop(&dir, "desk-1", &window("42"), 100).is_ok());
+        for (computer, id) in [
+            ("desk 1", "42"),
+            ("", "42"),
+            ("desk-1", "42; exec x"),
+            ("desk-1", "0xZZ"),
+            ("desk-1", ""),
+        ] {
+            assert!(
+                request_borrow_drop(&dir, computer, &window(id), 100).is_err(),
+                "{computer} {id}"
+            );
+        }
+        let mut odd = window("42");
+        odd.width = 10;
+        assert!(request_borrow_drop(&dir, "desk-1", &odd, 100).is_err());
+        let mut odd = window("42");
+        odd.x = 2_000_000;
+        assert!(request_borrow_drop(&dir, "desk-1", &odd, 100).is_err());
+        let mut odd = window("42");
+        odd.title = "x".repeat(201);
+        assert!(request_borrow_drop(&dir, "desk-1", &odd, 100).is_err());
+        // A file written by hand is held to the same rules when taken.
+        std::fs::write(
+            dir.join(APP_OPEN_FILE),
+            r#"{"page":"borrow_drop","phone":"desk-1","created_unix":100}"#,
+        )
+        .unwrap();
+        assert_eq!(take(&dir, 101), None, "no window named");
+        std::fs::write(
+            dir.join(APP_OPEN_FILE),
+            r#"{"page":"borrow_drop","phone":"desk-1","dropped":{"window":"4 2","title":"t","x":0,"y":0,"width":800,"height":600},"created_unix":100}"#,
+        )
+        .unwrap();
+        assert_eq!(take(&dir, 101), None, "not a window id");
+        // Stale, like any request.
+        assert!(request_borrow_drop(&dir, "desk-1", &window("42"), 100).is_ok());
+        assert_eq!(take(&dir, 100 + TTL_SECS + 1), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_quit_closes_only_a_window_that_was_open_when_it_was_asked() {
         let quit = OpenRequest {
             page: QUIT.into(),
             phone: None,
             app: None,
+            dropped: None,
             created_unix: 100,
         };
         assert!(quit.quits(90), "the window ran then");
