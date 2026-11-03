@@ -991,8 +991,20 @@ mod tests {
             crate::shared_input::drag_window::Trigger::Any
         );
         assert!(!drag_rules_now(&config, true).on, "no drag on old settings");
-        let off = pocketdesk_core::local::config::Config::default();
-        assert!(!drag_rules_now(&off, false).on, "off until asked");
+        let off = pocketdesk_core::local::config::Config {
+            drag_windows_across: false,
+            ..Default::default()
+        };
+        assert!(!drag_rules_now(&off, false).on, "off when turned off");
+        let no_lending = pocketdesk_core::local::config::Config {
+            lend_windows: false,
+            ..Default::default()
+        };
+        assert!(!drag_rules_now(&no_lending, false).on, "needs lending");
+        assert!(
+            drag_rules_now(&pocketdesk_core::local::config::Config::default(), false).on,
+            "on by default"
+        );
     }
 
     #[test]
