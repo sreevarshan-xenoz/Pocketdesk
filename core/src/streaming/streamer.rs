@@ -395,6 +395,12 @@ impl PointerSource {
         if super::latency_probe::mode() {
             return (Self::Off, false);
         }
+        // A window lent to another computer is not a monitor: its input is
+        // placed by its own guard (`window_guard`), never remapped as a
+        // monitor's, and a session that has no guard places nothing.
+        if super::window_target::is_window_index(index) {
+            return (Self::Off, false);
+        }
         if cfg!(windows) {
             let source = PointerSpace::for_monitor(index).map_or(Self::Off, Self::Fixed);
             return (source, true);
@@ -825,6 +831,38 @@ impl StreamingServer {
                 }
             },
         };
+        // An index past every monitor's is a window lent to another computer
+        // (window handoff, phase 5), and it is for the device it was lent to:
+        // judged by the id the gate above has just held to the key its
+        // connection proved, never by the index the client names. Any other
+        // session, any other device and any index no window is lent under is
+        // refused, whatever else it may do on this computer.
+        let window_lease = if super::window_target::is_window_index(self.config.monitor_index) {
+            match window_session_lease(
+                self.config.monitor_index,
+                self.session_gate.is_some(),
+                device_id.as_deref(),
+                super::window_target::lease_for,
+            ) {
+                Ok(lease) => Some(lease),
+                Err(reason) => {
+                    warn!(
+                        device_id = device_id.as_deref().unwrap_or("<none announced>"),
+                        index = self.config.monitor_index,
+                        "Session for a lent window refused: not lent to this device"
+                    );
+                    if let Some(guard) = &_telemetry_guard {
+                        guard.record(SessionOutcome::Rejected);
+                    }
+                    connection.close(0u32, reason);
+                    return Err(anyhow::anyhow!(
+                        "session refused: that window is not lent to this device"
+                    ));
+                }
+            }
+        } else {
+            None
+        };
         // Without input, the session is view-only whatever the phone asks:
         // the phone's own view-only switch can tighten this, never lift it.
         // A sound session gives no input at all (N5).
@@ -833,10 +871,14 @@ impl StreamingServer {
         // A computer's mic needs control too (PC10 review): never in a
         // session that may not drive this one.
         let mic_needs_control = permissions.mic_needs_control;
+        // A lent window has no sound or mic to give: the computer's sound is
+        // everything it plays, not that window's.
         let allow_mic = permissions.allows(Capability::Mic)
             && !input_only
+            && window_lease.is_none()
             && !(mic_needs_control && force_view_only);
-        let allow_audio = permissions.allows(Capability::Audio) && !input_only;
+        let allow_audio =
+            permissions.allows(Capability::Audio) && !input_only && window_lease.is_none();
         // A cast's sound plays here with its own permission (K5).
         let allow_phone_sound =
             casting && permissions.allows(Capability::PhoneSound) && self.phone_sound_tx.is_some();
@@ -958,9 +1000,20 @@ impl StreamingServer {
         // screen.
         let (mut pointer, per_screen) = if no_picture {
             (PointerSource::Off, false)
+        } else if window_lease.is_some() {
+            // Placed by the window's guard, in the window's frame.
+            (PointerSource::Off, true)
         } else {
             PointerSource::start(self.config.monitor_index)
         };
+        // What a session of a lent window may send, and where (`window_guard`).
+        let mut window_guard = window_lease.clone().map(|lease| {
+            super::window_guard::WindowGuard::new(
+                lease,
+                super::window_target::Machine,
+                capture::layout_rect(),
+            )
+        });
         // An input-only session says it was admitted, so the phone shows its
         // controls only now: taps made while the owner decided are not
         // queued and injected at once later.
@@ -1169,6 +1222,7 @@ impl StreamingServer {
                 self.capture_backend,
                 self.screen_grant.clone(),
                 cursor_feed.clone(),
+                window_lease.clone(),
             )
             .await
             .context("Failed to start screen capture")?;
@@ -1982,6 +2036,7 @@ impl StreamingServer {
             // connection is kept open (R2).
             let mut last_heard = tokio::time::Instant::now();
             let mut silence_check = tokio::time::interval(SILENCE_CHECK);
+            let mut lease_changes = super::window_target::changes();
 
             loop {
                 // Biased: a client stream already waiting is heard before the
@@ -2147,6 +2202,11 @@ impl StreamingServer {
                                                 // drive the capture-region/encoder
                                                 // resolution, don't inject input.
                                                 if matches!(packet, InputPacket::WindowCrop { .. }) {
+                                                    // A lent window is the picture: the
+                                                    // client's own pick does not change it.
+                                                    if window_guard.is_some() {
+                                                        continue;
+                                                    }
                                                     let rect = packet.crop_rect();
                                                     let addr = packet.window_handle().unwrap_or(0);
                                                     info!(?rect, addr, "Client set window crop");
@@ -2207,8 +2267,10 @@ impl StreamingServer {
                                                         *enabled,
                                                         monitor_view_only.load(Ordering::Relaxed),
                                                     );
-                                                    // F5: no mic permission, no relay.
+                                                    // F5: no mic permission, no relay; a
+                                                    // lent window has no mic to give.
                                                     if allow_mic
+                                                        && window_guard.is_none()
                                                         && !held_back
                                                         && let Some(tx) = &monitor_mic_tx
                                                         && tx.try_send(packet).is_err()
@@ -2221,6 +2283,25 @@ impl StreamingServer {
                                                     || monitor_view_only.load(Ordering::Relaxed)
                                                 {
                                                     debug!("View-only: dropping input packet");
+                                                    continue;
+                                                }
+                                                // A session of a window lent to another
+                                                // computer sends only what lands in that
+                                                // window, while it is lent to this device
+                                                // (`window_guard`); nothing is remapped
+                                                // as a monitor's input is.
+                                                if let Some(guard) = window_guard.as_mut() {
+                                                    let out = guard.admit(packet, Instant::now());
+                                                    if let Some(tx) = &input_tx {
+                                                        for packet in out.send {
+                                                            let _ = tx.send((live_id, packet));
+                                                        }
+                                                    }
+                                                    if out.end {
+                                                        info!("The lent window is not lent to this session any more; ending it");
+                                                        conn_for_monitor.close(0u32, b"window no longer lent");
+                                                        break;
+                                                    }
                                                     continue;
                                                 }
                                                 let packet = match packet {
@@ -2270,7 +2351,28 @@ impl StreamingServer {
                         }
                     }
 
+                    // A window lent to this session given back, closed or lent
+                    // again: the registry says so as it changes, and the
+                    // session ends at once.
+                    _ = lease_changes.changed(), if window_guard.is_some() => {
+                        if let Some(guard) = window_guard.as_mut()
+                            && !guard.still_lent()
+                        {
+                            info!("The lent window is not lent to this session any more; ending it");
+                            conn_for_monitor.close(0u32, b"window no longer lent");
+                            break;
+                        }
+                    }
+
                     _ = silence_check.tick() => {
+                        // Looked at on the slow tick too, whatever the registry said.
+                        if let Some(guard) = window_guard.as_mut()
+                            && !guard.still_lent()
+                        {
+                            info!("The lent window is not lent to this session any more; ending it");
+                            conn_for_monitor.close(0u32, b"window no longer lent");
+                            break;
+                        }
                         if client_went_silent(last_heard.elapsed()) {
                             warn!(
                                 silent_s = last_heard.elapsed().as_secs(),
@@ -2279,6 +2381,16 @@ impl StreamingServer {
                             conn_for_monitor.close(0u32, b"phone went silent");
                             break;
                         }
+                    }
+                }
+            }
+            // Whatever the session held down (a key, a button, the pen) is let
+            // go as it ends, so nothing is left pressed in the owner's desktop.
+            if let Some(guard) = window_guard.as_mut() {
+                let letting_go = guard.finish();
+                if let Some(tx) = &input_tx {
+                    for packet in letting_go {
+                        let _ = tx.send((live_id, packet));
                     }
                 }
             }
@@ -2655,6 +2767,29 @@ fn webcam_refusal(allowed: bool, offered: bool) -> Option<&'static [u8]> {
     } else {
         None
     }
+}
+
+/// The lease a session may hold on the window lent under `index` (window
+/// handoff, phase 5), or the reason it is refused. The window is for the
+/// device it was lent to alone: `device` is the id the session gate judged
+/// (so `gated` must be true: with no gate it is only a claim), and the lookup
+/// (`window_target::lease_for`) compares it with the device in the
+/// registration. Every refusal says the same words, so a device learns
+/// nothing of windows lent to others.
+fn window_session_lease(
+    index: u32,
+    gated: bool,
+    device: Option<&str>,
+    lookup: impl Fn(
+        u32,
+        Option<&str>,
+    ) -> Result<super::window_target::Lease, super::window_target::Refusal>,
+) -> Result<super::window_target::Lease, &'static [u8]> {
+    const REFUSED: &[u8] = b"that window is not lent to this device";
+    if !gated {
+        return Err(REFUSED);
+    }
+    lookup(index, device).map_err(|_| REFUSED)
 }
 
 /// Whether the client's capability bits say it needs no idle repeats of a
@@ -3951,6 +4086,36 @@ mod tests {
             Some(&b"phone camera not allowed"[..])
         );
         assert_eq!(webcam_refusal(true, true), None);
+    }
+
+    #[test]
+    fn a_lent_window_is_for_the_device_it_was_lent_to_and_no_other() {
+        use super::super::window_target::{self, Identity};
+        let device = "window-session-owner";
+        let (lease, _) = window_target::register(0x7F01, device, Identity { pid: 5, tid: 6 }, None)
+            .expect("a free index");
+        let ask = |gated: bool, who: Option<&str>| {
+            window_session_lease(lease.index, gated, who, window_target::lease_for)
+        };
+        assert_eq!(ask(true, Some(device)), Ok(lease.clone()));
+        let refused = Err(&b"that window is not lent to this device"[..]);
+        // Another device, a device not known, and a server with no gate (the
+        // id is then a claim, nothing proved it).
+        assert_eq!(ask(true, Some("window-session-other")), refused);
+        assert_eq!(ask(true, None), refused);
+        assert_eq!(ask(true, Some("")), refused);
+        assert_eq!(ask(false, Some(device)), refused);
+        // After the window is given back nobody has it, the device it was lent
+        // to included, and the words are the same.
+        window_target::unregister(&lease);
+        assert_eq!(ask(true, Some(device)), refused);
+    }
+
+    #[test]
+    fn a_session_for_a_lent_window_places_nothing_as_a_monitors_input_is() {
+        let (mut source, lands) = PointerSource::start(super::super::window_target::FIRST_INDEX);
+        assert!(!lands);
+        assert_eq!(source.remap(7, 9), (7, 9), "never remapped as a monitor");
     }
 
     #[test]

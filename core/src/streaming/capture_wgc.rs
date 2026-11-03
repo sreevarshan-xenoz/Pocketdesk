@@ -51,6 +51,7 @@ use super::capture::CaptureSession;
 #[cfg(test)]
 use super::capture_d3d::enumerate_monitors;
 use super::capture_d3d::{StagingCopy, pick_monitor, wait_before_sending};
+use super::window_target::{self, Lease};
 use super::{StreamingConfig, VideoFrame};
 
 /// How long [`start_wgc_capture`] waits for the first frame before reporting
@@ -59,6 +60,9 @@ const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// While the screen is still, re-send the last frame this often.
 const IDLE_HEARTBEAT: Duration = Duration::from_secs(1);
+
+/// How often a minimised lent window is asked to come out of the taskbar.
+const UNMINIMISE_EVERY: Duration = Duration::from_secs(1);
 
 /// Frames the pool may hold; two lets one be copied while the next lands.
 const POOL_BUFFERS: i32 = 2;
@@ -77,6 +81,7 @@ pub fn start_wgc_capture(
     cancel: CancellationToken,
     window_rx: watch::Receiver<u64>,
     window_mode: Arc<AtomicBool>,
+    window_lease: Option<Lease>,
 ) -> Result<CaptureSession> {
     if !GraphicsCaptureSession::IsSupported().unwrap_or(false) {
         bail!("Windows.Graphics.Capture is not supported on this Windows build");
@@ -95,6 +100,7 @@ pub fn start_wgc_capture(
                 &ready_tx,
                 window_rx,
                 window_mode,
+                window_lease,
             );
             if let Err(e) = result {
                 // Before the first frame this is the setup failure the caller
@@ -188,16 +194,46 @@ fn run_capture_loop(
     ready_tx: &std_mpsc::Sender<Result<()>>,
     mut window_rx: watch::Receiver<u64>,
     window_mode: Arc<AtomicBool>,
+    window_lease: Option<Lease>,
 ) -> Result<()> {
     // WinRT needs an apartment on this thread; MTA because the pool is
     // free-threaded and its event fires on a worker thread.
     unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.context("RoInitialize")?;
     let mut gpu = create_gpu()?;
-    let monitor = pick_monitor(config.monitor_index);
+    // A session for a window lent to another computer (window handoff,
+    // phase 5) captures that window alone, under the lease it was started
+    // with: never a monitor, which would show whatever its owner has open,
+    // and never the client's own pick of a window. The capture ends when the
+    // lease does not stand any more (the window was given back or closed, or
+    // its handle names another window), which ends the session.
+    if super::window_target::is_window_index(config.monitor_index) && window_lease.is_none() {
+        bail!("That window is not lent to this session");
+    }
+    let locked = window_lease;
+    if let Some(lease) = &locked
+        && !window_target::lease_alive(lease)
+    {
+        bail!("That window is not lent any more");
+    }
+    let monitor = match locked {
+        Some(_) => HMONITOR::default(),
+        None => pick_monitor(config.monitor_index),
+    };
     let (wake_tx, wake_rx) = std_mpsc::sync_channel::<()>(1);
 
-    let mut source = Source::Monitor;
-    let mut capture = start_item(&gpu, &monitor_item(monitor)?, wake_tx.clone())?;
+    let (mut source, mut capture) = match &locked {
+        Some(lease) => {
+            window_mode.store(true, Ordering::Relaxed);
+            (
+                Source::Window(lease.hwnd),
+                start_item(&gpu, &window_item(lease.hwnd)?, wake_tx.clone())?,
+            )
+        }
+        None => (
+            Source::Monitor,
+            start_item(&gpu, &monitor_item(monitor)?, wake_tx.clone())?,
+        ),
+    };
     // A window that failed to capture is not retried until the client picks
     // something else.
     let mut refused_window: Option<u64> = None;
@@ -213,14 +249,17 @@ fn run_capture_loop(
     // source whose first frame is not its item's size would restart forever).
     let mut restarted = false;
     let mut ready_sent = false;
+    // When a minimised lent window was last asked to come back.
+    let mut unminimised: Option<Instant> = None;
 
     while !cancel.is_cancelled() {
         // Follow the client's window choice.
         let wanted = *window_rx.borrow_and_update();
-        let want_source = match wanted {
-            0 => Source::Monitor,
-            hwnd if refused_window == Some(hwnd) => Source::Monitor,
-            hwnd => Source::Window(hwnd as isize),
+        let want_source = match (&locked, wanted) {
+            (Some(lease), _) => Source::Window(lease.hwnd),
+            (None, 0) => Source::Monitor,
+            (None, hwnd) if refused_window == Some(hwnd) => Source::Monitor,
+            (None, hwnd) => Source::Window(hwnd as isize),
         };
         if want_source != source {
             let switched = source_item(want_source, monitor)
@@ -246,6 +285,24 @@ fn run_capture_loop(
         }
         if wanted == 0 {
             refused_window = None;
+        }
+        // A lease that does not stand ends the capture, and with it the
+        // session that shows the window: there is no monitor to go back to.
+        // Asked each time round (at least ten times a second), so a window
+        // given back stops being shown at once.
+        if let Some(lease) = &locked {
+            if !window_target::lease_alive(lease) {
+                bail!("The lent window is not lent any more, or closed");
+            }
+            // A minimised window sends no frames: brought out of the taskbar
+            // (not more than once a second), rather than shown frozen until
+            // someone presses in it.
+            if window_target::is_minimized(lease.hwnd)
+                && unminimised.is_none_or(|at| at.elapsed() >= UNMINIMISE_EVERY)
+            {
+                unminimised = Some(Instant::now());
+                window_target::unminimize(lease);
+            }
         }
         // A captured window that closed: back to the monitor.
         if let Source::Window(hwnd) = source
@@ -497,8 +554,9 @@ mod tests {
             let (_window_tx, window_rx) = watch::channel(0u64);
             let window_mode = Arc::new(AtomicBool::new(false));
             let config = StreamingConfig::default();
-            let _session = start_wgc_capture(config, tx, cancel.clone(), window_rx, window_mode)
-                .expect("WGC should start on a desktop session");
+            let _session =
+                start_wgc_capture(config, tx, cancel.clone(), window_rx, window_mode, None)
+                    .expect("WGC should start on a desktop session");
             let frame = tokio::time::timeout(Duration::from_secs(3), rx.recv())
                 .await
                 .expect("a frame within 3 s")
@@ -683,6 +741,7 @@ mod tests {
                 cancel.clone(),
                 window_rx,
                 window_mode.clone(),
+                None,
             )
             .expect("WGC should start on a desktop session");
             let (_, monitor) = enumerate_monitors()[0];

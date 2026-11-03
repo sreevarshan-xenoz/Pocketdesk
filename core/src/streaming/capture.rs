@@ -248,7 +248,17 @@ pub async fn start_capture_auto(
     backend: CaptureBackend,
     screen_grant: Option<std::path::PathBuf>,
     cursor: Option<super::cursor_feed::CursorFeed>,
+    window_lease: Option<super::window_target::Lease>,
 ) -> Result<CaptureSession> {
+    // Only Windows lends a window.
+    #[cfg(not(windows))]
+    let _ = &window_lease;
+    // An index past the monitors is a lent window, and only the session the
+    // window was lent to (its lease) captures it: never a monitor in its
+    // place, whatever the index, the config or a failure says.
+    if super::window_target::is_window_index(config.monitor_index) && window_lease.is_none() {
+        bail!("That window is not lent to this session");
+    }
     // Only the portal asks anyone; the other backends need no grant.
     #[cfg(not(target_os = "linux"))]
     let _ = &screen_grant;
@@ -260,7 +270,7 @@ pub async fn start_capture_auto(
     if super::test_pattern::wanted() {
         return Ok(super::test_pattern::start(config, frame_tx, cancel));
     }
-    let attempts = capture_attempts(backend, detect_display_server())?;
+    let attempts = capture_attempts_for(window_lease.is_some(), backend, detect_display_server())?;
     let mut last_err: Option<anyhow::Error> = None;
     for backend_tried in attempts {
         // Each attempt has a token of its own under the session's (R6g
@@ -314,6 +324,7 @@ pub async fn start_capture_auto(
                 attempt.clone(),
                 window_rx.clone(),
                 window_mode.clone(),
+                window_lease.clone(),
             ),
             #[cfg(windows)]
             CaptureBackend::Dxgi => super::capture_dxgi::start_dxgi_capture(
@@ -350,6 +361,25 @@ pub async fn start_capture_auto(
 async fn end_session_with_capture(capture: CancellationToken, session: CancellationToken) {
     capture.cancelled().await;
     session.cancel();
+}
+
+/// [`capture_attempts`], for a session that may be bound to a window lent to
+/// another computer (`window_bound`, window handoff phase 5): that is captured
+/// as a window by Windows.Graphics.Capture and by nothing else, whatever the
+/// config pins and whatever fails, because every other backend would show a
+/// whole monitor.
+pub fn capture_attempts_for(
+    window_bound: bool,
+    backend: CaptureBackend,
+    detected: DisplayServer,
+) -> Result<Vec<CaptureBackend>> {
+    if window_bound {
+        return match detected {
+            DisplayServer::Windows => Ok(vec![CaptureBackend::Wgc]),
+            _ => bail!("A lent window can only be captured on Windows"),
+        };
+    }
+    capture_attempts(backend, detected)
 }
 
 /// Pure decision table: which backends to try, in order, for a configured
@@ -485,6 +515,27 @@ mod tests {
         );
         // Headless: nothing to try.
         assert!(capture_attempts(CaptureBackend::Auto, DisplayServer::None).is_err());
+    }
+
+    #[test]
+    fn a_lent_window_is_captured_by_wgc_alone() {
+        use CaptureBackend::{Auto, Dxgi, Portal, Wgc};
+        // Whatever is configured, and whatever would follow it: no monitor
+        // backend, which would show the whole screen.
+        for pinned in [Auto, Wgc, Dxgi] {
+            assert_eq!(
+                capture_attempts_for(true, pinned, DisplayServer::Windows).unwrap(),
+                vec![Wgc]
+            );
+        }
+        // Off Windows there is no such capture, and nothing else stands in.
+        assert!(capture_attempts_for(true, Auto, DisplayServer::Wayland).is_err());
+        assert!(capture_attempts_for(true, Portal, DisplayServer::X11).is_err());
+        // A session bound to no window is as it was.
+        assert_eq!(
+            capture_attempts_for(false, Auto, DisplayServer::Windows).unwrap(),
+            vec![Wgc, Dxgi]
+        );
     }
 
     #[test]
