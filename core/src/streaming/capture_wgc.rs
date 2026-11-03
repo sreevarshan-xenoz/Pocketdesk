@@ -193,11 +193,37 @@ fn run_capture_loop(
     // free-threaded and its event fires on a worker thread.
     unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.context("RoInitialize")?;
     let mut gpu = create_gpu()?;
-    let monitor = pick_monitor(config.monitor_index);
+    // A session for a window lent to another computer (window handoff,
+    // phase 5) captures that window alone: never a monitor, which would show
+    // whatever its owner has open, and never the client's own pick of a
+    // window. When the window closes the capture ends.
+    let locked = if super::window_target::is_window_index(config.monitor_index) {
+        Some(
+            super::window_target::hwnd(config.monitor_index)
+                .ok_or_else(|| anyhow!("That window is not lent any more"))?,
+        )
+    } else {
+        None
+    };
+    let monitor = match locked {
+        Some(_) => HMONITOR::default(),
+        None => pick_monitor(config.monitor_index),
+    };
     let (wake_tx, wake_rx) = std_mpsc::sync_channel::<()>(1);
 
-    let mut source = Source::Monitor;
-    let mut capture = start_item(&gpu, &monitor_item(monitor)?, wake_tx.clone())?;
+    let (mut source, mut capture) = match locked {
+        Some(hwnd) => {
+            window_mode.store(true, Ordering::Relaxed);
+            (
+                Source::Window(hwnd),
+                start_item(&gpu, &window_item(hwnd)?, wake_tx.clone())?,
+            )
+        }
+        None => (
+            Source::Monitor,
+            start_item(&gpu, &monitor_item(monitor)?, wake_tx.clone())?,
+        ),
+    };
     // A window that failed to capture is not retried until the client picks
     // something else.
     let mut refused_window: Option<u64> = None;
@@ -217,10 +243,11 @@ fn run_capture_loop(
     while !cancel.is_cancelled() {
         // Follow the client's window choice.
         let wanted = *window_rx.borrow_and_update();
-        let want_source = match wanted {
-            0 => Source::Monitor,
-            hwnd if refused_window == Some(hwnd) => Source::Monitor,
-            hwnd => Source::Window(hwnd as isize),
+        let want_source = match (locked, wanted) {
+            (Some(hwnd), _) => Source::Window(hwnd),
+            (None, 0) => Source::Monitor,
+            (None, hwnd) if refused_window == Some(hwnd) => Source::Monitor,
+            (None, hwnd) => Source::Window(hwnd as isize),
         };
         if want_source != source {
             let switched = source_item(want_source, monitor)
@@ -246,6 +273,13 @@ fn run_capture_loop(
         }
         if wanted == 0 {
             refused_window = None;
+        }
+        // A lent window that closed ends the capture, and with it the session
+        // that shows it: there is no monitor to go back to.
+        if let Some(hwnd) = locked
+            && !unsafe { IsWindow(Some(HWND(hwnd as *mut _))) }.as_bool()
+        {
+            bail!("The lent window closed");
         }
         // A captured window that closed: back to the monitor.
         if let Source::Window(hwnd) = source

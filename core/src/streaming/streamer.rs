@@ -384,6 +384,19 @@ enum PointerSource {
         bound: Option<u32>,
         spaces: AbsoluteSpaces,
     },
+    /// A window lent to another computer (window handoff, phase 5; Windows):
+    /// the picture is that window's frame, so a move lands in the frame's
+    /// pixels, asked of the window at each move because the window may be
+    /// moved or resized. `layout` is the box around every monitor, read at
+    /// the start. A move that cannot be placed (the window gone, the layout
+    /// unknown) is dropped, never sent over the desktop: a click there would
+    /// land on whatever else is open. `raised` is when the window was last
+    /// brought to the front (a click lands on what is in front).
+    Window {
+        index: u32,
+        layout: Option<Rect>,
+        raised: Option<Instant>,
+    },
 }
 
 impl PointerSource {
@@ -394,6 +407,17 @@ impl PointerSource {
         // reads the move as it came.
         if super::latency_probe::mode() {
             return (Self::Off, false);
+        }
+        // A window lent to another computer (or one that was, and is not any
+        // more: it places nothing, so nothing is sent): its moves land in its
+        // frame.
+        if super::window_target::is_window_index(index) {
+            let source = Self::Window {
+                index,
+                layout: capture::layout_rect(),
+                raised: None,
+            };
+            return (source, true);
         }
         if cfg!(windows) {
             let source = PointerSpace::for_monitor(index).map_or(Self::Off, Self::Fixed);
@@ -422,6 +446,8 @@ impl PointerSource {
     fn remap(&mut self, x_norm: u16, y_norm: u16) -> (u16, u16) {
         match self {
             Self::Off => (x_norm, y_norm),
+            // Placed by `place`, which can say no.
+            Self::Window { .. } => (x_norm, y_norm),
             Self::Fixed(space) => space.remap(x_norm, y_norm),
             Self::Live {
                 index,
@@ -441,6 +467,79 @@ impl PointerSource {
             }
         }
     }
+
+    /// Where an absolute move lands on the desktop, or `None` when it must
+    /// not be sent at all (a lent window that is gone or cannot be placed).
+    fn place(&mut self, x_norm: u16, y_norm: u16) -> Option<(u16, u16)> {
+        match self {
+            Self::Window { index, layout, .. } => window_point(
+                super::window_target::frame_rect(*index),
+                *layout,
+                x_norm,
+                y_norm,
+            ),
+            other => Some(other.remap(x_norm, y_norm)),
+        }
+    }
+
+    /// Whether the session is bound to a window lent to another computer,
+    /// which a client's own window pick and crop must not change.
+    fn is_window(&self) -> bool {
+        matches!(self, Self::Window { .. })
+    }
+
+    /// Input is about to be sent: bring a lent window to the front first when
+    /// it is the kind that lands on the window in front (a press, a scroll, a
+    /// key), not more than every `RAISE_EVERY`.
+    fn before_input(&mut self, packet: &InputPacket) {
+        let Self::Window { index, raised, .. } = self else {
+            return;
+        };
+        let acts = matches!(
+            packet,
+            InputPacket::MouseClick { pressed: true, .. }
+                | InputPacket::MouseScroll { .. }
+                | InputPacket::KeyEvent { pressed: true, .. }
+                | InputPacket::Text(_)
+        );
+        let now = Instant::now();
+        if super::window_target::raise_due(*raised, now, acts) {
+            super::window_target::raise(*index);
+            *raised = Some(now);
+        }
+    }
+}
+
+/// A frame-normalized point (0..=65535 per axis) of a lent window as the
+/// desktop-layout-normalized one the input backend takes: `None` when the
+/// window's frame or the layout is not known, or the frame lies wholly off the
+/// layout (nothing of the window is there to click). The point is inside the
+/// frame, so a window the viewer sees is the window the click lands in; a
+/// frame partly off the layout is clamped to the layout's edge.
+fn window_point(
+    frame: Option<Rect>,
+    layout: Option<Rect>,
+    x_norm: u16,
+    y_norm: u16,
+) -> Option<(u16, u16)> {
+    let (frame, layout) = (frame?, layout?);
+    if frame.2 == 0 || frame.3 == 0 || layout.2 == 0 || layout.3 == 0 {
+        return None;
+    }
+    let off = |start: i32, len: u32, outer: i32, outer_len: u32| {
+        i64::from(start) + i64::from(len) <= i64::from(outer)
+            || i64::from(start) >= i64::from(outer) + i64::from(outer_len)
+    };
+    if off(frame.0, frame.2, layout.0, layout.2) || off(frame.1, frame.3, layout.1, layout.3) {
+        return None;
+    }
+    Some(
+        PointerSpace {
+            monitor: frame,
+            layout,
+        }
+        .remap(x_norm, y_norm),
+    )
 }
 
 /// R4 A3: bitrate ceiling applied while an iroh session rides a relay —
@@ -1967,6 +2066,9 @@ impl StreamingServer {
                 per_screen,
                 "Absolute input follows this screen's place in the compositor's layout"
             ),
+            PointerSource::Window { .. } => info!(
+                "Absolute input lands in the lent window's frame, asked of the window at each move"
+            ),
             PointerSource::Off => {}
         }
         // The client's own measurements land in the session record, so the
@@ -2147,6 +2249,11 @@ impl StreamingServer {
                                                 // drive the capture-region/encoder
                                                 // resolution, don't inject input.
                                                 if matches!(packet, InputPacket::WindowCrop { .. }) {
+                                                    // A lent window is the picture: the
+                                                    // client's own pick does not change it.
+                                                    if pointer.is_window() {
+                                                        continue;
+                                                    }
                                                     let rect = packet.crop_rect();
                                                     let addr = packet.window_handle().unwrap_or(0);
                                                     info!(?rect, addr, "Client set window crop");
@@ -2227,18 +2334,36 @@ impl StreamingServer {
                                                     InputPacket::MouseMoveAbs { x_norm, y_norm }
                                                         if !cropped =>
                                                     {
-                                                        let (x_norm, y_norm) =
-                                                            pointer.remap(x_norm, y_norm);
+                                                        // A move that cannot be placed
+                                                        // (a lent window gone) is dropped.
+                                                        let Some((x_norm, y_norm)) =
+                                                            pointer.place(x_norm, y_norm)
+                                                        else {
+                                                            continue;
+                                                        };
                                                         InputPacket::MouseMoveAbs { x_norm, y_norm }
                                                     }
                                                     // A pen lands where a tap would (E3).
                                                     InputPacket::Pen(mut pen) if !cropped => {
-                                                        (pen.x_norm, pen.y_norm) =
-                                                            pointer.remap(pen.x_norm, pen.y_norm);
+                                                        let Some(at) =
+                                                            pointer.place(pen.x_norm, pen.y_norm)
+                                                        else {
+                                                            continue;
+                                                        };
+                                                        (pen.x_norm, pen.y_norm) = at;
                                                         InputPacket::Pen(pen)
+                                                    }
+                                                    // A lent window has a place to land in; a
+                                                    // move by a distance has none (it could
+                                                    // leave the window), so it is dropped.
+                                                    InputPacket::MouseMove { .. } if pointer.is_window() => {
+                                                        continue;
                                                     }
                                                     packet => packet,
                                                 };
+                                                // A lent window comes to the front
+                                                // before what lands on it is sent.
+                                                pointer.before_input(&packet);
                                                 // Forward to input injector via channel
                                                 if let Some(ref tx) = input_tx {
                                                    // Use send() without await (broadcast is sync).
@@ -3023,6 +3148,82 @@ mod tests {
             start + (f64::from(n) / 65535.0 * f64::from(len)).round() as i32
         };
         (px(norm.0, lx, lw), px(norm.1, ly, lh))
+    }
+
+    /// A window of 800x600 at (300, 100) on the two-screen layout above.
+    const WINDOW: Rect = (300, 100, 800, 600);
+
+    #[test]
+    fn a_lent_windows_points_land_inside_its_frame() {
+        let layout = Some(TWO_SCREENS.layout);
+        for (norm, inside) in [
+            ((0, 0), (300, 100)),
+            ((65535, 65535), (1100, 700)),
+            ((32768, 32768), (700, 400)),
+        ] {
+            let at = window_point(Some(WINDOW), layout, norm.0, norm.1).expect("placed");
+            let (x, y) = to_pixel(at, TWO_SCREENS.layout);
+            assert!(
+                (x - inside.0).abs() <= 1 && (y - inside.1).abs() <= 1,
+                "{norm:?} landed at ({x}, {y}), wanted about {inside:?}"
+            );
+            assert!((300..=1100).contains(&x) && (100..=700).contains(&y));
+        }
+    }
+
+    #[test]
+    fn a_lent_windows_move_with_nowhere_to_land_is_dropped() {
+        let layout = Some(TWO_SCREENS.layout);
+        // The window gone, or the layout not known.
+        assert_eq!(window_point(None, layout, 1, 1), None);
+        assert_eq!(window_point(Some(WINDOW), None, 1, 1), None);
+        // A frame with no size.
+        assert_eq!(window_point(Some((0, 0, 0, 600)), layout, 1, 1), None);
+        assert_eq!(window_point(Some((0, 0, 800, 0)), layout, 1, 1), None);
+        // A window wholly off every screen (moved away, or on a monitor that
+        // was unplugged): nothing of it is there to click.
+        assert_eq!(
+            window_point(Some((9000, 100, 800, 600)), layout, 100, 100),
+            None
+        );
+        assert_eq!(
+            window_point(Some((100, -2000, 800, 600)), layout, 100, 100),
+            None
+        );
+        assert_eq!(
+            window_point(Some((-900, 100, 800, 600)), layout, 100, 100),
+            None
+        );
+    }
+
+    #[test]
+    fn a_lent_window_half_off_the_layout_is_clamped_to_its_edge() {
+        let layout = Some(TWO_SCREENS.layout);
+        let frame = Some((4400, 100, 800, 600));
+        let at = window_point(frame, layout, 65535, 0).expect("placed");
+        let (x, _) = to_pixel(at, TWO_SCREENS.layout);
+        assert_eq!(x, 4608, "the layout's right edge, not past it");
+    }
+
+    #[test]
+    fn a_session_for_a_registered_window_is_bound_to_it_and_other_sources_pass_moves_on() {
+        let index = super::super::window_target::register(0x7401).expect("a free index");
+        let (mut source, lands) = PointerSource::start(index);
+        assert!(source.is_window());
+        assert!(lands, "its clicks land on its picture");
+        // Off Windows there is no frame to ask, so no move is placed; on
+        // Windows a window that is not there is the same.
+        assert_eq!(source.place(1, 1), None);
+        super::super::window_target::unregister(index);
+        // A window that is no longer lent still places nothing, and is never
+        // read as a monitor (whose pixels are somebody's whole screen).
+        let (mut gone, _) = PointerSource::start(index);
+        assert!(gone.is_window());
+        assert_eq!(gone.place(1, 1), None);
+        // An ordinary source places every move and is no window.
+        let mut off = PointerSource::Off;
+        assert!(!off.is_window());
+        assert_eq!(off.place(7, 9), Some((7, 9)));
     }
 
     #[test]
