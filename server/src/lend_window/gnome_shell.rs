@@ -23,7 +23,6 @@ use std::collections::HashMap;
 use std::io;
 use std::time::Duration;
 
-use pocketdesk_core::streaming::gnome_unattended;
 use zbus::zvariant::{OwnedValue, Value};
 
 use super::place::{Shell, ShellWindow};
@@ -43,12 +42,9 @@ pub struct Gnome;
 
 impl Shell for Gnome {
     fn cannot(&self) -> Option<&'static str> {
-        cannot_because(
-            gnome_unattended::is_gnome(std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref()),
-            // The config as it is now, not the capture's copy of it, which is
-            // set as each session starts: a lend comes before any session.
-            crate::events::current_config().gnome_unattended,
-        )
+        // The config as it is now, not the capture's copy of it, which is set
+        // as each session starts: a lend comes before any session.
+        cannot_because(crate::events::current_config().gnome_unattended)
     }
 
     fn windows(&self) -> io::Result<Vec<ShellWindow>> {
@@ -60,15 +56,13 @@ impl Shell for Gnome {
     }
 }
 
-/// Why a window cannot be lent from this computer, if one cannot. GNOME's own
-/// screen cast is what shows a lent window with no dialog, which is the
-/// "Unattended on GNOME" path (off by default), so the lend needs its switch.
-pub fn cannot_because(gnome: bool, unattended: bool) -> Option<&'static str> {
-    if !gnome {
-        Some(
-            "This computer cannot lend a window: only Sway, Hyprland, Windows and GNOME can for now",
-        )
-    } else if !unattended {
+/// Why a window cannot be lent from this computer, if one cannot. This is
+/// only asked where the lend picked GNOME (`here()` does so only on GNOME).
+/// GNOME's own screen cast is what shows a lent window with no dialog, which
+/// is the "Unattended on GNOME" path (off by default), so the lend needs its
+/// switch.
+pub fn cannot_because(unattended: bool) -> Option<&'static str> {
+    if !unattended {
         Some(
             "This computer lends a window of GNOME only with \"Unattended on GNOME\" on (Settings, Connection): GNOME's own screen cast is what shows it with no dialog",
         )
@@ -149,12 +143,38 @@ enum Failure {
     Other(&'static str),
 }
 
-/// The Shell's window list: the call, and nothing else.
-async fn get_windows() -> Result<Raw, Failure> {
+/// The one session-bus connection every call to the Shell shares (the lend
+/// watcher asks once a second, and a connection is not cheap to make). It is
+/// made on first use, on [`runtime`] (which it needs to live as long as), and
+/// dropped when a call fails any way but a D-Bus error from the Shell, so the
+/// next call connects afresh.
+static CONNECTION: tokio::sync::Mutex<Option<zbus::Connection>> =
+    tokio::sync::Mutex::const_new(None);
+
+async fn connection() -> Result<zbus::Connection, Failure> {
+    let mut held = CONNECTION.lock().await;
+    if let Some(conn) = &*held {
+        return Ok(conn.clone());
+    }
     let conn = tokio::time::timeout(CALL_WAIT, zbus::Connection::session())
         .await
         .map_err(|_| Failure::Other("the session bus did not answer"))?
         .map_err(|_| Failure::Other("no session bus"))?;
+    *held = Some(conn.clone());
+    Ok(conn)
+}
+
+/// The Shell's window list: the call, and nothing else.
+async fn get_windows() -> Result<Raw, Failure> {
+    let conn = connection().await?;
+    let result = ask(&conn).await;
+    if matches!(result, Err(Failure::Other(_))) {
+        *CONNECTION.lock().await = None;
+    }
+    result
+}
+
+async fn ask(conn: &zbus::Connection) -> Result<Raw, Failure> {
     let reply = tokio::time::timeout(
         CALL_WAIT,
         conn.call_method(Some(SHELL), PATH, Some(INTERFACE), "GetWindows", &()),
@@ -171,21 +191,35 @@ async fn get_windows() -> Result<Raw, Failure> {
     }
 }
 
-/// Run `fut` to its end on a thread of its own with a runtime of its own: the
-/// lend's calls come from blocking code that may or may not be inside the
-/// server's runtime, and a connection made here is gone when the runtime is.
-fn on_a_thread<T: Send>(fut: impl std::future::Future<Output = T> + Send) -> io::Result<T> {
-    std::thread::scope(|scope| {
-        scope
-            .spawn(|| {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()?;
-                Ok(runtime.block_on(fut))
-            })
-            .join()
-            .map_err(|_| io::Error::other("the call to GNOME Shell failed"))?
-    })
+/// The runtime the shared connection lives on: one for the life of the
+/// program, with a worker of its own, so a call can be made from blocking
+/// code that is or is not inside the server's runtime.
+fn runtime() -> io::Result<&'static tokio::runtime::Runtime> {
+    static RUNTIME: std::sync::OnceLock<Option<tokio::runtime::Runtime>> =
+        std::sync::OnceLock::new();
+    RUNTIME
+        .get_or_init(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .thread_name("gnome-shell-call")
+                .enable_all()
+                .build()
+                .ok()
+        })
+        .as_ref()
+        .ok_or_else(|| io::Error::other("the call to GNOME Shell could not be started"))
+}
+
+/// Run `fut` to its end on [`runtime`] and wait for it here.
+fn on_a_thread<T: Send + 'static>(
+    fut: impl std::future::Future<Output = T> + Send + 'static,
+) -> io::Result<T> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    runtime()?.spawn(async move {
+        let _ = tx.send(fut.await);
+    });
+    rx.recv()
+        .map_err(|_| io::Error::other("the call to GNOME Shell failed"))
 }
 
 #[cfg(test)]
@@ -293,16 +327,10 @@ mod tests {
     }
 
     #[test]
-    fn a_window_is_lent_only_from_gnome_and_only_with_the_switch_on() {
-        assert_eq!(cannot_because(true, true), None);
-        let off = cannot_because(true, false).unwrap();
+    fn a_window_is_lent_only_with_the_switch_on() {
+        assert_eq!(cannot_because(true), None);
+        let off = cannot_because(false).unwrap();
         assert!(off.contains("Unattended on GNOME"), "{off}");
-        let elsewhere = cannot_because(false, true).unwrap();
-        assert!(
-            elsewhere.contains("only Sway, Hyprland, Windows and GNOME"),
-            "{elsewhere}"
-        );
-        assert!(cannot_because(false, false).is_some());
     }
 
     #[test]
