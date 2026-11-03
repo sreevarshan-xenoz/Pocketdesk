@@ -45,10 +45,11 @@ pub struct Config {
     /// hitch in the picture's timing each time (it is several times the size
     /// of any other frame). An encoder that can (libx264, NVENC) spreads it
     /// over the stream instead, the rest send one every ten seconds, and a
-    /// viewer that loses a frame still gets a whole one at once. Off by
-    /// default until a phone has been checked with it
-    /// (`streaming::keyframes`). The server reads it at its start.
-    #[serde(default)]
+    /// viewer that loses a frame still gets a whole one at once. On by
+    /// default; off, every encoder sends a whole keyframe every two seconds
+    /// as it did before (`streaming::keyframes`). The server reads it at its
+    /// start.
+    #[serde(default = "default_true")]
     pub smooth_keyframes: bool,
     /// Copy the screen through memory, as every capture did before the
     /// zero-copy capture: on a wlroots desktop, and on GNOME and KDE through
@@ -286,9 +287,10 @@ pub struct Config {
     /// this computer's windows: the window moves to a hidden screen of its
     /// own size here, is streamed there, and goes back on return (Sway,
     /// Hyprland; on Windows the window stays where it is and is driven; on
-    /// GNOME it stays where it is and is only looked at). Off by default: a
-    /// window leaves the screen it was on.
-    #[serde(default)]
+    /// GNOME it stays where it is and is only looked at). On by default, and
+    /// only for the owner's own computers (paired both ways, with Input); off,
+    /// no window leaves the screen it is on.
+    #[serde(default = "default_true")]
     pub lend_windows: bool,
     /// A window borrowed from another of the owner's computers takes the
     /// size of the window that shows it here: as that window is resized,
@@ -305,9 +307,9 @@ pub struct Config {
     /// shared, a floating window dragged to the edge that leads to another
     /// computer is lent to it and shown there where it is dropped (Sway and
     /// Hyprland; needs `lend_windows`). The computer it goes to needs this
-    /// on too: it is the one that opens the window. Off by default: a drag
-    /// that crosses an edge only moves the pointer.
-    #[serde(default)]
+    /// on too: it is the one that opens the window. On by default; off, a
+    /// drag that crosses an edge only moves the pointer.
+    #[serde(default = "default_true")]
     pub drag_windows_across: bool,
     /// What marks such a drag as a window being moved, not a text selection
     /// or a file being dragged: `mod` (the default) wants the compositor's
@@ -875,7 +877,7 @@ impl Default for Config {
             pairing_required: true,
             allow_hevc: false,
             slow_link_frame_rate: true,
-            smooth_keyframes: false,
+            smooth_keyframes: true,
             capture_copy: false,
             laser_pointer: true,
             internet_files: true,
@@ -924,9 +926,9 @@ impl Default for Config {
             link_rules: Vec::new(),
             share_state: true,
             virtual_screens: true,
-            lend_windows: false,
+            lend_windows: true,
             borrowed_window_follows_size: true,
-            drag_windows_across: false,
+            drag_windows_across: true,
             drag_window_trigger: default_drag_window_trigger(),
             peek: true,
             notes_file: String::new(),
@@ -2161,14 +2163,14 @@ phone_battery = \"x\"
     }
 
     #[test]
-    fn smooth_keyframes_are_off_by_default_and_the_choice_saves() {
-        assert!(!Config::default().smooth_keyframes);
+    fn smooth_keyframes_are_on_by_default_and_the_choice_saves() {
+        assert!(Config::default().smooth_keyframes);
         let path = temp("smooth-keyframes");
         let mut config = Config::load_from(&path).unwrap();
-        assert!(!config.smooth_keyframes, "a file without the key");
-        config.smooth_keyframes = true;
+        assert!(config.smooth_keyframes, "a file without the key");
+        config.smooth_keyframes = false;
         config.save_to(&path).unwrap();
-        assert!(Config::load_from(&path).unwrap().smooth_keyframes);
+        assert!(!Config::load_from(&path).unwrap().smooth_keyframes);
         assert!(Config::KNOWN_KEYS.contains(&"smooth_keyframes"));
     }
 
@@ -2220,16 +2222,22 @@ phone_battery = \"x\"
     }
 
     #[test]
-    fn windows_are_lent_only_when_asked_and_the_choice_saves() {
+    fn windows_are_lent_until_turned_off_and_the_choice_saves() {
         assert!(
-            !Config::default().lend_windows,
-            "a window leaves its screen only when the owner says so"
+            Config::default().lend_windows,
+            "on by default, for the owner's own computers"
         );
         let path = temp("lend-windows");
         let mut config = Config::load_from(&path).unwrap();
-        config.lend_windows = true;
+        assert!(config.lend_windows, "a file without the key");
+        config.lend_windows = false;
         config.save_to(&path).unwrap();
-        assert!(Config::load_from(&path).unwrap().lend_windows);
+        assert!(!Config::load_from(&path).unwrap().lend_windows);
+        Config::default().save_to(&path).unwrap();
+        assert!(
+            Config::load_from(&path).unwrap().lend_windows,
+            "turned back on"
+        );
     }
 
     #[test]
@@ -2261,19 +2269,19 @@ phone_battery = \"x\"
     }
 
     #[test]
-    fn dragging_a_window_across_is_off_until_asked_and_the_choices_save() {
+    fn dragging_a_window_across_is_on_until_turned_off_and_the_choices_save() {
         let config = Config::default();
         assert!(
-            !config.drag_windows_across,
-            "a drag past the edge moves a window only when the owner says so"
+            config.drag_windows_across,
+            "on by default (it needs lend_windows and the shared keyboard and mouse too)"
         );
         assert_eq!(config.drag_window_trigger, "mod", "needs the modifier");
         let path = temp("drag-windows");
         std::fs::write(&path, "").unwrap();
-        assert!(!Config::load_from(&path).unwrap().drag_windows_across);
+        assert!(Config::load_from(&path).unwrap().drag_windows_across);
         assert_eq!(Config::load_from(&path).unwrap().drag_window_trigger, "mod");
         let chosen = Config {
-            drag_windows_across: true,
+            drag_windows_across: false,
             drag_window_trigger: "any".to_string(),
             ..Config::default()
         };
@@ -2281,7 +2289,7 @@ phone_battery = \"x\"
             .save_keys_to(&path, &["drag_windows_across", "drag_window_trigger"])
             .unwrap();
         let read = Config::load_from(&path).unwrap();
-        assert!(read.drag_windows_across);
+        assert!(!read.drag_windows_across);
         assert_eq!(read.drag_window_trigger, "any");
         assert_eq!(
             Config::default().changed_keys(&chosen),

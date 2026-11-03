@@ -27,9 +27,9 @@
 //!   keyframe, so a viewer's ask is answered by the next scheduled one, and
 //!   the phone's decoder, once it has dropped frames, waits for a keyframe.
 //!
-//! The setting off (the default) changes nothing: a keyframe every
-//! [`PERIODIC_SECS`] seconds. `POCKETDESK_KEYFRAMES=smooth` or `periodic`
-//! overrides the setting, for measuring one against the other.
+//! The setting is on by default. Off, nothing changes from before: a
+//! keyframe every [`PERIODIC_SECS`] seconds. `POCKETDESK_KEYFRAMES=smooth` or
+//! `periodic` overrides the setting, for measuring one against the other.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -48,10 +48,10 @@ pub const SAFETY_SECS_REFRESHING: u64 = 30;
 /// cannot: with nothing else to heal a spoiled picture, a shorter wait.
 pub const SAFETY_SECS_PLAIN: u64 = 10;
 
-static SMOOTH: AtomicBool = AtomicBool::new(false);
+static SMOOTH: AtomicBool = AtomicBool::new(true);
 
-/// Set from the owner's setting when the server starts; read as each session
-/// opens its encoder.
+/// Set from the owner's setting when the server starts (on until then, as
+/// the setting is by default); read as each session opens its encoder.
 pub fn set_smooth(on: bool) {
     SMOOTH.store(on, Ordering::Relaxed);
 }

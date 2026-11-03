@@ -31,8 +31,9 @@ video_quality = "balanced"
 # size of any other frame, so a hitch in the video each time). The software
 # encoder and NVENC spread it over the stream; VA-API sends one every ten
 # seconds; the FFmpeg sidecar keeps its two. A viewer that loses a frame
-# still gets a whole one at once. Default false. Read when the server starts.
-# smooth_keyframes = false
+# still gets a whole one at once. Default true; false sends a whole keyframe
+# every two seconds as before. Read when the server starts.
+# smooth_keyframes = true
 
 # Copy the screen through memory instead of the graphics card. On a Linux
 # desktop built on wlroots (Sway, Hyprland) with VA-API video, the screen is
@@ -214,8 +215,9 @@ video_quality = "balanced"
 # where it is, is shown on the other computer, and is clicked and typed into
 # there. On GNOME (with gnome_unattended on, and a Shell that gives its window
 # list) the window stays where it is and the other computer only looks at it.
-# Off until turned on.
-# lend_windows = false
+# On by default, for my computers paired both ways with Input only; false
+# turns it off.
+# lend_windows = true
 # A window borrowed from another of my computers takes the size of the window
 # that shows it here: resized, maximised or moved to a screen of another
 # scale, the other computer sizes the window to the picture area in real
@@ -225,8 +227,9 @@ video_quality = "balanced"
 # (the shared keyboard and mouse must be on, and lend_windows above): a
 # floating window dragged to the edge that leads there is lent to that
 # computer and shown there where I let go (Sway and Hyprland). The computer
-# it goes to needs this on too: it opens the window. Off until turned on.
-# drag_windows_across = false
+# it goes to needs this on too: it opens the window. On by default; false
+# turns it off.
+# drag_windows_across = true
 # What marks a drag as a window being moved: "mod" (the default) wants the
 # compositor's modifier, Super or Alt, held with the left button; "any" takes
 # any left-button drag from a floating window that reaches the edge, a
