@@ -297,6 +297,21 @@ pub struct Config {
     /// size it was lent at and its picture is scaled.
     #[serde(default = "default_true")]
     pub borrowed_window_follows_size: bool,
+    /// Drag a window past this computer's edge onto another of the owner's
+    /// computers (window handoff, phase 4): while the keyboard and mouse are
+    /// shared, a floating window dragged to the edge that leads to another
+    /// computer is lent to it and shown there where it is dropped (Sway and
+    /// Hyprland; needs `lend_windows`). Off by default: a drag that crosses
+    /// an edge only moves the pointer.
+    #[serde(default)]
+    pub drag_windows_across: bool,
+    /// What marks such a drag as a window being moved, not a text selection
+    /// or a file being dragged: `mod` (the default) wants the compositor's
+    /// modifier (Super or Alt) held with the left button, as its move
+    /// binding does; `any` takes any left-button drag that reaches the edge
+    /// from a floating window, a title-bar drag included.
+    #[serde(default = "default_drag_window_trigger")]
+    pub drag_window_trigger: String,
     /// Let phones with the Peek permission see this screen as one still,
     /// with no session (BF2). On: the permission, off for every phone until
     /// chosen, is what lets one.
@@ -689,6 +704,10 @@ fn default_phone_camera_fps() -> u32 {
     30
 }
 
+fn default_drag_window_trigger() -> String {
+    "mod".to_string()
+}
+
 fn default_computer_view_quality() -> String {
     "auto".to_string()
 }
@@ -903,6 +922,8 @@ impl Default for Config {
             virtual_screens: true,
             lend_windows: false,
             borrowed_window_follows_size: true,
+            drag_windows_across: false,
+            drag_window_trigger: default_drag_window_trigger(),
             peek: true,
             notes_file: String::new(),
             clipboard_push: true,
@@ -1205,6 +1226,8 @@ impl Config {
         "virtual_screens",
         "lend_windows",
         "borrowed_window_follows_size",
+        "drag_windows_across",
+        "drag_window_trigger",
         "peek",
         "notes_file",
         "clipboard_push",
@@ -2230,6 +2253,35 @@ phone_battery = \"x\"
         assert_eq!(
             Config::default().changed_keys(&chosen),
             ["borrowed_window_follows_size"]
+        );
+    }
+
+    #[test]
+    fn dragging_a_window_across_is_off_until_asked_and_the_choices_save() {
+        let config = Config::default();
+        assert!(
+            !config.drag_windows_across,
+            "a drag past the edge moves a window only when the owner says so"
+        );
+        assert_eq!(config.drag_window_trigger, "mod", "needs the modifier");
+        let path = temp("drag-windows");
+        std::fs::write(&path, "").unwrap();
+        assert!(!Config::load_from(&path).unwrap().drag_windows_across);
+        assert_eq!(Config::load_from(&path).unwrap().drag_window_trigger, "mod");
+        let chosen = Config {
+            drag_windows_across: true,
+            drag_window_trigger: "any".to_string(),
+            ..Config::default()
+        };
+        chosen
+            .save_keys_to(&path, &["drag_windows_across", "drag_window_trigger"])
+            .unwrap();
+        let read = Config::load_from(&path).unwrap();
+        assert!(read.drag_windows_across);
+        assert_eq!(read.drag_window_trigger, "any");
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["drag_windows_across", "drag_window_trigger"]
         );
     }
 
