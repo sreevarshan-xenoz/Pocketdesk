@@ -1489,34 +1489,45 @@ impl StreamingServer {
                         // need the pixels, so the capture goes back to copies
                         // for good, and the few frames already on their way
                         // are dropped (a tiled buffer is not read back).
+                        // Decided here for the encoder that is open, a crop
+                        // and an odd size, and again once the encoder is
+                        // rebuilt for the frame's size (below): a frame
+                        // never reaches an encoder that cannot take it on
+                        // the card.
                         #[cfg(target_os = "linux")]
-                        if frame.gpu.is_some()
-                            && super::dmabuf::needs_pixels(
-                                encoder.takes_dmabuf(),
-                                software_crop && crop.is_some(),
-                                frame.width,
-                                frame.height,
-                            )
-                        {
-                            if let Some(switch) = &zero_copy_switch
-                                && switch.swap(false, Ordering::Relaxed)
-                            {
-                                info!(
-                                    backend = encoder.backend_name(),
-                                    cropped = software_crop && crop.is_some(),
-                                    "Capture back to copies through memory: the picture needs its pixels"
-                                );
-                            }
-                            match frame.downloaded() {
-                                Ok(Some(cpu)) => frame = cpu,
-                                Ok(None) => {}
-                                Err(e) => {
-                                    debug!("A frame on the card dropped: {e:#}");
-                                    frames_dropped += 1;
-                                    continue;
+                        macro_rules! pixels_if_needed {
+                            () => {
+                                if frame.gpu.is_some()
+                                    && super::dmabuf::needs_pixels(
+                                        encoder.takes_dmabuf(),
+                                        software_crop && crop.is_some(),
+                                        frame.width,
+                                        frame.height,
+                                    )
+                                {
+                                    if let Some(switch) = &zero_copy_switch
+                                        && switch.swap(false, Ordering::Relaxed)
+                                    {
+                                        info!(
+                                            backend = encoder.backend_name(),
+                                            cropped = software_crop && crop.is_some(),
+                                            "Capture back to copies through memory: the picture needs its pixels"
+                                        );
+                                    }
+                                    match frame.downloaded() {
+                                        Ok(Some(cpu)) => frame = cpu,
+                                        Ok(None) => {}
+                                        Err(e) => {
+                                            debug!("A frame on the card dropped: {e:#}");
+                                            frames_dropped += 1;
+                                            continue;
+                                        }
+                                    }
                                 }
-                            }
+                            };
                         }
+                        #[cfg(target_os = "linux")]
+                        pixels_if_needed!();
                         if software_crop
                             && let Some((cx, cy, cw, ch)) = crop
                             && !frame.crop_region(cx, cy, cw, ch)
@@ -1584,6 +1595,10 @@ impl StreamingServer {
                                     break;
                                 }
                             }
+                            // The rebuilt encoder may be one that cannot take
+                            // a frame on the card (the rung below).
+                            #[cfg(target_os = "linux")]
+                            pixels_if_needed!();
                         }
 
                         // C2: rebuild one rung down after repeated failures
