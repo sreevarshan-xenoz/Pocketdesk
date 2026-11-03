@@ -11,8 +11,8 @@
 //! frame to it, so the viewer shows the window and nothing else.
 //!
 //! The record is another process's: each field is read with its bounds
-//! checked, and a rectangle that is not inside the frame is not used (the
-//! frame is then sent whole, as before this).
+//! checked, and a rectangle that is empty or not inside the frame is not used
+//! (the frame is then dropped: see [`part`]).
 
 use anyhow::Result;
 use libspa::sys as spa;
@@ -29,21 +29,23 @@ fn i32_at(data: &[u8], at: usize) -> Option<i32> {
         .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
 }
 
-/// The rectangle a `spa_meta_region` record holds: `None` when it is too
-/// short, or its size is empty or not a size (a record of zeroes is the
-/// stream saying nothing).
+/// The rectangle a `spa_meta_region` record holds, as it says it: `None` only
+/// when the record is too short to hold one. A record of zeroes or with a size
+/// that is no size is still a record present (the stream saying the picture is
+/// nothing), so it is returned as it is and [`part`] drops the frame; it is not
+/// an absent record, which cuts to the last good rectangle.
 pub fn parse(data: &[u8]) -> Option<(i32, i32, i32, i32)> {
     if data.len() < REGION_SIZE {
         return None;
     }
     let (x, y) = (i32_at(data, 0)?, i32_at(data, 4)?);
     let (w, h) = (i32_at(data, 8)?, i32_at(data, 12)?);
-    (w > 0 && h > 0).then_some((x, y, w, h))
+    Some((x, y, w, h))
 }
 
 /// The part of a `frame_width`×`frame_height` frame a record names, when it
 /// is a part of it: inside the frame on every side, and not the whole frame
-/// (which needs no cutting). `None` otherwise, and the frame is used whole.
+/// (which needs no cutting). `None` otherwise; [`part`] decides what each case does.
 pub fn region_in(
     frame_width: u32,
     frame_height: u32,
@@ -73,8 +75,8 @@ pub enum Part {
 /// send, by the rule that when in doubt nothing is sent: a stream that is as
 /// big as a screen with the window in a corner is only the window once it is
 /// cut to the window. A record inside the frame cuts it; one naming the whole
-/// frame leaves it; one that is not inside the frame drops it; a buffer with
-/// no record (`None`) is cut to the last rectangle that was good (`last`) if
+/// frame leaves it; one that is not inside the frame, or is empty, drops it; a
+/// buffer with no record (`None`) is cut to the last rectangle that was good (`last`) if
 /// that still fits, and dropped if there is none or it no longer fits.
 pub fn part(
     frame_width: u32,
@@ -177,12 +179,13 @@ mod tests {
     }
 
     #[test]
-    fn a_record_is_read_field_by_field_and_a_short_or_empty_one_says_nothing() {
+    fn a_record_is_read_field_by_field_and_only_a_short_one_is_not_a_record() {
         assert_eq!(parse(&record(10, 20, 640, 480)), Some((10, 20, 640, 480)));
         assert_eq!(parse(&record(-5, -6, 1, 1)), Some((-5, -6, 1, 1)));
-        assert_eq!(parse(&record(0, 0, 0, 0)), None, "zeroes say nothing");
-        assert_eq!(parse(&record(0, 0, 640, 0)), None);
-        assert_eq!(parse(&record(0, 0, -640, 480)), None);
+        // An empty record is a record present: read as it is, not as absent.
+        assert_eq!(parse(&record(0, 0, 0, 0)), Some((0, 0, 0, 0)));
+        assert_eq!(parse(&record(0, 0, 640, 0)), Some((0, 0, 640, 0)));
+        assert_eq!(parse(&record(0, 0, -640, 480)), Some((0, 0, -640, 480)));
         assert_eq!(parse(&record(0, 0, 640, 480)[..15]), None, "too short");
         assert_eq!(parse(&[]), None);
         // More than the record is fine: only its first sixteen bytes count.
@@ -241,6 +244,21 @@ mod tests {
         assert_eq!(
             part(w, h, Some((0, 0, 0, 0)), Some((0, 0, 640, 480))),
             Part::Drop
+        );
+        // The same through the reader the capture uses: an empty record on a
+        // buffer is present, so it drops the frame and does not cut it to the
+        // last good rectangle as an absent one does.
+        let last = Some((0, 0, 640, 480));
+        for empty in [
+            record(0, 0, 0, 0),
+            record(0, 0, 640, 0),
+            record(0, 0, -1, 5),
+        ] {
+            assert_eq!(part(w, h, parse(&empty), last), Part::Drop);
+        }
+        assert_eq!(
+            part(w, h, parse(&record(0, 0, 320, 240)), last),
+            Part::Cut((0, 0, 320, 240))
         );
         // No record: the last good rectangle while it fits, else nothing.
         assert_eq!(part(w, h, None, None), Part::Drop);

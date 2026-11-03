@@ -987,7 +987,8 @@ impl<'s> Dequeued<'s> {
         unsafe { super::capture_cursor_pw::cursor_meta(self.spa()) }
     }
 
-    /// The rectangle of this buffer that is the picture, if it says one.
+    /// The rectangle of this buffer that is the picture, if it carries a record
+    /// (an empty one is returned as it is: [`part`](super::capture_video_crop::part) drops it).
     fn crop_record(&self) -> Option<(i32, i32, i32, i32)> {
         // SAFETY: the buffer is valid and not queued while `self` lives.
         unsafe { super::capture_video_crop::crop_meta(self.spa()) }
