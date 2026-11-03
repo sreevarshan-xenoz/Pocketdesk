@@ -248,7 +248,17 @@ pub async fn start_capture_auto(
     backend: CaptureBackend,
     screen_grant: Option<std::path::PathBuf>,
     cursor: Option<super::cursor_feed::CursorFeed>,
+    window_lease: Option<super::window_target::Lease>,
 ) -> Result<CaptureSession> {
+    // Only Windows lends a window.
+    #[cfg(not(windows))]
+    let _ = &window_lease;
+    // An index past the monitors is a lent window, and only the session the
+    // window was lent to (its lease) captures it: never a monitor in its
+    // place, whatever the index, the config or a failure says.
+    if super::window_target::is_window_index(config.monitor_index) && window_lease.is_none() {
+        bail!("That window is not lent to this session");
+    }
     // Only the portal asks anyone; the other backends need no grant.
     #[cfg(not(target_os = "linux"))]
     let _ = &screen_grant;
@@ -260,11 +270,7 @@ pub async fn start_capture_auto(
     if super::test_pattern::wanted() {
         return Ok(super::test_pattern::start(config, frame_tx, cancel));
     }
-    let attempts = capture_attempts_for(
-        super::window_target::is_window_index(config.monitor_index),
-        backend,
-        detect_display_server(),
-    )?;
+    let attempts = capture_attempts_for(window_lease.is_some(), backend, detect_display_server())?;
     let mut last_err: Option<anyhow::Error> = None;
     for backend_tried in attempts {
         // Each attempt has a token of its own under the session's (R6g
@@ -318,6 +324,7 @@ pub async fn start_capture_auto(
                 attempt.clone(),
                 window_rx.clone(),
                 window_mode.clone(),
+                window_lease.clone(),
             ),
             #[cfg(windows)]
             CaptureBackend::Dxgi => super::capture_dxgi::start_dxgi_capture(

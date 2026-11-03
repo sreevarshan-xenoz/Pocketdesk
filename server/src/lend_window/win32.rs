@@ -8,14 +8,23 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use pocketdesk_core::streaming::window_target;
-use windows::Win32::Foundation::{HWND, POINT, RECT};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, POINT, RECT};
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+};
+use windows::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
+use windows::Win32::System::Threading::{
+    GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowPlacement, GetWindowRect, IsIconic, IsWindow, IsZoomed, SW_RESTORE,
-    SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetWindowPlacement, SetWindowPos,
-    ShowWindowAsync, WINDOWPLACEMENT, WINDOWPLACEMENT_FLAGS,
+    GetClassNameW, GetWindowPlacement, GetWindowRect, IsIconic, IsWindow, IsZoomed, SW_RESTORE,
+    SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPlacement,
+    SetWindowPos, ShowWindowAsync, WINDOWPLACEMENT, WINDOWPLACEMENT_FLAGS,
 };
 
-use super::desktop::{Desktop, Facts, Placement, Show, needs_resize, outer_for_picture};
+use super::desktop::{
+    Desktop, Facts, Kind, Placement, Show, keep_on_screen, needs_resize, outer_for_picture,
+};
 use crate::hyprland::HyprWindow;
 
 /// How long a window is given to take a size or to come out of the taskbar.
@@ -57,6 +66,58 @@ fn read_placement(hwnd: HWND) -> io::Result<WINDOWPLACEMENT> {
     Ok(wp)
 }
 
+/// Whether the process `process` runs elevated; `None` when that cannot be
+/// read.
+fn is_elevated(process: HANDLE) -> Option<bool> {
+    let mut token = HANDLE::default();
+    // SAFETY: a process handle this function was given, and an out handle on
+    // this stack, closed below.
+    unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) }.ok()?;
+    let mut elevation = TOKEN_ELEVATION::default();
+    let mut len = 0u32;
+    // SAFETY: the token just opened, and an out buffer of the size told.
+    let read = unsafe {
+        GetTokenInformation(
+            token,
+            TokenElevation,
+            Some(&mut elevation as *mut TOKEN_ELEVATION as *mut _),
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut len,
+        )
+    };
+    // SAFETY: the token opened above, closed once.
+    let _ = unsafe { CloseHandle(token) };
+    read.ok()?;
+    Some(elevation.TokenIsElevated != 0)
+}
+
+/// Whether the program of `pid` runs with more rights than this server, or
+/// cannot be looked into (taken as more: when in doubt it is not lent).
+fn is_beyond_us(pid: u32) -> bool {
+    // SAFETY: the pseudo handle of this process, which needs no closing.
+    let ours = is_elevated(unsafe { GetCurrentProcess() }).unwrap_or(true);
+    // SAFETY: a process id is only asked about; the handle is closed below.
+    let Ok(process) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) })
+    else {
+        return true;
+    };
+    let theirs = is_elevated(process);
+    // SAFETY: the handle opened above, closed once.
+    let _ = unsafe { CloseHandle(process) };
+    match theirs {
+        Some(theirs) => theirs && !ours,
+        None => true,
+    }
+}
+
+/// The window's class name.
+fn class_of(hwnd: HWND) -> String {
+    let mut buffer = [0u16; 256];
+    // SAFETY: a window handle and a buffer of the length it is given.
+    let len = unsafe { GetClassNameW(hwnd, &mut buffer) };
+    String::from_utf16_lossy(&buffer[..usize::try_from(len).unwrap_or(0)])
+}
+
 /// Wait up to [`SETTLE`] for `done` to hold; whether it did.
 fn wait_until(mut done: impl FnMut() -> bool) -> bool {
     let deadline = Instant::now() + SETTLE;
@@ -85,6 +146,7 @@ impl Desktop for Win32 {
         if !is_window(h) {
             return None;
         }
+        let identity = window_target::identity_of(hwnd)?;
         let minimized = is_minimized(h);
         let frame = if minimized {
             // A minimised window has no frame on the desktop: it has the
@@ -95,7 +157,24 @@ impl Desktop for Win32 {
             let (x, y, width, height) = window_target::frame_of(hwnd)?;
             [x, y, width as i32, height as i32]
         };
-        (frame[2] > 0 && frame[3] > 0).then_some(Facts { frame, minimized })
+        (frame[2] > 0 && frame[3] > 0).then_some(Facts {
+            frame,
+            minimized,
+            maximized: is_maximized(h),
+            identity,
+        })
+    }
+
+    fn kind(&self, hwnd: isize) -> Option<Kind> {
+        let h = handle(hwnd);
+        if !is_window(h) {
+            return None;
+        }
+        let identity = window_target::identity_of(hwnd)?;
+        Some(Kind {
+            class: class_of(h),
+            beyond_us: is_beyond_us(identity.pid),
+        })
     }
 
     fn placement(&self, hwnd: isize) -> io::Result<Placement> {
@@ -154,11 +233,10 @@ impl Desktop for Win32 {
     fn size_picture(&self, hwnd: isize, width: u32, height: u32) -> io::Result<()> {
         let h = handle(hwnd);
         // A minimised window has no frame to size, and a maximised one stays
-        // as large as its screen lets it: neither is sized.
+        // as large as its screen lets it: neither is asked (the caller does
+        // not, and this does not either), and the answer is the size it has.
         if is_minimized(h) || is_maximized(h) {
-            return Err(io::Error::other(
-                "a minimised or maximised window is not sized",
-            ));
+            return Ok(());
         }
         let frame = window_target::frame_of(hwnd)
             .ok_or_else(|| io::Error::other("the window has no frame"))?;
@@ -170,7 +248,7 @@ impl Desktop for Win32 {
             (outer.right - outer.left, outer.bottom - outer.top),
             (frame.2 as i32, frame.3 as i32),
         );
-        // The size only; the place and the stacking are left alone. The
+        // The size only; the place and the stacking are left alone for now. The
         // asynchronous form so a window whose program has hung does not hold
         // this thread; what it came to is read below.
         // SAFETY: a window handle and plain numbers; `None` leaves the
@@ -202,6 +280,53 @@ impl Desktop for Win32 {
             last = Some(now);
             still >= 6
         });
+        keep_window_on_screen(h);
         Ok(())
+    }
+}
+
+/// A window that grew may overhang its screen: move it back by what it
+/// overhangs (to the work area, the screen without the taskbar), size and
+/// stacking untouched. Best effort; a window that is gone or has no screen is
+/// left.
+fn keep_window_on_screen(h: HWND) {
+    let mut outer = RECT::default();
+    // SAFETY: a window handle and an out value.
+    if unsafe { GetWindowRect(h, &mut outer) }.is_err() {
+        return;
+    }
+    // SAFETY: a window handle; the nearest monitor is always answered.
+    let monitor = unsafe { MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST) };
+    let mut info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: a monitor handle Windows just gave and an out value whose
+    // `cbSize` is set, as the call requires.
+    if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
+        return;
+    }
+    let work = info.rcWork;
+    let (x, y) = keep_on_screen(
+        outer.left,
+        outer.top,
+        outer.right - outer.left,
+        outer.bottom - outer.top,
+        [work.left, work.top, work.right, work.bottom],
+    );
+    if (x, y) != (outer.left, outer.top) {
+        // SAFETY: a window handle and plain numbers; the size and stacking are
+        // left as they are.
+        let _ = unsafe {
+            SetWindowPos(
+                h,
+                None,
+                x,
+                y,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
+            )
+        };
     }
 }

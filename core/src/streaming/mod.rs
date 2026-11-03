@@ -43,6 +43,7 @@ pub mod transport;
 #[cfg(feature = "wan")]
 pub mod wake_helper_net;
 pub mod wheel;
+pub mod window_guard;
 pub mod window_target;
 
 // Server-only modules. Feature gates say *what* is built; the

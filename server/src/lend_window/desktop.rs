@@ -17,6 +17,26 @@
 //! the viewer" of the other systems), and `return` puts the window back as it
 //! was: its show state (minimised, maximised, normal) and its place.
 //!
+//! **What a lend grants, and to whom.** A lend is a grant of one window to one
+//! device, and nothing a borrower does reaches past it. (1) Only a window the
+//! list would show (the picker's windows, not this program's own, not the
+//! shell's own windows such as the desktop and the taskbar, not a program
+//! this server could not drive or look into) may be lent: a handle named any
+//! other way is refused as a window that is not there. (2) The registration
+//! names the device it was lent to, the window's handle, the program and the
+//! thread that own the window, and a generation no other registration has;
+//! a session is accepted only from that device and holds a lease on exactly
+//! that registration ([`window_target`]), so a window given back, closed,
+//! lent again or whose handle Windows gave to another window ends the
+//! sessions of the old grant at once and none of them can drive the new one.
+//! (3) A handle is never followed alone: every later look at the window (its
+//! facts, its place to put back, its size) must find the same program and
+//! thread, or the window is taken for gone and left alone, so a recycled
+//! handle is never moved, sized or restored. (4) Giving a window back ends
+//! the grant first, before the window is put back and whether or not it goes;
+//! a lend asked for again is a new grant. What the session may send, and
+//! where, is in core's `window_guard`.
+//!
 //! **What the picture is.** The window's frame as the desktop draws it (title
 //! bar and borders, without the invisible shadow around): DWM's extended frame
 //! bounds, which is what Windows.Graphics.Capture produces for a window, and
@@ -40,7 +60,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::sync::Mutex;
 
-use pocketdesk_core::streaming::window_target;
+use pocketdesk_core::streaming::window_target::{self, Identity, Lease, RegisterError};
 use serde_json::{Value, json};
 
 use super::{Env, Lent, Seen, error};
@@ -99,6 +119,22 @@ pub struct Facts {
     /// The frame the capture shows: left, top, width, height.
     pub frame: [i32; 4],
     pub minimized: bool,
+    pub maximized: bool,
+    /// The program and thread that own the window now: a handle that names
+    /// another window later has another.
+    pub identity: Identity,
+}
+
+/// What kind of window a handle is, for whether it may be lent at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Kind {
+    /// The window's class (Windows' own name for what kind of window it is:
+    /// `Progman` is the desktop).
+    pub class: String,
+    /// Its program runs with more rights than this server (elevated while the
+    /// server is not), or could not be looked into: input cannot be sent to
+    /// it, and what it shows is not the owner's to lend by a borrower's pick.
+    pub beyond_us: bool,
 }
 
 /// What lending a window asks of Windows. [`super::win32::Win32`] is the real
@@ -111,13 +147,18 @@ pub trait Desktop: Sync {
     fn windows(&self) -> io::Result<Vec<HyprWindow>>;
     /// The window now; `None` when it is gone (closed, or not a window).
     fn facts(&self, hwnd: isize) -> Option<Facts>;
+    /// What kind of window it is; `None` when it is gone.
+    fn kind(&self, hwnd: isize) -> Option<Kind>;
     fn placement(&self, hwnd: isize) -> io::Result<Placement>;
     fn set_placement(&self, hwnd: isize, placement: &Placement) -> io::Result<()>;
     /// Out of the taskbar or maximised, to the place it has when shown
     /// normally.
     fn restore(&self, hwnd: isize) -> io::Result<()>;
     /// Size the window so that its frame (what [`Facts::frame`] says) is
-    /// `width`×`height`, where it is. A window may not take every size.
+    /// `width`×`height`, and keep it on its screen (the work area: a window
+    /// that grew is moved back by what it overhangs, see [`keep_on_screen`]).
+    /// A window may not take every size, and one that is minimised or
+    /// maximised is not asked ([`can_size`]).
     fn size_picture(&self, hwnd: isize, width: u32, height: u32) -> io::Result<()>;
 }
 
@@ -141,10 +182,11 @@ pub fn window_id(hwnd: isize) -> String {
     format!("0x{:x}", hwnd as usize)
 }
 
-/// The window of the key a lend is recorded under (`<device>#lend-<window>`,
-/// [`super::lend_key`]).
-fn window_of_key(key: &str) -> Option<&str> {
-    key.rsplit_once("#lend-").map(|(_, window)| window)
+/// The device and the window of the key a lend is recorded under
+/// (`<device>#lend-<window>`, [`super::lend_key`]).
+fn split_key(key: &str) -> Option<(&str, isize)> {
+    let (device, window) = key.rsplit_once("#lend-")?;
+    Some((device, parse_hwnd(window)?))
 }
 
 /// What the picture's own name says: a screen's, so the lend's answer and
@@ -201,13 +243,96 @@ pub fn needs_restore(before: &Placement, now: &Placement) -> bool {
     before.show != now.show || before.normal != now.normal
 }
 
+/// The classes of windows that are the shell's own: the desktop, the taskbar
+/// and the surfaces it draws on (Start, search, the notification area).
+const SHELL_CLASSES: &[&str] = &[
+    "Progman",
+    "WorkerW",
+    "Shell_TrayWnd",
+    "Shell_SecondaryTrayWnd",
+    "Windows.UI.Core.CoreWindow",
+    "NotifyIconOverflowWindow",
+    "TopLevelWindowForOverflowXamlIsland",
+    "XamlExplorerHostIslandWindow",
+    "MultitaskingViewFrame",
+    "ForegroundStaging",
+];
+
+/// Whether `class` is one of the shell's own windows.
+pub fn is_shell_class(class: &str) -> bool {
+    SHELL_CLASSES.iter().any(|c| c.eq_ignore_ascii_case(class))
+}
+
+/// Whether a window of this kind may be lent: not the shell's own, and not a
+/// program with more rights than this server.
+pub fn lendable_kind(kind: &Kind) -> bool {
+    !is_shell_class(&kind.class) && !kind.beyond_us
+}
+
+/// Whether a window in this state can be asked to take a size: a minimised
+/// window has no frame to size, and a maximised one stays as large as its
+/// screen lets it. Such a window is lent as it is and the answer is the size
+/// it has (the viewer scales the picture), never an error.
+pub fn can_size(facts: &Facts) -> bool {
+    !facts.minimized && !facts.maximized
+}
+
+/// Where a window that was just sized goes so that it is on its screen: its
+/// left and top (the outer rectangle's) given the outer size and the work
+/// area of its screen (left, top, right, bottom). A window larger than the
+/// work area on a side is put at the work area's edge on that side (the
+/// start of it shows); one that overhangs is moved back by what it overhangs;
+/// one inside is left where it is.
+pub fn keep_on_screen(left: i32, top: i32, width: i32, height: i32, work: [i32; 4]) -> (i32, i32) {
+    let axis = |start: i32, len: i32, low: i32, high: i32| {
+        let (start, len, low, high) = (
+            i64::from(start),
+            i64::from(len),
+            i64::from(low),
+            i64::from(high),
+        );
+        let placed = if len >= high - low {
+            low
+        } else {
+            start.clamp(low, high - len)
+        };
+        placed as i32
+    };
+    (
+        axis(left, width, work[0], work[2]),
+        axis(top, height, work[1], work[3]),
+    )
+}
+
 // ---- The environment ----
 
-/// A window lent: its handle and the index a session captures it by.
-#[derive(Debug, Clone, Copy)]
+/// A window lent: the lease on its registration (its handle, the index a
+/// session captures it by, the program and thread that own it, the device it
+/// is lent to).
+#[derive(Debug, Clone)]
 struct Screen {
-    hwnd: isize,
-    index: u32,
+    lease: Lease,
+}
+
+impl Screen {
+    fn hwnd(&self) -> isize {
+        self.lease.hwnd
+    }
+
+    fn index(&self) -> u32 {
+        self.lease.index
+    }
+
+    fn identity(&self) -> Identity {
+        self.lease.identity
+    }
+}
+
+/// Where a lent window was, and which window that was.
+#[derive(Debug, Clone, Copy)]
+struct Held {
+    placement: Placement,
+    identity: Identity,
 }
 
 #[derive(Default)]
@@ -215,7 +340,7 @@ struct State {
     /// The lends, by the key the lend path uses.
     screens: BTreeMap<String, Screen>,
     /// Where each lent window was, until it is put back.
-    placed: BTreeMap<isize, Placement>,
+    placed: BTreeMap<isize, Held>,
 }
 
 /// Lending as Windows does it: [`Env`] over a [`Desktop`].
@@ -223,6 +348,11 @@ pub struct WinEnv<D> {
     desk: D,
     state: Mutex<State>,
 }
+
+/// What a lend of a window that cannot be lent says, whatever the reason (it
+/// is not there, it is not one that is listed): a borrower learns nothing
+/// about windows it was not offered.
+const NOT_THERE: &str = "No such window on this computer (it may have closed)";
 
 impl<D: Desktop> WinEnv<D> {
     pub fn new(desk: D) -> Self {
@@ -236,13 +366,26 @@ impl<D: Desktop> WinEnv<D> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// The window `hwnd` now, if it is still the window `identity` owned
+    /// when it was lent; a handle that names another window is gone.
+    fn facts_of(&self, hwnd: isize, identity: Identity) -> Option<Facts> {
+        self.desk.facts(hwnd).filter(|f| f.identity == identity)
+    }
+
+    /// Whether the window `hwnd` is one the list would show a borrower: the
+    /// only windows that may be lent.
+    fn lendable(&self, hwnd: isize) -> bool {
+        let id = window_id(hwnd);
+        Env::windows(self).is_ok_and(|all| all.iter().any(|w| w.address == id))
+    }
+
     /// The answer for a window lent: its screen's name and index and the size
     /// its picture has now.
-    fn reply(&self, screen: Screen) -> Value {
-        match self.desk.facts(screen.hwnd) {
+    fn reply(&self, screen: &Screen) -> Value {
+        match self.facts_of(screen.hwnd(), screen.identity()) {
             Some(facts) => json!({
-                "name": output_name(screen.index),
-                "index": screen.index,
+                "name": output_name(screen.index()),
+                "index": screen.index(),
                 "width": facts.frame[2].max(0),
                 "height": facts.frame[3].max(0),
             }),
@@ -252,35 +395,68 @@ impl<D: Desktop> WinEnv<D> {
 
     /// A minimised window sends no frames: restore one that is, as often as
     /// it is asked (a view that dials again finds it as it was left).
-    fn unminimise(&self, hwnd: isize) {
-        if self.desk.facts(hwnd).is_some_and(|f| f.minimized)
-            && let Err(e) = self.desk.restore(hwnd)
+    fn unminimise(&self, screen: &Screen) {
+        if self
+            .facts_of(screen.hwnd(), screen.identity())
+            .is_some_and(|f| f.minimized)
+            && let Err(e) = self.desk.restore(screen.hwnd())
         {
             tracing::warn!("A lent window could not be brought back from the taskbar: {e}");
         }
     }
 
-    /// Size the window's picture to `width`×`height` if it is not already.
-    fn size_to(&self, hwnd: isize, width: u32, height: u32) -> io::Result<()> {
-        let Some(facts) = self.desk.facts(hwnd) else {
+    /// Size the window's picture to `width`×`height` if it is not already. A
+    /// window that cannot be asked (minimised, maximised) is left as it is and
+    /// the answer says the size it has: that is no error.
+    fn size_to(&self, screen: &Screen, width: u32, height: u32) -> io::Result<()> {
+        let Some(facts) = self.facts_of(screen.hwnd(), screen.identity()) else {
             return Err(io::Error::other("the window closed"));
         };
-        if needs_resize((facts.frame[2], facts.frame[3]), (width, height)) {
-            self.desk.size_picture(hwnd, width, height)?;
+        if can_size(&facts) && needs_resize((facts.frame[2], facts.frame[3]), (width, height)) {
+            self.desk.size_picture(screen.hwnd(), width, height)?;
         }
         Ok(())
     }
 
-    /// Put the window `hwnd` back as `before` says, if it is not as it was.
-    fn put_back_as(&self, hwnd: isize, before: &Placement) -> io::Result<()> {
-        if self.desk.facts(hwnd).is_none() {
+    /// Put the window `hwnd` back as `before` says, if it is not as it was and
+    /// it is still the window that was lent: a window that is gone, or a
+    /// handle that names another window now, is left alone.
+    fn put_back_as(&self, hwnd: isize, held: &Held) -> io::Result<()> {
+        if self.facts_of(hwnd, held.identity).is_none() {
             return Ok(());
         }
         let now = self.desk.placement(hwnd)?;
-        if needs_restore(before, &now) {
-            self.desk.set_placement(hwnd, before)?;
+        if needs_restore(&held.placement, &now) {
+            self.desk.set_placement(hwnd, &held.placement)?;
         }
         Ok(())
+    }
+
+    /// The screen of a lend asked for again, with a grant that stands: the one
+    /// it has, or, when that was ended (the window was being given back and
+    /// would not go), a new one for the same device, window and screen name.
+    fn regrant(&self, state: &mut State, key: &str, screen: Screen) -> Result<Screen, Value> {
+        if self.facts_of(screen.hwnd(), screen.identity()).is_none() {
+            return Err(error("The window closed"));
+        }
+        if window_target::lease_holds(&screen.lease) {
+            return Ok(screen);
+        }
+        let again = window_target::register(
+            screen.hwnd(),
+            &screen.lease.device,
+            screen.identity(),
+            Some(screen.index()),
+        );
+        match again {
+            Ok((lease, _)) => {
+                let screen = Screen { lease };
+                state.screens.insert(key.to_string(), screen.clone());
+                Ok(screen)
+            }
+            Err(RegisterError::Full) => Err(error("Too many windows are lent at once")),
+            Err(_) => Err(error("Another computer has borrowed that window")),
+        }
     }
 }
 
@@ -293,7 +469,19 @@ impl<D: Desktop> Env for WinEnv<D> {
 
     fn seen(&self, window: &str) -> io::Result<Option<Seen>> {
         let hwnd = parse_hwnd(window).ok_or_else(|| super::other("not a Windows window id"))?;
-        Ok(self.desk.facts(hwnd).map(|facts| Seen {
+        // A window that is lent is the window that was lent: a handle that
+        // names another one now is gone (the sweep then ends the lend).
+        let lent = self
+            .state()
+            .screens
+            .values()
+            .find(|s| s.hwnd() == hwnd)
+            .map(Screen::identity);
+        let facts = match lent {
+            Some(identity) => self.facts_of(hwnd, identity),
+            None => self.desk.facts(hwnd),
+        };
+        Ok(facts.map(|facts| Seen {
             id: window.to_string(),
             // Nothing tiles on this desktop and a window is never "put" on a
             // screen: these say only that there is nothing to keep.
@@ -319,49 +507,85 @@ impl<D: Desktop> Env for WinEnv<D> {
             .windows()?
             .into_iter()
             .filter(|w| keep_listed(w, own))
+            .filter(|w| {
+                parse_hwnd(&w.address)
+                    .and_then(|hwnd| self.desk.kind(hwnd))
+                    .is_some_and(|kind| lendable_kind(&kind))
+            })
             .collect())
     }
 
     fn add_screen(&self, key: &str, width: u32, height: u32) -> Value {
-        let Some(hwnd) = window_of_key(key).and_then(parse_hwnd) else {
+        let Some((device, hwnd)) = split_key(key) else {
             return error("not a window");
         };
         let mut state = self.state();
-        if let Some(screen) = state.screens.get(key).copied() {
-            // Asked again: the same window, shown if it was minimised since.
-            self.unminimise(screen.hwnd);
-            return self.reply(screen);
+        if let Some(screen) = state.screens.get(key).cloned() {
+            // Asked again: the same window, shown if it was minimised since,
+            // under a grant that stands.
+            let screen = match self.regrant(&mut state, key, screen) {
+                Ok(screen) => screen,
+                Err(refused) => return refused,
+            };
+            self.unminimise(&screen);
+            return self.reply(&screen);
         }
-        let Some(facts) = self.desk.facts(hwnd) else {
-            return error("No such window on this computer (it may have closed)");
+        // Only a window the list shows may be lent, whatever handle is named.
+        let Some(facts) = self.desk.facts(hwnd).filter(|_| self.lendable(hwnd)) else {
+            return error(NOT_THERE);
         };
-        let Some(index) = window_target::register(hwnd) else {
-            return error("Too many windows are lent at once");
+        let (lease, created) = match window_target::register(hwnd, device, facts.identity, None) {
+            Ok(made) => made,
+            Err(RegisterError::Full) => return error("Too many windows are lent at once"),
+            Err(RegisterError::Held) => return error("Another computer has borrowed that window"),
+            Err(RegisterError::Nothing) => return error("not a window"),
+        };
+        // Only what this call made is undone by it: a registration that was
+        // there already (the same device's, the same window) is not ours to
+        // remove.
+        let undo = |lease: &Lease| {
+            if created {
+                window_target::unregister(lease);
+            }
         };
         let before = match self.desk.placement(hwnd) {
             Ok(placement) => placement,
             Err(e) => {
-                window_target::unregister(index);
+                undo(&lease);
                 return error(format!("Could not read where the window is: {e}"));
             }
         };
         if facts.minimized
             && let Err(e) = self.desk.restore(hwnd)
         {
-            window_target::unregister(index);
+            undo(&lease);
             return error(format!(
                 "Could not bring the window back from the taskbar: {e}"
             ));
         }
-        let screen = Screen { hwnd, index };
-        state.placed.insert(hwnd, before);
-        state.screens.insert(key.to_string(), screen);
+        let screen = Screen { lease };
+        // The first place of this window is the one to put back: one taken
+        // for the same window already is kept.
+        if state
+            .placed
+            .get(&hwnd)
+            .is_none_or(|held| held.identity != facts.identity)
+        {
+            state.placed.insert(
+                hwnd,
+                Held {
+                    placement: before,
+                    identity: facts.identity,
+                },
+            );
+        }
+        state.screens.insert(key.to_string(), screen.clone());
         // A window that will not take the size is lent at the size it has: the
         // answer says which.
-        if let Err(e) = self.size_to(hwnd, width, height) {
+        if let Err(e) = self.size_to(&screen, width, height) {
             tracing::warn!("A lent window was not sized to the borrower's window: {e}");
         }
-        self.reply(screen)
+        self.reply(&screen)
     }
 
     fn drop_screen(&self, key: &str) {
@@ -369,24 +593,29 @@ impl<D: Desktop> Env for WinEnv<D> {
         let Some(screen) = state.screens.remove(key) else {
             return;
         };
-        window_target::unregister(screen.index);
+        window_target::unregister(&screen.lease);
         // A lend that failed after the window was touched: back as it was.
-        if let Some(before) = state.placed.remove(&screen.hwnd)
-            && let Err(e) = self.put_back_as(screen.hwnd, &before)
+        if let Some(held) = state.placed.remove(&screen.hwnd())
+            && let Err(e) = self.put_back_as(screen.hwnd(), &held)
         {
             tracing::warn!("A window that was not lent after all could not be put back: {e}");
         }
     }
 
     fn resize_screen(&self, key: &str, width: u32, height: u32) -> Value {
-        let Some(screen) = self.state().screens.get(key).copied() else {
+        let Some(screen) = self.state().screens.get(key).cloned() else {
             return error("That window is not lent");
         };
-        self.unminimise(screen.hwnd);
-        if let Err(e) = self.size_to(screen.hwnd, width, height) {
+        // A resize is no new grant: a lend that was ended stays ended until
+        // it is asked for again.
+        if !window_target::lease_holds(&screen.lease) {
+            return error("That window is not lent");
+        }
+        self.unminimise(&screen);
+        if let Err(e) = self.size_to(&screen, width, height) {
             return error(format!("The window was not sized: {e}"));
         }
-        self.reply(screen)
+        self.reply(&screen)
     }
 
     fn output(&self, name: &str) -> Option<Output> {
@@ -394,9 +623,9 @@ impl<D: Desktop> Env for WinEnv<D> {
             .state()
             .screens
             .values()
-            .find(|s| output_name(s.index) == name)
-            .copied()?;
-        let facts = self.desk.facts(screen.hwnd)?;
+            .find(|s| output_name(s.index()) == name)
+            .cloned()?;
+        let facts = self.facts_of(screen.hwnd(), screen.identity())?;
         Some(Output {
             name: name.to_string(),
             rect: Rect {
@@ -422,12 +651,19 @@ impl<D: Desktop> Env for WinEnv<D> {
     fn back(&self, lent: &Lent) -> io::Result<()> {
         let hwnd = parse_hwnd(&lent.window).ok_or_else(super::no_place)?;
         let mut state = self.state();
-        let Some(before) = state.placed.get(&hwnd).copied() else {
+        // The grant ends first, before the window is moved back and whether
+        // or not it goes: the sessions bound to it stop at once. A window
+        // that will not go back stays lent for another try, and a lend asked
+        // for again is a new grant.
+        for screen in state.screens.values().filter(|s| s.hwnd() == hwnd) {
+            window_target::unregister(&screen.lease);
+        }
+        let Some(held) = state.placed.get(&hwnd).copied() else {
             return Ok(());
         };
         // A window that will not go back keeps its place in the table, so a
         // later try can.
-        self.put_back_as(hwnd, &before)?;
+        self.put_back_as(hwnd, &held)?;
         state.placed.remove(&hwnd);
         Ok(())
     }
@@ -459,6 +695,12 @@ mod tests {
         title: &'static str,
         class: &'static str,
         pid: u32,
+        /// Who owns it: a handle recycled for another window has another.
+        identity: Identity,
+        /// Windows' own class name of it.
+        win_class: &'static str,
+        /// Its program has more rights than this server.
+        beyond_us: bool,
     }
 
     struct Fake {
@@ -468,6 +710,11 @@ mod tests {
         log: Mutex<Vec<String>>,
         /// A window that refuses to go back.
         stuck: Mutex<Vec<isize>>,
+        /// A window whose place cannot be read.
+        unreadable: Mutex<Vec<isize>>,
+        /// Whether the list shows a minimised window (the real picker does
+        /// not; this models one minimised between the list and the lend).
+        lists_minimised: bool,
     }
 
     fn placement(show: Show, normal: [i32; 4]) -> Placement {
@@ -489,6 +736,9 @@ mod tests {
             title: "Notes",
             class: "notepad",
             pid: 4242,
+            identity: Identity { pid: 4242, tid: 7 },
+            win_class: "Notepad",
+            beyond_us: false,
         }
     }
 
@@ -499,6 +749,8 @@ mod tests {
                 capture: true,
                 log: Mutex::new(Vec::new()),
                 stuck: Mutex::new(Vec::new()),
+                unreadable: Mutex::new(Vec::new()),
+                lists_minimised: false,
             }
         }
 
@@ -512,6 +764,14 @@ mod tests {
 
         fn close(&self, hwnd: isize) {
             self.wins.lock().unwrap().remove(&hwnd);
+        }
+
+        /// The handle now names another program's window.
+        fn recycle(&self, hwnd: isize, pid: u32) {
+            self.with(hwnd, |w| {
+                w.identity = Identity { pid, tid: 99 };
+                w.pid = pid;
+            });
         }
 
         fn log(&self) -> Vec<String> {
@@ -530,6 +790,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .iter()
+                .filter(|(_, w)| self.lists_minimised || w.placement.show != Show::Minimized)
                 .map(|(hwnd, w)| HyprWindow {
                     address: window_id(*hwnd),
                     title: w.title.to_string(),
@@ -551,10 +812,23 @@ mod tests {
             Some(Facts {
                 frame: w.frame,
                 minimized: w.placement.show == Show::Minimized,
+                maximized: w.placement.show == Show::Maximized,
+                identity: w.identity,
+            })
+        }
+
+        fn kind(&self, hwnd: isize) -> Option<Kind> {
+            let w = self.wins.lock().unwrap().get(&hwnd)?.clone();
+            Some(Kind {
+                class: w.win_class.to_string(),
+                beyond_us: w.beyond_us,
             })
         }
 
         fn placement(&self, hwnd: isize) -> io::Result<Placement> {
+            if self.unreadable.lock().unwrap().contains(&hwnd) {
+                return Err(io::Error::other("the place cannot be read"));
+            }
             self.wins
                 .lock()
                 .unwrap()
@@ -624,6 +898,13 @@ mod tests {
         TURN.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// The window the registration under `index` holds for DEVICE, if any.
+    fn lent_hwnd(index: u32) -> Option<isize> {
+        window_target::lease_for(index, Some(DEVICE))
+            .ok()
+            .map(|l| l.hwnd)
+    }
+
     fn first(v: &Value) -> &Value {
         &v["windows"][0]
     }
@@ -663,8 +944,14 @@ mod tests {
     #[test]
     fn the_key_of_a_lend_names_its_window() {
         let key = crate::lend_window::lend_key(DEVICE, "0xabc");
-        assert_eq!(window_of_key(&key), Some("0xabc"));
-        assert_eq!(window_of_key("no key"), None);
+        assert_eq!(split_key(&key), Some((DEVICE, 0xabc)));
+        assert_eq!(split_key("no key"), None);
+        assert_eq!(split_key(&format!("{DEVICE}#lend-nothex")), None);
+        // A device id that has the separator in it keeps all of itself.
+        assert_eq!(
+            split_key("odd#lend-id#lend-0x5"),
+            Some(("odd#lend-id", 0x5))
+        );
     }
 
     #[test]
@@ -828,14 +1115,14 @@ mod tests {
         assert_eq!(reply["height"], 600);
         assert_eq!(reply["name"], output_name(index).as_str());
         // The session that dials that index finds the window by it.
-        assert_eq!(window_target::hwnd(index), Some(hwnd));
+        assert_eq!(lent_hwnd(index), Some(hwnd));
         // Nothing moved or was sized: the window is lent as it stands.
         assert!(env.desk.log().is_empty(), "{:?}", env.desk.log());
         assert_eq!(env.desk.win(hwnd).frame, [100, 80, 800, 600]);
         // Back: the index is free again, and still nothing was touched.
         let back = return_with(&lends, &env, DEVICE, Some(&id));
         assert_eq!(back["returned"], 1, "{back}");
-        assert_eq!(window_target::hwnd(index), None);
+        assert_eq!(lent_hwnd(index), None);
         assert!(env.desk.log().is_empty());
     }
 
@@ -870,7 +1157,7 @@ mod tests {
         let none = return_with(&lends, &env, OTHER, Some(&id));
         assert_eq!(none["returned"], 0);
         assert_eq!(
-            window_target::hwnd(index_of(&lend_with(&lends, &env, DEVICE, &id))),
+            lent_hwnd(index_of(&lend_with(&lends, &env, DEVICE, &id))),
             Some(hwnd)
         );
         return_with(&lends, &env, DEVICE, None);
@@ -913,7 +1200,10 @@ mod tests {
     fn a_minimised_window_is_restored_and_goes_back_minimised() {
         let _turn = serial();
         let hwnd = 0x8106;
-        let (lends, env) = setup(hwnd);
+        let mut fake = Fake::new(&[(hwnd, win(100, 80, 800, 600))]);
+        // Minimised after the list was made and before the lend.
+        fake.lists_minimised = true;
+        let (lends, env) = (Lends::new(), WinEnv::new(fake));
         env.desk.with(hwnd, |w| {
             w.placement = placement(Show::Minimized, [100, 80, 900, 680]);
         });
@@ -999,6 +1289,12 @@ mod tests {
         let sized = crate::lend_window::lend_sized(&lends, &env, DEVICE, &id, Some((640, 480)));
         assert!(sized.get("error").is_none(), "{sized}");
         assert_eq!(env.desk.win(hwnd).frame[2], 800);
+        assert_eq!(sized["width"], 800, "the answer is the size it has");
+        assert!(
+            env.desk.log().iter().all(|l| !l.starts_with("size ")),
+            "a maximised window is not asked to take a size: {:?}",
+            env.desk.log()
+        );
         return_with(&lends, &env, DEVICE, None);
         assert_eq!(env.desk.win(hwnd).placement.show, Show::Maximized);
     }
@@ -1043,13 +1339,23 @@ mod tests {
         let failed = return_with(&lends, &env, DEVICE, Some(&id));
         assert!(failed.get("error").is_some(), "{failed}");
         assert_eq!(failed["returned"], 0);
-        assert_eq!(window_target::hwnd(index), Some(hwnd), "its screen is kept");
+        assert_eq!(
+            lent_hwnd(index),
+            None,
+            "the grant ended with the return, whether or not the window went back"
+        );
+        assert!(
+            env.state()
+                .screens
+                .contains_key(&crate::lend_window::lend_key(DEVICE, &id)),
+            "it stays lent, for the next try"
+        );
         // Free again: the next try puts it back.
         env.desk.stuck.lock().unwrap().clear();
         let ok = return_with(&lends, &env, DEVICE, Some(&id));
         assert_eq!(ok["returned"], 1, "{ok}");
         assert_eq!(env.desk.win(hwnd).placement.normal, [100, 80, 900, 680]);
-        assert_eq!(window_target::hwnd(index), None);
+        assert_eq!(lent_hwnd(index), None);
     }
 
     #[test]
@@ -1065,7 +1371,7 @@ mod tests {
         // A return of a window that is not there is not an error.
         let back = return_with(&lends, &env, DEVICE, Some(&id));
         assert_eq!(back["returned"], 1, "{back}");
-        assert_eq!(window_target::hwnd(index), None);
+        assert_eq!(lent_hwnd(index), None);
     }
 
     #[test]
@@ -1097,17 +1403,13 @@ mod tests {
         assert_eq!(second.len(), 1);
         assert_eq!(second[0].window, b);
         assert_eq!(second[0].why, Gone::Closed);
-        assert_eq!(window_target::hwnd(ib), None);
-        assert_eq!(
-            window_target::hwnd(ia),
-            Some(shown),
-            "the shown window stays lent"
-        );
+        assert_eq!(lent_hwnd(ib), None);
+        assert_eq!(lent_hwnd(ia), Some(shown), "the shown window stays lent");
         // The switch turned off gives the rest back.
         let off = crate::lend_window::sweep_with(&lends, &env, false, &present, &mut looks, now);
         assert_eq!(off.len(), 1);
         assert_eq!(off[0].why, Gone::SwitchOff);
-        assert_eq!(window_target::hwnd(ia), None);
+        assert_eq!(lent_hwnd(ia), None);
     }
 
     #[test]
@@ -1132,7 +1434,7 @@ mod tests {
         assert_eq!(ended.len(), 1);
         assert_eq!(ended[0].why, Gone::BorrowerAway);
         assert_eq!(env.desk.win(hwnd).placement.normal, [100, 80, 900, 680]);
-        assert_eq!(window_target::hwnd(index), None);
+        assert_eq!(lent_hwnd(index), None);
     }
 
     #[test]
@@ -1218,6 +1520,364 @@ mod tests {
                 assert!(!env.state().placed.contains_key(hwnd));
             }
         }
+        return_with(&lends, &env, DEVICE, None);
+    }
+
+    // ---- What a lend grants, and to whom ----
+
+    #[test]
+    fn the_shells_own_windows_and_programs_beyond_us_are_not_lendable() {
+        for class in [
+            "Progman",
+            "progman",
+            "WorkerW",
+            "Shell_TrayWnd",
+            "Shell_SecondaryTrayWnd",
+            "Windows.UI.Core.CoreWindow",
+        ] {
+            assert!(is_shell_class(class), "{class}");
+            let kind = Kind {
+                class: class.into(),
+                beyond_us: false,
+            };
+            assert!(!lendable_kind(&kind), "{class}");
+        }
+        for class in ["Notepad", "CabinetWClass", "Chrome_WidgetWin_1", "", "Prog"] {
+            assert!(!is_shell_class(class), "{class}");
+            let kind = Kind {
+                class: class.into(),
+                beyond_us: false,
+            };
+            assert!(lendable_kind(&kind), "{class}");
+        }
+        let elevated = Kind {
+            class: "Notepad".into(),
+            beyond_us: true,
+        };
+        assert!(!lendable_kind(&elevated));
+    }
+
+    #[test]
+    fn only_a_window_that_is_shown_normally_is_asked_to_take_a_size() {
+        let facts = |minimized, maximized| Facts {
+            frame: [0, 0, 800, 600],
+            minimized,
+            maximized,
+            identity: Identity { pid: 1, tid: 2 },
+        };
+        assert!(can_size(&facts(false, false)));
+        assert!(!can_size(&facts(true, false)));
+        assert!(!can_size(&facts(false, true)));
+    }
+
+    #[test]
+    fn a_window_that_grew_is_moved_back_onto_its_screen() {
+        let work = [0, 0, 1920, 1040];
+        // Inside: left where it is.
+        assert_eq!(keep_on_screen(100, 80, 800, 600, work), (100, 80));
+        // Overhanging right and bottom: back by what it overhangs.
+        assert_eq!(keep_on_screen(1500, 700, 800, 600, work), (1120, 440));
+        // Overhanging left and top (a screen left of or above this one).
+        assert_eq!(keep_on_screen(-50, -30, 800, 600, work), (0, 0));
+        // Larger than the work area: its start shows.
+        assert_eq!(keep_on_screen(300, 200, 2400, 1300, work), (0, 0));
+        // Exactly the work area.
+        assert_eq!(keep_on_screen(0, 0, 1920, 1040, work), (0, 0));
+        // A work area that does not start at the origin (a second screen).
+        let second = [1920, 0, 3840, 1040];
+        assert_eq!(keep_on_screen(3500, 900, 800, 600, second), (3040, 440));
+        assert_eq!(keep_on_screen(1000, 10, 800, 600, second), (1920, 10));
+        // Sizes that would overflow a plain sum are held.
+        assert_eq!(
+            keep_on_screen(i32::MAX - 5, i32::MIN + 5, i32::MAX, 10, work),
+            (0, 0)
+        );
+    }
+
+    #[test]
+    fn only_a_listed_window_is_lent_whatever_handle_is_named() {
+        let _turn = serial();
+        let (fine, desktop, elevated, own, minimised, taskbar) =
+            (0x8301, 0x8302, 0x8303, 0x8304, 0x8305, 0x8306);
+        let mut shell = win(0, 0, 1920, 1080);
+        shell.win_class = "Progman";
+        shell.title = "Program Manager";
+        shell.class = "explorer";
+        let mut bar = win(0, 1040, 1920, 40);
+        bar.win_class = "Shell_TrayWnd";
+        bar.class = "explorer";
+        let mut high = win(10, 10, 640, 480);
+        high.beyond_us = true;
+        high.identity = Identity { pid: 4, tid: 5 };
+        let mut ours = win(10, 10, 640, 480);
+        ours.pid = std::process::id();
+        let mut away = win(10, 10, 640, 480);
+        away.placement = placement(Show::Minimized, [10, 10, 650, 490]);
+        let fake = Fake::new(&[
+            (fine, win(10, 10, 640, 480)),
+            (desktop, shell),
+            (elevated, high),
+            (own, ours),
+            (minimised, away),
+            (taskbar, bar),
+        ]);
+        let env = WinEnv::new(fake);
+        let lends = Lends::new();
+        // The list shows the one window.
+        let listed = list_with(&lends, &env, DEVICE);
+        assert_eq!(listed["windows"].as_array().unwrap().len(), 1, "{listed}");
+        assert_eq!(first(&listed)["address"], window_id(fine).as_str());
+        // Any other handle is refused in the same words as a window that is
+        // not there, and nothing is touched or recorded.
+        for hwnd in [desktop, elevated, own, minimised, taskbar, 0x8399] {
+            let reply = lend_with(&lends, &env, DEVICE, &window_id(hwnd));
+            assert!(
+                reply["error"].as_str().unwrap().contains("No such window"),
+                "{hwnd:#x}: {reply}"
+            );
+        }
+        assert!(env.state().screens.is_empty());
+        assert!(env.state().placed.is_empty());
+        assert!(env.desk.log().is_empty());
+        let ok = lend_with(&lends, &env, DEVICE, &window_id(fine));
+        assert!(ok.get("error").is_none(), "{ok}");
+        return_with(&lends, &env, DEVICE, None);
+    }
+
+    #[test]
+    fn a_window_is_lent_to_the_device_that_asked_and_to_no_other() {
+        let _turn = serial();
+        let hwnd = 0x8310;
+        let (lends, env) = setup(hwnd);
+        let index = index_of(&lend_with(&lends, &env, DEVICE, &window_id(hwnd)));
+        let lease = window_target::lease_for(index, Some(DEVICE)).expect("its borrower holds it");
+        assert_eq!(lease.hwnd, hwnd);
+        assert_eq!(lease.device, DEVICE);
+        assert_eq!(
+            window_target::lease_for(index, Some(OTHER)).unwrap_err(),
+            window_target::Refusal::OtherDevice,
+            "another paired device cannot dial the index"
+        );
+        assert_eq!(
+            window_target::lease_for(index, None).unwrap_err(),
+            window_target::Refusal::OtherDevice
+        );
+        return_with(&lends, &env, DEVICE, None);
+    }
+
+    #[test]
+    fn giving_a_window_back_ends_the_grant_and_the_index_is_not_given_out_again_at_once() {
+        let _turn = serial();
+        let hwnd = 0x8320;
+        let (lends, env) = setup(hwnd);
+        let id = window_id(hwnd);
+        let index = index_of(&lend_with(&lends, &env, DEVICE, &id));
+        let lease = window_target::lease_for(index, Some(DEVICE)).unwrap();
+        assert!(window_target::lease_holds(&lease));
+        let back = return_with(&lends, &env, DEVICE, Some(&id));
+        assert_eq!(back["returned"], 1);
+        assert!(
+            !window_target::lease_holds(&lease),
+            "a session bound to the lend is over"
+        );
+        // Another window lent next is not under the index just freed, and the
+        // old lease holds nothing of it either.
+        let other = 0x8321;
+        let fake = Fake::new(&[(hwnd, win(100, 80, 800, 600)), (other, win(0, 0, 640, 480))]);
+        let env = WinEnv::new(fake);
+        let lends = Lends::new();
+        let again = index_of(&lend_with(&lends, &env, DEVICE, &window_id(other)));
+        assert_ne!(again, index, "not the index freed a moment ago");
+        assert!(!window_target::lease_holds(&lease));
+        return_with(&lends, &env, DEVICE, None);
+    }
+
+    #[test]
+    fn a_swept_lend_and_a_dropped_screen_end_their_grants_too() {
+        let _turn = serial();
+        let (a, b) = (0x8330, 0x8331);
+        let fake = Fake::new(&[(a, win(0, 0, 800, 600)), (b, win(50, 50, 640, 480))]);
+        let env = WinEnv::new(fake);
+        let lends = Lends::new();
+        let ia = index_of(&lend_with(&lends, &env, DEVICE, &window_id(a)));
+        let ib = index_of(&lend_with(&lends, &env, DEVICE, &window_id(b)));
+        let lease_a = window_target::lease_for(ia, Some(DEVICE)).unwrap();
+        let lease_b = window_target::lease_for(ib, Some(DEVICE)).unwrap();
+        // A borrower that went away: swept back.
+        let present = Present {
+            live: &[],
+            captures: &[],
+            linked: &|_| false,
+        };
+        let mut looks = Looks::default();
+        let later = Instant::now() + std::time::Duration::from_secs(10);
+        let ended = crate::lend_window::sweep_with(&lends, &env, true, &present, &mut looks, later);
+        assert_eq!(ended.len(), 2);
+        assert!(!window_target::lease_holds(&lease_a));
+        assert!(!window_target::lease_holds(&lease_b));
+        // A screen dropped on its own (a lend that failed after the window
+        // was registered).
+        let c = 0x8332;
+        let fake = Fake::new(&[(c, win(0, 0, 800, 600))]);
+        let env = WinEnv::new(fake);
+        let lends = Lends::new();
+        let ic = index_of(&lend_with(&lends, &env, DEVICE, &window_id(c)));
+        let lease_c = window_target::lease_for(ic, Some(DEVICE)).unwrap();
+        env.drop_screen(&crate::lend_window::lend_key(DEVICE, &window_id(c)));
+        assert!(!window_target::lease_holds(&lease_c));
+    }
+
+    #[test]
+    fn a_lend_asked_for_again_after_a_return_that_failed_is_a_new_grant_for_the_same_screen() {
+        let _turn = serial();
+        let hwnd = 0x8340;
+        let (lends, env) = setup(hwnd);
+        let id = window_id(hwnd);
+        let first = lend_with(&lends, &env, DEVICE, &id);
+        let index = index_of(&first);
+        let old = window_target::lease_for(index, Some(DEVICE)).unwrap();
+        env.desk
+            .with(hwnd, |w| w.placement.normal = [0, 0, 500, 500]);
+        env.desk.stuck.lock().unwrap().push(hwnd);
+        assert!(
+            return_with(&lends, &env, DEVICE, Some(&id))
+                .get("error")
+                .is_some()
+        );
+        assert!(!window_target::lease_holds(&old), "ended by the return");
+        // The borrower dials again and asks again: the window is still lent
+        // to it, under a grant of its own and the same name.
+        let again = lend_with(&lends, &env, DEVICE, &id);
+        assert!(again.get("error").is_none(), "{again}");
+        assert_eq!(index_of(&again), index, "the screen keeps its name");
+        let new = window_target::lease_for(index, Some(DEVICE)).unwrap();
+        assert_ne!(new.generation, old.generation);
+        assert!(
+            !window_target::lease_holds(&old),
+            "the old session stays over"
+        );
+        env.desk.stuck.lock().unwrap().clear();
+        assert_eq!(return_with(&lends, &env, DEVICE, Some(&id))["returned"], 1);
+        assert!(!window_target::lease_holds(&new));
+    }
+
+    #[test]
+    fn a_handle_that_names_another_window_is_never_touched() {
+        let _turn = serial();
+        let hwnd = 0x8350;
+        let (lends, env) = setup(hwnd);
+        let id = window_id(hwnd);
+        let index = index_of(&lend_with(&lends, &env, DEVICE, &id));
+        let lease = window_target::lease_for(index, Some(DEVICE)).unwrap();
+        // The window is moved by its owner (so putting it back would write),
+        // closed, and Windows gives the handle to another program's window.
+        env.desk
+            .with(hwnd, |w| w.placement.normal = [400, 300, 1200, 900]);
+        env.desk.recycle(hwnd, 77);
+        // It is not the lent window: gone to every look.
+        assert!(env.seen(&id).unwrap().is_none());
+        assert!(env.output(&output_name(index)).is_none());
+        let sized = env.resize_screen(&crate::lend_window::lend_key(DEVICE, &id), 640, 480);
+        assert!(sized.get("error").is_some(), "{sized}");
+        // Returned: counted as put back, and the new window is left exactly as
+        // it is (nothing set, nothing restored, nothing sized).
+        let back = return_with(&lends, &env, DEVICE, Some(&id));
+        assert_eq!(back["returned"], 1, "{back}");
+        assert!(env.desk.log().is_empty(), "{:?}", env.desk.log());
+        assert_eq!(env.desk.win(hwnd).placement.normal, [400, 300, 1200, 900]);
+        assert!(!window_target::lease_holds(&lease));
+        // And nothing of the lend is left to be put back on the next return.
+        assert!(env.state().placed.is_empty());
+    }
+
+    #[test]
+    fn the_sweep_ends_a_lend_whose_handle_was_given_to_another_window() {
+        let _turn = serial();
+        let hwnd = 0x8351;
+        let (lends, env) = setup(hwnd);
+        let id = window_id(hwnd);
+        let index = index_of(&lend_with(&lends, &env, DEVICE, &id));
+        let live = vec![DEVICE.to_string()];
+        let captures = vec![(DEVICE.to_string(), index)];
+        let present = Present {
+            live: &live,
+            captures: &captures,
+            linked: &|_| true,
+        };
+        let mut looks = Looks::default();
+        let now = Instant::now();
+        env.desk.recycle(hwnd, 88);
+        assert!(
+            crate::lend_window::sweep_with(&lends, &env, true, &present, &mut looks, now)
+                .is_empty()
+        );
+        let ended = crate::lend_window::sweep_with(&lends, &env, true, &present, &mut looks, now);
+        assert_eq!(ended.len(), 1);
+        assert_eq!(ended[0].why, Gone::Closed);
+        assert_eq!(lent_hwnd(index), None);
+        assert!(env.desk.log().is_empty(), "{:?}", env.desk.log());
+    }
+
+    #[test]
+    fn a_lend_that_fails_undoes_only_what_it_made() {
+        let _turn = serial();
+        // Nothing was registered before: a window whose place cannot be read
+        // is refused and leaves no registration.
+        let hwnd = 0x8360;
+        let (lends, env) = setup(hwnd);
+        env.desk.unreadable.lock().unwrap().push(hwnd);
+        let id = window_id(hwnd);
+        let refused = lend_with(&lends, &env, DEVICE, &id);
+        assert!(
+            refused["error"]
+                .as_str()
+                .unwrap()
+                .contains("where the window is")
+        );
+        assert!(env.state().screens.is_empty());
+        assert!(env.state().placed.is_empty());
+        let probe = window_target::register(hwnd, DEVICE, Identity { pid: 4242, tid: 7 }, None);
+        let (probe_lease, made) = probe.expect("nothing was left registered");
+        assert!(made, "so a registration made now is new");
+        window_target::unregister(&probe_lease);
+
+        // The same window was registered before this call (a grant to this
+        // device that this environment does not know): the failed lend does
+        // not remove it.
+        let before = window_target::register(hwnd, DEVICE, Identity { pid: 4242, tid: 7 }, None)
+            .expect("registered")
+            .0;
+        let refused = lend_with(&lends, &env, DEVICE, &id);
+        assert!(refused.get("error").is_some());
+        assert!(
+            window_target::lease_holds(&before),
+            "a registration this call did not make is left alone"
+        );
+        window_target::unregister(&before);
+    }
+
+    #[test]
+    fn a_window_lent_to_one_device_cannot_be_registered_for_another_by_a_side_door() {
+        let _turn = serial();
+        let hwnd = 0x8370;
+        let (lends, env) = setup(hwnd);
+        let id = window_id(hwnd);
+        lend_with(&lends, &env, DEVICE, &id);
+        // The environment asked directly for the same window under another
+        // device's key (the lend path refuses first; this is the second wall).
+        let reply = env.add_screen(&crate::lend_window::lend_key(OTHER, &id), 800, 600);
+        assert!(
+            reply["error"]
+                .as_str()
+                .unwrap()
+                .contains("Another computer"),
+            "{reply}"
+        );
+        assert!(
+            !env.state()
+                .screens
+                .contains_key(&crate::lend_window::lend_key(OTHER, &id))
+        );
         return_with(&lends, &env, DEVICE, None);
     }
 }
