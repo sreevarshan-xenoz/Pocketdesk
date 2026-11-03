@@ -894,8 +894,7 @@ mod tests {
     /// The tests share the process-wide table of window indexes: the ones that
     /// lend take turns, so a test that fills the table does not starve another.
     fn serial() -> std::sync::MutexGuard<'static, ()> {
-        static TURN: Mutex<()> = Mutex::new(());
-        TURN.lock().unwrap_or_else(|e| e.into_inner())
+        crate::lend_window::table_turn()
     }
 
     /// The window the registration under `index` holds for DEVICE, if any.
