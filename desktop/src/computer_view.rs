@@ -1102,12 +1102,12 @@ pub fn window_title(name: &str, screen: u32, mic_on: bool) -> String {
     }
 }
 
-/// A borrowed window's own title cleaned for a window's: no control
-/// characters, at most 120 characters.
+/// A borrowed window's own title cleaned for a window's: no control,
+/// bidirectional or other format characters, at most 120 characters.
 pub fn clean_title(title: &str) -> String {
     title
         .chars()
-        .filter(|c| !c.is_control())
+        .filter(|c| !pocketdesk_core::local::shared_input::is_hidden(*c))
         .take(120)
         .collect::<String>()
         .trim()
@@ -7827,6 +7827,12 @@ mod tests {
         assert_eq!(borrowed_title("", "Desk"), "Window \u{b7} Desk");
         assert_eq!(clean_title("  Notes\u{2026}\u{7}\n x "), "Notes\u{2026} x");
         assert_eq!(clean_title(&"x".repeat(300)).chars().count(), 120);
+        // Bidirectional overrides and isolates and other format characters
+        // are no more shown than controls are.
+        assert_eq!(
+            clean_title("a\u{202E}b\u{2066}c\u{2069}d\u{200B}e\u{2060}f"),
+            "abcdef"
+        );
     }
 
     /// Window handoff 4: a window dragged here opens where it was let go,

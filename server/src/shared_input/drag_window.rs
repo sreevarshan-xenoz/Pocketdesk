@@ -430,10 +430,12 @@ impl Offer {
     }
 }
 
-/// `text` without control characters, at most [`TITLE_CHARS`] characters.
+/// `text` without control, bidirectional and other format characters (a
+/// title is another program's, and is put before the owner), at most
+/// [`TITLE_CHARS`] characters.
 fn clean_title(text: &str) -> String {
     text.chars()
-        .filter(|c| !c.is_control())
+        .filter(|c| !pocketdesk_core::local::shared_input::is_hidden(*c))
         .take(TITLE_CHARS)
         .collect::<String>()
         .trim()
@@ -1203,6 +1205,24 @@ mod tests {
         let read = with("title", json!(format!("a\u{7}b\n{long}"))).unwrap();
         assert!(!read.title.contains('\u{7}') && !read.title.contains('\n'));
         assert_eq!(read.title.chars().count(), TITLE_CHARS);
+    }
+
+    #[test]
+    fn a_title_loses_bidi_overrides_isolates_and_other_format_characters() {
+        let sly = "a\u{202E}b\u{2066}c\u{2069}d\u{200B}e\u{2060}f\u{AD}g\u{E0041}h\u{7}";
+        assert_eq!(clean_title(sly), "abcdefgh");
+        // The title of an offer read off the wire, and of one decided here.
+        let mut body = json!({ OFFER: {
+            "window": "42", "title": "t", "x": 1, "y": 2, "width": 300, "height": 200 }});
+        body[OFFER]["title"] = json!(sly);
+        assert_eq!(Offer::read(&body).unwrap().title, "abcdefgh");
+        let mut front = window("0xaa", [1200, 300, 800, 600]);
+        front.title = sly.to_string();
+        front.focused = true;
+        let Decided::Offer(offer, _) = decide(&fake(Ok(()), Some(vec![front])), &handover()) else {
+            panic!("an offer");
+        };
+        assert_eq!(offer.title, "abcdefgh");
     }
 
     // ---- taking an offer ----

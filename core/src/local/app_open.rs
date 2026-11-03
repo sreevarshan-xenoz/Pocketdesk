@@ -65,6 +65,7 @@ impl DroppedWindow {
             && self.x.unsigned_abs() <= 1_000_000
             && self.y.unsigned_abs() <= 1_000_000
             && self.title.chars().count() <= 200
+            && !self.title.chars().any(super::shared_input::is_hidden)
     }
 }
 
@@ -298,6 +299,10 @@ mod tests {
         assert!(request_borrow_drop(&dir, "desk-1", &odd, 100).is_err());
         let mut odd = window("42");
         odd.title = "x".repeat(201);
+        assert!(request_borrow_drop(&dir, "desk-1", &odd, 100).is_err());
+        // A title that turns text around is not one the app is asked to show.
+        let mut odd = window("42");
+        odd.title = "safe\u{202E}txt.exe".to_string();
         assert!(request_borrow_drop(&dir, "desk-1", &odd, 100).is_err());
         // A file written by hand is held to the same rules when taken.
         std::fs::write(
