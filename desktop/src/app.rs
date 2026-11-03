@@ -1061,6 +1061,46 @@ impl PocketdeskApp {
         }
     }
 
+    /// Open the window `dropped` names of the paired computer `computer`,
+    /// dragged here ("Drag windows to my other computers" there): a
+    /// borrowed window as "Borrow a window..." opens one, at the place it
+    /// was let go. A computer that is not one of this one's is ignored.
+    fn open_dropped_window(
+        &mut self,
+        ctx: &egui::Context,
+        computer: &str,
+        dropped: &pocketdesk_core::local::app_open::DroppedWindow,
+    ) {
+        let Some(known) = pocketdesk_core::local::computers::read(&self.state_dir)
+            .computers
+            .into_iter()
+            .find(|c| c.device_id == computer)
+        else {
+            return;
+        };
+        let (preset, view_only, stats) = self.computer_view_choices();
+        let place = crate::computer_view::Placement {
+            x: dropped.x,
+            y: dropped.y,
+            width: dropped.width,
+            height: dropped.height,
+        };
+        let opened = self.computer_view_ready(ctx).open_borrowed_at(
+            ctx,
+            computer,
+            &known.name,
+            &dropped.window,
+            &dropped.title,
+            Some(place),
+            preset,
+            view_only,
+            stats,
+        );
+        if let Err(e) = opened {
+            self.notice = crate::notice::Notice::error(e);
+        }
+    }
+
     /// The quality preset, view-only and stats a computer's window starts
     /// with, as the settings say.
     fn computer_view_choices(&self) -> (u8, bool, bool) {
@@ -1150,6 +1190,15 @@ impl PocketdeskApp {
             if open.quits(self.started_unix) {
                 self.quitting = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            return;
+        }
+        // Window handoff 4: a window of another computer dragged here and let
+        // go. It opens as a borrowed window where it was let go and does not
+        // raise this window.
+        if open.page == pocketdesk_core::local::app_open::BORROW_DROP {
+            if let (Some(computer), Some(dropped)) = (&open.phone, &open.dropped) {
+                self.open_dropped_window(ctx, computer, dropped);
             }
             return;
         }
