@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 
 use super::awake::KeepAwake;
 use super::badge;
+use super::drag_window::Rules;
 use super::drive::{
     Action, Captured, Driver, LayoutFiles, OpenChannel, SavedLayout, layout_from, reachable,
 };
@@ -80,6 +81,16 @@ const GAME_EVERY: Duration = Duration::from_millis(500);
 const PROBE_WAIT: Duration = Duration::from_millis(100);
 /// How long, as a driver ends, what it just sent may take to go.
 const FLUSH_WAIT: Duration = Duration::from_millis(300);
+
+/// Whether a window dragged to the edge goes across, as the settings say:
+/// `drag_windows_across` with `lend_windows`, and how a drag is told.
+fn drag_rules(config: &pocketdesk_core::local::config::Config) -> Rules {
+    Rules::from_settings(
+        config.drag_windows_across,
+        config.lend_windows,
+        &config.drag_window_trigger,
+    )
+}
 
 /// What Hyprland's window in front says for the gaming lock: full screen
 /// (Hyprland 0.42 and later say 2 for it, 3 with maximized too; 1 is only
@@ -327,6 +338,15 @@ impl<B: Backend> Glue<B> {
                             badge::flash(&said_here, badge::SWITCH_FOR);
                         }
                     }
+                    // A window dragged to the edge goes to the computer the
+                    // pointer went to, and one dragged back comes home: the
+                    // compositor is read off this loop.
+                    Action::DragWindow(handover) => {
+                        tokio::spawn(super::drag_window::hand_over(handover));
+                    }
+                    Action::DragBack(back) => {
+                        tokio::spawn(super::drag_window::bring_back(back));
+                    }
                     // Win+L is Windows' (its hook spots it); the mode, the
                     // park and the cursor are the portal glue's.
                     Action::LockHere
@@ -514,6 +534,7 @@ pub(super) fn drive<B: Backend>(
     let mut driver = Driver::new(&me.device_id, layout)
         .with_game_lock(game_lock_on, config.shared_input_lock_programs.clone());
     driver.set_clipboard(config.shared_input_clipboard);
+    driver.set_drag(drag_rules(&config));
     let actions = driver.on(foreground_now(&runtime, game_lock_on));
     glue.apply(&mut driver, actions);
     // The files, the settings, the screens and Hyprland's scale every two
@@ -770,6 +791,12 @@ pub(super) fn drive<B: Backend>(
             quick_on = config.shared_input_low_latency;
             glue.pacer.set(quick_on);
             driver.set_clipboard(config.shared_input_clipboard && !stale);
+            // A window dragged across: like the clipboard, not on a stale read.
+            driver.set_drag(if stale {
+                Rules::default()
+            } else {
+                drag_rules(config)
+            });
             glue.sound_on = config.shared_input_sound;
             let actions =
                 driver.set_game_lock(game_lock_on, config.shared_input_lock_programs.clone());
