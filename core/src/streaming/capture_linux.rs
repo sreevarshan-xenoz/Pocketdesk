@@ -31,6 +31,13 @@ struct StreamUserData {
     /// The pointer's metadata, read from each buffer, when the stream was
     /// asked for it (local cursor).
     cursor: Option<std::sync::Mutex<PwCursor>>,
+    /// Each frame is cut to the rectangle its buffer says is the picture
+    /// (`SPA_META_VideoCrop`): a lent window's stream is as big as a screen
+    /// with the window in a corner of it.
+    crop_meta: bool,
+    /// The last rectangle a lent window's buffer named that was good, for a
+    /// buffer that names none.
+    last_crop: std::sync::Mutex<Option<super::capture_video_crop::Region>>,
 }
 
 /// Whether the screencast portal can leave the pointer out of the picture
@@ -290,13 +297,29 @@ pub(super) fn spawn_pipewire_capture(
     cancel: CancellationToken,
     cursor: Option<CursorFeed>,
 ) -> Result<()> {
+    spawn_pipewire_capture_with(node_id, config, frame_tx, cancel, cursor, false)
+}
+
+/// [`spawn_pipewire_capture`] for the stream of one window (`crop_meta`): the
+/// stream is asked for the rectangle of each buffer that is the picture, and
+/// each frame is cut to it.
+pub(super) fn spawn_pipewire_capture_with(
+    node_id: u32,
+    config: StreamingConfig,
+    frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
+    cancel: CancellationToken,
+    cursor: Option<CursorFeed>,
+    crop_meta: bool,
+) -> Result<()> {
     // Held by the thread: dropped when it ends, and when the spawn fails.
     let apart = cursor.as_ref().map(CursorFeed::apart);
     std::thread::Builder::new()
         .name("pipewire-capture".into())
         .spawn(move || {
             let _apart = apart;
-            if let Err(e) = run_pipewire_capture(node_id, &config, frame_tx, cancel, cursor) {
+            if let Err(e) =
+                run_pipewire_capture(node_id, &config, frame_tx, cancel, cursor, crop_meta)
+            {
                 error!("PipeWire capture thread exited with error: {e}");
             } else {
                 info!("PipeWire capture thread exited normally");
@@ -641,6 +664,7 @@ fn run_pipewire_capture(
     frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
     cursor: Option<CursorFeed>,
+    crop_meta: bool,
 ) -> Result<()> {
     info!("PipeWire capture thread started, connecting to node {node_id}");
 
@@ -680,6 +704,8 @@ fn run_pipewire_capture(
         height: AtomicU32::new(config.height),
         frame_count: AtomicU64::new(0),
         cursor: cursor.map(|feed| std::sync::Mutex::new(PwCursor::new(feed))),
+        crop_meta,
+        last_crop: std::sync::Mutex::new(None),
     };
     let wants_cursor = user_data.cursor.is_some();
 
@@ -725,8 +751,22 @@ fn run_pipewire_capture(
             libspa::pod::Pod::from_bytes(bytes).context("The pointer's meta param is not a pod")
         })
         .transpose()?;
+    // A lent window's buffers are asked to say which part of them is the
+    // window.
+    let crop = if crop_meta {
+        Some(super::capture_video_crop::meta_param_pod()?)
+    } else {
+        None
+    };
+    let crop = crop
+        .as_deref()
+        .map(|bytes| {
+            libspa::pod::Pod::from_bytes(bytes).context("The crop's meta param is not a pod")
+        })
+        .transpose()?;
     let mut params = vec![format];
     params.extend(meta);
+    params.extend(crop);
     stream
         .connect(
             libspa::utils::Direction::Input,
@@ -946,6 +986,13 @@ impl<'s> Dequeued<'s> {
         // SAFETY: the buffer is valid and not queued while `self` lives.
         unsafe { super::capture_cursor_pw::cursor_meta(self.spa()) }
     }
+
+    /// The rectangle of this buffer that is the picture, if it says one.
+    fn crop_record(&self) -> Option<(i32, i32, i32, i32)> {
+        // SAFETY: the buffer is valid and not queued while `self` lives.
+        unsafe { super::capture_video_crop::crop_meta(self.spa()) }
+            .and_then(super::capture_video_crop::parse)
+    }
 }
 
 impl Drop for Dequeued<'_> {
@@ -975,6 +1022,14 @@ fn on_process(stream: &pipewire::stream::Stream, user_data: &StreamUserData) {
             .unwrap_or_else(|e| e.into_inner())
             .update(record, width, height);
     }
+
+    // The part of the buffer that is the picture, copied out before the
+    // buffer's data is borrowed.
+    let crop = if user_data.crop_meta {
+        buffer.crop_record()
+    } else {
+        None
+    };
 
     // Access the buffer data
     let datas = buffer.datas_mut();
@@ -1023,7 +1078,7 @@ fn on_process(stream: &pipewire::stream::Stream, user_data: &StreamUserData) {
         debug!("Captured frame #{count}: size={size}B, {width}x{height}, stride={stride}");
     }
 
-    let frame = VideoFrame {
+    let mut frame = VideoFrame {
         data: frame_data,
         width,
         height,
@@ -1032,6 +1087,30 @@ fn on_process(stream: &pipewire::stream::Stream, user_data: &StreamUserData) {
         gpu: None,
         repeat: false,
     };
+    // A lent window: only the part the stream says is the window, and when
+    // that cannot be told, nothing (the stream is a screen's size with the
+    // window in a corner).
+    if user_data.crop_meta {
+        use super::capture_video_crop::{Part, part};
+        let mut last = user_data
+            .last_crop
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        match part(width, height, crop, *last) {
+            Part::Whole => *last = None,
+            Part::Cut((x, y, w, h)) => {
+                if !frame.crop_region(x, y, w, h) {
+                    debug!("A lent window's frame could not be cut: dropped");
+                    return;
+                }
+                *last = Some((x, y, w, h));
+            }
+            Part::Drop => {
+                debug!("A lent window's frame is not shown to be the window: dropped");
+                return;
+            }
+        }
+    }
     // Send the frame through the channel.
     // Use try_send to implement Latest-Frame-Wins by dropping the newest frame if full.
     match user_data.frame_tx.try_send(frame) {
