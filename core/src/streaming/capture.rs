@@ -259,6 +259,16 @@ pub async fn start_capture_auto(
     if super::window_target::is_window_index(config.monitor_index) && window_lease.is_none() {
         bail!("That window is not lent to this session");
     }
+    // A window lent from a Linux compositor (window handoff, phase 6) is
+    // captured as that window alone through the compositor's own screen-cast
+    // and by nothing else: no backend below could show less than a whole
+    // monitor, and none is tried if it cannot start.
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(lease) = window_lease.as_ref().filter(|l| !l.native.is_empty()) {
+            return start_native_window_capture(config, frame_tx, cancel, lease.clone()).await;
+        }
+    }
     // Only the portal asks anyone; the other backends need no grant.
     #[cfg(not(target_os = "linux"))]
     let _ = &screen_grant;
@@ -354,6 +364,32 @@ pub async fn start_capture_auto(
         }
     }
     Err(last_err.unwrap_or_else(|| anyhow::Error::msg("no capture backend available")))
+}
+
+/// Capture the window of a Linux compositor a session holds `lease` on (see
+/// `window_target::Lease::native`): GNOME's, through mutter's own
+/// `RecordWindow`, which is the "Unattended on GNOME" path and so needs its
+/// switch on and a GNOME session. Nothing falls back to a monitor or to the
+/// portal, whose picker would show the owner a dialog and let anything be
+/// chosen.
+#[cfg(target_os = "linux")]
+async fn start_native_window_capture(
+    config: StreamingConfig,
+    frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
+    cancel: CancellationToken,
+    lease: super::window_target::Lease,
+) -> Result<CaptureSession> {
+    if super::gnome_unattended::session_route() != super::gnome_unattended::Route::Mutter {
+        bail!(
+            "A lent window is captured through GNOME's own screen cast, which needs \"Unattended on GNOME\" on and a GNOME session"
+        );
+    }
+    let session =
+        super::capture_mutter::start_window_capture(config, frame_tx, cancel, lease).await?;
+    // The capture runs under the session's own token: one that dies once
+    // started cancels it, which ends the session.
+    info!("Capture started for a lent GNOME window");
+    Ok(session)
 }
 
 /// When a started capture's token is cancelled (it died, or the session is
