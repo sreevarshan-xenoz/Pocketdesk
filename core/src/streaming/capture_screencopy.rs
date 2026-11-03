@@ -81,13 +81,19 @@ impl ZeroCopy {
     fn active(&self) -> bool {
         match *self {}
     }
-    fn take(&mut self, _offers: &[(u32, u32, u32)], _qh: &QueueHandle<WlState>) -> Take {
+    fn take(
+        &mut self,
+        _offers: &[(u32, u32, u32)],
+        _qh: &QueueHandle<WlState>,
+        _queue: &mut EventQueue<WlState>,
+        _state: &mut WlState,
+    ) -> Take {
         match *self {}
     }
     fn needs_check(&self) -> bool {
         match *self {}
     }
-    fn checked(&mut self, _agreed: bool) {
+    fn checked(&mut self, _agreement: super::dmabuf::Agreement) -> Duration {
         match *self {}
     }
     fn worked(&mut self) {
@@ -144,6 +150,11 @@ const POLL_TICK: Duration = Duration::from_millis(100);
 /// Time the caller waits for the first successful frame before falling back
 /// to the portal path (the capture thread aborts via the cancel token).
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long the first frame may wait for the DMA-BUF side to set itself up
+/// (the card's converter, the buffers, the compositor's import, the first
+/// checks) before the capture copies through memory for good: well inside
+/// `HANDSHAKE_TIMEOUT`, so a slow setup never ends the session in the portal.
+const FIRST_FRAME_SETUP: Duration = Duration::from_millis(2500);
 /// Time a toplevel capture may stay silent before it is considered dead.
 /// Hyprland answers a request for a gone/invalid window handle by logging and
 /// returning *without ever creating the frame object*, so there is no
@@ -572,6 +583,7 @@ fn run_capture_loop(
     // The next copy ignores damage: a still screen would otherwise wait for
     // the change a compositor that tracks damage (wlroots) answers with.
     let mut copy_at_once = false;
+    let loop_started = Instant::now();
 
     loop {
         if cancel.is_cancelled() {
@@ -676,12 +688,21 @@ fn run_capture_loop(
         // takes (never for a window: its picture is copied through shm).
         let mut gpu: Option<(super::GpuFrame, WlBuffer)> = None;
         if !window && let Some(z) = zc.as_mut() {
-            match z.take(&dmabufs, &qh) {
+            // A first frame that waits too long for the setup is not worth
+            // the handshake: copy through memory, for good.
+            if !ready_sent && loop_started.elapsed() > FIRST_FRAME_SETUP {
+                z.fail("the first frame waited too long for the setup");
+            }
+            match z.take(&dmabufs, &qh, &mut queue, &mut state) {
                 Take::Frame(frame, wl_buffer) if z.needs_check() => {
                     // A new kind of buffer: the same picture is copied both
                     // ways at once, and trusted only if the card reads it as
                     // the compositor wrote it. This cycle's own request is
-                    // let go; the next one carries a frame.
+                    // let go. The copy through memory the check made is the
+                    // cycle's frame (so the stream, and the first frame the
+                    // handshake waits for, go on while a modifier is checked);
+                    // the next cycle carries a frame on the card once the
+                    // modifier is trusted.
                     capture.destroy();
                     let copy = copy_through_both(
                         &conn,
@@ -695,21 +716,48 @@ fn run_capture_loop(
                         &shm,
                         &wl_buffer,
                     );
-                    wl_buffer.destroy();
-                    let agreed = match copy {
-                        Ok(Some(copy)) => {
+                    let (agreement, shown) = match copy {
+                        Ok(Some((cw, ch, bgra)))
+                            if (cw, ch) == (frame.dmabuf().width, frame.dmabuf().height) =>
+                        {
                             let card = z.read_back(&frame);
-                            let copy = z.read_back_copy(&copy, frame.dmabuf().width);
-                            matches!((card, copy), (Some(a), Some(b)) if super::dmabuf::same_picture(&a, &b))
+                            let copy = z.read_back_copy(&bgra, cw);
+                            let agreement = match (card, copy) {
+                                (Some(a), Some(b)) => super::dmabuf::agreement(&a, &b, cw as usize),
+                                _ => super::dmabuf::Agreement::Differ,
+                            };
+                            (agreement, Some((cw, ch, bgra)))
                         }
-                        Ok(None) => false,
+                        Ok(_) => (super::dmabuf::Agreement::Differ, None),
                         Err(e) => {
                             debug!("zero-copy check: {e:#}");
-                            false
+                            (super::dmabuf::Agreement::Differ, None)
                         }
                     };
-                    z.checked(agreed);
+                    let gap = z.checked(agreement);
+                    if let Some((cw, ch, bgra)) = shown {
+                        last_gpu = None;
+                        last_inverted = None;
+                        still.changed();
+                        if !ready_sent {
+                            let _ = ready_tx.send(Ok(()));
+                            ready_sent = true;
+                        }
+                        if !send_frame(&frame_tx, bgra, cw, ch, false) {
+                            debug!("Frame channel closed, stopping screencopy capture");
+                            break;
+                        }
+                        last_sent = Instant::now();
+                        idle = false;
+                    }
                     force_emit = true;
+                    // At the frame rate, and no quicker (an empty screen's
+                    // check waits for a picture with detail).
+                    let period = Duration::from_micros(1_000_000 / config.fps.max(1) as u64);
+                    let wait = gap.max(period.saturating_sub(cycle_start.elapsed()));
+                    if !wait.is_zero() {
+                        std::thread::sleep(wait);
+                    }
                     continue;
                 }
                 Take::Frame(frame, wl_buffer) => gpu = Some((frame, wl_buffer)),
@@ -784,8 +832,10 @@ fn run_capture_loop(
             },
         )?;
         if !finished {
-            buffer.destroy();
-            if let Some((pool, _)) = &shm_parts {
+            // The DMA-BUF side's `wl_buffer`s are the capture's own, kept for
+            // the next copy; the shm ones are made for each.
+            if let Some((pool, shm_buffer)) = &shm_parts {
+                shm_buffer.destroy();
                 pool.destroy();
             }
             capture.destroy();
@@ -824,8 +874,8 @@ fn run_capture_loop(
             let p = slot.lock().unwrap();
             (p.y_invert, p.damaged, p.failed)
         };
-        buffer.destroy();
-        if let Some((pool, _)) = &shm_parts {
+        if let Some((pool, shm_buffer)) = &shm_parts {
+            shm_buffer.destroy();
             pool.destroy();
         }
         capture.destroy();
@@ -1000,8 +1050,10 @@ fn send_frame(
 }
 
 /// Ask for the picture twice at once, into a DMA-BUF and into shared memory,
-/// and give back the second as BGRA rows: what a DMA-BUF's read-back is
-/// compared with. `None` where either copy did not complete or came flipped.
+/// and give back the second as its width, height and BGRA rows: what a
+/// DMA-BUF's read-back is compared with. `None` where either copy did not
+/// complete or came flipped. The DMA-BUF's `wl_buffer` is the capture's own
+/// and is left as it is.
 #[cfg_attr(not(feature = "inproc"), allow(dead_code))]
 #[allow(clippy::too_many_arguments)]
 fn copy_through_both(
@@ -1015,7 +1067,7 @@ fn copy_through_both(
     overlay: i32,
     shm: &WlShm,
     gpu_buffer: &WlBuffer,
-) -> Result<Option<Vec<u8>>> {
+) -> Result<Option<(u32, u32, Vec<u8>)>> {
     let gpu_slot: FrameSlot = Arc::new(Mutex::new(FramePhase::default()));
     let shm_slot: FrameSlot = Arc::new(Mutex::new(FramePhase::default()));
     let gpu_frame = manager.capture_output(overlay, output, qh, gpu_slot.clone());
@@ -1024,7 +1076,7 @@ fn copy_through_both(
         let p = slot.lock().unwrap();
         p.buffer_done || p.done || p.failed
     };
-    let result = (|| -> Result<Option<Vec<u8>>> {
+    let result = (|| -> Result<Option<(u32, u32, Vec<u8>)>> {
         pump_until(conn, queue, state, cancel, || {
             staged(&gpu_slot) && staged(&shm_slot)
         })?;
@@ -1059,7 +1111,7 @@ fn copy_through_both(
         if !finished || a.failed || b.failed || a.y_invert {
             return Ok(None);
         }
-        Ok(Some(backing.repack(b.y_invert, w, h, stride)))
+        Ok(Some((w, h, backing.repack(b.y_invert, w, h, stride))))
     })();
     gpu_frame.destroy();
     shm_frame.destroy();

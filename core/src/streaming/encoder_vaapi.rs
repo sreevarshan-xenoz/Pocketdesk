@@ -126,11 +126,29 @@ fn list_render_nodes() -> Vec<PathBuf> {
 /// Returns a fresh, solely-owned `AVBufferRef` the caller must `av_buffer_unref`
 /// (this module does so in `Drop`).
 unsafe fn open_vaapi_device() -> anyhow::Result<(*mut ffmpeg::ffi::AVBufferRef, String)> {
+    // SAFETY: as this function's own contract.
+    unsafe { open_vaapi_device_on(None) }
+}
+
+/// As [`open_vaapi_device`], on `pinned` only when it is given: the DMA-BUF
+/// capture reopens its converter on the node its buffers were made on, and
+/// never on another one.
+///
+/// # Safety
+/// As [`open_vaapi_device`].
+unsafe fn open_vaapi_device_on(
+    pinned: Option<&str>,
+) -> anyhow::Result<(*mut ffmpeg::ffi::AVBufferRef, String)> {
     use ffmpeg::ffi;
 
-    let override_node = std::env::var(VAAPI_DEVICE_ENV).ok();
-    let present = list_render_nodes();
-    let candidates = vaapi_device_candidates(&present, override_node.as_deref());
+    let candidates = match pinned {
+        Some(node) => vec![PathBuf::from(node)],
+        None => {
+            let override_node = std::env::var(VAAPI_DEVICE_ENV).ok();
+            let present = list_render_nodes();
+            vaapi_device_candidates(&present, override_node.as_deref())
+        }
+    };
 
     if candidates.is_empty() {
         anyhow::bail!("no /dev/dri/renderD* nodes present for VAAPI");
@@ -745,7 +763,15 @@ unsafe impl Send for Importer {}
 impl Importer {
     /// Open the device the in-process encoder opens, and a converter for
     /// `width`x`height`.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn open(width: u32, height: u32) -> anyhow::Result<Self> {
+        Self::open_on(None, width, height)
+    }
+
+    /// As [`Self::open`], on the render node `node` only when it is given:
+    /// the capture's buffers are made on one node, and a converter that
+    /// replaces another is opened on that same one.
+    pub(crate) fn open_on(node: Option<&str>, width: u32, height: u32) -> anyhow::Result<Self> {
         use ffmpeg::ffi;
         FFMPEG_INIT.call_once(|| {
             if let Err(e) = ffmpeg::init() {
@@ -755,7 +781,7 @@ impl Importer {
         });
         // SAFETY: a fresh device reference, owned by the importer from here
         // on and released in `Drop` (or below on a failure).
-        let (mut device_ref, node) = unsafe { open_vaapi_device()? };
+        let (mut device_ref, node) = unsafe { open_vaapi_device_on(node)? };
         let made = GpuConvert::new(device_ref, width, height, 60);
         let (convert, mut out_ref) = match made {
             Ok(m) => m,
@@ -783,6 +809,19 @@ impl Importer {
             width,
             height,
         })
+    }
+
+    /// Whether the converter went out of step (a frame went in and none came
+    /// out, or the card did not finish): it fails every call after, and the
+    /// capture opens a new one.
+    pub(crate) fn stuck(&self) -> bool {
+        self.convert.stuck
+    }
+
+    /// Make the converter stuck, as a failed conversion does (for the tests).
+    #[cfg(test)]
+    pub(crate) fn poison(&mut self) {
+        self.convert.stuck = true;
     }
 
     /// The render node the device opened on.
@@ -1756,6 +1795,32 @@ mod tests {
         };
         let small = gradient_frame(640, 360, 0);
         assert!(encoder.encode_frame(&small).is_err());
+    }
+
+    /// A converter that went out of step is told apart, and a new one on the
+    /// same node converts again.
+    #[test]
+    fn a_new_converter_on_the_same_node_replaces_one_out_of_step() {
+        use crate::streaming::dmabuf::DEVICE_TESTS;
+        let _only = DEVICE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let (mut importer, buffers) = match importer_and_buffers(1) {
+            Ok(m) => m,
+            Err(why) => {
+                eprintln!("skipping the converter test: {why}");
+                return;
+            }
+        };
+        importer.poison();
+        assert!(importer.stuck());
+        assert!(
+            importer.verify(&buffers[0]).is_err(),
+            "a stuck converter converts"
+        );
+        let node = importer.node().to_string();
+        let mut fresh = Importer::open_on(Some(&node), 1280, 720).expect("a new converter");
+        assert_eq!(fresh.node(), node, "another node");
+        assert!(!fresh.stuck());
+        fresh.verify(&buffers[0]).expect("a conversion");
     }
 
     /// Write `frame`'s rows into a linear buffer through a mapping.

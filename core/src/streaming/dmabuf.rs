@@ -261,6 +261,11 @@ impl Pool {
         None
     }
 
+    /// The pool's buffers, held or not.
+    pub fn buffers(&self) -> impl Iterator<Item = &Arc<DmaBuf>> {
+        self.slots.iter().map(|(b, _)| b)
+    }
+
     /// The modifier the pool's buffers were made with.
     pub fn modifier(&self) -> Option<u64> {
         self.slots.first().map(|(b, _)| b.modifier)
@@ -279,8 +284,9 @@ impl Pool {
 /// card's driver can take as a surface first, tiled ones before linear (the
 /// card renders and reads them quicker), the others dropped. `offered` is
 /// what the compositor takes for the format; `forced` is the measuring
-/// switch, which names the one to try. An empty `offered` (a compositor that
-/// names none) tries the driver's own choice.
+/// switch, which names the one to try. A modifier the compositor did not name
+/// is never tried (not even the driver's own choice, `MOD_INVALID`, unless it
+/// is named): an empty `offered` has nothing to try, and the capture copies.
 pub fn candidate_modifiers(offered: &[u64], forced: Option<u64>) -> Vec<u64> {
     let mut tiled = Vec::new();
     let mut linear = Vec::new();
@@ -299,9 +305,6 @@ pub fn candidate_modifiers(offered: &[u64], forced: Option<u64>) -> Vec<u64> {
     }
     let mut out = tiled;
     out.extend(linear);
-    if out.is_empty() {
-        out.push(MOD_INVALID);
-    }
     out
 }
 
@@ -313,16 +316,84 @@ pub fn needs_pixels(encoder_takes_dmabuf: bool, cropped: bool, width: u32, heigh
     !encoder_takes_dmabuf || cropped || (width | height) & 1 != 0
 }
 
-/// Whether two NV12 pictures (`card`: the video processor's output for the
-/// buffer, `copy`: its output for the compositor's copy through memory) are
-/// the same: nearly every byte alike. A few differ where a moving screen
-/// changed between the two copies.
-pub fn same_picture(card: &[u8], copy: &[u8]) -> bool {
-    if card.len() != copy.len() || card.is_empty() {
-        return false;
+/// What a comparison of the card's picture with the copy's came to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Agreement {
+    /// The same picture, and one with enough in it that a buffer read in the
+    /// wrong layout would not have matched.
+    Same,
+    /// Not the same picture.
+    Differ,
+    /// The same, but a picture with next to nothing in it (an empty desktop):
+    /// a buffer read in the wrong layout would look the same, so nothing is
+    /// known until a picture with detail comes.
+    Unclear,
+}
+
+/// How far two NV12 bytes may be apart and still be the same: both pictures
+/// went through the same video processor, so only a moving screen differs.
+const TOLERANCE: u8 = 3;
+
+/// A step in luma this big between neighbours is detail (an edge of text, a
+/// window's border), and not a gradient.
+const EDGE_STEP: u8 = 24;
+
+/// The picture has enough detail when one luma sample in this many is an
+/// edge.
+const DETAIL_ONE_IN: usize = 400;
+
+/// How many luma samples of `luma` (rows of `width`) sit on an edge: the next
+/// sample on the row or the one below is `EDGE_STEP` or more away.
+fn edges(luma: &[u8], width: usize) -> usize {
+    let mut n = 0;
+    for (i, &v) in luma.iter().enumerate() {
+        let right = (i + 1) % width != 0 && luma[i + 1].abs_diff(v) >= EDGE_STEP;
+        let below = luma
+            .get(i + width)
+            .is_some_and(|b| b.abs_diff(v) >= EDGE_STEP);
+        n += usize::from(right || below);
     }
-    let different = card.iter().zip(copy).filter(|(a, b)| a != b).count();
-    different * 200 <= card.len()
+    n
+}
+
+/// Whether two NV12 pictures of rows `width` wide (`card`: the video
+/// processor's output for the buffer, `copy`: its output for the
+/// compositor's copy through memory) are the same, to a tolerance of a few
+/// bytes' worth (a moving screen changes between the two copies).
+///
+/// A buffer read in the wrong layout comes out shuffled, and a shuffled
+/// picture looks the same only if there is nothing in it: so a match counts
+/// only for a picture with detail, and the mismatching bytes must be a tenth
+/// at most of the picture's edges. A picture with next to nothing in it that
+/// matches says [`Agreement::Unclear`], not yes.
+pub fn agreement(card: &[u8], copy: &[u8], width: usize) -> Agreement {
+    // NV12 is `width * height * 3 / 2` bytes.
+    if card.len() != copy.len() || width == 0 || card.is_empty() || !card.len().is_multiple_of(3) {
+        return Agreement::Differ;
+    }
+    let luma = card.len() / 3 * 2;
+    if !luma.is_multiple_of(width) {
+        return Agreement::Differ;
+    }
+    let mismatch = card
+        .iter()
+        .zip(copy)
+        .filter(|(a, b)| a.abs_diff(**b) > TOLERANCE)
+        .count();
+    let detail = edges(&copy[..luma], width);
+    if detail < luma / DETAIL_ONE_IN {
+        // Nothing to tell a shuffled picture from the right one.
+        return if mismatch * 200 <= card.len() {
+            Agreement::Unclear
+        } else {
+            Agreement::Differ
+        };
+    }
+    if mismatch * 10 <= detail {
+        Agreement::Same
+    } else {
+        Agreement::Differ
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -578,8 +649,10 @@ mod tests {
             candidate_modifiers(&[Y_TILED, MOD_LINEAR], Some(MOD_LINEAR)),
             vec![MOD_LINEAR]
         );
-        // A compositor that names none gets the driver's choice.
-        assert_eq!(candidate_modifiers(&[], None), vec![MOD_INVALID]);
+        // A compositor that names none gets nothing tried, and the driver's
+        // own choice only when it is named.
+        assert!(candidate_modifiers(&[], None).is_empty());
+        assert_eq!(candidate_modifiers(&[MOD_INVALID], None), vec![MOD_INVALID]);
     }
 
     #[test]
@@ -674,24 +747,85 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    /// An NV12 picture of `w`x`h` with plenty of edges, like text: luma
+    /// stripes that shift down the rows, flat chroma.
+    fn detailed(w: usize, h: usize) -> Vec<u8> {
+        let mut p = vec![128u8; w * h * 3 / 2];
+        for y in 0..h {
+            for x in 0..w {
+                p[y * w + x] = if (x / 3 + y / 5) % 2 == 0 { 40 } else { 210 };
+            }
+        }
+        p
+    }
+
     #[test]
-    fn a_picture_is_the_same_when_all_but_a_few_bytes_are_alike() {
-        let a: Vec<u8> = (0..6000u32).map(|i| (i * 7) as u8 | 1).collect();
-        assert!(same_picture(&a, &a));
-        // A few bytes (a cursor, a blink) are allowed to differ.
+    fn a_picture_with_detail_is_the_same_when_a_few_bytes_differ() {
+        let (w, h) = (64, 48);
+        let a = detailed(w, h);
+        assert_eq!(agreement(&a, &a, w), Agreement::Same);
+        // A cursor, a blink: a few bytes far off, one a little off.
         let mut c = a.clone();
         c[0] ^= 0xff;
         c[400] ^= 0xff;
-        assert!(same_picture(&a, &c));
+        c[900] = c[900].wrapping_add(2);
+        assert_eq!(agreement(&a, &c, w), Agreement::Same);
         // A picture that came out as zeros, or half wrong, is not.
         let zeros = vec![0u8; a.len()];
-        assert!(!same_picture(&zeros, &a));
+        assert_eq!(agreement(&zeros, &a, w), Agreement::Differ);
         let mut half = a.clone();
-        for b in half.iter_mut().take(3000) {
+        for b in half.iter_mut().take(a.len() / 2) {
             *b ^= 0xff;
         }
-        assert!(!same_picture(&half, &a));
-        assert!(!same_picture(&a[..16], &a));
-        assert!(!same_picture(&[], &[]));
+        assert_eq!(agreement(&half, &a, w), Agreement::Differ);
+        assert_eq!(agreement(&a[..16], &a, w), Agreement::Differ);
+        assert_eq!(agreement(&[], &[], w), Agreement::Differ);
+        assert_eq!(agreement(&a, &a, 0), Agreement::Differ);
+        // A width the size does not split by.
+        assert_eq!(agreement(&a, &a, 7), Agreement::Differ);
+    }
+
+    /// The failure the check is for: the card reads a tiled buffer in the
+    /// wrong layout, so the picture comes out shuffled, with the same bytes
+    /// in other places. A few differing bytes in a mostly flat picture used
+    /// to pass for a match.
+    #[test]
+    fn a_shuffled_picture_is_not_the_same() {
+        let (w, h) = (64, 48);
+        let a = detailed(w, h);
+        // Rows read in the wrong order, as tiles read in the wrong layout.
+        let mut shuffled = a.clone();
+        for y in 0..h {
+            let from = (y * 7 + 3) % h;
+            shuffled[y * w..(y + 1) * w].copy_from_slice(&a[from * w..(from + 1) * w]);
+        }
+        assert_eq!(agreement(&shuffled, &a, w), Agreement::Differ);
+        // A mostly flat picture with a small window: garbling the window is
+        // a handful of bytes out of many, not a tolerated blink.
+        let mut flat = vec![16u8; w * h * 3 / 2];
+        let mut garbled = flat.clone();
+        for y in 10..22 {
+            for x in 10..30 {
+                let on = (x + y) % 2 == 0;
+                flat[y * w + x] = if on { 20 } else { 235 };
+                garbled[y * w + x] = if on { 235 } else { 20 };
+            }
+        }
+        assert_eq!(agreement(&garbled, &flat, w), Agreement::Differ);
+    }
+
+    #[test]
+    fn an_empty_screen_says_nothing_until_a_picture_with_detail_comes() {
+        let (w, h) = (64, 48);
+        let flat = vec![16u8; w * h * 3 / 2];
+        // A uniform screen the same both ways cannot show the layout is right.
+        assert_eq!(agreement(&flat, &flat, w), Agreement::Unclear);
+        // A gradient has no edges either.
+        let gradient: Vec<u8> = (0..w * h * 3 / 2).map(|i| (i / 40) as u8).collect();
+        assert_eq!(agreement(&gradient, &gradient, w), Agreement::Unclear);
+        // But an empty screen the card made something else of is a failure.
+        let black = vec![0u8; flat.len()];
+        let white = vec![235u8; flat.len()];
+        assert_eq!(agreement(&black, &white, w), Agreement::Differ);
     }
 }

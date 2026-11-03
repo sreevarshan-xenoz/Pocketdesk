@@ -9,10 +9,11 @@
 //! and `POCKETDESK_VAAPI_DEVICE` both naming the same render node, its own
 //! `XDG_RUNTIME_DIR` under `/tmp`), never the owner's session: the test
 //! refuses to run unless `SWAYSOCK` and an `XDG_RUNTIME_DIR` under `/tmp` are
-//! set. Put a window on its screen first: a still one for the picture tests
-//! (a terminal with text), a moving one for the cost test (the example
-//! `pd_source`, a full-screen window that draws the test pattern at the
-//! display's rate: `PD_SOURCE_SECS` is how long it runs).
+//! set. Put a window on its screen first, the example `pd_source`, a
+//! full-screen window that draws the test pattern with a page of text under it
+//! (`POCKETDESK_TEST_PATTERN_TEXT=1`): a still one for the picture tests
+//! (`PD_SOURCE_STILL=1`), a moving one for the cost test (at the display's
+//! rate; `PD_SOURCE_SECS` is how long it runs).
 //!
 //! `cargo test -p pocketdesk-core --release --test zero_copy_live -- --ignored
 //! --nocapture --test-threads=1`. `PD_LIVE_SECS` (15) is how long the cost
@@ -104,6 +105,21 @@ impl Capture {
         }
         None
     }
+
+    /// The first frame on the card within `within`: while a modifier is
+    /// checked the frames are copies through memory, and the card's come
+    /// after.
+    fn next_on_card(&mut self, within: Duration) -> Option<VideoFrame> {
+        let until = Instant::now() + within;
+        while Instant::now() < until {
+            if let Some(frame) = self.next(Duration::from_millis(500))
+                && frame.gpu.is_some()
+            {
+                return Some(frame);
+            }
+        }
+        None
+    }
 }
 
 impl Drop for Capture {
@@ -151,11 +167,9 @@ fn the_card_picture_encodes_as_the_copys_picture() {
     dmabuf::set_copy(false);
     let card = {
         let mut capture = Capture::start();
-        let frame = capture.next(Duration::from_secs(10)).expect("a frame");
-        assert!(
-            frame.gpu.is_some(),
-            "no frame on the card: the capture copied (see the log: PD_LIVE_LOG=1)"
-        );
+        let frame = capture
+            .next_on_card(Duration::from_secs(15))
+            .expect("no frame on the card: the capture copied (see the log: PD_LIVE_LOG=1)");
         first_packet(&frame)
     };
     let alike = copy.iter().zip(&card).filter(|(a, b)| a == b).count();
@@ -318,8 +332,9 @@ fn a_still_screen_repeats_its_last_frame_on_the_card() {
     guard();
     dmabuf::set_copy(false);
     let mut capture = Capture::start();
-    let first = capture.next(Duration::from_secs(10)).expect("a frame");
-    assert!(first.gpu.is_some(), "the capture copied (PD_LIVE_LOG=1)");
+    let first = capture
+        .next_on_card(Duration::from_secs(15))
+        .expect("a frame on the card: the capture copied (PD_LIVE_LOG=1)");
     assert!(!first.repeat);
     let started = Instant::now();
     let (mut frames, mut repeats, mut on_card) = (0u32, 0u32, 0u32);
@@ -348,8 +363,9 @@ fn the_switch_turns_the_capture_back_to_copies() {
     guard();
     dmabuf::set_copy(false);
     let mut capture = Capture::start();
-    let first = capture.next(Duration::from_secs(10)).expect("a frame");
-    assert!(first.gpu.is_some(), "the capture copied (PD_LIVE_LOG=1)");
+    capture
+        .next_on_card(Duration::from_secs(15))
+        .expect("a frame on the card: the capture copied (PD_LIVE_LOG=1)");
     let switch = capture
         ._session
         .zero_copy_switch()
@@ -371,4 +387,87 @@ fn the_switch_turns_the_capture_back_to_copies() {
             assert!(frame.gpu.is_none(), "a frame on the card after the switch");
         }
     }
+}
+
+/// The check of a new kind of buffer copies the picture through memory, and
+/// that copy is a frame: the stream (and the handshake's first frame, which
+/// the portal fallback is timed from) goes on while the modifiers are tried,
+/// whatever they take, and nothing is left open when the capture ends.
+#[test]
+#[ignore = "needs a headless sway of its own with a window and a VA-API render node"]
+fn the_stream_goes_on_while_a_modifier_is_checked() {
+    guard();
+    dmabuf::set_copy(false);
+    let fds_before = dmabuf::open_fds();
+    {
+        let started = Instant::now();
+        let mut capture = Capture::start();
+        let started_in = started.elapsed();
+        println!("the capture started in {started_in:.2?}");
+        assert!(
+            started_in < Duration::from_secs(4),
+            "the handshake took {started_in:?}: close to its timeout"
+        );
+        // The first frames come at the frame rate, checks or not.
+        let first = capture.next(Duration::from_secs(1)).expect("a first frame");
+        println!(
+            "first frame: {}",
+            if first.gpu.is_some() {
+                "on the card"
+            } else {
+                "a copy through memory"
+            }
+        );
+        let (mut copies, mut on_card) = (
+            u32::from(first.gpu.is_none()),
+            u32::from(first.gpu.is_some()),
+        );
+        let until = Instant::now() + Duration::from_secs(6);
+        let mut gap_max = Duration::ZERO;
+        let mut last = Instant::now();
+        while Instant::now() < until {
+            if let Some(frame) = capture.next(Duration::from_millis(200)) {
+                gap_max = gap_max.max(last.elapsed());
+                last = Instant::now();
+                copies += u32::from(frame.gpu.is_none());
+                on_card += u32::from(frame.gpu.is_some());
+            }
+        }
+        println!("{copies} copies, {on_card} on the card, longest gap {gap_max:.2?}");
+        assert!(
+            gap_max < Duration::from_millis(1500),
+            "the stream stopped for {gap_max:?}"
+        );
+    }
+    std::thread::sleep(Duration::from_millis(500));
+    let fds_after = dmabuf::open_fds();
+    println!("descriptors open: {fds_before} before, {fds_after} after");
+    assert!(
+        fds_after <= fds_before + 2,
+        "descriptors left open: {fds_before} then {fds_after}"
+    );
+}
+
+/// A screen with nothing on it shows nothing of how the card reads a buffer,
+/// so no tiled modifier is trusted on it: the stream goes on as copies, then
+/// linear is trusted after the wait and the frames come from the card.
+/// Run it with no window on the screen (stop `pd_source`).
+#[test]
+#[ignore = "needs a headless sway of its own with an empty screen and a VA-API render node"]
+fn an_empty_screen_is_waited_out_and_ends_on_the_card_as_linear() {
+    guard();
+    dmabuf::set_copy(false);
+    let mut capture = Capture::start();
+    let first = capture.next(Duration::from_secs(1)).expect("a first frame");
+    assert!(first.gpu.is_none(), "the first frame is a copy");
+    let started = Instant::now();
+    let frame = capture
+        .next_on_card(Duration::from_secs(20))
+        .expect("no frame on the card after the wait (PD_LIVE_LOG=1)");
+    println!("on the card after {:.1?}", started.elapsed());
+    assert_eq!(
+        frame.gpu.as_ref().map(|g| g.dmabuf().modifier),
+        Some(dmabuf::MOD_LINEAR),
+        "a tiled buffer was trusted on an empty screen"
+    );
 }

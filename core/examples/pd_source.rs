@@ -3,9 +3,11 @@
 //! (`core/tests/zero_copy_live.rs`) in a headless sway of its own, where
 //! nothing else moves at the display's rate.
 //!
-//! `PD_SOURCE_SECS` (the default 60) is how long it runs, and
+//! `PD_SOURCE_SECS` (the default 60) is how long it runs,
 //! `POCKETDESK_TEST_PATTERN_TEXT=1` puts a page of text under the pattern, as
-//! the latency probe does. It draws through shared memory and needs no GPU.
+//! the latency probe does, and `PD_SOURCE_STILL=1` draws three pictures and
+//! then stops committing: a still screen with detail on it, for the picture
+//! tests. It draws through shared memory and needs no GPU.
 //! Run it only in a compositor of your own.
 
 #[cfg(all(target_os = "linux", feature = "capture"))]
@@ -39,10 +41,16 @@ mod linux {
         started: bool,
         frame: u64,
         done: bool,
+        /// Stop committing after three pictures.
+        still: bool,
     }
 
     impl App {
         fn draw(&mut self, qh: &QueueHandle<App>) {
+            if self.still && self.frame >= 3 {
+                self.frame_due = false;
+                return;
+            }
             let Some(at) = self.free.iter().position(|f| *f) else {
                 return;
             };
@@ -236,6 +244,7 @@ mod linux {
             started: false,
             frame: 0,
             done: false,
+            still: std::env::var_os("PD_SOURCE_STILL").is_some_and(|v| v != "0"),
         };
         while !app.configured {
             queue.blocking_dispatch(&mut app).expect("dispatch");
