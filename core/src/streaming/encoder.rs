@@ -44,6 +44,14 @@ use super::{EncodedPacket, EncoderPreset, H264Profile, StreamingConfig, VideoCod
 /// supervisor then sees) instead of growing memory without limit.
 const STDOUT_CHUNKS_IN_FLIGHT: usize = 256;
 
+/// Frames an encoder holds: the ones written whose packets are not out
+/// (`submitted`), or the lag learned for an encoder that keeps frames until
+/// more input arrives, whichever is more. The lag is learned one frame at a
+/// time, so the first picture of a session counts as held at once.
+fn held_frames(submitted: usize, lag: usize) -> usize {
+    submitted.max(lag)
+}
+
 /// Read the child's stdout on a dedicated thread and forward each chunk.
 ///
 /// The encode loop must never block on the pipe. On Linux that used to be
@@ -325,6 +333,35 @@ impl VideoEncoder {
             Self::InProcess(e) => e.request_keyframe(),
             #[cfg(all(target_os = "linux", feature = "inproc"))]
             Self::VaapiInProcess(e) => e.request_keyframe(),
+        }
+    }
+
+    /// Frames the encoder holds until more input arrives: written to it,
+    /// their packets not out yet. Only the FFmpeg sidecar holds any (AMF one,
+    /// Media Foundation more, learned as frames go in); the in-process
+    /// encoders give each frame's packet back at once.
+    pub fn held_frames(&self) -> usize {
+        match self {
+            Self::Sidecar(e) => e.held_frames(),
+            #[cfg(any(
+                all(target_os = "linux", feature = "inproc"),
+                all(windows, feature = "inproc-windows")
+            ))]
+            Self::InProcess(_) => 0,
+            #[cfg(all(target_os = "linux", feature = "inproc"))]
+            Self::VaapiInProcess(_) => 0,
+        }
+    }
+
+    /// Whether this encoder takes a frame still on the card (a DMA-BUF from
+    /// the Linux capture) as it is, with no read back: the in-process VA-API
+    /// encoder with its conversion on the card. Every other encoder needs
+    /// the pixels in memory, so a capture is turned back to copies for it.
+    pub fn takes_dmabuf(&self) -> bool {
+        match self {
+            #[cfg(all(target_os = "linux", feature = "inproc"))]
+            Self::VaapiInProcess(e) => e.takes_dmabuf(),
+            _ => false,
         }
     }
 
@@ -846,6 +883,13 @@ impl SidecarEncoder {
         );
     }
 
+    /// Frames written to the child whose packets are not out yet, or the
+    /// lag learned for an encoder that keeps frames until more input comes,
+    /// whichever is more.
+    pub fn held_frames(&self) -> usize {
+        held_frames(self.submitted.len(), self.encoder_lag)
+    }
+
     /// Get the current sequence number.
     pub fn sequence(&self) -> u64 {
         self.sequence
@@ -1279,6 +1323,10 @@ fn build_ffmpeg_args(
                 vaapi_device_node(),
                 "-c:v".to_string(),
                 codec_name.to_string(),
+                // One frame in flight: the default of two holds a frame
+                // until the next one is written.
+                "-async_depth".to_string(),
+                "1".to_string(),
                 "-b:v".to_string(),
                 config.bitrate_bps.to_string(),
                 "-maxrate".to_string(),
@@ -1528,6 +1576,17 @@ fn build_ffmpeg_args(
 
 #[cfg(test)]
 mod tests {
+    /// The gate behind `idle_repeats` reads this to keep repeats flowing
+    /// until an encoder that keeps frames has put the changed one out.
+    #[test]
+    fn an_encoder_holds_what_it_was_given_and_has_not_given_back() {
+        assert_eq!(held_frames(0, 0), 0, "NVENC: each frame at once");
+        assert_eq!(held_frames(1, 0), 1, "the first frame, lag not learned yet");
+        assert_eq!(held_frames(1, 1), 1, "AMF holds one");
+        assert_eq!(held_frames(0, 3), 3, "Media Foundation's learned lag");
+        assert_eq!(held_frames(5, 3), 5, "a slow frame in flight");
+    }
+
     #[test]
     fn the_fail_seam_names_hardware_rungs_only() {
         use HardwareEncoder::*;
@@ -1754,6 +1813,7 @@ mod tests {
 
         assert!(args.contains(&"hevc_vaapi".to_string()));
         assert!(args.iter().any(|a| a.contains("hwupload")));
+        assert_eq!(arg_after(&args, "-async_depth"), "1");
         let g = args.iter().position(|a| a == "-g").unwrap();
         assert_eq!(args[g + 1], "60");
         let bf = args.iter().position(|a| a == "-bf").unwrap();
@@ -1993,6 +2053,7 @@ mod tests {
             stride,
             timestamp: Instant::now(),
             gpu: None,
+            repeat: false,
         };
 
         // Encode several frames — first few may be empty due to encoder latency
@@ -2142,6 +2203,7 @@ mod tests {
             stride,
             timestamp: Instant::now(),
             gpu: None,
+            repeat: false,
         };
 
         for _ in 0..10 {
@@ -2181,6 +2243,7 @@ mod tests {
             stride,
             timestamp: Instant::now(),
             gpu: None,
+            repeat: false,
         };
 
         // Encode enough frames to trigger the keyframe interval (2 seconds = 60 frames)
@@ -2227,6 +2290,7 @@ mod tests {
             stride,
             timestamp: Instant::now(),
             gpu: None,
+            repeat: false,
         };
 
         // Encode a few frames then request a keyframe
@@ -2280,6 +2344,7 @@ mod tests {
             stride,
             timestamp: Instant::now(),
             gpu: None,
+            repeat: false,
         };
         let _ = encoder.encode_frame(&frame);
 
@@ -2436,6 +2501,7 @@ mod tests {
                 stride,
                 timestamp: Instant::now(),
                 gpu: None,
+                repeat: false,
             };
             packets.extend(sidecar.encode_frame(&frame).expect("encode"));
         }
@@ -2545,6 +2611,7 @@ mod tests {
             stride,
             timestamp: Instant::now(),
             gpu: None,
+            repeat: false,
         };
 
         for _ in 0..60 {

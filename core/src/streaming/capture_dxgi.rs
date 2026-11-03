@@ -212,7 +212,7 @@ fn run_capture_loop(
                     && last_sent.is_some_and(|t| t.elapsed() >= IDLE_HEARTBEAT) =>
             {
                 match duplication.copier.copy_again() {
-                    Some(frame) => frame?,
+                    Some(frame) => frame?.as_repeat(),
                     None => continue,
                 }
             }

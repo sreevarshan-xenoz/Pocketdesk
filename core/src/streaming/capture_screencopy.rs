@@ -50,6 +50,69 @@ use wayland_protocols_wlr::screencopy::v1::client::zwlr_screencopy_manager_v1::Z
 use super::capture::CaptureSession;
 use super::{StreamingConfig, VideoFrame};
 
+// The DMA-BUF side (see the module's own docs). Without the in-process
+// encoders (the portable tarball) nothing could take a buffer, so the
+// capture always copies, and this is a type that is never made.
+#[cfg(feature = "inproc")]
+mod zero_copy;
+#[cfg(feature = "inproc")]
+use zero_copy::{Take, ZeroCopy};
+#[cfg(not(feature = "inproc"))]
+enum ZeroCopy {}
+#[cfg(not(feature = "inproc"))]
+#[allow(dead_code)]
+enum Take {
+    Frame(super::GpuFrame, WlBuffer),
+    Busy,
+    Copy,
+}
+#[cfg(not(feature = "inproc"))]
+#[allow(dead_code)]
+impl ZeroCopy {
+    fn new(
+        _globals: &GlobalList,
+        _qh: &QueueHandle<WlState>,
+        _queue: &mut EventQueue<WlState>,
+        _state: &mut WlState,
+        _switch: Arc<AtomicBool>,
+    ) -> Option<Self> {
+        None
+    }
+    fn active(&self) -> bool {
+        match *self {}
+    }
+    fn take(
+        &mut self,
+        _offers: &[(u32, u32, u32)],
+        _qh: &QueueHandle<WlState>,
+        _queue: &mut EventQueue<WlState>,
+        _state: &mut WlState,
+    ) -> Take {
+        match *self {}
+    }
+    fn needs_check(&self) -> bool {
+        match *self {}
+    }
+    fn checked(&mut self, _agreement: super::dmabuf::Agreement) -> Duration {
+        match *self {}
+    }
+    fn worked(&mut self) {
+        match *self {}
+    }
+    fn refused(&mut self) -> bool {
+        match *self {}
+    }
+    fn fail(&mut self, _why: &str) {
+        match *self {}
+    }
+    fn read_back(&mut self, _frame: &super::GpuFrame) -> Option<Vec<u8>> {
+        match *self {}
+    }
+    fn read_back_copy(&mut self, _bgra: &[u8], _width: u32) -> Option<Vec<u8>> {
+        match *self {}
+    }
+}
+
 /// Generated client bindings for `hyprland_toplevel_export_v1` (R4 B2:
 /// per-window capture). The XML is a vendored, trimmed copy (BSD-3-Clause,
 /// upstream hyprwm/hyprland-protocols) under `core/protocols/`; trimming the
@@ -87,6 +150,11 @@ const POLL_TICK: Duration = Duration::from_millis(100);
 /// Time the caller waits for the first successful frame before falling back
 /// to the portal path (the capture thread aborts via the cancel token).
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long the first frame may wait for the DMA-BUF side to set itself up
+/// (the card's converter, the buffers, the compositor's import, the first
+/// checks) before the capture copies through memory for good: well inside
+/// `HANDSHAKE_TIMEOUT`, so a slow setup never ends the session in the portal.
+const FIRST_FRAME_SETUP: Duration = Duration::from_millis(2500);
 /// Time a toplevel capture may stay silent before it is considered dead.
 /// Hyprland answers a request for a gone/invalid window handle by logging and
 /// returning *without ever creating the frame object*, so there is no
@@ -115,6 +183,11 @@ struct FramePhase {
     damaged: bool,
     done: bool,
     failed: bool,
+    /// The DMA-BUFs the compositor offers: (format, width, height), one per
+    /// `linux_dmabuf` event.
+    dmabufs: Vec<(u32, u32, u32)>,
+    /// The compositor has said every buffer it takes (`buffer_done`).
+    buffer_done: bool,
 }
 
 type FrameSlot = Arc<Mutex<FramePhase>>;
@@ -193,15 +266,15 @@ impl Dispatch<ZwlrScreencopyFrameV1, FrameSlot> for WlState {
             Event::Damage { .. } => phase.damaged = true,
             Event::Ready { .. } => phase.done = true,
             Event::Failed => phase.failed = true,
-            // DMA-BUF-only frames are not supported by this backend; shm
-            // support is announced by `buffer`, so absence + dmabuf means
-            // "fail over to the portal path".
-            Event::LinuxDmabuf { .. } => {
-                if phase.buffer.is_none() {
-                    phase.failed = true;
-                }
-            }
-            Event::BufferDone => {}
+            // The buffers the compositor will fill besides shm: DMA-BUFs. A
+            // capture that cannot take one copies through shm (`buffer`);
+            // `buffer_done` ends the list.
+            Event::LinuxDmabuf {
+                format,
+                width,
+                height,
+            } => phase.dmabufs.push((format, width, height)),
+            Event::BufferDone => phase.buffer_done = true,
             _ => {}
         }
     }
@@ -308,12 +381,18 @@ impl Dispatch<HyprlandToplevelExportFrameV1, FrameSlot> for WlState {
 /// stream (R4 B2, 0 = whole output); `window_mode` is set while the thread
 /// really is emitting compositor-cropped per-window frames, which tells the
 /// encode task to skip its own software crop.
+///
+/// With a `cursor` feed (the viewer draws the pointer itself) and a
+/// compositor that has the pointer capture ([`super::capture_cursor_wl`]),
+/// the picture is asked for without the pointer and the feed told so;
+/// otherwise the pointer is drawn into the picture, as it always was.
 pub fn start_screencopy_capture(
     config: StreamingConfig,
     frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
     window_rx: watch::Receiver<u64>,
     window_mode: Arc<AtomicBool>,
+    cursor: Option<super::cursor_feed::CursorFeed>,
 ) -> Result<CaptureSession> {
     if std::env::var("POCKETDESK_SCREENCOPY")
         .map(|v| v == "0")
@@ -321,10 +400,35 @@ pub fn start_screencopy_capture(
     {
         bail!("screencopy backend disabled via POCKETDESK_SCREENCOPY=0");
     }
+    // The pointer's capture, when there is one: the feed then says the
+    // picture has no pointer in it for as long as that capture runs, and
+    // each picture is asked for with or without the pointer as the feed
+    // says ([`CursorFeed::want_out`](super::cursor_feed::CursorFeed::want_out)). Without one the pointer is drawn into the
+    // picture, as it always was.
+    let pointer = cursor.and_then(|feed| {
+        match super::capture_cursor_wl::start(feed.clone(), config.monitor_index, cancel.clone()) {
+            Ok(()) => Some(feed),
+            Err(e) => {
+                info!("The pointer stays in the picture: {e:#}");
+                None
+            }
+        }
+    });
 
+    // Whether pictures may come as DMA-BUFs (the streamer turns this off when
+    // its encoder, or a crop, needs them in memory). Only the in-process
+    // VA-API encoder takes one, so a session pinned to any other starts with
+    // copies.
+    let zero_copy = Arc::new(AtomicBool::new(
+        matches!(
+            config.hardware_encoder,
+            super::HardwareEncoder::Auto | super::HardwareEncoder::Vaapi
+        ) && !super::dmabuf::copy_forced(),
+    ));
     let (ready_tx, ready_rx) = mpsc::channel::<Result<()>>();
     let thread_config = config.clone();
     let thread_cancel = cancel.clone();
+    let thread_zero_copy = zero_copy.clone();
     std::thread::Builder::new()
         .name("screencopy-capture".into())
         .spawn(move || {
@@ -335,6 +439,8 @@ pub fn start_screencopy_capture(
                 ready_tx.clone(),
                 window_rx,
                 window_mode,
+                pointer,
+                thread_zero_copy,
             ) {
                 let _ = ready_tx.send(Err(e));
             }
@@ -342,7 +448,7 @@ pub fn start_screencopy_capture(
         .context("Failed to spawn screencopy capture thread")?;
 
     match ready_rx.recv_timeout(HANDSHAKE_TIMEOUT) {
-        Ok(Ok(())) => Ok(CaptureSession::new(config, cancel.clone())),
+        Ok(Ok(())) => Ok(CaptureSession::new(config, cancel.clone()).with_zero_copy(zero_copy)),
         Ok(Err(e)) => {
             cancel.cancel();
             Err(e)
@@ -364,12 +470,15 @@ enum Capture {
 }
 
 impl Capture {
-    fn copy(&self, buffer: &WlBuffer) {
+    /// Ask for the picture in `buffer`. `at_once` ignores damage: it comes
+    /// whether or not the screen changed.
+    fn copy(&self, buffer: &WlBuffer, at_once: bool) {
         match self {
             // `copy_with_damage` is zwlr's `copy(buffer, ignore_damage = 0)`:
             // the `damage` events that drive idle back-off depend on it.
+            Capture::Output(f) if at_once => f.copy(buffer),
             Capture::Output(f) => f.copy_with_damage(buffer),
-            Capture::Window(f) => f.copy(buffer, 0),
+            Capture::Window(f) => f.copy(buffer, i32::from(at_once)),
         }
     }
 
@@ -385,6 +494,7 @@ impl Capture {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_capture_loop(
     config: StreamingConfig,
     frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
@@ -392,7 +502,21 @@ fn run_capture_loop(
     ready_tx: Sender<Result<()>>,
     mut window_rx: watch::Receiver<u64>,
     window_mode: Arc<AtomicBool>,
+    pointer: Option<super::cursor_feed::CursorFeed>,
+    zero_copy: Arc<AtomicBool>,
 ) -> Result<()> {
+    // `overlay_cursor` of a request: 1 draws the pointer into the picture,
+    // 0 leaves it out. Out only for the whole output's picture while the
+    // pointer capture runs: a window's picture (Hyprland's toplevel export)
+    // keeps the pointer, as the capture reports its places over the whole
+    // output, which a window's picture does not show; and the moment the
+    // pointer capture ends, the pointer is drawn into the next picture.
+    let overlay_for = |window: bool| -> i32 {
+        match &pointer {
+            Some(feed) if feed.want_out(!window) => 0,
+            _ => 1,
+        }
+    };
     let conn = Connection::connect_to_env().context("no Wayland display")?;
     let (globals, mut queue) =
         registry_queue_init::<WlState>(&conn).context("wayland registry init failed")?;
@@ -448,6 +572,18 @@ fn run_capture_loop(
     // When a frame last went to the encoder: a still screen still sends one
     // each STATIC_HEARTBEAT, whichever way the compositor reports it.
     let mut last_sent = Instant::now();
+    // What a heartbeat is compared with: it is a repeat only when its pixels
+    // are the last frame's, or a change the compositor did not report goes
+    // out marked as one (Hyprland reports no damage at once).
+    let mut still = super::idle_repeats::StillPixels::default();
+    // The DMA-BUF side, where the compositor and the card allow it, and the
+    // last frame sent that way, for the heartbeat to send again.
+    let mut zc = ZeroCopy::new(&globals, &qh, &mut queue, &mut state, zero_copy);
+    let mut last_gpu: Option<super::GpuFrame> = None;
+    // The next copy ignores damage: a still screen would otherwise wait for
+    // the change a compositor that tracks damage (wlroots) answers with.
+    let mut copy_at_once = false;
+    let loop_started = Instant::now();
 
     loop {
         if cancel.is_cancelled() {
@@ -455,6 +591,15 @@ fn run_capture_loop(
             break;
         }
         let cycle_start = Instant::now();
+        // The streamer turned the DMA-BUFs off (its encoder or a crop needs
+        // the pixels), or a failure did: the next frame is a copy, sent at
+        // once.
+        if last_gpu.is_some() && zc.as_ref().is_none_or(|z| !z.active()) {
+            last_gpu = None;
+            still.changed();
+            force_emit = true;
+            copy_at_once = true;
+        }
 
         let addr = *window_rx.borrow_and_update();
         let wanted = match (addr, suspended, export.as_ref()) {
@@ -469,8 +614,7 @@ fn run_capture_loop(
         let capture = match wanted {
             Some((addr, mgr)) => {
                 let handle = addr as u32;
-                // overlay_cursor = 1: desktop parity with the output path.
-                let frame = mgr.capture_toplevel(1, handle, &qh, slot.clone());
+                let frame = mgr.capture_toplevel(overlay_for(true), handle, &qh, slot.clone());
                 let staged = pump_until_timeout(
                     &conn,
                     &mut queue,
@@ -498,50 +642,181 @@ fn run_capture_loop(
                     suspended = Some(addr);
                     window_mode.store(false, AtomicOrdering::Relaxed);
                     slot = Arc::new(Mutex::new(FramePhase::default()));
-                    Capture::Output(manager.capture_output(1, &output, &qh, slot.clone()))
+                    Capture::Output(manager.capture_output(
+                        overlay_for(false),
+                        &output,
+                        &qh,
+                        slot.clone(),
+                    ))
                 }
             }
             None => {
                 window_mode.store(false, AtomicOrdering::Relaxed);
-                Capture::Output(manager.capture_output(1, &output, &qh, slot.clone()))
+                Capture::Output(manager.capture_output(
+                    overlay_for(false),
+                    &output,
+                    &qh,
+                    slot.clone(),
+                ))
             }
         };
 
-        // Stage 1: the compositor announces the shm layout (or fails). For a
-        // window capture this is already satisfied — the deadline above only
-        // admits a staged frame.
+        // Stage 1: the compositor announces the buffers it will fill (shm,
+        // and DMA-BUFs where it can) or fails. For a window capture this is
+        // already satisfied: the deadline above only admits a staged frame,
+        // and a window's picture is always copied through shm.
+        let window = capture.is_window();
+        if window {
+            // A window's picture is a copy: what was last sent from the card
+            // is another source's, and is not repeated for it.
+            last_gpu = None;
+        }
         pump_until(&conn, &mut queue, &mut state, &cancel, || {
             let p = slot.lock().unwrap();
-            p.buffer.is_some() || p.done || p.failed
+            p.buffer_done || p.done || p.failed || (window && p.buffer.is_some())
         })?;
-        let meta = {
+        let (shm_meta, dmabufs, announce_failed) = {
             let p = slot.lock().unwrap();
-            if p.failed || p.buffer.is_none() {
-                capture.destroy();
-                bail!("compositor rejected the shm capture (unsupported buffer format?)");
-            }
-            p.buffer.unwrap()
+            (p.buffer, p.dmabufs.clone(), p.failed)
         };
-        let (w, h, stride, format) = meta;
-        if !matches!(format, wl_shm::Format::Argb8888 | wl_shm::Format::Xrgb8888) {
+        if announce_failed {
             capture.destroy();
-            bail!("unsupported screencopy shm format {format:?}");
+            bail!("compositor rejected the capture (unsupported buffer format?)");
         }
 
-        // (Re)allocate the backing pixels only when geometry drifts; the
-        // pool/buffer objects must be fresh per frame (the compositor
-        // destroys the buffer once the copy completes).
-        let reusable = shm_buf
-            .as_ref()
-            .is_some_and(|f| f.matches(w, h, stride, format));
-        if !reusable {
-            shm_buf = Some(ShmBuffer::new(w, h, stride, format)?);
-            // New pixels: nothing in them to repeat yet.
-            last_inverted = None;
+        // A DMA-BUF for this copy, when the compositor offers one the card
+        // takes (never for a window: its picture is copied through shm).
+        let mut gpu: Option<(super::GpuFrame, WlBuffer)> = None;
+        if !window && let Some(z) = zc.as_mut() {
+            // A first frame that waits too long for the setup is not worth
+            // the handshake: copy through memory, for good.
+            if !ready_sent && loop_started.elapsed() > FIRST_FRAME_SETUP {
+                z.fail("the first frame waited too long for the setup");
+            }
+            match z.take(&dmabufs, &qh, &mut queue, &mut state) {
+                Take::Frame(frame, wl_buffer) if z.needs_check() => {
+                    // A new kind of buffer: the same picture is copied both
+                    // ways at once, and trusted only if the card reads it as
+                    // the compositor wrote it. This cycle's own request is
+                    // let go. The copy through memory the check made is the
+                    // cycle's frame (so the stream, and the first frame the
+                    // handshake waits for, go on while a modifier is checked);
+                    // the next cycle carries a frame on the card once the
+                    // modifier is trusted.
+                    capture.destroy();
+                    let copy = copy_through_both(
+                        &conn,
+                        &mut queue,
+                        &mut state,
+                        &qh,
+                        &cancel,
+                        &manager,
+                        &output,
+                        overlay_for(false),
+                        &shm,
+                        &wl_buffer,
+                    );
+                    let (agreement, shown) = match copy {
+                        Ok(Some((cw, ch, bgra)))
+                            if (cw, ch) == (frame.dmabuf().width, frame.dmabuf().height) =>
+                        {
+                            let card = z.read_back(&frame);
+                            let copy = z.read_back_copy(&bgra, cw);
+                            let agreement = match (card, copy) {
+                                (Some(a), Some(b)) => super::dmabuf::agreement(&a, &b, cw as usize),
+                                _ => super::dmabuf::Agreement::Differ,
+                            };
+                            (agreement, Some((cw, ch, bgra)))
+                        }
+                        Ok(_) => (super::dmabuf::Agreement::Differ, None),
+                        Err(e) => {
+                            debug!("zero-copy check: {e:#}");
+                            (super::dmabuf::Agreement::Differ, None)
+                        }
+                    };
+                    let gap = z.checked(agreement);
+                    if let Some((cw, ch, bgra)) = shown {
+                        last_gpu = None;
+                        last_inverted = None;
+                        still.changed();
+                        if !ready_sent {
+                            let _ = ready_tx.send(Ok(()));
+                            ready_sent = true;
+                        }
+                        if !send_frame(&frame_tx, bgra, cw, ch, false) {
+                            debug!("Frame channel closed, stopping screencopy capture");
+                            break;
+                        }
+                        last_sent = Instant::now();
+                        idle = false;
+                    }
+                    force_emit = true;
+                    // At the frame rate, and no quicker (an empty screen's
+                    // check waits for a picture with detail).
+                    let period = Duration::from_micros(1_000_000 / config.fps.max(1) as u64);
+                    let wait = gap.max(period.saturating_sub(cycle_start.elapsed()));
+                    if !wait.is_zero() {
+                        std::thread::sleep(wait);
+                    }
+                    continue;
+                }
+                Take::Frame(frame, wl_buffer) => gpu = Some((frame, wl_buffer)),
+                Take::Busy => {
+                    // Every buffer is with a frame still on its way: this
+                    // copy is skipped, as one the encoder is too slow for.
+                    capture.destroy();
+                    queue.flush()?;
+                    std::thread::sleep(Duration::from_millis(2));
+                    continue;
+                }
+                Take::Copy => {}
+            }
         }
-        let fb = shm_buf.as_ref().unwrap();
-        let (pool, buffer) = fb.attach(&shm, &qh);
-        capture.copy(&buffer);
+        // The shm side of the copy, when no DMA-BUF is used. A compositor
+        // that offers only DMA-BUFs, with none usable, ends the capture here.
+        let mut shm_parts: Option<(WlShmPool, WlBuffer)> = None;
+        let (w, h, stride) = match &gpu {
+            Some((frame, _)) => {
+                let buf = frame.dmabuf();
+                (buf.width, buf.height, buf.width * 4)
+            }
+            None => {
+                let Some((w, h, stride, format)) = shm_meta else {
+                    capture.destroy();
+                    bail!("compositor rejected the shm capture (unsupported buffer format?)");
+                };
+                if !matches!(
+                    format,
+                    wl_shm::Format::Argb8888
+                        | wl_shm::Format::Xrgb8888
+                        | wl_shm::Format::Abgr8888
+                        | wl_shm::Format::Xbgr8888
+                ) {
+                    capture.destroy();
+                    bail!("unsupported screencopy shm format {format:?}");
+                }
+                // (Re)allocate the backing pixels only when geometry drifts;
+                // the pool/buffer objects must be fresh per frame (the
+                // compositor destroys the buffer once the copy completes).
+                let reusable = shm_buf
+                    .as_ref()
+                    .is_some_and(|f| f.matches(w, h, stride, format));
+                if !reusable {
+                    shm_buf = Some(ShmBuffer::new(w, h, stride, format)?);
+                    // New pixels: nothing in them to repeat yet.
+                    last_inverted = None;
+                    still.changed();
+                }
+                shm_parts = Some(shm_buf.as_ref().unwrap().attach(&shm, &qh));
+                (w, h, stride)
+            }
+        };
+        let buffer: &WlBuffer = match (&gpu, &shm_parts) {
+            (Some((_, b)), _) => b,
+            (None, Some((_, b))) => b,
+            (None, None) => unreachable!("a copy has a buffer"),
+        };
+        capture.copy(buffer, std::mem::take(&mut copy_at_once));
 
         // Stage 2: wait for ready/failed, but not for ever: a compositor that
         // waits for damage (wlroots) answers a still screen with silence.
@@ -557,14 +832,33 @@ fn run_capture_loop(
             },
         )?;
         if !finished {
-            buffer.destroy();
-            pool.destroy();
+            // The DMA-BUF side's `wl_buffer`s are the capture's own, kept for
+            // the next copy; the shm ones are made for each.
+            if let Some((pool, shm_buffer)) = &shm_parts {
+                shm_buffer.destroy();
+                pool.destroy();
+            }
             capture.destroy();
             // Once the compositor has handled the destroy it no longer
             // writes into the buffer, so the last frame in it can be read.
             queue.roundtrip(&mut state)?;
-            if let Some(inverted) = last_inverted {
-                if !send_frame(&frame_tx, fb.repack(inverted, w, h, stride), w, h) {
+            if let Some(last) = &last_gpu {
+                // The frame the buffers last carried is still held: it goes
+                // again, as the pixels in the shm buffer do below.
+                let repeat = still.buffer_repeat();
+                if !send_gpu_frame(&frame_tx, last.clone(), repeat) {
+                    debug!("Frame channel closed, stopping screencopy capture");
+                    break;
+                }
+                last_sent = Instant::now();
+            } else if let Some(inverted) = last_inverted
+                && let Some(fb) = shm_buf.as_ref()
+            {
+                // The compositor wrote nothing: the buffer holds the last
+                // frame, unless an undamaged copy filled it since.
+                let repeat = still.buffer_repeat();
+                let (fw, fh, fs) = (fb.width, fb.height, fb.stride);
+                if !send_frame(&frame_tx, fb.repack(inverted, fw, fh, fs), fw, fh, repeat) {
                     debug!("Frame channel closed, stopping screencopy capture");
                     break;
                 }
@@ -580,8 +874,10 @@ fn run_capture_loop(
             let p = slot.lock().unwrap();
             (p.y_invert, p.damaged, p.failed)
         };
-        buffer.destroy();
-        pool.destroy();
+        if let Some((pool, shm_buffer)) = &shm_parts {
+            shm_buffer.destroy();
+            pool.destroy();
+        }
         capture.destroy();
         if failed {
             if let Some(handle) = used_window {
@@ -593,12 +889,45 @@ fn run_capture_loop(
                 window_mode.store(false, AtomicOrdering::Relaxed);
                 continue;
             }
+            if gpu.is_some() {
+                // The compositor will not render into this buffer: the next
+                // modifier, or copies through memory. A copy that had worked
+                // and now fails ends the capture, as a copy through memory
+                // does.
+                if let Some(z) = zc.as_mut()
+                    && !z.refused()
+                {
+                    bail!("screencopy frame copy failed (compositor busy?)");
+                }
+                last_gpu = None;
+                last_inverted = None;
+                still.changed();
+                force_emit = true;
+                copy_at_once = true;
+                continue;
+            }
             bail!("screencopy frame copy failed (compositor busy?)");
         }
+        if gpu.is_some() && inverted {
+            // A flipped picture cannot be put right on the card here.
+            if let Some(z) = zc.as_mut() {
+                z.fail("the compositor flips its picture");
+            }
+            last_gpu = None;
+            still.changed();
+            force_emit = true;
+            copy_at_once = true;
+            continue;
+        }
+        if gpu.is_some()
+            && let Some(z) = zc.as_mut()
+        {
+            z.worked();
+        }
 
-        // A source switch (output ↔ window, or window ↔ window) invalidates
-        // both the client's decoder size and the accumulated reference
-        // frames, so that cycle must emit even without damage.
+        // A source switch (output <-> window, or window <-> window)
+        // invalidates both the client's decoder size and the accumulated
+        // reference frames, so that cycle must emit even without damage.
         let new_source = capture.is_window().then_some(used_window.unwrap_or(0));
         if new_source != source {
             source = new_source;
@@ -622,7 +951,8 @@ fn run_capture_loop(
         // A compositor that answers an undamaged copy at once (Hyprland)
         // reports a still screen as no damage: the frame is repeated once a
         // STATIC_HEARTBEAT all the same, or the phone ends the session.
-        let heartbeat = last_inverted.is_some() && last_sent.elapsed() >= STATIC_HEARTBEAT;
+        let heartbeat = (last_inverted.is_some() || last_gpu.is_some())
+            && last_sent.elapsed() >= STATIC_HEARTBEAT;
         if emit && idle {
             debug!(
                 "Screencopy: screen active, resuming {} fps pacing",
@@ -631,12 +961,48 @@ fn run_capture_loop(
             idle = false;
         }
         if emit || heartbeat {
-            last_inverted = Some(inverted);
-            if !send_frame(&frame_tx, fb.repack(inverted, w, h, stride), w, h) {
-                debug!("Frame channel closed, stopping screencopy capture");
-                break;
+            if let Some((frame, _)) = gpu {
+                // A frame still on the card. The heartbeat, with no damage,
+                // repeats the last frame only if its pixels are the same:
+                // the card reads this one back for the comparison (once a
+                // second, on a still screen).
+                let repeat = if emit {
+                    still.changed();
+                    false
+                } else {
+                    let pixels = zc.as_mut().and_then(|z| z.read_back(&frame));
+                    pixels.is_some_and(|p| still.heartbeat(&p))
+                };
+                last_inverted = None;
+                last_gpu = Some(frame.clone());
+                if !send_gpu_frame(&frame_tx, frame, repeat) {
+                    debug!("Frame channel closed, stopping screencopy capture");
+                    break;
+                }
+            } else {
+                last_gpu = None;
+                last_inverted = Some(inverted);
+                let fb = shm_buf.as_ref().expect("an shm copy has its buffer");
+                let pixels = fb.repack(inverted, w, h, stride);
+                // The heartbeat, with no damage, repeats the last frame only
+                // if its pixels are the same; one that differs is a real
+                // change.
+                let repeat = if emit {
+                    still.changed();
+                    false
+                } else {
+                    still.heartbeat(&pixels)
+                };
+                if !send_frame(&frame_tx, pixels, w, h, repeat) {
+                    debug!("Frame channel closed, stopping screencopy capture");
+                    break;
+                }
             }
             last_sent = Instant::now();
+        } else {
+            // Copied, undamaged, and not due: the buffer holds pixels no
+            // frame has carried.
+            still.unsent();
         }
         if !emit && !idle {
             info!("Screencopy: screen static, dropping to {IDLE_FPS} fps idle pacing");
@@ -659,12 +1025,14 @@ fn run_capture_loop(
 
 /// Hand one frame to the encoder. It replaces one still waiting (the
 /// encoder is behind; this one has newer pixels, BG2). Returns false once
-/// the encoder side is gone.
+/// the encoder side is gone. `repeat`: the frame is the heartbeat's, the
+/// last one again.
 fn send_frame(
     frame_tx: &crate::streaming::latest_frame::FrameSender<VideoFrame>,
     data: Vec<u8>,
     width: u32,
     height: u32,
+    repeat: bool,
 ) -> bool {
     let frame = VideoFrame {
         data,
@@ -673,6 +1041,101 @@ fn send_frame(
         stride: width * 4,
         timestamp: Instant::now(),
         gpu: None,
+        repeat,
+    };
+    !matches!(
+        frame_tx.try_send(frame),
+        Err(tokio_mpsc::error::TrySendError::Closed(_))
+    )
+}
+
+/// Ask for the picture twice at once, into a DMA-BUF and into shared memory,
+/// and give back the second as its width, height and BGRA rows: what a
+/// DMA-BUF's read-back is compared with. `None` where either copy did not
+/// complete or came flipped. The DMA-BUF's `wl_buffer` is the capture's own
+/// and is left as it is.
+#[cfg_attr(not(feature = "inproc"), allow(dead_code))]
+#[allow(clippy::too_many_arguments)]
+fn copy_through_both(
+    conn: &Connection,
+    queue: &mut EventQueue<WlState>,
+    state: &mut WlState,
+    qh: &QueueHandle<WlState>,
+    cancel: &CancellationToken,
+    manager: &ZwlrScreencopyManagerV1,
+    output: &WlOutput,
+    overlay: i32,
+    shm: &WlShm,
+    gpu_buffer: &WlBuffer,
+) -> Result<Option<(u32, u32, Vec<u8>)>> {
+    let gpu_slot: FrameSlot = Arc::new(Mutex::new(FramePhase::default()));
+    let shm_slot: FrameSlot = Arc::new(Mutex::new(FramePhase::default()));
+    let gpu_frame = manager.capture_output(overlay, output, qh, gpu_slot.clone());
+    let shm_frame = manager.capture_output(overlay, output, qh, shm_slot.clone());
+    let staged = |slot: &FrameSlot| {
+        let p = slot.lock().unwrap();
+        p.buffer_done || p.done || p.failed
+    };
+    let result = (|| -> Result<Option<(u32, u32, Vec<u8>)>> {
+        pump_until(conn, queue, state, cancel, || {
+            staged(&gpu_slot) && staged(&shm_slot)
+        })?;
+        let Some((w, h, stride, format)) = shm_slot.lock().unwrap().buffer else {
+            return Ok(None);
+        };
+        if gpu_slot.lock().unwrap().failed
+            || shm_slot.lock().unwrap().failed
+            || !matches!(
+                format,
+                wl_shm::Format::Argb8888
+                    | wl_shm::Format::Xrgb8888
+                    | wl_shm::Format::Abgr8888
+                    | wl_shm::Format::Xbgr8888
+            )
+        {
+            return Ok(None);
+        }
+        let backing = ShmBuffer::new(w, h, stride, format)?;
+        let (pool, buffer) = backing.attach(shm, qh);
+        // Both ignore damage: a still screen answers at once.
+        gpu_frame.copy(gpu_buffer);
+        shm_frame.copy(&buffer);
+        let finished =
+            pump_until_timeout(conn, queue, state, cancel, STATIC_HEARTBEAT * 3, || {
+                let (a, b) = (gpu_slot.lock().unwrap(), shm_slot.lock().unwrap());
+                (a.done || a.failed) && (b.done || b.failed)
+            })?;
+        buffer.destroy();
+        pool.destroy();
+        let (a, b) = (gpu_slot.lock().unwrap(), shm_slot.lock().unwrap());
+        if !finished || a.failed || b.failed || a.y_invert {
+            return Ok(None);
+        }
+        Ok(Some((w, h, backing.repack(b.y_invert, w, h, stride))))
+    })();
+    gpu_frame.destroy();
+    shm_frame.destroy();
+    // The compositor has handled the destroys: neither buffer is written
+    // after this.
+    queue.roundtrip(state)?;
+    result
+}
+
+/// Hand one frame still on the card to the encoder (as [`send_frame`]).
+fn send_gpu_frame(
+    frame_tx: &crate::streaming::latest_frame::FrameSender<VideoFrame>,
+    gpu: super::GpuFrame,
+    repeat: bool,
+) -> bool {
+    let (width, height) = (gpu.dmabuf().width, gpu.dmabuf().height);
+    let frame = VideoFrame {
+        data: Vec::new(),
+        width,
+        height,
+        stride: width * 4,
+        timestamp: Instant::now(),
+        gpu: Some(gpu),
+        repeat,
     };
     !matches!(
         frame_tx.try_send(frame),
@@ -740,7 +1203,7 @@ fn pick_output(
     ))
 }
 
-fn monitor_rect_physical(index: u32) -> Option<(i32, i32)> {
+pub(super) fn monitor_rect_physical(index: u32) -> Option<(i32, i32)> {
     let monitors = xcap::Monitor::all().ok()?;
     let monitor = monitors.get(index as usize)?;
     Some((monitor.x().ok()?, monitor.y().ok()?))
@@ -828,7 +1291,7 @@ where
     }
 }
 
-fn poll_fd(fd: i32, timeout: Duration) {
+pub(super) fn poll_fd(fd: i32, timeout: Duration) {
     let mut pfd = libc::pollfd {
         fd,
         events: libc::POLLIN,
@@ -839,10 +1302,18 @@ fn poll_fd(fd: i32, timeout: Duration) {
     unsafe { libc::poll(&mut pfd, 1, ms) };
 }
 
+/// Whether an shm format keeps red first in memory (R,G,B,x), which a
+/// renderer's preferred read-back format is (wlroots' GLES2 on Intel gives
+/// `Xbgr8888`): the capture swaps red and blue to the BGRA the pipeline takes.
+fn red_first(format: wl_shm::Format) -> bool {
+    matches!(format, wl_shm::Format::Abgr8888 | wl_shm::Format::Xbgr8888)
+}
+
 /// Copy shm pixels into a tightly packed BGRA frame, flipping rows when the
 /// compositor requested y-inversion. ARGB8888 memory (little-endian) is
-/// already B,G,R,A — no byte shuffling needed for our BGRA pipeline.
-fn repack_shm(src: &[u8], invert: bool, w: u32, h: u32, stride: u32) -> Vec<u8> {
+/// already B,G,R,A — no byte shuffling needed for our BGRA pipeline; a
+/// format with red first (`swap_rb`) has its red and blue bytes swapped.
+fn repack_shm(src: &[u8], invert: bool, swap_rb: bool, w: u32, h: u32, stride: u32) -> Vec<u8> {
     let row = (w as usize) * 4;
     let rows = h as usize;
     let stride = stride as usize;
@@ -854,6 +1325,11 @@ fn repack_shm(src: &[u8], invert: bool, w: u32, h: u32, stride: u32) -> Vec<u8> 
             break; // defensive: short buffer, keep the zero tail
         }
         out[y * row..y * row + row].copy_from_slice(&src[from..from + row]);
+        if swap_rb {
+            for px in out[y * row..y * row + row].chunks_mut(4) {
+                px.swap(0, 2);
+            }
+        }
     }
     out
 }
@@ -929,7 +1405,7 @@ impl ShmBuffer {
         // SAFETY: the mmap covers stride*height, and the compositor wrote
         // the full buffer before signaling ready.
         let src = unsafe { std::slice::from_raw_parts(self.ptr as *const u8, self.len) };
-        repack_shm(src, invert, w, h, stride)
+        repack_shm(src, invert, red_first(self.format), w, h, stride)
     }
 }
 
@@ -940,7 +1416,7 @@ impl Drop for ShmBuffer {
     }
 }
 
-fn make_memfd(len: u64) -> Result<OwnedFd> {
+pub(super) fn make_memfd(len: u64) -> Result<OwnedFd> {
     let name = std::ffi::CString::new("pocketdesk-screencopy").unwrap();
     // SAFETY: plain memfd_create; fd checked below.
     let fd = unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_CLOEXEC) };
@@ -971,12 +1447,24 @@ mod tests {
         src[4..8].copy_from_slice(&[2, 2, 2, 255]); // row0 px1
         src[stride..stride + 4].copy_from_slice(&[3, 3, 3, 255]); // row1 px0
         src[stride + 4..stride + 8].copy_from_slice(&[4, 4, 4, 255]);
-        let out = repack_shm(&src, false, 2, 2, stride as u32);
+        let out = repack_shm(&src, false, false, 2, 2, stride as u32);
         assert_eq!(&out[0..8], &[1, 1, 1, 255, 2, 2, 2, 255]);
         assert_eq!(&out[8..16], &[3, 3, 3, 255, 4, 4, 4, 255]);
-        let flipped = repack_shm(&src, true, 2, 2, stride as u32);
+        let flipped = repack_shm(&src, true, false, 2, 2, stride as u32);
         assert_eq!(&flipped[0..8], &[3, 3, 3, 255, 4, 4, 4, 255]);
         assert_eq!(&flipped[8..16], &[1, 1, 1, 255, 2, 2, 2, 255]);
+    }
+
+    #[test]
+    fn a_picture_with_red_first_is_swapped_to_blue_first() {
+        // Two pixels of R,G,B,x memory (what an `Xbgr8888` buffer holds).
+        let src = [10u8, 20, 30, 255, 40, 50, 60, 255];
+        let out = repack_shm(&src, false, true, 2, 1, 8);
+        assert_eq!(out, [30, 20, 10, 255, 60, 50, 40, 255]);
+        assert!(red_first(wl_shm::Format::Xbgr8888));
+        assert!(red_first(wl_shm::Format::Abgr8888));
+        assert!(!red_first(wl_shm::Format::Xrgb8888));
+        assert!(!red_first(wl_shm::Format::Argb8888));
     }
 
     /// Real capture against the running compositor (developer machines).
@@ -990,14 +1478,20 @@ mod tests {
         let config = StreamingConfig::default();
         let (_window_tx, window_rx) = watch::channel(0u64);
         let window_mode = Arc::new(AtomicBool::new(false));
-        let session =
-            match start_screencopy_capture(config, tx, cancel.clone(), window_rx, window_mode) {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("skipping: no wlroots screencopy available here: {e:#}");
-                    return;
-                }
-            };
+        let session = match start_screencopy_capture(
+            config,
+            tx,
+            cancel.clone(),
+            window_rx,
+            window_mode,
+            None,
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("skipping: no wlroots screencopy available here: {e:#}");
+                return;
+            }
+        };
         let frame = rx
             .blocking_recv()
             .expect("handshake completed but no frame arrived");
@@ -1054,6 +1548,7 @@ mod tests {
             cancel.clone(),
             window_rx,
             window_mode.clone(),
+            None,
         ) {
             Ok(s) => s,
             Err(e) => {

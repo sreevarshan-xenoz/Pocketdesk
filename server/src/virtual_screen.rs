@@ -24,6 +24,11 @@
 //! with the phones'. The screen is an empty extra desktop: nothing is moved
 //! onto it.
 //!
+//! A computer may also lend one of its windows ([`crate::lend_window`]): that
+//! makes a screen the same way (`lend`, a key `<device>#lend-<window>`), the
+//! window is moved onto it, and whenever the screen is removed (the
+//! computer gone, a return, a sweep) the window goes back first.
+//!
 //! An output lasts while its phone has a session or link, and those a server
 //! that stopped left are swept by the next one in the same compositor
 //! (`virtual_screens.json`); on Hyprland the next one also removes any of its
@@ -108,12 +113,12 @@ pub struct Rect {
 
 /// The compositor a screen is added in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Desk {
+pub(crate) enum Desk {
     Sway,
     Hyprland,
 }
 
-fn desk() -> Option<Desk> {
+pub(crate) fn desk() -> Option<Desk> {
     if std::env::var_os("SWAYSOCK").is_some() {
         Some(Desk::Sway)
     } else if crate::hyprland::HyprlandIpc::is_available() {
@@ -221,7 +226,7 @@ pub fn hypr_outputs(raw: &str) -> std::io::Result<Vec<Output>> {
         .collect())
 }
 
-fn hypr(req: &str) -> std::io::Result<String> {
+pub(crate) fn hypr(req: &str) -> std::io::Result<String> {
     crate::hyprland::HyprlandIpc::from_env()
         .map_err(|e| std::io::Error::other(e.to_string()))?
         .request_blocking(req)
@@ -286,7 +291,7 @@ const GET_OUTPUTS: u32 = 3;
 
 /// Send one i3-IPC message to Sway and read its reply.
 #[cfg(unix)]
-fn ipc(kind: u32, payload: &str) -> std::io::Result<serde_json::Value> {
+pub(crate) fn ipc(kind: u32, payload: &str) -> std::io::Result<serde_json::Value> {
     use std::io::{Read, Write};
     let socket = std::env::var_os("SWAYSOCK")
         .ok_or_else(|| std::io::Error::other("not running under Sway"))?;
@@ -308,19 +313,24 @@ fn ipc(kind: u32, payload: &str) -> std::io::Result<serde_json::Value> {
 }
 
 #[cfg(not(unix))]
-fn ipc(_kind: u32, _payload: &str) -> std::io::Result<serde_json::Value> {
+pub(crate) fn ipc(_kind: u32, _payload: &str) -> std::io::Result<serde_json::Value> {
     Err(std::io::Error::other("not running under Sway"))
 }
 
-fn outputs() -> std::io::Result<Vec<Output>> {
+pub(crate) fn outputs() -> std::io::Result<Vec<Output>> {
     match desk() {
         Some(Desk::Hyprland) => hypr_outputs(&hypr("j/monitors")?),
-        _ => serde_json::from_value(ipc(GET_OUTPUTS, "")?).map_err(std::io::Error::other),
+        _ => sway_outputs(),
     }
 }
 
+/// Sway's outputs.
+pub(crate) fn sway_outputs() -> std::io::Result<Vec<Output>> {
+    serde_json::from_value(ipc(GET_OUTPUTS, "")?).map_err(std::io::Error::other)
+}
+
 /// Run a Sway command; an error when Sway says it failed.
-fn run(command: &str) -> std::io::Result<()> {
+pub(crate) fn run(command: &str) -> std::io::Result<()> {
     let reply = ipc(RUN_COMMAND, command)?;
     let ok = reply
         .as_array()
@@ -435,6 +445,16 @@ fn create_sway(width: u32, height: u32) -> std::io::Result<(String, i32)> {
     Ok((name, x))
 }
 
+/// The Sway command that gives the output `name` the mode `width`×`height`
+/// where it is (its place is kept): `None` unless `name` is an output Sway
+/// made with `create_output` and both sides are within
+/// [`MIN_SIDE`]..=[`MAX_SIDE`], so nothing else reaches a command.
+pub fn sway_mode_command(name: &str, width: u32, height: u32) -> Option<String> {
+    let side = MIN_SIDE..=MAX_SIDE;
+    (is_virtual(name) && side.contains(&width) && side.contains(&height))
+        .then(|| format!("output {name} mode --custom {width}x{height}"))
+}
+
 /// Give the output `name` (one this server made) the size `width`×`height`
 /// where it is, and wait up to 2 s for the compositor to show it; its `x`.
 fn resize(name: &str, width: u32, height: u32) -> std::io::Result<i32> {
@@ -448,8 +468,10 @@ fn resize(name: &str, width: u32, height: u32) -> std::io::Result<i32> {
             }
             resize_hyprland(&hypr, name, width, height, wait)
         }
-        Some(Desk::Sway) if is_virtual(name) => {
-            run(&format!("output {name} mode --custom {width}x{height}"))?;
+        Some(Desk::Sway) => {
+            let command = sway_mode_command(name, width, height)
+                .ok_or_else(|| std::io::Error::other("not a screen this computer makes"))?;
+            run(&command)?;
             wait_for_size(&outputs, name, width, height, wait)
         }
         _ => Err(std::io::Error::other("not a screen this computer makes")),
@@ -508,7 +530,13 @@ fn wait_for_size(
     }
 }
 
-fn remove(name: &str) {
+pub(crate) fn remove(name: &str) {
+    // A window lent onto it goes back first; one that will not go stays on
+    // its screen (the sweep tries again), not lost with it.
+    if !crate::lend_window::give_back_for_output(name) {
+        tracing::warn!("Keeping the screen {name}: the window lent on it would not go back");
+        return;
+    }
     let removed = match desk() {
         Some(Desk::Hyprland) if this_tag().is_some_and(|tag| is_hypr_screen(name, &tag)) => {
             hypr(&format!("output remove {name}")).and_then(|r| hypr_ok(&r))
@@ -632,7 +660,7 @@ impl Host for Live {
     }
 }
 
-fn this_instance() -> Option<String> {
+pub(crate) fn this_instance() -> Option<String> {
     match desk()? {
         Desk::Sway => std::env::var("SWAYSOCK").ok(),
         Desk::Hyprland => std::env::var("HYPRLAND_INSTANCE_SIGNATURE")
@@ -692,6 +720,8 @@ pub fn clear_left_over() {
     let Ok(dir) = crate::state::state_dir() else {
         return;
     };
+    // Windows a stopped server lent go back first, their screens with them.
+    let returned = crate::lend_window::return_left_over();
     let path = dir.join(STATE_FILE);
     let left = std::fs::read_to_string(&path)
         .ok()
@@ -700,7 +730,8 @@ pub fn clear_left_over() {
     if let Some(left) = left {
         if left.instance.is_some() && left.instance == this_instance() {
             let mut made = made().lock().unwrap_or_else(|e| e.into_inner());
-            for (phone, names) in left.phones {
+            for (phone, mut names) in left.phones {
+                names.retain(|n| !returned.contains(n));
                 kept.extend(names.iter().cloned());
                 made.phones.entry(phone).or_default().extend(names);
             }
@@ -751,6 +782,23 @@ async fn wait_at_most(limit: std::time::Duration, work: impl FnOnce() + Send + '
         .is_ok()
 }
 
+/// The devices that count as there now: a phone counts while it has a
+/// session or a control link (a session switching to the new screen, waiting
+/// at the approval gate or reconnecting has its link the whole time).
+pub(crate) async fn live_devices() -> Vec<String> {
+    let mut live: Vec<String> = pocketdesk_core::streaming::sessions::list()
+        .into_iter()
+        .filter_map(|s| s.device_id)
+        .collect();
+    live.extend(
+        crate::state::clone_clients()
+            .await
+            .iter()
+            .map(|c| c.device_id().to_string()),
+    );
+    live
+}
+
 /// Remove the outputs of phones with no session in `live` twice in a row
 /// (a session switching screens is gone for a moment). Runs every few
 /// seconds for the server's life.
@@ -759,19 +807,7 @@ pub async fn run_sweeper() {
     let mut tick = tokio::time::interval(std::time::Duration::from_secs(5));
     loop {
         tick.tick().await;
-        // A phone counts while it has a session or a control link: a
-        // session switching to the new screen, waiting at the approval gate
-        // or reconnecting has its link the whole time.
-        let mut live: Vec<String> = pocketdesk_core::streaming::sessions::list()
-            .into_iter()
-            .filter_map(|s| s.device_id)
-            .collect();
-        live.extend(
-            crate::state::clone_clients()
-                .await
-                .iter()
-                .map(|c| c.device_id().to_string()),
-        );
+        let live = live_devices().await;
         let gone: Vec<(String, Vec<String>)> = {
             let mut made = made().lock().unwrap_or_else(|e| e.into_inner());
             let phones: Vec<String> = made.phones.keys().cloned().collect();
@@ -882,6 +918,25 @@ pub async fn respond(device: &str, body: &serde_json::Value) -> serde_json::Valu
             .unwrap_or(0)
     };
     let (width, height) = (side("width"), side("height"));
+    // Only the lend path resizes a lent window's screen
+    // ([`resize_for_lend`], under the key of the loan): from the wire it
+    // would resize the asker's own screen, past "Phones may add a screen".
+    if is_internal_only(&action) {
+        return said_with(body, serde_json::json!({ "error": "unknown action" }));
+    }
+    // A computer that lent a window asks whether this computer's view of it is
+    // the window being dragged back (window handoff 4).
+    if action == "drag_back" {
+        return said_with(
+            body,
+            crate::shared_input::drag_window::answer_drag_back(device, body).await,
+        );
+    }
+    // A computer's lending of one of its windows (phase 3a of the window
+    // handoff) has its own gate and its own state.
+    if matches!(action.as_str(), "lend" | "list" | "return") {
+        return said_with(body, crate::lend_window::answer(device, body).await);
+    }
     // A computer's window, 0 to 3; a phone says none. One past the last is
     // no window.
     let slot = match body.get("slot") {
@@ -906,6 +961,11 @@ pub async fn respond(device: &str, body: &serde_json::Value) -> serde_json::Valu
     said_with(body, reply)
 }
 
+/// Whether `action` is one only this server's own lend path may use.
+fn is_internal_only(action: &str) -> bool {
+    action == "lend_resize"
+}
+
 /// The window a request is for: a computer's own `slot`, but always 0 for
 /// a phone, which has one screen and must not hold four (#609 review).
 fn own_slot(slot: u8, computer: bool) -> u8 {
@@ -925,6 +985,39 @@ fn is_computer(device: &str) -> bool {
 /// height}`, `{removed}` or `{error}`.
 fn answer(key: &str, action: &str, width: u32, height: u32) -> serde_json::Value {
     answer_with(screens(), &Live, key, action, width, height)
+}
+
+/// The screen for a window lent under `key` ([`crate::lend_window::lend_key`]):
+/// `{name, index, width, height}` or `{error}`. The same limits as any
+/// screen's, and swept as any screen is.
+pub(crate) fn add_for_lend(key: &str, width: u32, height: u32) -> serde_json::Value {
+    answer_with(screens(), &Live, key, "lend", width, height)
+}
+
+/// Record the screen `name` under `key` again (see [`add_for_lend`]): its
+/// removal was refused because the window on it would not go back, and the
+/// record the sweep or a remove just took must stay for the next sweep.
+pub(crate) fn keep_for_lend(key: &str, name: &str) {
+    let mut made = made().lock().unwrap_or_else(|e| e.into_inner());
+    let names = made.phones.entry(key.to_string()).or_default();
+    if !names.iter().any(|n| n == name) {
+        names.push(name.to_string());
+    }
+    save(&made);
+}
+
+/// Give the screen already made for a window lent under `key` the size
+/// `width`×`height` where it is (the borrowing computer's window was resized,
+/// [`crate::lend_window`]): `{name, index, width, height}` or `{error}`. It
+/// never makes a screen, and is not held to "Phones may add a screen": the
+/// window is already lent.
+pub(crate) fn resize_for_lend(key: &str, width: u32, height: u32) -> serde_json::Value {
+    answer_with(screens(), &Live, key, "lend_resize", width, height)
+}
+
+/// Take away the screen of `key` (see [`add_for_lend`]).
+pub(crate) fn drop_for_lend(key: &str) {
+    answer_with(screens(), &Live, key, "remove", 0, 0);
 }
 
 fn answer_with(
@@ -953,8 +1046,11 @@ fn answer_with(
             json!({ "removed": names.len() })
         }
         // `fit` (a computer's window) is `add` that also gives the screen it
-        // has the window's new size.
-        "add" | "fit" => {
+        // has the window's new size. `lend` (a window of this computer moved
+        // onto the screen, [`crate::lend_window`]) is `add` under its own
+        // switch, not this one's; `lend_resize` is `fit` for such a screen,
+        // and makes none.
+        "add" | "fit" | "lend" | "lend_resize" => {
             let Some((w, h)) = screen_size(width, height) else {
                 return json!({ "error": "not a screen size" });
             };
@@ -974,7 +1070,7 @@ fn answer_with(
                     .ok()
                     .and_then(|all| all.into_iter().find(|o| o.name == name));
                 if let Some(mut output) = place {
-                    if action == "fit"
+                    if matches!(action, "fit" | "lend_resize")
                         && (output.rect.width, output.rect.height) != (w as i32, h as i32)
                     {
                         match host.resize(&name, w, h) {
@@ -1001,6 +1097,9 @@ fn answer_with(
                 }
                 // Gone from the compositor meanwhile: forget it and make another.
                 made().phones.remove(phone);
+            }
+            if action == "lend_resize" {
+                return json!({ "error": "no screen to resize" });
             }
             // A few at most, whatever ids phones announce.
             let held = made().phones.values().map(Vec::len).sum::<usize>();
@@ -1036,6 +1135,28 @@ fn answer_with(
 mod tests {
     use super::*;
 
+    /// A paired device cannot send `lend_resize` on the wire: it is the lend
+    /// path's own, and would resize the asker's own screen with "Phones may
+    /// add a screen" off.
+    #[tokio::test]
+    async fn lend_resize_is_refused_from_the_wire() {
+        assert!(is_internal_only("lend_resize"));
+        for action in ["add", "fit", "remove", "lend", "list", "return"] {
+            assert!(!is_internal_only(action), "{action}");
+        }
+        let ask = serde_json::json!({
+            "action": "lend_resize", "id": 4, "width": 1000, "height": 600
+        });
+        let said = respond("desk", &ask).await;
+        assert_eq!(said["error"], "unknown action", "{said}");
+        assert_eq!(said["id"], 4);
+        assert!(said.get("name").is_none() && said.get("index").is_none());
+        // Whatever slot it names, and whoever asks.
+        let slotted =
+            serde_json::json!({ "action": "lend_resize", "slot": 2, "width": 1000, "height": 600 });
+        assert_eq!(respond("desk", &slotted).await["error"], "unknown action");
+    }
+
     #[test]
     fn a_phone_has_one_screen_whatever_slot_it_says() {
         assert_eq!(own_slot(3, false), 0);
@@ -1066,6 +1187,25 @@ mod tests {
             "at least the minimum"
         );
         assert_eq!(screen_size(0, 2400), None);
+    }
+
+    #[test]
+    fn sways_mode_command_is_only_for_its_own_headless_outputs_within_bounds() {
+        assert_eq!(
+            sway_mode_command("HEADLESS-2", 1000, 600).as_deref(),
+            Some("output HEADLESS-2 mode --custom 1000x600")
+        );
+        for (name, w, h) in [
+            ("DP-1", 1000, 600),
+            ("eDP-1", 1000, 600),
+            ("HEADLESS-", 1000, 600),
+            ("HEADLESS-2 pos 0 0", 1000, 600),
+            ("HEADLESS-2", 319, 600),
+            ("HEADLESS-2", 1000, 2561),
+            ("HEADLESS-2", 0, 0),
+        ] {
+            assert!(sway_mode_command(name, w, h).is_none(), "{name} {w}x{h}");
+        }
     }
 
     #[test]
@@ -1553,6 +1693,7 @@ mod tests {
                 tokio_util::sync::CancellationToken::new(),
                 window_rx,
                 Arc::new(AtomicBool::new(false)),
+                None,
             )
             .expect("screencopy starts on the new screen");
             let frame = rx.blocking_recv().expect("a frame");
@@ -1636,6 +1777,50 @@ mod tests {
             "made anew"
         );
         assert_eq!(gone["width"], 1000);
+    }
+
+    /// A borrowed window's screen follows its borrower's window: `lend_resize`
+    /// sizes the screen `lend` made, in place, and makes none of its own.
+    #[test]
+    fn a_lent_windows_screen_is_resized_in_place_and_never_made() {
+        let screens = Screens::new();
+        let host = FakeHost::default();
+        let key = "desk#lend-5";
+        let none = answer_with(&screens, &host, key, "lend_resize", 1000, 700);
+        assert!(none["error"].as_str().unwrap().contains("no screen"));
+        assert_eq!(host.made.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let first = answer_with(&screens, &host, key, "lend", 1280, 720);
+        let name = first["name"].as_str().unwrap().to_string();
+        // `lend` again, at another size, leaves the screen as it is.
+        let kept = answer_with(&screens, &host, key, "lend", 1000, 700);
+        assert_eq!(kept["width"], 1280);
+        assert!(host.resized.lock().unwrap().is_empty());
+        // `lend_resize` is the same screen at the new size, clamped as a
+        // screen's size is.
+        let resized = answer_with(&screens, &host, key, "lend_resize", 1001, 701);
+        assert_eq!(resized["name"].as_str(), Some(name.as_str()));
+        assert_eq!(
+            (resized["width"].as_u64(), resized["height"].as_u64()),
+            (Some(1000), Some(700))
+        );
+        let huge = answer_with(&screens, &host, key, "lend_resize", 5120, 2880);
+        assert_eq!(
+            (huge["width"].as_u64(), huge["height"].as_u64()),
+            (Some(2560), Some(1440))
+        );
+        assert_eq!(*host.resized.lock().unwrap(), [(1000, 700), (2560, 1440)]);
+        assert_eq!(host.made.load(std::sync::atomic::Ordering::SeqCst), 1);
+        // The screen gone from the compositor: nothing is made in its place.
+        host.outputs.lock().unwrap().clear();
+        let gone = answer_with(&screens, &host, key, "lend_resize", 800, 600);
+        assert!(gone.get("error").is_some(), "{gone}");
+        assert_eq!(host.made.load(std::sync::atomic::Ordering::SeqCst), 1);
+        // A size that is no screen is refused.
+        assert!(
+            answer_with(&screens, &host, key, "lend_resize", 0, 600)
+                .get("error")
+                .is_some()
+        );
     }
 
     #[test]

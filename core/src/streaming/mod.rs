@@ -10,21 +10,30 @@ pub mod cast_control;
 pub mod chaos;
 pub mod client;
 pub mod connection;
+pub mod cursor_feed;
 #[cfg(feature = "wan")]
 pub mod dht;
+#[cfg(target_os = "linux")]
+pub mod dmabuf;
 pub mod encoder_detect;
 pub mod ffmpeg_flags;
 mod frame_pool;
 #[cfg(all(windows, feature = "capture", feature = "inproc-windows"))]
 mod gpu_frame;
 pub mod h264_sps;
+#[cfg(target_os = "linux")]
+pub use dmabuf::GpuFrame;
 #[cfg(all(windows, feature = "capture", feature = "inproc-windows"))]
 pub use gpu_frame::GpuFrame;
 pub mod gnome_unattended;
+pub mod idle_repeats;
 pub mod in_flight;
 pub mod input_packet;
 #[cfg(feature = "wan")]
 pub mod iroh_connection;
+pub mod keyframes;
+pub mod latency_probe;
+pub mod latency_trace;
 pub mod latest_frame;
 pub mod portal_input;
 pub mod session;
@@ -34,6 +43,8 @@ pub mod transport;
 #[cfg(feature = "wan")]
 pub mod wake_helper_net;
 pub mod wheel;
+pub mod window_guard;
+pub mod window_target;
 
 // Server-only modules. Feature gates say *what* is built; the
 // `target_os = "linux"` gates mark backends whose dependencies only exist there.
@@ -48,6 +59,10 @@ pub mod bench;
 #[cfg(feature = "capture")]
 pub mod capture;
 pub mod capture_backend;
+#[cfg(all(feature = "capture", target_os = "linux"))]
+mod capture_cursor_pw;
+#[cfg(all(feature = "capture", target_os = "linux"))]
+mod capture_cursor_wl;
 #[cfg(all(feature = "capture", windows))]
 mod capture_d3d;
 #[cfg(all(feature = "capture", windows))]
@@ -57,7 +72,11 @@ pub mod capture_linux;
 #[cfg(all(feature = "capture", target_os = "linux"))]
 pub mod capture_mutter;
 #[cfg(all(feature = "capture", target_os = "linux"))]
+mod capture_pw_dmabuf;
+#[cfg(all(feature = "capture", target_os = "linux"))]
 pub mod capture_screencopy;
+#[cfg(all(feature = "capture", target_os = "linux"))]
+mod capture_video_crop;
 #[cfg(all(feature = "capture", windows))]
 pub mod capture_wgc;
 #[cfg(feature = "capture")]
@@ -366,14 +385,26 @@ pub struct VideoFrame {
     /// an NVIDIA adapter with `inproc-windows`. Read back with
     /// [`VideoFrame::downloaded`] where the pixels are needed.
     pub gpu: Option<GpuFrame>,
+    /// The capture sent the last frame again, only to show it is alive (the
+    /// idle heartbeat): the screen has not changed since. A session that
+    /// needs no idle repeats (`client::CODEC_CAP_NO_IDLE_REPEATS`) has them
+    /// dropped before the encoder (`idle_repeats::RepeatGate`).
+    pub repeat: bool,
 }
 
-/// Without zero-copy (BG10) no frame is on the GPU.
-#[cfg(not(all(windows, feature = "capture", feature = "inproc-windows")))]
+/// Without zero-copy (BG10 on Windows, the DMA-BUF capture on Linux) no frame
+/// is on the GPU.
+#[cfg(not(any(
+    all(windows, feature = "capture", feature = "inproc-windows"),
+    target_os = "linux"
+)))]
 #[derive(Debug, Clone)]
 pub enum GpuFrame {}
 
-#[cfg(not(all(windows, feature = "capture", feature = "inproc-windows")))]
+#[cfg(not(any(
+    all(windows, feature = "capture", feature = "inproc-windows"),
+    target_os = "linux"
+)))]
 impl GpuFrame {
     fn offset(&mut self, _x: u32, _y: u32) {
         match *self {}
@@ -392,6 +423,13 @@ impl Drop for VideoFrame {
 }
 
 impl VideoFrame {
+    /// This frame marked as the idle heartbeat's repeat of the last one (see
+    /// [`VideoFrame::repeat`]).
+    pub fn as_repeat(mut self) -> Self {
+        self.repeat = true;
+        self
+    }
+
     /// This frame read back to the CPU when it is on the GPU (BG10), for an
     /// encoder that needs its pixels; `None` when it already holds them.
     pub fn downloaded(&self) -> anyhow::Result<Option<VideoFrame>> {
@@ -405,6 +443,7 @@ impl VideoFrame {
             stride: self.width * 4,
             timestamp: self.timestamp,
             gpu: None,
+            repeat: self.repeat,
         }))
     }
 
@@ -432,6 +471,20 @@ impl VideoFrame {
         let h = height.min(self.height - y) & !1;
         if w == 0 || h == 0 {
             return false;
+        }
+        // A frame on the card from the DMA-BUF capture (Linux) is read back
+        // and cropped like any other; the streamer then turns the capture
+        // back to copies (`dmabuf`), so this is a frame or two.
+        #[cfg(target_os = "linux")]
+        if self.gpu.is_some() {
+            match self.downloaded() {
+                Ok(Some(mut cpu)) => {
+                    self.data = std::mem::take(&mut cpu.data);
+                    self.stride = cpu.stride;
+                    self.gpu = None;
+                }
+                _ => return false,
+            }
         }
         // A frame on the GPU (BG10) is cropped by narrowing its region; the
         // encoder copies only that.
@@ -503,6 +556,7 @@ mod tests {
             stride,
             timestamp: Instant::now(),
             gpu: None,
+            repeat: false,
         }
     }
 

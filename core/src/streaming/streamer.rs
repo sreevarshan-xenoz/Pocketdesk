@@ -92,6 +92,13 @@ struct ClientClaim {
     /// A cast of app windows only (Phone apps tier 2), no screen of the
     /// phone's. Said with [`super::client::CAST_WINDOWS_FLAG`].
     windows: bool,
+    /// The client needs no idle repeats of a screen that has not changed
+    /// (another computer's window). Said with
+    /// [`super::client::CODEC_CAP_NO_IDLE_REPEATS`], in the codec caps.
+    no_idle_repeats: bool,
+    /// The client draws the other computer's pointer itself. Said with
+    /// [`super::client::CODEC_CAP_LOCAL_CURSOR`], in the codec caps.
+    local_cursor: bool,
 }
 
 /// Tells the relay a cast ended, however its session ends (T10k).
@@ -383,6 +390,17 @@ impl PointerSource {
     /// The source for a session showing monitor `index`, and whether its
     /// moves land on that screen now (Windows: always).
     fn start(index: u32) -> (Self, bool) {
+        // The latency probe's pattern is the whole picture and its marker
+        // reads the move as it came.
+        if super::latency_probe::mode() {
+            return (Self::Off, false);
+        }
+        // A window lent to another computer is not a monitor: its input is
+        // placed by its own guard (`window_guard`), never remapped as a
+        // monitor's, and a session that has no guard places nothing.
+        if super::window_target::is_window_index(index) {
+            return (Self::Off, false);
+        }
         if cfg!(windows) {
             let source = PointerSpace::for_monitor(index).map_or(Self::Off, Self::Fixed);
             return (source, true);
@@ -748,6 +766,13 @@ impl StreamingServer {
         let casting = cast || phone_sound_only;
         // No capture, encode, video or arbiter for any of those.
         let no_picture = input_only || sound;
+        // Another computer's window needs no repeat of a still screen: the
+        // encode task drops the capture's idle heartbeat for it.
+        let no_idle_repeats = claim.no_idle_repeats && !no_picture;
+        // The client draws the pointer itself: the capture is asked to take
+        // it out of the picture where it can, and reports it here.
+        let cursor_feed =
+            (claim.local_cursor && !no_picture && !cast).then(super::cursor_feed::CursorFeed::new);
 
         // R4 A2 session telemetry: a shared recorder observes the connection
         // on a slow poll and an RAII guard emits the outcome report when the
@@ -806,18 +831,61 @@ impl StreamingServer {
                 }
             },
         };
+        // An index past every monitor's is a window lent to another computer
+        // (window handoff, phase 5), and it is for the device it was lent to:
+        // judged by the id the gate above has just held to the key its
+        // connection proved, never by the index the client names. Any other
+        // session, any other device and any index no window is lent under is
+        // refused, whatever else it may do on this computer.
+        let window_lease = if super::window_target::is_window_index(self.config.monitor_index) {
+            match window_session_lease(
+                self.config.monitor_index,
+                self.session_gate.is_some(),
+                device_id.as_deref(),
+                super::window_target::lease_for,
+            ) {
+                Ok(lease) => Some(lease),
+                Err(reason) => {
+                    warn!(
+                        device_id = device_id.as_deref().unwrap_or("<none announced>"),
+                        index = self.config.monitor_index,
+                        "Session for a lent window refused: not lent to this device"
+                    );
+                    if let Some(guard) = &_telemetry_guard {
+                        guard.record(SessionOutcome::Rejected);
+                    }
+                    connection.close(0u32, reason);
+                    return Err(anyhow::anyhow!(
+                        "session refused: that window is not lent to this device"
+                    ));
+                }
+            }
+        } else {
+            None
+        };
         // Without input, the session is view-only whatever the phone asks:
         // the phone's own view-only switch can tighten this, never lift it.
         // A sound session gives no input at all (N5).
-        let force_view_only = !permissions.allows(Capability::Input) || sound || phone_sound_only;
+        // A window of a Linux compositor is lent to look at only: nothing
+        // could be shown to land in it alone (`window_target::takes_input`).
+        let force_view_only = !permissions.allows(Capability::Input)
+            || sound
+            || phone_sound_only
+            || window_lease
+                .as_ref()
+                .is_some_and(|lease| !super::window_target::takes_input(lease));
         let laser = self.laser;
         // A computer's mic needs control too (PC10 review): never in a
         // session that may not drive this one.
         let mic_needs_control = permissions.mic_needs_control;
+        // A lent window has no sound or mic to give: the computer's sound is
+        // everything it plays, not that window's.
         let allow_mic = permissions.allows(Capability::Mic)
             && !input_only
+            && window_lease.is_none()
             && !(mic_needs_control && force_view_only);
-        let allow_audio = permissions.allows(Capability::Audio) && !input_only;
+        let allow_audio =
+            permissions.allows(Capability::Audio) && !input_only && window_lease.is_none();
         // A cast's sound plays here with its own permission (K5).
         let allow_phone_sound =
             casting && permissions.allows(Capability::PhoneSound) && self.phone_sound_tx.is_some();
@@ -931,14 +999,28 @@ impl StreamingServer {
                 webcam,
             },
         );
+        if !no_picture {
+            _live_session.set_monitor(self.config.monitor_index);
+        }
         // Where this session's absolute moves land (PC11 on Linux): read
         // before the ready stream, which says whether they land on its
         // screen.
         let (mut pointer, per_screen) = if no_picture {
             (PointerSource::Off, false)
+        } else if window_lease.is_some() {
+            // Placed by the window's guard, in the window's frame.
+            (PointerSource::Off, true)
         } else {
             PointerSource::start(self.config.monitor_index)
         };
+        // What a session of a lent window may send, and where (`window_guard`).
+        let mut window_guard = window_lease.clone().map(|lease| {
+            super::window_guard::WindowGuard::new(
+                lease,
+                super::window_target::Machine,
+                capture::layout_rect(),
+            )
+        });
         // An input-only session says it was admitted, so the phone shows its
         // controls only now: taps made while the owner decided are not
         // queued and injected at once later.
@@ -1146,10 +1228,23 @@ impl StreamingServer {
                 window_mode.clone(),
                 self.capture_backend,
                 self.screen_grant.clone(),
+                cursor_feed.clone(),
+                window_lease.clone(),
             )
             .await
             .context("Failed to start screen capture")?;
             info!("Screen capture session started");
+            // Said whether or not the capture could take the pointer out:
+            // the client keeps it in the picture on a no. The sender follows
+            // the feed from here, so a capture that gives the pointer up
+            // later (or puts it back in a window's picture) is said too.
+            if let Some(feed) = cursor_feed.clone() {
+                info!(
+                    separate = feed.separate(),
+                    "Pointer sent apart from the picture"
+                );
+                tokio::spawn(run_cursor_sender(connection.clone(), feed, cancel.clone()));
+            }
             // A capture that carries input itself (GNOME's and KDE's portal,
             // mutter) may find it refused only when the first event comes:
             // the phone hears then.
@@ -1196,6 +1291,10 @@ impl StreamingServer {
             // back through the failing hardware probe on every window crop.
             let mut encoder_preferred = encoder.config().clone();
             let encode_crop_rx = crop_rx.clone();
+            // The capture's switch for frames still on the card (DMA-BUFs):
+            // turned off for good the first time a frame cannot go as it is.
+            #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
+            let zero_copy_switch = capture_session.as_ref().and_then(|s| s.zero_copy_switch());
             let encode_window_rx = window_rx.clone();
             let encode_window_mode = window_mode.clone();
 
@@ -1237,6 +1336,9 @@ impl StreamingServer {
             const ERR_END_AT: u64 = 90;
             const STALL_FRAMES: u64 = 30;
             const STALL_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
+            // A still screen sends nothing to a client that needs no idle
+            // repeats; a fresh picture owed to it goes through (`idle_repeats`).
+            let mut repeat_gate = super::idle_repeats::RepeatGate::new(no_idle_repeats);
 
             loop {
                 tokio::select! {
@@ -1251,6 +1353,7 @@ impl StreamingServer {
                     Ok(()) = keyframe_rx.changed() => {
                         info!("Forcing IDR on encoder");
                         encoder.request_keyframe();
+                        repeat_gate.refresh();
                     }
 
                     // Window crop changes. Size changes are handled by the
@@ -1267,6 +1370,7 @@ impl StreamingServer {
                                 encoder.request_keyframe();
                             }
                             crop = new;
+                            repeat_gate.refresh();
                         }
                     }
 
@@ -1279,6 +1383,7 @@ impl StreamingServer {
                         let addr = *window_rx.borrow_and_update();
                         info!(addr, "Window capture target changed");
                         encoder.request_keyframe();
+                        repeat_gate.refresh();
                     }
 
                     // Bitrate changes (R4 A3 relay floor / E5 HUD preset)
@@ -1405,6 +1510,17 @@ impl StreamingServer {
                         }
                     } => {
                         let from_hold = held.is_none() && held_due.is_some();
+                        // The capture's idle heartbeat, for a client that
+                        // needs none: dropped before the encoder, so the
+                        // picture chain and its sequence numbers go on whole.
+                        // One that replaced a waiting frame stands for it.
+                        if !from_hold {
+                            let replaced = frame_rx.last_replaced();
+                            let held = encoder.held_frames();
+                            if !repeat_gate.admit(frame.repeat, replaced, held) {
+                                continue;
+                            }
+                        }
                         // R6f: at a lower frame rate than the capture's, pass
                         // frames on at the encoder's rate, holding the newest
                         // early one.
@@ -1428,6 +1544,51 @@ impl StreamingServer {
                         // are exactly the window — the software crop would
                         // cut into it a second time.
                         let software_crop = !window_mode.load(Ordering::Relaxed);
+                        // A frame still on the card (Linux's DMA-BUF
+                        // capture) goes to the in-process VA-API encoder as
+                        // it is. Any other encoder, a crop and an odd size
+                        // need the pixels, so the capture goes back to copies
+                        // for good, and the few frames already on their way
+                        // are dropped (a tiled buffer is not read back).
+                        // Decided here for the encoder that is open, a crop
+                        // and an odd size, and again once the encoder is
+                        // rebuilt for the frame's size (below): a frame
+                        // never reaches an encoder that cannot take it on
+                        // the card.
+                        #[cfg(target_os = "linux")]
+                        macro_rules! pixels_if_needed {
+                            () => {
+                                if frame.gpu.is_some()
+                                    && super::dmabuf::needs_pixels(
+                                        encoder.takes_dmabuf(),
+                                        software_crop && crop.is_some(),
+                                        frame.width,
+                                        frame.height,
+                                    )
+                                {
+                                    if let Some(switch) = &zero_copy_switch
+                                        && switch.swap(false, Ordering::Relaxed)
+                                    {
+                                        info!(
+                                            backend = encoder.backend_name(),
+                                            cropped = software_crop && crop.is_some(),
+                                            "Capture back to copies through memory: the picture needs its pixels"
+                                        );
+                                    }
+                                    match frame.downloaded() {
+                                        Ok(Some(cpu)) => frame = cpu,
+                                        Ok(None) => {}
+                                        Err(e) => {
+                                            debug!("A frame on the card dropped: {e:#}");
+                                            frames_dropped += 1;
+                                            continue;
+                                        }
+                                    }
+                                }
+                            };
+                        }
+                        #[cfg(target_os = "linux")]
+                        pixels_if_needed!();
                         if software_crop
                             && let Some((cx, cy, cw, ch)) = crop
                             && !frame.crop_region(cx, cy, cw, ch)
@@ -1495,6 +1656,10 @@ impl StreamingServer {
                                     break;
                                 }
                             }
+                            // The rebuilt encoder may be one that cannot take
+                            // a frame on the card (the rung below).
+                            #[cfg(target_os = "linux")]
+                            pixels_if_needed!();
                         }
 
                         // C2: rebuild one rung down after repeated failures
@@ -1548,6 +1713,7 @@ impl StreamingServer {
                         // Only successful encodes are sampled: a failed one tells
                         // the C2 ladder's story, not the frame-pacing story.
                         let encode_started = Instant::now();
+                        super::latency_trace::encoder_in(frame.timestamp);
                         match encoder.encode_frame(&frame) {
                             Ok(packets) if !packets.is_empty() => {
                                 if let Some(recorder) = &encode_recorder {
@@ -1566,8 +1732,16 @@ impl StreamingServer {
                                 for packet in packets {
                                     if packet.is_keyframe {
                                         debug!("Keyframe encoded (seq={}, size={} bytes)", packet.sequence, packet.data.len());
+                                        // The fresh picture a client asked for is out.
+                                        repeat_gate.keyframe_sent();
                                     }
                                     trace_packet_stats(&packet);
+                                    super::latency_trace::encoder_out(
+                                        packet.timestamp,
+                                        packet.sequence,
+                                        packet.data.len(),
+                                        packet.is_keyframe,
+                                    );
 
                                     // Send packet to transport
                                     if packet_tx.send(packet).await.is_err() {
@@ -1579,6 +1753,16 @@ impl StreamingServer {
                                     warn!("Packet receiver dropped, stopping encoder");
                                     break;
                                 }
+                                // Let the transport task that the send just
+                                // woke run now. Encoding blocks this thread,
+                                // and when a frame's encode time nears the
+                                // frame period the loop is back in the next
+                                // encode before the woken task was polled:
+                                // the packet then waited (14 ms at the 95th
+                                // percentile for 1080p60 H.264 VA-API). Only
+                                // the order of tasks changes, never what is
+                                // sent or when a frame is taken.
+                                tokio::task::yield_now().await;
                             }
                             Ok(_) => {
                                 // Encoder has no output yet (latency/drain phase)
@@ -1633,6 +1817,7 @@ impl StreamingServer {
             info!(
                 packets_encoded,
                 frames_dropped,
+                repeats_skipped = repeat_gate.skipped(),
                 capture_replaced = frame_rx.replaced(),
                 "Encoding task complete"
             );
@@ -1758,6 +1943,7 @@ impl StreamingServer {
                                         continue;
                                     }
                                     in_flight.push(send_stream.delivered());
+                                    super::latency_trace::written(packet.sequence);
 
                                     packets_sent += 1;
                                     bytes_sent += data_len as u64;
@@ -1822,6 +2008,7 @@ impl StreamingServer {
         let monitor_cast_want = cast_want_tx;
         let monitor_cast_control_on = cast_control_on;
         let monitor_window_input = cast_window_input;
+        let monitor_cursor = cursor_feed;
         let mut cast_chain = super::cast::CastChain::default();
         // Each app window is its own decode chain (Phone apps tier 2).
         let mut window_chains: [super::cast::CastChain; super::cast::MAX_WINDOWS as usize] =
@@ -1856,6 +2043,7 @@ impl StreamingServer {
             // connection is kept open (R2).
             let mut last_heard = tokio::time::Instant::now();
             let mut silence_check = tokio::time::interval(SILENCE_CHECK);
+            let mut lease_changes = super::window_target::changes();
 
             loop {
                 // Biased: a client stream already waiting is heard before the
@@ -1983,6 +2171,11 @@ impl StreamingServer {
                                         // Parse as binary InputPacket
                                         match InputPacket::decode(&data) {
                                             Ok(packet) => {
+                                                if let InputPacket::MouseMoveAbs { x_norm, .. } =
+                                                    &packet
+                                                {
+                                                    super::latency_trace::input(*x_norm);
+                                                }
                                                 // The client's measurements are
                                                 // control-plane: they never reach
                                                 // the injector and are not blocked
@@ -2016,12 +2209,26 @@ impl StreamingServer {
                                                 // drive the capture-region/encoder
                                                 // resolution, don't inject input.
                                                 if matches!(packet, InputPacket::WindowCrop { .. }) {
+                                                    // A lent window is the picture: the
+                                                    // client's own pick does not change it.
+                                                    if window_guard.is_some() {
+                                                        continue;
+                                                    }
                                                     let rect = packet.crop_rect();
                                                     let addr = packet.window_handle().unwrap_or(0);
                                                     info!(?rect, addr, "Client set window crop");
                                                     cropped = rect.is_some();
                                                     let _ = monitor_crop_tx.send(rect);
                                                     let _ = monitor_window_tx.send(addr);
+                                                    continue;
+                                                }
+                                                // The viewer asks for the pointer's
+                                                // places (local cursor): control-
+                                                // plane, never injected.
+                                                if let InputPacket::CursorTrack { on } = packet {
+                                                    if let Some(feed) = &monitor_cursor {
+                                                        feed.set_tracking(on);
+                                                    }
                                                     continue;
                                                 }
                                                 // View-only is server-enforced input
@@ -2067,8 +2274,10 @@ impl StreamingServer {
                                                         *enabled,
                                                         monitor_view_only.load(Ordering::Relaxed),
                                                     );
-                                                    // F5: no mic permission, no relay.
+                                                    // F5: no mic permission, no relay; a
+                                                    // lent window has no mic to give.
                                                     if allow_mic
+                                                        && window_guard.is_none()
                                                         && !held_back
                                                         && let Some(tx) = &monitor_mic_tx
                                                         && tx.try_send(packet).is_err()
@@ -2081,6 +2290,25 @@ impl StreamingServer {
                                                     || monitor_view_only.load(Ordering::Relaxed)
                                                 {
                                                     debug!("View-only: dropping input packet");
+                                                    continue;
+                                                }
+                                                // A session of a window lent to another
+                                                // computer sends only what lands in that
+                                                // window, while it is lent to this device
+                                                // (`window_guard`); nothing is remapped
+                                                // as a monitor's input is.
+                                                if let Some(guard) = window_guard.as_mut() {
+                                                    let out = guard.admit(packet, Instant::now());
+                                                    if let Some(tx) = &input_tx {
+                                                        for packet in out.send {
+                                                            let _ = tx.send((live_id, packet));
+                                                        }
+                                                    }
+                                                    if out.end {
+                                                        info!("The lent window is not lent to this session any more; ending it");
+                                                        conn_for_monitor.close(0u32, b"window no longer lent");
+                                                        break;
+                                                    }
                                                     continue;
                                                 }
                                                 let packet = match packet {
@@ -2130,7 +2358,28 @@ impl StreamingServer {
                         }
                     }
 
+                    // A window lent to this session given back, closed or lent
+                    // again: the registry says so as it changes, and the
+                    // session ends at once.
+                    _ = lease_changes.changed(), if window_guard.is_some() => {
+                        if let Some(guard) = window_guard.as_mut()
+                            && !guard.still_lent()
+                        {
+                            info!("The lent window is not lent to this session any more; ending it");
+                            conn_for_monitor.close(0u32, b"window no longer lent");
+                            break;
+                        }
+                    }
+
                     _ = silence_check.tick() => {
+                        // Looked at on the slow tick too, whatever the registry said.
+                        if let Some(guard) = window_guard.as_mut()
+                            && !guard.still_lent()
+                        {
+                            info!("The lent window is not lent to this session any more; ending it");
+                            conn_for_monitor.close(0u32, b"window no longer lent");
+                            break;
+                        }
                         if client_went_silent(last_heard.elapsed()) {
                             warn!(
                                 silent_s = last_heard.elapsed().as_secs(),
@@ -2139,6 +2388,16 @@ impl StreamingServer {
                             conn_for_monitor.close(0u32, b"phone went silent");
                             break;
                         }
+                    }
+                }
+            }
+            // Whatever the session held down (a key, a button, the pen) is let
+            // go as it ends, so nothing is left pressed in the owner's desktop.
+            if let Some(guard) = window_guard.as_mut() {
+                let letting_go = guard.finish();
+                if let Some(tx) = &input_tx {
+                    for packet in letting_go {
+                        let _ = tx.send((live_id, packet));
                     }
                 }
             }
@@ -2461,9 +2720,13 @@ async fn read_client_config(
             if let Some(codec) = negotiate_codec(caps[0], hevc_allowed, config.codec) {
                 config.codec = codec;
             }
+            claim.no_idle_repeats = wants_no_idle_repeats(caps[0]);
+            claim.local_cursor = wants_local_cursor(caps[0]);
             info!(
                 caps = caps[0],
                 codec = config.codec.display_name(),
+                no_idle_repeats = claim.no_idle_repeats,
+                local_cursor = claim.local_cursor,
                 "Client codec caps negotiated"
             );
         } else if marker == SESSION_MODE_MARKER {
@@ -2513,6 +2776,43 @@ fn webcam_refusal(allowed: bool, offered: bool) -> Option<&'static [u8]> {
     }
 }
 
+/// The lease a session may hold on the window lent under `index` (window
+/// handoff, phase 5), or the reason it is refused. The window is for the
+/// device it was lent to alone: `device` is the id the session gate judged
+/// (so `gated` must be true: with no gate it is only a claim), and the lookup
+/// (`window_target::lease_for`) compares it with the device in the
+/// registration. Every refusal says the same words, so a device learns
+/// nothing of windows lent to others.
+fn window_session_lease(
+    index: u32,
+    gated: bool,
+    device: Option<&str>,
+    lookup: impl Fn(
+        u32,
+        Option<&str>,
+    ) -> Result<super::window_target::Lease, super::window_target::Refusal>,
+) -> Result<super::window_target::Lease, &'static [u8]> {
+    const REFUSED: &[u8] = b"that window is not lent to this device";
+    if !gated {
+        return Err(REFUSED);
+    }
+    lookup(index, device).map_err(|_| REFUSED)
+}
+
+/// Whether the client's capability bits say it needs no idle repeats of a
+/// screen that has not changed (another computer's window). Bits an older
+/// client never sets read as no, so a phone gets the repeats as before.
+fn wants_no_idle_repeats(caps: u8) -> bool {
+    caps & super::client::CODEC_CAP_NO_IDLE_REPEATS != 0
+}
+
+/// Whether the client's capability bits say it draws the other computer's
+/// pointer itself (local cursor). Bits an older client never sets read as
+/// no, so a phone keeps the pointer in the picture.
+fn wants_local_cursor(caps: u8) -> bool {
+    caps & super::client::CODEC_CAP_LOCAL_CURSOR != 0
+}
+
 /// R4 C1: pick the session codec from the client's capability bits and the
 /// server's policy. Pure so the negotiation is unit-testable without a
 /// pipeline. Returns `None` to keep the current config codec (H.264 default).
@@ -2550,6 +2850,95 @@ async fn send_cast_control(connection: &SharedConnection, batch: &[u8]) {
             let _ = stream.finish();
         }
         Err(e) => debug!(error = %e, "Could not send control to the phone"),
+    }
+}
+
+/// How a pointer message went.
+enum CursorSent {
+    Yes,
+    /// The stream opened but the write failed: the viewer may not have it.
+    Failed,
+    /// The connection is gone.
+    Gone,
+}
+
+/// One pointer message on a stream of its own (local cursor): the header
+/// numbers it, so the viewer drops one that arrives after a newer.
+async fn send_cursor_message(
+    connection: &SharedConnection,
+    sequence: u64,
+    message: &crate::protocol::cursor::CursorMessage,
+) -> CursorSent {
+    let header = super::transport::PacketHeader {
+        sequence,
+        stream_kind: super::transport::STREAM_KIND_CURSOR,
+        is_keyframe: false,
+        timestamp_us: 0,
+    };
+    let Ok(mut stream) = connection.open_uni().await else {
+        return CursorSent::Gone;
+    };
+    let sent = async {
+        stream.write_all(&header.as_bytes()).await?;
+        stream.write_all(&message.encode()).await
+    }
+    .await;
+    let _ = stream.finish();
+    match sent {
+        Ok(()) => CursorSent::Yes,
+        Err(e) => {
+            debug!(error = %e, "Could not send the pointer to the viewer");
+            CursorSent::Failed
+        }
+    }
+}
+
+/// The pointer to a viewer that draws it (local cursor): the mode first
+/// (whether the picture has the pointer taken out), then, while it has, the
+/// shape, whether it shows, and, while the viewer asked, where it is, each
+/// as it changes. A mode that changes later (the capture lost the pointer
+/// capture, a window's picture has it drawn in) is said at once. A message
+/// may be lost, so the whole of it is said again every
+/// [`REFRESH_EVERY`](super::cursor_feed::REFRESH_EVERY) once it was ever
+/// apart, and at once after a write that failed. Ends with the session.
+async fn run_cursor_sender(
+    connection: SharedConnection,
+    feed: super::cursor_feed::CursorFeed,
+    cancel: CancellationToken,
+) {
+    use super::cursor_feed::{PLACE_EVERY, REFRESH_EVERY, RETRY_AFTER, Sender};
+    use crate::protocol::cursor::CursorMessage;
+    let mut sender = Sender::default();
+    let mut refresh_at = tokio::time::Instant::now() + REFRESH_EVERY;
+    loop {
+        let now = tokio::time::Instant::now();
+        let refresh = now >= refresh_at;
+        if refresh {
+            refresh_at = now + REFRESH_EVERY;
+        }
+        let mut moved = false;
+        for (sequence, message) in sender.step(&feed, refresh) {
+            moved |= matches!(message, CursorMessage::Move { .. });
+            match send_cursor_message(&connection, sequence, &message).await {
+                CursorSent::Yes => {}
+                CursorSent::Failed => {
+                    sender.lost();
+                    refresh_at = refresh_at.min(tokio::time::Instant::now() + RETRY_AFTER);
+                }
+                CursorSent::Gone => return,
+            }
+        }
+        if moved {
+            tokio::select! {
+                _ = cancel.cancelled() => return,
+                _ = tokio::time::sleep(PLACE_EVERY) => {}
+            }
+        }
+        tokio::select! {
+            _ = cancel.cancelled() => return,
+            _ = feed.changed() => {}
+            _ = tokio::time::sleep_until(refresh_at) => {}
+        }
     }
 }
 
@@ -3197,6 +3586,256 @@ mod tests {
         assert_eq!(config.monitor_index, 2);
         assert_eq!(config.codec, VideoCodec::H265);
         assert!(!claim.input_only);
+        assert!(!claim.no_idle_repeats, "a phone's caps: repeats go on");
+    }
+
+    /// Another computer's window says it needs no idle repeats in its codec
+    /// caps, with no stream of its own; the host reads it beside HEVC.
+    #[tokio::test]
+    async fn a_computers_window_says_it_needs_no_idle_repeats_over_loopback() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        use super::super::client::{CODEC_CAP_HEVC, CODEC_CAP_NO_IDLE_REPEATS, StreamingClient};
+
+        let certs = std::sync::Arc::new(CertManager::new().expect("certs"));
+        let alpn = vec![StreamTransportConfig::default().alpn];
+        let server_endpoint = quinn::Endpoint::server(
+            certs.server_config(alpn.clone()).expect("server config"),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .expect("bind");
+        let addr = server_endpoint.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let incoming = server_endpoint.accept().await.expect("incoming");
+            QuinnConnection::shared(incoming.await.expect("accept"))
+        });
+
+        let (_client, _frames, _audio) = StreamingClient::connect(
+            &addr.to_string(),
+            certs,
+            Some(0),
+            Some("device-pc"),
+            None,
+            Some(CODEC_CAP_HEVC | CODEC_CAP_NO_IDLE_REPEATS),
+            super::super::client::SessionMode::Screen,
+        )
+        .await
+        .expect("connect");
+
+        let server_conn = accept.await.expect("accept task");
+        let mut config = StreamingConfig::default();
+        let claim = read_client_config(&server_conn, &mut config, true).await;
+
+        assert!(claim.no_idle_repeats);
+        assert_eq!(config.codec, VideoCodec::H265, "HEVC read beside it");
+        assert!(!claim.input_only);
+    }
+
+    /// Local cursor: a viewer that draws the other computer's pointer says
+    /// so in its codec caps; the host sends the pointer's messages on
+    /// streams of their own and the viewer's inbox takes them in order, with
+    /// the picture's receive loop never taking them for a frame.
+    #[tokio::test]
+    async fn a_viewer_that_draws_the_pointer_is_sent_it_apart_from_the_picture() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        use super::super::client::{CODEC_CAP_LOCAL_CURSOR, StreamingClient};
+        use super::super::cursor_feed::CursorFeed;
+        use crate::protocol::cursor::{CursorMessage, CursorShape, CursorState};
+
+        let certs = std::sync::Arc::new(CertManager::new().expect("certs"));
+        let alpn = vec![StreamTransportConfig::default().alpn];
+        let server_endpoint = quinn::Endpoint::server(
+            certs.server_config(alpn.clone()).expect("server config"),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .expect("bind");
+        let addr = server_endpoint.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let incoming = server_endpoint.accept().await.expect("incoming");
+            QuinnConnection::shared(incoming.await.expect("accept"))
+        });
+        let (mut client, mut frames, _audio) = StreamingClient::connect(
+            &addr.to_string(),
+            certs,
+            Some(0),
+            Some("device-pc"),
+            None,
+            Some(CODEC_CAP_LOCAL_CURSOR),
+            super::super::client::SessionMode::Screen,
+        )
+        .await
+        .expect("connect");
+        let inbox = client.remote().cursor;
+        assert!(inbox.wanted());
+        tokio::spawn(async move { client.start().await });
+
+        let server_conn = accept.await.expect("accept task");
+        let mut config = StreamingConfig::default();
+        let claim = read_client_config(&server_conn, &mut config, true).await;
+        assert!(claim.local_cursor);
+
+        let feed = CursorFeed::new();
+        feed.set_separate(true);
+        feed.set_shape(CursorShape::new(2, 2, 1, 1, vec![9; 16]).unwrap());
+        let cancel = CancellationToken::new();
+        tokio::spawn(run_cursor_sender(
+            server_conn.clone(),
+            feed.clone(),
+            cancel.clone(),
+        ));
+        let mut got = Vec::new();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while got.len() < 3 && tokio::time::Instant::now() < deadline {
+            let _ = tokio::time::timeout(Duration::from_millis(200), inbox.arrived()).await;
+            got.extend(inbox.drain());
+        }
+        assert_eq!(got[0], CursorMessage::Mode { separate: true }, "first");
+        assert!(
+            got.iter()
+                .any(|m| matches!(m, CursorMessage::Shape(s) if s.hot_x == 1))
+        );
+        assert!(got.contains(&CursorMessage::Visible(true)));
+        assert!(
+            !got.iter().any(|m| matches!(m, CursorMessage::Move { .. })),
+            "no places unasked"
+        );
+
+        // Asked for places, the newest comes; the picture's stream saw none
+        // of it.
+        feed.set_tracking(true);
+        feed.set_place(100, 200);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let mut moved = false;
+        while !moved && tokio::time::Instant::now() < deadline {
+            let _ = tokio::time::timeout(Duration::from_millis(200), inbox.arrived()).await;
+            moved = inbox
+                .drain()
+                .contains(&CursorMessage::Move { x: 100, y: 200 });
+        }
+        assert!(moved, "a place, once asked for");
+        assert!(
+            frames.try_recv().is_err(),
+            "a pointer message is never a frame"
+        );
+
+        // Nothing changes, and the host still says the whole pointer again
+        // (a message may have been lost on the way): the mode, the shape
+        // that is current, whether it shows.
+        inbox.drain();
+        let mut again = Vec::new();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(6);
+        while again.len() < 3 && tokio::time::Instant::now() < deadline {
+            let _ = tokio::time::timeout(Duration::from_millis(200), inbox.arrived()).await;
+            again.extend(inbox.drain());
+        }
+        assert_eq!(again.first(), Some(&CursorMessage::Mode { separate: true }));
+        assert!(
+            again
+                .iter()
+                .any(|m| matches!(m, CursorMessage::Shape(s) if s.hot_x == 1)),
+            "the shape whole again: {again:?}"
+        );
+        assert!(again.contains(&CursorMessage::Visible(true)));
+
+        // The capture gives the pointer up: the viewer is told at once,
+        // and forgets what it held.
+        feed.set_separate(false);
+        let mut state = CursorState::default();
+        state.apply(CursorMessage::Mode { separate: true });
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let mut told = false;
+        while !told && tokio::time::Instant::now() < deadline {
+            let _ = tokio::time::timeout(Duration::from_millis(200), inbox.arrived()).await;
+            for message in inbox.drain() {
+                told |= message == (CursorMessage::Mode { separate: false });
+                state.apply(message);
+            }
+        }
+        assert!(told, "the mode of no, said at once");
+        assert!(!state.separate && state.shape.is_none());
+        cancel.cancel();
+    }
+
+    /// A host that cannot take the pointer out of the picture still answers
+    /// a viewer that asked: `separate: false`, so it hides nothing.
+    #[tokio::test]
+    async fn a_host_that_keeps_the_pointer_in_the_picture_says_so_and_sends_no_more() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        use super::super::client::{CODEC_CAP_LOCAL_CURSOR, StreamingClient};
+        use super::super::cursor_feed::CursorFeed;
+        use crate::protocol::cursor::{CursorMessage, CursorState};
+
+        let certs = std::sync::Arc::new(CertManager::new().expect("certs"));
+        let alpn = vec![StreamTransportConfig::default().alpn];
+        let server_endpoint = quinn::Endpoint::server(
+            certs.server_config(alpn.clone()).expect("server config"),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .expect("bind");
+        let addr = server_endpoint.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let incoming = server_endpoint.accept().await.expect("incoming");
+            QuinnConnection::shared(incoming.await.expect("accept"))
+        });
+        let (mut client, _frames, _audio) = StreamingClient::connect(
+            &addr.to_string(),
+            certs,
+            Some(0),
+            Some("device-pc"),
+            None,
+            Some(CODEC_CAP_LOCAL_CURSOR),
+            super::super::client::SessionMode::Screen,
+        )
+        .await
+        .expect("connect");
+        let inbox = client.remote().cursor;
+        tokio::spawn(async move { client.start().await });
+        let server_conn = accept.await.expect("accept task");
+        let mut config = StreamingConfig::default();
+        read_client_config(&server_conn, &mut config, true).await;
+
+        let feed = CursorFeed::new();
+        let cancel = CancellationToken::new();
+        tokio::spawn(run_cursor_sender(server_conn.clone(), feed, cancel.clone()));
+        let mut state = CursorState::default();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let mut said = false;
+        while !said && tokio::time::Instant::now() < deadline {
+            let _ = tokio::time::timeout(Duration::from_millis(200), inbox.arrived()).await;
+            for message in inbox.drain() {
+                said |= message == (CursorMessage::Mode { separate: false });
+                state.apply(message);
+            }
+        }
+        assert!(said, "the answer");
+        assert!(!state.separate, "the viewer hides and draws nothing");
+        cancel.cancel();
+    }
+
+    /// A viewer that never said it draws the pointer does not read pointer
+    /// streams, and a host never sends them (old viewers keep the pointer in
+    /// the picture they always had).
+    #[test]
+    fn the_local_cursor_bit_is_a_bit_of_its_own_and_an_old_viewer_never_sets_it() {
+        use super::super::client::{
+            CODEC_CAP_HEVC, CODEC_CAP_LOCAL_CURSOR, CODEC_CAP_NO_IDLE_REPEATS,
+        };
+        assert!(!wants_local_cursor(0));
+        assert!(!wants_local_cursor(
+            CODEC_CAP_HEVC | CODEC_CAP_NO_IDLE_REPEATS
+        ));
+        assert!(wants_local_cursor(CODEC_CAP_LOCAL_CURSOR));
+        assert!(wants_local_cursor(CODEC_CAP_LOCAL_CURSOR | CODEC_CAP_HEVC));
+        assert_eq!(
+            CODEC_CAP_LOCAL_CURSOR & (CODEC_CAP_HEVC | CODEC_CAP_NO_IDLE_REPEATS),
+            0
+        );
+        // Not a codec, and not the idle repeats: the other negotiations
+        // ignore it.
+        assert_eq!(
+            negotiate_codec(CODEC_CAP_LOCAL_CURSOR, true, VideoCodec::H264),
+            None
+        );
+        assert!(!wants_no_idle_repeats(CODEC_CAP_LOCAL_CURSOR));
     }
 
     /// T10i: a remote says it is input only, and sends neither a monitor
@@ -3457,6 +4096,36 @@ mod tests {
     }
 
     #[test]
+    fn a_lent_window_is_for_the_device_it_was_lent_to_and_no_other() {
+        use super::super::window_target::{self, Identity};
+        let device = "window-session-owner";
+        let (lease, _) = window_target::register(0x7F01, device, Identity { pid: 5, tid: 6 }, None)
+            .expect("a free index");
+        let ask = |gated: bool, who: Option<&str>| {
+            window_session_lease(lease.index, gated, who, window_target::lease_for)
+        };
+        assert_eq!(ask(true, Some(device)), Ok(lease.clone()));
+        let refused = Err(&b"that window is not lent to this device"[..]);
+        // Another device, a device not known, and a server with no gate (the
+        // id is then a claim, nothing proved it).
+        assert_eq!(ask(true, Some("window-session-other")), refused);
+        assert_eq!(ask(true, None), refused);
+        assert_eq!(ask(true, Some("")), refused);
+        assert_eq!(ask(false, Some(device)), refused);
+        // After the window is given back nobody has it, the device it was lent
+        // to included, and the words are the same.
+        window_target::unregister(&lease);
+        assert_eq!(ask(true, Some(device)), refused);
+    }
+
+    #[test]
+    fn a_session_for_a_lent_window_places_nothing_as_a_monitors_input_is() {
+        let (mut source, lands) = PointerSource::start(super::super::window_target::FIRST_INDEX);
+        assert!(!lands);
+        assert_eq!(source.remap(7, 9), (7, 9), "never remapped as a monitor");
+    }
+
+    #[test]
     fn a_pen_is_offered_only_to_a_phone_whose_input_is_taken() {
         use super::super::client::{SCREEN_FEATURE_PEN, screen_features};
         assert_eq!(
@@ -3642,7 +4311,27 @@ mod tests {
         );
         // A server already configured for H.265 is untouched; unknown future
         // capability bits alone must not change anything.
-        assert_eq!(negotiate_codec(0b10, true, VideoCodec::H265), None);
-        assert_eq!(negotiate_codec(0b10, true, VideoCodec::H264), None);
+        assert_eq!(negotiate_codec(0b1000, true, VideoCodec::H265), None);
+        assert_eq!(negotiate_codec(0b1000, true, VideoCodec::H264), None);
+    }
+
+    /// The no-idle-repeats bit rides beside the HEVC bit without changing
+    /// the codec negotiated, and an absent bit is the old behaviour.
+    #[test]
+    fn the_no_idle_repeats_bit_is_read_beside_the_codec_bits() {
+        use super::super::client::{CODEC_CAP_HEVC, CODEC_CAP_NO_IDLE_REPEATS};
+        let still = CODEC_CAP_NO_IDLE_REPEATS;
+        let both = CODEC_CAP_HEVC | still;
+        assert_ne!(CODEC_CAP_HEVC, still, "a bit of its own");
+        assert!(!wants_no_idle_repeats(0), "absent: the repeats go on");
+        assert!(!wants_no_idle_repeats(CODEC_CAP_HEVC), "a phone's caps");
+        assert!(wants_no_idle_repeats(still));
+        assert!(wants_no_idle_repeats(both));
+        // Not a codec: the negotiation ignores it.
+        assert_eq!(negotiate_codec(still, true, VideoCodec::H264), None);
+        assert_eq!(
+            negotiate_codec(both, true, VideoCodec::H264),
+            Some(VideoCodec::H265)
+        );
     }
 }

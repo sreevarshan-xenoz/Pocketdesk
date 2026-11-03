@@ -137,6 +137,12 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     ("video_quality", "Video quality", Section::Phones),
     ("allow_hevc", "H.265 (HEVC)", Section::Phones),
     ("slow_link_frame_rate", "Slow links", Section::Phones),
+    ("smooth_keyframes", "Smooth keyframes", Section::Phones),
+    (
+        "capture_copy",
+        "Copy the screen through memory",
+        Section::Phones,
+    ),
     (
         "laser_pointer",
         "Laser pointer from phones",
@@ -436,6 +442,26 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "lend_windows",
+        "Let my computers borrow my windows",
+        Section::Computers,
+    ),
+    (
+        "borrowed_window_follows_size",
+        "Borrowed windows take the size of their window here",
+        Section::Computers,
+    ),
+    (
+        "drag_windows_across",
+        "Drag windows to my other computers",
+        Section::Computers,
+    ),
+    (
+        "drag_window_trigger",
+        "What starts a window drag across the edge",
+        Section::Computers,
+    ),
+    (
         "computer_view_quality",
         "Quality of a computer's screen here",
         Section::Computers,
@@ -472,6 +498,16 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "computer_view_no_idle_repeats",
+        "Send nothing while the other screen is still",
+        Section::Computers,
+    ),
+    (
+        "computer_view_local_cursor",
+        "Draw the other computer's pointer here",
+        Section::Computers,
+    ),
+    (
         "computer_view_lock_on_close",
         "Lock it when I close the window",
         Section::Computers,
@@ -487,6 +523,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     ("smooth_scrolling", "Smooth scrolling", Section::Computers),
+    (
+        "display_no_vsync",
+        "Show pictures without waiting for the display",
+        Section::Computers,
+    ),
     (
         "computer_view_mic_device",
         "Microphone for computer windows",
@@ -642,6 +683,14 @@ fn drawn_in(key: &str) -> &str {
     }
 }
 
+/// What starts a window drag across the edge, as the page names it.
+pub fn drag_trigger_label(name: &str) -> &'static str {
+    match name {
+        "any" => "Any left-button drag",
+        _ => "Super or Alt held with the button",
+    }
+}
+
 /// A computer's window's quality, as the page names it (BK7).
 pub fn computer_quality_label(name: &str) -> &'static str {
     match name {
@@ -657,6 +706,10 @@ pub fn computer_quality_label(name: &str) -> &'static str {
 pub(crate) fn drawn_here(key: &str) -> bool {
     match key {
         "remember_screen_grant" | "gnome_unattended" => cfg!(target_os = "linux"),
+        // Window handoff, phase 4: the window dragged is this computer's own,
+        // lent through Sway's or Hyprland's compositor, and the drag is seen
+        // by Linux's input capture.
+        "drag_windows_across" | "drag_window_trigger" => cfg!(target_os = "linux"),
         // The direct link is made on Linux (NetworkManager) and on Windows
         // (the Mobile Hotspot).
         "direct_link" | "direct_link_band" | "direct_link_idle_minutes" => {
@@ -784,6 +837,14 @@ pub fn applies_live(key: &str) -> bool {
             | "remote_revoke"
             // Ecosystem phase 4: read by the server at each introduction.
             | "computer_introductions"
+            // Window handoff 3a: read by the server at each ask.
+            | "lend_windows"
+            // Read by an open borrowed window at once.
+            | "borrowed_window_follows_size"
+            // Window handoff 4: read by the shared keyboard and mouse's loop
+            // within a couple of seconds.
+            | "drag_windows_across"
+            | "drag_window_trigger"
             // BK7: read by this app as a computer's window opens.
             | "computer_view_quality"
             | "computer_view_only"
@@ -796,6 +857,10 @@ pub fn applies_live(key: &str) -> bool {
             // view dials.
             | "computer_view_hw_decode"
             | "computer_view_hevc"
+            // Read by the server as each view dials.
+            | "computer_view_no_idle_repeats"
+            // Read as each view starts.
+            | "computer_view_local_cursor"
             // PC8: read by an open window at once.
             | "computer_view_lock_on_close"
             // Item 8: read as a window starts showing a computer.
@@ -1028,6 +1093,11 @@ impl SettingsForm {
     /// Whether a computer's screen window shows its stats, as saved.
     pub fn saved_computer_view_stats(&self) -> bool {
         self.saved.computer_view_stats
+    }
+
+    /// Whether a borrowed window takes the size of its window here, as saved.
+    pub fn saved_borrowed_window_follows_size(&self) -> bool {
+        self.saved.borrowed_window_follows_size
     }
 
     /// The screen window's Stats switch saved `computer_view_stats` (PC2):
@@ -1478,6 +1548,34 @@ impl SettingsForm {
                     ui.checkbox(
                         &mut e.slow_link_frame_rate,
                         "lower the frame rate to keep the picture moving",
+                    );
+                });
+                row(ui, "smooth_keyframes", |ui| {
+                    ui.checkbox(
+                        &mut e.smooth_keyframes,
+                        "no whole picture every two seconds: fewer hitches in the video",
+                    )
+                    .on_hover_text(
+                        "A whole picture (a keyframe) is several times the size of any other \
+                         frame, so it arrives a little late, every two seconds. With this on, \
+                         the encoders that can (the software one, NVIDIA's on Windows) spread \
+                         it over the stream; the rest send one every ten seconds. A viewer that \
+                         loses a frame still gets a whole picture at once. Read when the \
+                         server starts.",
+                    );
+                });
+                row(ui, "capture_copy", |ui| {
+                    ui.checkbox(
+                        &mut e.capture_copy,
+                        "copy the screen through memory instead of the graphics card",
+                    )
+                    .on_hover_text(
+                        "On a Linux desktop built on wlroots (Sway, Hyprland), or GNOME or KDE \
+                         through PipeWire, with a graphics card that does video, the screen is \
+                         rendered into a buffer on the card and encoded from there, with no copy \
+                         through memory. Turn this on to copy it through memory as before, if \
+                         the picture ever misbehaves with your card or driver. Read when the \
+                         server starts.",
                     );
                 });
                 row(ui, "laser_pointer", |ui| {
@@ -2729,6 +2827,63 @@ impl SettingsForm {
                         "A phone paired with your other computer's own code can pair here too, once you say yes on the phone: it gets this computer's usual permissions, never more than it has there. Only your computers paired both ways can ask. Removing the phone on one computer removes it on the other.",
                     );
                 });
+                // Window handoff, phase 3a: a computer paired both ways
+                // moves one of this computer's windows onto a hidden screen
+                // and shows it there.
+                row(ui, "lend_windows", |ui| {
+                    ui.checkbox(&mut e.lend_windows, name("lend_windows"));
+                    note(
+                        ui,
+                        "A computer of yours paired both ways, with Input allowed, can see which windows are open here (their titles too) and move one of them (Sway, Hyprland) to a hidden screen of its own size and show it there. The program keeps running here; the window leaves your screen until it is returned, the other computer goes away, the window is closed or this server stops. On GNOME the window stays where it is and the other computer only looks at it (it needs \u{201c}Unattended on GNOME\u{201d} on, and GNOME Shell must give a program its window list, which a stock one does not). On Windows no window moves: it stays where it is on your screen, is brought to the front and used with this computer\u{2019}s own pointer and keyboard by the other computer, may be resized to the window that shows it (not if it is maximised), and is put back as it was when it is returned. Turning this off puts every window lent back at once, and nothing is listed or lent.",
+                    );
+                });
+                // The window handoff's resize: a borrowed window here takes the
+                // size of its window.
+                row(ui, "borrowed_window_follows_size", |ui| {
+                    ui.checkbox(
+                        &mut e.borrowed_window_follows_size,
+                        name("borrowed_window_follows_size"),
+                    );
+                    note(
+                        ui,
+                        "A window you borrowed from another of your computers (\u{201c}Borrow a window\u{2026}\u{201d}) is given the size of the window that shows it here: resize it, maximise it or move it to a screen of another scale and, a moment after it stops changing, the other computer sizes the window to the picture area in real pixels, so the picture stays sharp instead of scaled. Until the new size is in, the old picture is scaled to fit. Off, the window keeps the size it was lent at and the picture is scaled. It needs this version on the other computer too (an older one lends the window as it is). Applies at once.",
+                    );
+                });
+                // Window handoff, phase 4: a window dragged past the edge the
+                // shared keyboard and mouse crosses goes to the other computer.
+                if drawn_here("drag_windows_across") {
+                    row(ui, "drag_windows_across", |ui| {
+                        ui.checkbox(&mut e.drag_windows_across, name("drag_windows_across"));
+                        note(
+                            ui,
+                            "With the shared keyboard and mouse on, drag a floating window to the screen's edge that leads to another of your computers and let go there: the window is lent to that computer and opens in a window of its own where you let go (Sway, Hyprland). Drag it back over the edge and it returns here, as long as its window there has the focus. It needs \u{201c}Let my computers borrow my windows\u{201d} on here, this switch on at the other computer too (it is the one that opens the window), and that computer paired both ways with Input allowed, and it does nothing to a Windows computer yet. Tiled and full-screen windows are never taken. Read within a couple of seconds.",
+                        );
+                    });
+                }
+                if drawn_here("drag_window_trigger") {
+                    row(ui, "drag_window_trigger", |ui| {
+                        let named = e.drag_window_trigger.trim().to_ascii_lowercase();
+                        egui::ComboBox::from_id_salt("drag-window-trigger")
+                            .selected_text(drag_trigger_label(&named))
+                            .show_ui(ui, |ui| {
+                                for choice in ["mod", "any"] {
+                                    if ui
+                                        .selectable_label(
+                                            named == choice,
+                                            drag_trigger_label(choice),
+                                        )
+                                        .clicked()
+                                    {
+                                        e.drag_window_trigger = choice.to_string();
+                                    }
+                                }
+                            });
+                        note(
+                            ui,
+                            "Super or Alt held with the left button (the keys the compositor moves a window with) keeps a text selection or a file drag from taking a window. Any left-button drag also takes a drag by the title bar, and a selection made inside a floating window that reaches the edge.",
+                        );
+                    });
+                }
                 // BK7: "Show its screen" is on each computer's line below.
                 row(ui, "computer_view_quality", |ui| {
                     let named = e.computer_view_quality.trim().to_ascii_lowercase();
@@ -2810,6 +2965,28 @@ impl SettingsForm {
                         "HEVC usually needs less bitrate for a moving picture, which helps most over the internet. Only with decoding on the graphics card on too: on the processor HEVC is slower than H.264. The other computer sends it only with H.265 (HEVC) on there, in its Settings under Phones (allow_hevc). Applies from the next view.",
                     );
                 });
+                // Phase 1a of the window handoff: a still screen sends nothing.
+                row(ui, "computer_view_no_idle_repeats", |ui| {
+                    ui.checkbox(
+                        &mut e.computer_view_no_idle_repeats,
+                        "send nothing while the other screen is still: a computer's screen window keeps its last picture, and the other computer stops repeating a screen that does not change",
+                    );
+                    note(
+                        ui,
+                        "Saves bandwidth and decoding, most over the internet or on a battery. A change on that screen shows at once. Turn it off if a still picture ever goes stale or grey; the other computer then repeats it once a second, as before. It needs this version on the other computer too (an older one repeats anyway), and a phone is not affected. Applies from the next view.",
+                    );
+                });
+                // The window handoff's local cursor.
+                row(ui, "computer_view_local_cursor", |ui| {
+                    ui.checkbox(
+                        &mut e.computer_view_local_cursor,
+                        "draw the other computer's pointer here: it is shown as this computer's own pointer, so it moves with no wait for the picture",
+                    );
+                    note(
+                        ui,
+                        "The other computer takes its pointer out of the picture and sends its shape (an arrow, a text cursor, a hand) apart, on a Sway or Hyprland desktop, or GNOME and KDE through screen sharing; where it cannot (Windows, an X session, or a version before this one) the pointer stays in the picture as before, and nothing is hidden. With your pointer locked to the window, the other computer's is drawn where that one says it is. Off, the pointer stays as the picture has it. Applies from the next view.",
+                    );
+                });
                 row(ui, "computer_view_lock_on_close", |ui| {
                     ui.checkbox(
                         &mut e.computer_view_lock_on_close,
@@ -2851,6 +3028,17 @@ impl SettingsForm {
                     note(
                         ui,
                         "That computer scrolls by it as finely as it can, so a slow two-finger scroll moves a little at a time instead of a notch at a time. Off, the window sends what it sent before this setting came. A computer older than this gets whole notches either way. The phone has its own switch.",
+                    );
+                });
+                // Window handoff 1d: the swap does not wait for the display.
+                row(ui, "display_no_vsync", |ui| {
+                    ui.checkbox(
+                        &mut e.display_no_vsync,
+                        "show pictures without waiting for the display: a computer's screen in a window comes about a frame sooner",
+                    );
+                    note(
+                        ui,
+                        "Off, a picture waits for the display's next refresh before it is drawn, which never tears. On, it is drawn at once: on X11 and Windows a picture can tear, and no window draws more than twice the display's refresh a second, so an animation does not run flat out. On Wayland this changes nothing: the app never waits for the display there (a window the compositor is not showing gets no signal, and waiting would stop every window of the app), and the compositor shows whole frames. Applies after the app restarts.",
                     );
                 });
                 // PC10: the microphone "Send my mic" sends.
@@ -3652,12 +3840,25 @@ mod tests {
         assert!(drawn_here(key));
     }
 
+    /// Window handoff 1d: showing pictures without waiting for the display is
+    /// with the computers, and the app reads it as it starts.
+    #[test]
+    fn showing_pictures_without_waiting_for_the_display_waits_for_a_restart() {
+        let key = "display_no_vsync";
+        assert!(SETTINGS.iter().any(|(k, n, s)| *k == key
+            && *n == "Show pictures without waiting for the display"
+            && *s == Section::Computers));
+        assert!(!applies_live(key));
+        assert!(drawn_here(key));
+    }
+
     /// BK7: a computer's window's quality and view-only start are with the
     /// other computers, apply as the next window opens, and name the
     /// phone's presets.
     #[test]
     fn a_computers_window_settings_are_with_the_computers() {
         for key in [
+            "borrowed_window_follows_size",
             "computer_view_quality",
             "computer_view_only",
             "computer_view_stats",
@@ -3665,6 +3866,8 @@ mod tests {
             "computer_view_grab_keys",
             "computer_view_hw_decode",
             "computer_view_hevc",
+            "computer_view_no_idle_repeats",
+            "computer_view_local_cursor",
             "computer_view_lock_on_close",
             "computer_view_fit",
             "computer_view_scancodes",

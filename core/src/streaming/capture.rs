@@ -26,6 +26,11 @@ pub struct CaptureSession {
     /// Turns true once this session's input is found refused (the portal's
     /// or mutter's "not allowed"); only a capture that carries input has it.
     input_refused: Option<tokio::sync::watch::Receiver<bool>>,
+    /// While true the capture may hand the encoder DMA-BUFs (frames still on
+    /// the card) instead of copies in memory; the streamer sets it false for
+    /// good when its encoder or a crop needs the pixels. Only the wlroots
+    /// capture has one.
+    zero_copy: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl CaptureSession {
@@ -36,7 +41,23 @@ impl CaptureSession {
             config,
             cancel,
             input_refused: None,
+            zero_copy: None,
         }
+    }
+
+    /// Carry the switch that lets the capture send DMA-BUFs.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub(crate) fn with_zero_copy(
+        mut self,
+        switch: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
+        self.zero_copy = Some(switch);
+        self
+    }
+
+    /// The switch for the capture's DMA-BUFs, for a capture that has them.
+    pub fn zero_copy_switch(&self) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+        self.zero_copy.clone()
     }
 
     /// Carry the signal that this session's input is refused.
@@ -226,15 +247,40 @@ pub async fn start_capture_auto(
     window_mode: std::sync::Arc<std::sync::atomic::AtomicBool>,
     backend: CaptureBackend,
     screen_grant: Option<std::path::PathBuf>,
+    cursor: Option<super::cursor_feed::CursorFeed>,
+    window_lease: Option<super::window_target::Lease>,
 ) -> Result<CaptureSession> {
+    // Only Windows lends a window.
+    #[cfg(not(windows))]
+    let _ = &window_lease;
+    // An index past the monitors is a lent window, and only the session the
+    // window was lent to (its lease) captures it: never a monitor in its
+    // place, whatever the index, the config or a failure says.
+    if super::window_target::is_window_index(config.monitor_index) && window_lease.is_none() {
+        bail!("That window is not lent to this session");
+    }
+    // A window lent from a Linux compositor (window handoff, phase 6) is
+    // captured as that window alone through the compositor's own screen-cast
+    // and by nothing else: no backend below could show less than a whole
+    // monitor, and none is tried if it cannot start.
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(lease) = window_lease.as_ref().filter(|l| !l.native.is_empty()) {
+            return start_native_window_capture(config, frame_tx, cancel, lease.clone()).await;
+        }
+    }
     // Only the portal asks anyone; the other backends need no grant.
     #[cfg(not(target_os = "linux"))]
     let _ = &screen_grant;
+    // Only the Linux backends can take the pointer out of the picture so
+    // far; a feed the others never report to says the picture keeps it.
+    #[cfg(not(target_os = "linux"))]
+    let _ = &cursor;
     // A moving pattern instead of the screen (benches, throwaways).
     if super::test_pattern::wanted() {
         return Ok(super::test_pattern::start(config, frame_tx, cancel));
     }
-    let attempts = capture_attempts(backend, detect_display_server())?;
+    let attempts = capture_attempts_for(window_lease.is_some(), backend, detect_display_server())?;
     let mut last_err: Option<anyhow::Error> = None;
     for backend_tried in attempts {
         // Each attempt has a token of its own under the session's (R6g
@@ -242,6 +288,11 @@ pub async fn start_capture_auto(
         // the session's, so the next backend started already cancelled and
         // the fallback never worked.
         let attempt = cancel.child_token();
+        // Each backend says whether it takes the pointer out of the picture:
+        // what an attempt that failed said does not stand.
+        if let Some(feed) = &cursor {
+            feed.set_separate(false);
+        }
         let result = match backend_tried {
             CaptureBackend::Auto => continue,
             // window_rx/window_mode are cheap to clone (watch Receiver + Arc)
@@ -253,6 +304,7 @@ pub async fn start_capture_auto(
                 attempt.clone(),
                 window_rx.clone(),
                 window_mode.clone(),
+                cursor.clone(),
             ),
             #[cfg(target_os = "linux")]
             CaptureBackend::Portal => {
@@ -261,6 +313,7 @@ pub async fn start_capture_auto(
                     frame_tx.clone(),
                     attempt.clone(),
                     screen_grant.clone(),
+                    cursor.clone(),
                 )
                 .await
             }
@@ -281,6 +334,7 @@ pub async fn start_capture_auto(
                 attempt.clone(),
                 window_rx.clone(),
                 window_mode.clone(),
+                window_lease.clone(),
             ),
             #[cfg(windows)]
             CaptureBackend::Dxgi => super::capture_dxgi::start_dxgi_capture(
@@ -312,11 +366,56 @@ pub async fn start_capture_auto(
     Err(last_err.unwrap_or_else(|| anyhow::Error::msg("no capture backend available")))
 }
 
+/// Capture the window of a Linux compositor a session holds `lease` on (see
+/// `window_target::Lease::native`): GNOME's, through mutter's own
+/// `RecordWindow`, which is the "Unattended on GNOME" path and so needs its
+/// switch on and a GNOME session. Nothing falls back to a monitor or to the
+/// portal, whose picker would show the owner a dialog and let anything be
+/// chosen.
+#[cfg(target_os = "linux")]
+async fn start_native_window_capture(
+    config: StreamingConfig,
+    frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
+    cancel: CancellationToken,
+    lease: super::window_target::Lease,
+) -> Result<CaptureSession> {
+    if super::gnome_unattended::session_route() != super::gnome_unattended::Route::Mutter {
+        bail!(
+            "A lent window is captured through GNOME's own screen cast, which needs \"Unattended on GNOME\" on and a GNOME session"
+        );
+    }
+    let session =
+        super::capture_mutter::start_window_capture(config, frame_tx, cancel, lease).await?;
+    // The capture runs under the session's own token: one that dies once
+    // started cancels it, which ends the session.
+    info!("Capture started for a lent GNOME window");
+    Ok(session)
+}
+
 /// When a started capture's token is cancelled (it died, or the session is
 /// over), the session's is too.
 async fn end_session_with_capture(capture: CancellationToken, session: CancellationToken) {
     capture.cancelled().await;
     session.cancel();
+}
+
+/// [`capture_attempts`], for a session that may be bound to a window lent to
+/// another computer (`window_bound`, window handoff phase 5): that is captured
+/// as a window by Windows.Graphics.Capture and by nothing else, whatever the
+/// config pins and whatever fails, because every other backend would show a
+/// whole monitor.
+pub fn capture_attempts_for(
+    window_bound: bool,
+    backend: CaptureBackend,
+    detected: DisplayServer,
+) -> Result<Vec<CaptureBackend>> {
+    if window_bound {
+        return match detected {
+            DisplayServer::Windows => Ok(vec![CaptureBackend::Wgc]),
+            _ => bail!("A lent window can only be captured on Windows"),
+        };
+    }
+    capture_attempts(backend, detected)
 }
 
 /// Pure decision table: which backends to try, in order, for a configured
@@ -397,6 +496,7 @@ pub fn create_test_frame(width: u32, height: u32) -> VideoFrame {
         stride,
         timestamp: std::time::Instant::now(),
         gpu: None,
+        repeat: false,
     }
 }
 
@@ -451,6 +551,27 @@ mod tests {
         );
         // Headless: nothing to try.
         assert!(capture_attempts(CaptureBackend::Auto, DisplayServer::None).is_err());
+    }
+
+    #[test]
+    fn a_lent_window_is_captured_by_wgc_alone() {
+        use CaptureBackend::{Auto, Dxgi, Portal, Wgc};
+        // Whatever is configured, and whatever would follow it: no monitor
+        // backend, which would show the whole screen.
+        for pinned in [Auto, Wgc, Dxgi] {
+            assert_eq!(
+                capture_attempts_for(true, pinned, DisplayServer::Windows).unwrap(),
+                vec![Wgc]
+            );
+        }
+        // Off Windows there is no such capture, and nothing else stands in.
+        assert!(capture_attempts_for(true, Auto, DisplayServer::Wayland).is_err());
+        assert!(capture_attempts_for(true, Portal, DisplayServer::X11).is_err());
+        // A session bound to no window is as it was.
+        assert_eq!(
+            capture_attempts_for(false, Auto, DisplayServer::Windows).unwrap(),
+            vec![Wgc, Dxgi]
+        );
     }
 
     #[test]

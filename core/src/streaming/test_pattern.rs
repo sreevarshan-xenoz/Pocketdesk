@@ -8,25 +8,78 @@
 //! The picture is a still gradient with a bar that moves across it, a step
 //! each frame, and a strip of blocks counting the frame number in binary, so
 //! every frame differs and a dropped one can be told from the picture.
+//!
+//! With the variable at `probe` (the input-to-picture latency probe, see
+//! [`super::latency_probe`]) the picture's last rows are a dark band, kept
+//! clear of the bar and the strip, and a bright square in it at the last
+//! absolute pointer move a session sent; the server then injects none of its
+//! sessions' input.
 
 use std::time::{Duration, Instant};
 
 use tokio_util::sync::CancellationToken;
 
 use super::capture::CaptureSession;
+use super::latency_probe;
+use super::latency_trace;
 use super::latest_frame::FrameSender;
 use super::{StreamingConfig, VideoFrame};
 
 /// The seam's variable.
-pub const VAR: &str = "POCKETDESK_TEST_PATTERN";
+pub const VAR: &str = latency_probe::PATTERN_VAR;
+
+/// With this set (not empty, `0`, `false`, `off` or `no`) the background is
+/// a page of text over the gradient, so a keyframe has a desktop's worth of
+/// detail to code and the frames between only what moves: the bytes a
+/// keyframe adds to the stream are then as a real screen's, which the
+/// gradient's are not (it costs about what any frame does). For the
+/// keyframe measurements (`docs/status-history.md`); off, the pattern is as
+/// it was.
+pub const TEXT_VAR: &str = "POCKETDESK_TEST_PATTERN_TEXT";
+
+fn text_wanted() -> bool {
+    wanted_by(std::env::var_os(TEXT_VAR))
+}
+
+fn hash(mut x: u32) -> u32 {
+    x ^= x >> 16;
+    x = x.wrapping_mul(0x7feb_352d);
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x846c_a68b);
+    x ^ (x >> 16)
+}
+
+/// Dark glyph-like marks in rows of 9 by 16 pixel cells, a fifth of them
+/// spaces, over `data` (BGRA, `stride` bytes a row): the same every time.
+fn draw_text(data: &mut [u8], width: u32, height: u32, stride: u32) {
+    let (cell_w, cell_h) = (9u32, 16u32);
+    for row in 1..height / cell_h {
+        for col in 0..width / cell_w {
+            let glyph = hash(row * 1000 + col);
+            if glyph.is_multiple_of(5) {
+                continue;
+            }
+            for y in 0..10 {
+                for x in 0..6 {
+                    if !hash(glyph ^ (y * 8 + x)).is_multiple_of(3) {
+                        continue;
+                    }
+                    let px =
+                        ((row * cell_h + 3 + y) * stride + (col * cell_w + 1 + x) * 4) as usize;
+                    data[px..px + 3].copy_from_slice(&[30, 30, 30]);
+                }
+            }
+        }
+    }
+}
 
 /// How far the bar moves each frame, in pixels.
 const BAR_STEP: u32 = 8;
 /// The bar's width, in pixels.
 const BAR_WIDTH: u32 = 64;
 /// The counting strip: this many blocks of this many pixels.
-const COUNT_BITS: u32 = 16;
-const COUNT_BLOCK: u32 = 16;
+const COUNT_BITS: u32 = latency_probe::STRIP_BITS;
+const COUNT_BLOCK: u32 = latency_probe::STRIP_BLOCK;
 
 /// Whether the pattern stands in for the screen: the variable set to
 /// anything but empty, `0`, `false`, `off` or `no`.
@@ -49,6 +102,44 @@ pub fn frame(width: u32, height: u32, n: u64) -> VideoFrame {
     frame
 }
 
+/// Frame `n` as [`frame`], with the probe's band and, once a pointer is
+/// known (`pointer`: the last absolute move, `x_norm` and `y_norm`), its
+/// marker.
+pub fn frame_probe(width: u32, height: u32, n: u64, pointer: Option<(u16, u16)>) -> VideoFrame {
+    let mut frame = frame(width, height, n);
+    draw_probe(&mut frame, n, pointer);
+    frame
+}
+
+/// The probe's changes to frame `n`: the counting strip whole, over the bar
+/// (a stand-in viewer reads the frame number from every picture), the dark
+/// band over the picture's last rows (over the bar too), and the marker in
+/// it at `pointer`'s `x_norm`, white. The marker follows the pointer's
+/// column only; the band is where it moves.
+fn draw_probe(frame: &mut VideoFrame, n: u64, pointer: Option<(u16, u16)>) {
+    draw_strip(frame, n, None);
+    let (width, height, stride) = (frame.width, frame.height, frame.stride);
+    let dark = latency_probe::DARK;
+    for y in latency_probe::band_top(height)..height {
+        let row = (y * stride) as usize;
+        for x in 0..width {
+            let px = row + (x * 4) as usize;
+            frame.data[px..px + 4].copy_from_slice(&[dark, dark, dark, 255]);
+        }
+    }
+    if let Some((x_norm, _)) = pointer {
+        let left = latency_probe::marker_left(width, x_norm);
+        let top = latency_probe::marker_top(height);
+        for y in top..(top + latency_probe::SIZE).min(height) {
+            let row = (y * stride) as usize;
+            for x in left..(left + latency_probe::SIZE).min(width) {
+                let px = row + (x * 4) as usize;
+                frame.data[px..px + 4].copy_from_slice(&[255, 255, 255, 255]);
+            }
+        }
+    }
+}
+
 /// The still gradient every frame starts from.
 fn background(width: u32, height: u32) -> VideoFrame {
     let width = (width.max(64) + 1) & !1;
@@ -63,6 +154,9 @@ fn background(width: u32, height: u32) -> VideoFrame {
             data[px..px + 4].copy_from_slice(&[b, g, r, 255]);
         }
     }
+    if text_wanted() {
+        draw_text(&mut data, width, height, stride);
+    }
     VideoFrame {
         data,
         width,
@@ -70,6 +164,7 @@ fn background(width: u32, height: u32) -> VideoFrame {
         stride,
         timestamp: Instant::now(),
         gpu: None,
+        repeat: false,
     }
 }
 
@@ -88,10 +183,18 @@ fn draw(frame: &mut VideoFrame, n: u64) {
             frame.data[px..px + 4].copy_from_slice(&[255, 255, 255, 255]);
         }
     }
+    draw_strip(frame, n, Some(bar_start..bar_end));
+    frame.timestamp = Instant::now();
+}
+
+/// Frame `n`'s counting strip, left clear where the bar (`bar`'s columns)
+/// is, or the whole strip with `None`.
+fn draw_strip(frame: &mut VideoFrame, n: u64, bar: Option<std::ops::Range<u32>>) {
+    let (width, height, stride) = (frame.width, frame.height, frame.stride);
     for y in 0..COUNT_BLOCK.min(height) {
         let row = (y * stride) as usize;
         for x in 0..(COUNT_BITS * COUNT_BLOCK).min(width) {
-            if (bar_start..bar_end).contains(&x) {
+            if bar.as_ref().is_some_and(|bar| bar.contains(&x)) {
                 continue;
             }
             // Bit (x / block) of n, most significant first.
@@ -105,7 +208,6 @@ fn draw(frame: &mut VideoFrame, n: u64) {
             frame.data[px..px + 4].copy_from_slice(&[b, g, r, 255]);
         }
     }
-    frame.timestamp = Instant::now();
 }
 
 /// Make the pattern at `config`'s size and frame rate into `frame_tx`
@@ -119,6 +221,12 @@ pub fn start(
     let period = Duration::from_secs_f64(1.0 / f64::from(config.fps.max(1)));
     let (width, height) = (config.width, config.height);
     let token = cancel.clone();
+    let probe = latency_probe::mode();
+    if probe {
+        tracing::warn!("{VAR}=probe: the pattern draws the latency marker; no input is injected");
+        // Opens the stage trace (when asked for) before the first frame.
+        latency_trace::on();
+    }
     std::thread::Builder::new()
         .name("test-pattern".into())
         .spawn(move || {
@@ -133,6 +241,11 @@ pub fn start(
                     ..base
                 };
                 draw(&mut current, n);
+                if probe {
+                    let pointer = latency_probe::POINTER.get();
+                    draw_probe(&mut current, n, pointer);
+                    latency_trace::pattern(n, current.timestamp, pointer.map(|(x, _)| x));
+                }
                 if token.is_cancelled() || frame_tx.try_send(current).is_err() {
                     break;
                 }
@@ -153,6 +266,22 @@ pub fn start(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_text_page_marks_the_rows_below_the_strip_and_is_the_same_every_time() {
+        let (w, h) = (192u32, 96u32);
+        let mut page = vec![255u8; (w * h * 4) as usize];
+        draw_text(&mut page, w, h, w * 4);
+        let marked = page.chunks(4).filter(|p| p[0] == 30).count();
+        assert!(marked > 500, "{marked} marked pixels");
+        assert!(
+            page[..(w * 16 * 4) as usize].iter().all(|b| *b == 255),
+            "the counting strip's rows are left alone"
+        );
+        let mut again = vec![255u8; (w * h * 4) as usize];
+        draw_text(&mut again, w, h, w * 4);
+        assert_eq!(page, again);
+    }
 
     #[test]
     fn the_seam_is_on_for_any_value_but_empty_or_0() {
@@ -191,6 +320,92 @@ mod tests {
             f.data[(x * 4 + 1) as usize] // green
         };
         assert_eq!((block(2), block(1), block(0)), (220, 20, 220));
+    }
+
+    /// The luma the probe's finder reads, from a BGRA frame (the pattern's
+    /// band and marker are grey, so one channel is their luma).
+    fn luma(f: &VideoFrame) -> Vec<u8> {
+        f.data.as_chunks::<4>().0.iter().map(|px| px[1]).collect()
+    }
+
+    #[test]
+    fn the_probe_draws_a_marker_the_finder_finds_whatever_the_bar_does() {
+        let (w, h) = (640, 360);
+        for x_norm in [0u16, 1000, 32768, 50000, u16::MAX] {
+            // Every bar place, and so the bar over the marker's columns.
+            for n in (0..90).step_by(7) {
+                let f = frame_probe(w, h, n, Some((x_norm, 7)));
+                assert_eq!(
+                    latency_probe::find(&luma(&f), w as usize, h as usize),
+                    Some(latency_probe::marker_left(w, x_norm)),
+                    "x_norm {x_norm}, frame {n}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_probe_shows_no_marker_before_any_pointer_and_leaves_the_rest_alone() {
+        let (w, h) = (640, 360);
+        let f = frame_probe(w, h, 3, None);
+        assert_eq!(latency_probe::find(&luma(&f), w as usize, h as usize), None);
+        // Between the strip and the band the picture is the pattern's own,
+        // bar included.
+        let plain = frame(w, h, 3);
+        let strip = (COUNT_BLOCK * plain.stride) as usize;
+        let above = (latency_probe::band_top(h) * plain.stride) as usize;
+        assert_eq!(f.data[strip..above], plain.data[strip..above]);
+        assert_ne!(f.data[above..], plain.data[above..], "the band is dark");
+        // Without the probe the pattern has no band: its last rows are the
+        // gradient.
+        assert_ne!(plain.data[plain.data.len() - 4..], [16, 16, 16, 255]);
+    }
+
+    #[test]
+    fn a_small_pattern_keeps_its_strip_clear_of_the_band() {
+        // 64 rows: the counting strip (16) and the band (48) just fit.
+        let f = frame_probe(64, 64, 0b101, Some((0, 0)));
+        let mut reference = background(64, 64);
+        draw_strip(&mut reference, 0b101, None);
+        let strip = (COUNT_BLOCK * reference.stride) as usize;
+        assert_eq!(
+            f.data[..strip],
+            reference.data[..strip],
+            "the strip is whole"
+        );
+        assert_eq!(
+            latency_probe::find(&luma(&f), 64, 64),
+            Some(0),
+            "found at the smallest size"
+        );
+    }
+
+    /// Limited-range BT.709 luma of a BGRA frame, as a decoder gives it.
+    fn video_luma(f: &VideoFrame) -> Vec<u8> {
+        f.data
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|px| {
+                let (b, g, r) = (f64::from(px[0]), f64::from(px[1]), f64::from(px[2]));
+                let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                (16.0 + y * 219.0 / 255.0).round() as u8
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_probes_strip_is_read_back_whatever_the_bar_covers() {
+        let (w, h) = (640, 360);
+        // Every frame number in a run, so the bar crosses the whole strip.
+        for n in (0..200u64).chain([255, 256, 40_000, 65_535, 65_536, 65_537]) {
+            let f = frame_probe(w, h, n, Some((20000, 7)));
+            assert_eq!(
+                latency_probe::read_frame_number(&video_luma(&f), w as usize, h as usize),
+                Some(n as u16),
+                "frame {n}"
+            );
+        }
     }
 
     #[tokio::test]

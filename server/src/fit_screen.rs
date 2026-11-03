@@ -92,6 +92,14 @@ pub fn is_answer(packet: &NetworkPacket) -> bool {
 /// ask. Whether any ask took it; one from a computer never asked, or for an
 /// ask given up, is dropped.
 pub fn heard(device_id: &str, body: &serde_json::Value) -> bool {
+    // A computer saying a window it lent is gone is no answer to an ask.
+    if crate::borrow_window::note_gone(device_id, body) {
+        return true;
+    }
+    // Nor is a window it offers as it is dragged here (window handoff 4).
+    if crate::shared_input::drag_window::note_offer(device_id, body) {
+        return true;
+    }
     let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
     let at = match body.get("id").and_then(serde_json::Value::as_u64) {
         Some(id) => pending
@@ -152,12 +160,28 @@ where
     F: Fn(NetworkPacket) -> Fut,
     Fut: std::future::Future<Output = Result<(), String>>,
 {
-    let (id, mut rx) = register(device_id);
-    let mut body = serde_json::json!({ "action": action, "id": id, "slot": slot });
+    let mut body = serde_json::json!({ "action": action, "slot": slot });
     if let Some(size) = size {
         body["width"] = size.width.into();
         body["height"] = size.height.into();
     }
+    ask_body_via(send, device_id, body).await
+}
+
+/// [`ask_via`] for a request `body` that names its own action and fields:
+/// the ask's number is added to it. Borrowing a window asks `list`, `lend`
+/// and `return` this way ([`crate::borrow_window`]).
+pub(crate) async fn ask_body_via<F, Fut>(
+    send: F,
+    device_id: &str,
+    mut body: serde_json::Value,
+) -> Result<serde_json::Value, String>
+where
+    F: Fn(NetworkPacket) -> Fut,
+    Fut: std::future::Future<Output = Result<(), String>>,
+{
+    let (id, mut rx) = register(device_id);
+    body["id"] = id.into();
     let packet = NetworkPacket::new(PACKET).with_body(body);
     let started = std::time::Instant::now();
     loop {
@@ -201,6 +225,29 @@ async fn ask(
         size,
     )
     .await
+}
+
+/// How a packet goes to the computer `device_id`: on its connection or the
+/// link ([`crate::clipboard_push::send_to_computer`]).
+pub(crate) fn link_to(
+    device_id: &str,
+) -> impl Fn(
+    NetworkPacket,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send>> {
+    let device = device_id.to_string();
+    move |packet: NetworkPacket| {
+        let device = device.clone();
+        Box::pin(async move { crate::clipboard_push::send_to_computer(&device, &packet).await })
+    }
+}
+
+/// [`ask_body_via`] to the computer `device_id`, on its connection or the
+/// link.
+pub(crate) async fn ask_body(
+    device_id: &str,
+    body: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    ask_body_via(link_to(device_id), device_id, body).await
 }
 
 /// One at a time for a computer's window: a resize and a release never

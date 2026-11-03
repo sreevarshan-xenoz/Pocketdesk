@@ -25,6 +25,7 @@ use tracing::{info, warn};
 
 use super::capture::{CaptureSession, monitor_rect};
 use super::portal_input::{PortalEvent, WheelStyle, absolute_position, fine_wheel_call};
+use super::window_target::Lease;
 use super::{StreamingConfig, VideoFrame};
 
 const SCREENCAST: &str = "org.gnome.Mutter.ScreenCast";
@@ -53,12 +54,38 @@ pub fn session_options(remote_session_id: Option<&str>) -> HashMap<&'static str,
 /// The options for `RecordMonitor`: the cursor stays out of the picture (as
 /// through the portal, where it is asked for hidden), and the stream says
 /// it is a recording, which makes GNOME show its screen-sharing indicator
-/// for as long as it runs.
-pub fn record_options() -> HashMap<&'static str, Value<'static>> {
+/// for as long as it runs. With `metadata` (a viewer that draws the
+/// pointer itself, local cursor) the cursor is still out of the picture and
+/// comes as the stream's cursor metadata (mutter's mode 2).
+pub fn record_options(metadata: bool) -> HashMap<&'static str, Value<'static>> {
     HashMap::from([
-        ("cursor-mode", Value::from(0u32)),
+        (
+            "cursor-mode",
+            Value::from(if metadata { 2u32 } else { 0u32 }),
+        ),
         ("is-recording", Value::from(true)),
     ])
+}
+
+/// The options for `RecordWindow`: the window by mutter's id, and the same
+/// two that `RecordMonitor` takes ([`record_options`]). The pointer is kept
+/// out of the picture (`metadata` false: a window lent to look at is shown
+/// with no trace of the owner's pointer).
+pub fn window_record_options(id: u64) -> HashMap<&'static str, Value<'static>> {
+    let mut options = record_options(false);
+    options.insert("window-id", Value::from(id));
+    options
+}
+
+/// The mutter window a session's lease holds: the id in its native name, and
+/// only if the lease still stands. `Err` says why a window is not recorded.
+pub fn leased_window(lease: &Lease) -> Result<u64> {
+    let id = super::window_target::gnome_id(&lease.native)
+        .context("that lease is not for a GNOME window")?;
+    if !super::window_target::lease_alive(lease) {
+        anyhow::bail!("That window is not lent to this session any more");
+    }
+    Ok(id)
 }
 
 /// One logical monitor as `DisplayConfig` lists it, reduced to what picks
@@ -290,7 +317,11 @@ pub async fn start_capture(
     frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
     input: bool,
+    cursor: Option<super::cursor_feed::CursorFeed>,
 ) -> Result<CaptureSession> {
+    // The pointer as metadata for a viewer that draws it (`cursor`): the
+    // feed is told the picture has none in it only once the capture thread
+    // runs (`spawn_pipewire_capture`), so a start that fails says nothing.
     let conn = tokio::time::timeout(CALL_WAIT, Connection::session())
         .await
         .map_err(|_| anyhow::anyhow!("the session bus did not answer"))?
@@ -385,7 +416,7 @@ pub async fn start_capture(
             &cast,
             SCREENCAST_SESSION,
             "RecordMonitor",
-            &(connector.as_str(), record_options()),
+            &(connector.as_str(), record_options(cursor.is_some())),
         )
         .await?;
         let stream = object_path(&reply)?;
@@ -497,21 +528,147 @@ pub async fn start_capture(
         stop(closing.0, closing.1, closing.2).await;
     });
 
-    if let Err(e) = super::capture_linux::spawn_pipewire_capture(
+    let zero_copy = match super::capture_linux::spawn_pipewire_capture(
         node_id,
         config.clone(),
         frame_tx,
         cancel.clone(),
+        cursor,
     ) {
-        abandon.cancel();
-        return Err(e);
-    }
-    let session = CaptureSession::new(config, cancel);
+        Ok(switch) => switch,
+        Err(e) => {
+            abandon.cancel();
+            return Err(e);
+        }
+    };
+    let session = CaptureSession::new(config, cancel).with_zero_copy(zero_copy);
     Ok(if remote.is_some() {
         session.with_input_refused(refused_rx)
     } else {
         session
     })
+}
+
+/// Capture the one window a session holds `lease` on (window handoff, phase
+/// 6: GNOME as the source) through mutter's `RecordWindow`, which records a
+/// window by id whatever is in front of it, with no dialog: the same
+/// no-dialog ScreenCast calls [`start_capture`] makes, so the same owner's
+/// switch and the same trust (SECURITY limit 75) apply.
+///
+/// Screen only: no RemoteDesktop session is made, so nothing this capture
+/// does can send input, and the pointer is not in the picture. The capture
+/// ends, and its session is stopped, when the lease does not stand any more
+/// (the window was given back or closed) as well as when `cancel` is
+/// cancelled; it cancels `cancel` itself in that case, which ends the
+/// streaming session. Failing to start leaves `cancel` alone.
+pub async fn start_window_capture(
+    config: StreamingConfig,
+    frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
+    cancel: CancellationToken,
+    lease: Lease,
+) -> Result<CaptureSession> {
+    let id = leased_window(&lease)?;
+    let conn = tokio::time::timeout(CALL_WAIT, Connection::session())
+        .await
+        .map_err(|_| anyhow::anyhow!("the session bus did not answer"))?
+        .context("no session bus")?;
+    let reply = call(
+        &conn,
+        SCREENCAST,
+        SCREENCAST_PATH,
+        SCREENCAST,
+        "CreateSession",
+        &(session_options(None),),
+    )
+    .await?;
+    let cast = object_path(&reply)?;
+    let stop = |conn: Connection, cast: String| async move {
+        let _ = call(&conn, SCREENCAST, &cast, SCREENCAST_SESSION, "Stop", &()).await;
+    };
+
+    let started = async {
+        let reply = call(
+            &conn,
+            SCREENCAST,
+            &cast,
+            SCREENCAST_SESSION,
+            "RecordWindow",
+            &(window_record_options(id),),
+        )
+        .await?;
+        let stream = object_path(&reply)?;
+        // The stream's node is announced once the session starts: listen
+        // before starting it.
+        let proxy = ashpd::zbus::Proxy::new(&conn, SCREENCAST, stream.as_str(), SCREENCAST_STREAM)
+            .await
+            .context("no stream object")?;
+        let mut added = proxy
+            .receive_signal("PipeWireStreamAdded")
+            .await
+            .context("could not listen for the stream")?;
+        call(&conn, SCREENCAST, &cast, SCREENCAST_SESSION, "Start", &()).await?;
+        let signal = tokio::time::timeout(CALL_WAIT, added.next())
+            .await
+            .map_err(|_| anyhow::anyhow!("mutter announced no stream"))?
+            .context("the stream signal ended")?;
+        let node_id: u32 = signal.body().deserialize().context("no node id")?;
+        Ok::<u32, anyhow::Error>(node_id)
+    }
+    .await;
+    let node_id = match started {
+        Ok(node_id) => node_id,
+        Err(e) => {
+            stop(conn, cast).await;
+            return Err(e);
+        }
+    };
+    info!("Lent GNOME window capture through mutter: node_id={node_id}");
+
+    // The session is stopped when the capture ends, whichever way, and at
+    // once if the capture below does not start. It watches the lease too:
+    // the registry says as it changes, and a slow look backs it up.
+    let closer = cancel.child_token();
+    let abandon = closer.clone();
+    let session_end = cancel.clone();
+    let watched = lease.clone();
+    tokio::spawn(async move {
+        let mut changes = super::window_target::changes();
+        let mut tick = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            tokio::select! {
+                _ = closer.cancelled() => break,
+                _ = changes.changed() => {}
+                _ = tick.tick() => {}
+            }
+            if !super::window_target::lease_alive(&watched) {
+                info!("The lent window is not lent any more: ending its capture");
+                session_end.cancel();
+                break;
+            }
+        }
+        stop(conn, cast).await;
+    });
+
+    // The pointer is out of the picture (the capture is told there is no
+    // cursor feed, so it never reports one). The stream is as big as a screen
+    // with the window in a corner of it: it is asked which part is the window,
+    // and each frame is cut to that.
+    let zero_copy = match super::capture_linux::spawn_pipewire_capture_with(
+        node_id,
+        config.clone(),
+        frame_tx,
+        cancel.clone(),
+        None,
+        true,
+    ) {
+        Ok(switch) => switch,
+        Err(e) => {
+            abandon.cancel();
+            return Err(e);
+        }
+    };
+    // A lent window's frames are cut on the processor: always copies.
+    Ok(CaptureSession::new(config, cancel).with_zero_copy(zero_copy))
 }
 
 /// The bus name an interface of the two session kinds is served by.
@@ -563,8 +720,13 @@ mod tests {
 
     #[test]
     fn a_recording_hides_the_cursor_and_shows_gnomes_indicator() {
-        let options = record_options();
+        let options = record_options(false);
         assert_eq!(options["cursor-mode"], Value::from(0u32), "hidden");
+        assert_eq!(options["is-recording"], Value::from(true));
+        // A viewer that draws the pointer gets it as metadata, still out of
+        // the picture.
+        let options = record_options(true);
+        assert_eq!(options["cursor-mode"], Value::from(2u32), "metadata");
         assert_eq!(options["is-recording"], Value::from(true));
     }
 
@@ -598,6 +760,38 @@ mod tests {
             "no primary: the first"
         );
         assert_eq!(pick_connector(&[], Some((0, 0))), None, "none at all");
+    }
+
+    #[test]
+    fn a_window_is_recorded_by_its_id_with_the_pointer_out_of_the_picture() {
+        let options = window_record_options(2609479513);
+        assert_eq!(options["window-id"], Value::from(2609479513u64), "a t");
+        assert_eq!(options["cursor-mode"], Value::from(0u32), "hidden");
+        assert_eq!(options["is-recording"], Value::from(true));
+        assert_eq!(options.len(), 3, "nothing else is asked of mutter");
+    }
+
+    #[test]
+    fn only_a_standing_gnome_lease_names_a_window_to_record() {
+        use super::super::window_target::{self, Lease};
+        let device = "capture-mutter-lease-device";
+        let (lease, _) = window_target::register_native("gnome:77", device, None).unwrap();
+        assert_eq!(leased_window(&lease).unwrap(), 77);
+        // A Windows lease, or a name that is not a GNOME window's, is none.
+        let handle = Lease {
+            native: String::new(),
+            ..lease.clone()
+        };
+        assert!(leased_window(&handle).is_err());
+        let odd = Lease {
+            native: "gnome:0x4d".into(),
+            ..lease.clone()
+        };
+        assert!(leased_window(&odd).is_err());
+        // Given back, it records nothing.
+        window_target::unregister(&lease);
+        let gone = leased_window(&lease).unwrap_err().to_string();
+        assert!(gone.contains("not lent"), "{gone}");
     }
 
     #[test]

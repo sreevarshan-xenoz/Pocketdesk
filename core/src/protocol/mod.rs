@@ -6,6 +6,7 @@ pub mod command;
 pub mod computer_media;
 pub mod connection;
 pub mod conversation;
+pub mod cursor;
 pub mod dial;
 pub mod file_time;
 pub mod in_use;

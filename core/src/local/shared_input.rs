@@ -79,6 +79,45 @@ pub fn unshown(c: char) -> bool {
         )
 }
 
+/// Whether `c` is one of Unicode's format characters (category Cf): unseen,
+/// and some of them turn text around or glue what is shown to what is not
+/// (soft hyphen, the Arabic letter mark, the word joiner and the invisible
+/// operators, the interlinear marks, the tag characters).
+pub fn is_format(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{0600}'..='\u{0605}'
+            | '\u{061C}'
+            | '\u{06DD}'
+            | '\u{070F}'
+            | '\u{0890}'..='\u{0891}'
+            | '\u{08E2}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206F}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}'
+            | '\u{110BD}'
+            | '\u{110CD}'
+            | '\u{13430}'..='\u{1343F}'
+            | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0001}'
+            | '\u{E0020}'..='\u{E007F}'
+    )
+}
+
+/// Whether `c` has no place in a window's title taken from another
+/// computer: a control character or one [`unshown`] (zero-width ones, the
+/// line and paragraph separators, the bidirectional marks), or any other
+/// format character ([`is_format`]).
+pub fn is_hidden(c: char) -> bool {
+    unshown(c) || is_format(c)
+}
+
 /// `name` as the owner is shown it: on one line, each [`unshown`]
 /// character a space, trimmed, and cut to `most` characters (an ellipsis
 /// marking the cut).
@@ -946,6 +985,38 @@ phone",
         assert_eq!(display_name("  long name  ", 6), "long\u{2026}");
         assert_eq!(display_name("short", 64), "short");
         assert!(unshown('\u{200F}') && unshown('\u{2029}') && !unshown('\u{00E9}'));
+    }
+
+    #[test]
+    fn a_title_from_another_computer_loses_every_hidden_character() {
+        // Bidi overrides and isolates, zero-width ones, the word joiner, the
+        // soft hyphen, tag characters and controls: none is shown.
+        for c in [
+            '\u{202A}',
+            '\u{202B}',
+            '\u{202C}',
+            '\u{202D}',
+            '\u{202E}',
+            '\u{2066}',
+            '\u{2067}',
+            '\u{2068}',
+            '\u{2069}',
+            '\u{200B}',
+            '\u{200E}',
+            '\u{061C}',
+            '\u{2060}',
+            '\u{00AD}',
+            '\u{FEFF}',
+            '\u{E0041}',
+            '\u{7}',
+            '\u{85}',
+            '\u{2028}',
+        ] {
+            assert!(is_hidden(c), "{:04x}", u32::from(c));
+        }
+        for c in ['a', ' ', '\u{e9}', '\u{4e2d}', '\u{1F600}', '-'] {
+            assert!(!is_hidden(c), "{c}");
+        }
     }
 
     #[test]

@@ -94,6 +94,9 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
     if let Err(e) = restarted {
         tracing::debug!("Could not reset the links' state: {e}");
     }
+    // The windows of another computer an earlier run listed for the app's
+    // picker (titles) are not kept past it.
+    crate::borrow_window::expire_lists(&dir, true);
     loop {
         for request in computers::take_all(&dir, pocketdesk_core::local::pin::now_unix()) {
             match request.ask {
@@ -195,6 +198,22 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     })
                     .await;
                 }
+                // Borrowing a window: the other computer's lendable windows,
+                // asked off this loop (the answer may take seconds), and
+                // forgotten as the picker closes.
+                ComputerAsk::WindowsThere { device_id } => {
+                    let dir = dir.clone();
+                    tokio::spawn(
+                        async move { crate::borrow_window::ask_list(&dir, &device_id).await },
+                    );
+                }
+                ComputerAsk::CloseWindowsThere { device_id } => {
+                    let dir = dir.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        crate::borrow_window::close_list(&dir, &device_id)
+                    })
+                    .await;
+                }
                 ComputerAsk::LetDrive { device_id, allow } => {
                     let_drive(&dir, &device_id, allow);
                 }
@@ -208,9 +227,13 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     device_id,
                     monitor,
                     hevc,
+                    cursor,
                     window,
                     fit,
+                    borrow,
                 } => {
+                    // (A borrow that is no window id ends the view with a
+                    // word, in the view relay: never the computer's own screen.)
                     // PC6: viewed now, for the recents, off the runtime.
                     let (at, id) = (dir.clone(), device_id.clone());
                     tokio::task::spawn_blocking(move || viewed(&at, &id));
@@ -221,9 +244,14 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                         device_id,
                         monitor,
                         hevc,
+                        cursor,
                         window,
-                        // A size of nothing is no ask for a fit.
-                        fit: fit.filter(|f| f.width > 0 && f.height > 0),
+                        // A size of nothing is no ask for a fit; a borrowed
+                        // window is its own size, never fitted.
+                        fit: fit
+                            .filter(|f| f.width > 0 && f.height > 0)
+                            .filter(|_| borrow.is_none()),
+                        borrow,
                     };
                     if views.send(start).await.is_err() {
                         tracing::warn!(
@@ -252,6 +280,9 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
         }
         forget_untrusted_mine(&dir, &cert_manager, &mut links, views.as_ref()).await;
         lapse_pending(&dir);
+        // A list of another computer's windows nobody asked for again (the
+        // app quit, or the page was left) does not keep their titles.
+        crate::borrow_window::expire_lists(&dir, false);
         if let Some(wan) = &wan {
             keep_links(&dir, wan, &mut links);
         }

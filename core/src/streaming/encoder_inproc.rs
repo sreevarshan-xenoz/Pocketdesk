@@ -23,6 +23,7 @@ use tracing::{trace, warn};
 #[cfg(all(windows, feature = "capture"))]
 use super::GpuFrame;
 use super::encoder::detect_keyframe;
+use super::keyframes::Plan;
 use super::{EncodedPacket, EncoderPreset, H264Profile, StreamingConfig, VideoCodec, VideoFrame};
 #[cfg(target_os = "linux")]
 use ffmpeg_next as ffmpeg;
@@ -73,8 +74,16 @@ pub struct InProcessEncoder {
     /// Packets received early relative to `encode_frame` calls.
     pending: VecDeque<EncodedPacket>,
     sequence: u64,
+    /// Frames between the whole keyframes sent unasked ([`Plan::idr_every`]).
     keyframe_interval: u64,
     frames_since_keyframe: u64,
+    /// The picture is refreshed in waves ([`Plan::refresh_period`]): the
+    /// encoder flags the start of each wave as a keyframe, which it is not
+    /// (a P frame with intra blocks), so only an IDR counts as one.
+    refreshing: bool,
+    /// How the encoder is kept whole (`keyframes`), for a reopen.
+    #[cfg(all(windows, feature = "capture"))]
+    plan: Plan,
     /// NVENC fed textures from the capture's device (BG10).
     #[cfg(all(windows, feature = "capture"))]
     gpu: GpuInput,
@@ -160,13 +169,13 @@ fn d3d11_frames(device: &ID3D11Device, width: u32, height: u32) -> anyhow::Resul
 #[cfg(windows)]
 fn open_nvenc(
     config: &StreamingConfig,
+    plan: Plan,
     frames: Option<*mut ffmpeg::ffi::AVBufferRef>,
 ) -> anyhow::Result<ffmpeg::encoder::Video> {
     let is_hevc = matches!(config.codec, VideoCodec::H265);
     let name = if is_hevc { "hevc_nvenc" } else { "h264_nvenc" };
     let codec = ffmpeg::encoder::find_by_name(name)
         .ok_or_else(|| anyhow::anyhow!("FFmpeg has no {name}"))?;
-    let keyframe_interval = (config.fps as u64) * 2;
     let (maxrate_kbps, bufsize_kbits) =
         super::encoder::vbv_kbit_bounds(config.bitrate_bps, config.fps);
 
@@ -177,7 +186,7 @@ fn open_nvenc(
     video.set_format(ffmpeg::format::Pixel::BGRA);
     video.set_frame_rate(Some(ffmpeg::Rational::new(config.fps as i32, 1)));
     video.set_time_base(ffmpeg::Rational(1, config.fps as i32));
-    video.set_gop(keyframe_interval.min(u32::MAX as u64) as u32);
+    video.set_gop(plan.gop().min(u32::MAX as u64) as u32);
     video.set_max_b_frames(0);
     video.set_bit_rate(config.bitrate_bps as usize);
     video.set_max_bit_rate(maxrate_kbps as usize * 1000);
@@ -199,6 +208,11 @@ fn open_nvenc(
     options.set("delay", "0");
     options.set("rc", "cbr");
     options.set("forced-idr", "1");
+    // The picture refreshed in waves, not by whole keyframes; FFmpeg then
+    // takes `-g` as the wave's length and sends no keyframe of its own.
+    if plan.refresh_period.is_some() {
+        options.set("intra-refresh", "1");
+    }
     if !is_hevc {
         options.set("profile", profile_name(&config.profile));
     }
@@ -232,6 +246,11 @@ fn profile_name(profile: &H264Profile) -> &'static str {
 
 impl InProcessEncoder {
     pub fn new(config: StreamingConfig) -> anyhow::Result<Self> {
+        Self::with_smooth(config, super::keyframes::smooth())
+    }
+
+    /// As [`Self::new`], with the "smooth keyframes" setting given.
+    pub fn with_smooth(config: StreamingConfig, smooth: bool) -> anyhow::Result<Self> {
         init_ffmpeg();
         let is_hevc = matches!(config.codec, VideoCodec::H265);
         let codec = ffmpeg::encoder::find_by_name(if is_hevc { "libx265" } else { "libx264" })
@@ -244,7 +263,24 @@ impl InProcessEncoder {
             })
             .ok_or_else(|| anyhow::anyhow!("no software H.264/H.265 encoder in FFmpeg"))?;
 
-        let keyframe_interval = (config.fps as u64) * 2;
+        // Only libx264 takes part: libx265 and whatever else stands in keep
+        // their keyframe every two seconds.
+        let plan = if codec.name() == "libx264" {
+            Plan::choose(smooth, config.fps, true)
+        } else {
+            Plan::choose(false, config.fps, false)
+        };
+        Self::open_software(config, codec, is_hevc, plan)
+    }
+
+    /// As [`Self::new`], with the encoder and the keyframe plan given.
+    fn open_software(
+        config: StreamingConfig,
+        codec: ffmpeg::Codec,
+        is_hevc: bool,
+        plan: Plan,
+    ) -> anyhow::Result<Self> {
+        let keyframe_interval = plan.idr_every;
         let (maxrate_kbps, bufsize_kbits) =
             super::encoder::vbv_kbit_bounds(config.bitrate_bps, config.fps);
 
@@ -255,7 +291,7 @@ impl InProcessEncoder {
         video.set_format(ffmpeg::format::Pixel::YUV420P);
         video.set_frame_rate(Some(ffmpeg::Rational::new(config.fps as i32, 1)));
         video.set_time_base(ffmpeg::Rational(1, config.fps as i32));
-        video.set_gop(keyframe_interval.min(u32::MAX as u64) as u32);
+        video.set_gop(plan.gop().min(u32::MAX as u64) as u32);
         video.set_bit_rate(config.bitrate_bps as usize);
 
         let mut options = ffmpeg::Dictionary::new();
@@ -265,21 +301,35 @@ impl InProcessEncoder {
                 "x265-params",
                 &format!(
                     "keyint={}:min-keyint=1:bframes=0:rc-lookahead=0:vbv-maxrate={}:vbv-bufsize={}",
-                    keyframe_interval, maxrate_kbps, bufsize_kbits
-                ),
-            );
-        } else {
-            options.set("tune", "zerolatency");
-            options.set(
-                "x264-params",
-                &format!(
-                    "profile={}:keyint={}:min-keyint=1:bframes=0:rc-lookahead=0:vbv-maxrate={}:vbv-bufsize={}",
-                    profile_name(&config.profile),
-                    keyframe_interval,
+                    plan.gop(),
                     maxrate_kbps,
                     bufsize_kbits
                 ),
             );
+        } else {
+            options.set("tune", "zerolatency");
+            // With intra refresh x264's keyint is the wave's period and it
+            // sends no keyframe but the first; the keyframe asked for is a
+            // real IDR (`forced-idr`).
+            let refresh = if plan.refresh_period.is_some() {
+                ":intra-refresh=1"
+            } else {
+                ""
+            };
+            options.set(
+                "x264-params",
+                &format!(
+                    "profile={}:keyint={}:min-keyint=1:bframes=0:rc-lookahead=0:vbv-maxrate={}:vbv-bufsize={}{}",
+                    profile_name(&config.profile),
+                    plan.gop(),
+                    maxrate_kbps,
+                    bufsize_kbits,
+                    refresh
+                ),
+            );
+            if plan.refresh_period.is_some() {
+                options.set("forced-idr", "1");
+            }
         }
         let encoder = video.open_with(options)?;
 
@@ -307,6 +357,9 @@ impl InProcessEncoder {
             sequence: 0,
             keyframe_interval,
             frames_since_keyframe: 0,
+            refreshing: plan.refresh_period.is_some(),
+            #[cfg(all(windows, feature = "capture"))]
+            plan,
             #[cfg(all(windows, feature = "capture"))]
             gpu: GpuInput::Off,
         })
@@ -318,8 +371,12 @@ impl InProcessEncoder {
     #[cfg(windows)]
     pub fn new_hardware(config: StreamingConfig) -> anyhow::Result<Self> {
         init_ffmpeg();
-        let keyframe_interval = (config.fps as u64) * 2;
-        let encoder = open_nvenc(&config, None)?;
+        // NVENC refreshes in waves; H.264 only, since a keyframe is told
+        // from the flag of a wave's start by its IDR unit, which
+        // `detect_keyframe` knows only in H.264.
+        let plan = Plan::new(config.fps, !matches!(config.codec, VideoCodec::H265));
+        let keyframe_interval = plan.idr_every;
+        let encoder = open_nvenc(&config, plan, None)?;
         let bgra =
             ffmpeg::frame::Video::new(ffmpeg::format::Pixel::BGRA, config.width, config.height);
         Ok(Self {
@@ -332,6 +389,9 @@ impl InProcessEncoder {
             sequence: 0,
             keyframe_interval,
             frames_since_keyframe: 0,
+            refreshing: plan.refresh_period.is_some(),
+            #[cfg(all(windows, feature = "capture"))]
+            plan,
             #[cfg(all(windows, feature = "capture"))]
             gpu: GpuInput::Untried,
         })
@@ -472,7 +532,7 @@ impl InProcessEncoder {
     #[cfg(all(windows, feature = "capture"))]
     fn open_on_gpu(&mut self, device: &ID3D11Device) -> anyhow::Result<()> {
         let frames = d3d11_frames(device, self.config.width, self.config.height)?;
-        let encoder = open_nvenc(&self.config, Some(frames.frames))?;
+        let encoder = open_nvenc(&self.config, self.plan, Some(frames.frames))?;
         // Whatever the old encoder still holds goes out first.
         self.encoder.send_eof()?;
         self.receive_packets()?;
@@ -540,7 +600,11 @@ impl InProcessEncoder {
                         .pop_front()
                         .unwrap_or((self.sequence, Instant::now()));
                     let data = packet.data().unwrap_or_default().to_vec();
-                    let is_keyframe = packet.is_key() || detect_keyframe(&data);
+                    let is_keyframe = if self.refreshing {
+                        detect_keyframe(&data)
+                    } else {
+                        packet.is_key() || detect_keyframe(&data)
+                    };
                     trace!(
                         "in-process packet seq={} {}B key={}",
                         sequence,
@@ -585,6 +649,7 @@ mod tests {
             stride: stride as u32,
             timestamp: Instant::now(),
             gpu: None,
+            repeat: false,
         }
     }
 
@@ -607,7 +672,9 @@ mod tests {
     #[test]
     #[ignore]
     fn test_inprocess_encode_annexb_roundtrip() {
-        let mut encoder = InProcessEncoder::new(software_config(VideoCodec::H264)).unwrap();
+        // Periodic keyframes are the thing under test: smooth is the default.
+        let mut encoder =
+            InProcessEncoder::with_smooth(software_config(VideoCodec::H264), false).unwrap();
 
         let mut packets = Vec::new();
         for i in 0..70 {
@@ -641,6 +708,47 @@ mod tests {
         assert!(
             packets.iter().any(|p| p.is_keyframe && p.sequence >= 59),
             "expected a periodic keyframe at the 60-frame interval"
+        );
+    }
+
+    /// The keyframes' places, by frame number, of `frames` frames through
+    /// libx264 at 30 fps, with a keyframe asked for at frame `ask`.
+    fn x264_keyframes(smooth: bool, frames: usize, ask: usize) -> Vec<u64> {
+        let mut encoder =
+            InProcessEncoder::with_smooth(software_config(VideoCodec::H264), smooth).unwrap();
+        let mut keys = Vec::new();
+        for i in 0..frames {
+            if i == ask {
+                encoder.request_keyframe();
+            }
+            let packet = encoder
+                .encode_frame(&gradient_frame(320, 240, i))
+                .unwrap()
+                .expect("zero latency: a packet for each frame");
+            if packet.is_keyframe {
+                keys.push(packet.sequence);
+            }
+        }
+        keys
+    }
+
+    /// With smooth keyframes libx264 refreshes the picture in waves and sends
+    /// a whole keyframe only first and when asked (its safety net, 30 s of
+    /// frames, is far off); without, every two seconds as before. Needs
+    /// FFmpeg with libx264 at runtime. Run with:
+    /// cargo test -p pocketdesk-core -- --ignored smooth_keyframes
+    #[test]
+    #[ignore]
+    fn smooth_keyframes_x264_sends_a_whole_one_first_and_when_asked() {
+        assert_eq!(
+            x264_keyframes(false, 150, 100),
+            vec![0, 59, 100],
+            "every two seconds (60 frames), and the one asked for"
+        );
+        assert_eq!(
+            x264_keyframes(true, 150, 100),
+            vec![0, 100],
+            "the first, and the one asked for: nothing on a beat"
         );
     }
 

@@ -8,12 +8,15 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use ashpd::desktop::PersistMode;
-use ashpd::desktop::screencast::{Screencast, SelectSourcesOptions, SourceType};
+use ashpd::desktop::screencast::{CursorMode, Screencast, SelectSourcesOptions, SourceType};
 use pipewire::stream::StreamFlags;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 
 use super::capture::{CaptureSession, monitor_rect};
+use super::capture_cursor_pw::PwCursor;
+use super::capture_pw_dmabuf::{self as pw_dma, OnError, PwDma, Step, Take};
+use super::cursor_feed::CursorFeed;
 use super::{StreamingConfig, VideoFrame};
 
 /// Shared state between the PipeWire thread and stream callbacks.
@@ -26,6 +29,48 @@ struct StreamUserData {
     height: AtomicU32,
     /// Frame counter for logging.
     frame_count: AtomicU64,
+    /// The pointer's metadata, read from each buffer, when the stream was
+    /// asked for it (local cursor).
+    cursor: Option<std::sync::Mutex<PwCursor>>,
+    /// Each frame is cut to the rectangle its buffer says is the picture
+    /// (`SPA_META_VideoCrop`): a lent window's stream is as big as a screen
+    /// with the window in a corner of it.
+    crop_meta: bool,
+    /// The last rectangle a lent window's buffer named that was good, for a
+    /// buffer that names none.
+    last_crop: std::sync::Mutex<Option<super::capture_video_crop::Region>>,
+    /// The DMA-BUF side of the capture, when the card takes some of the
+    /// compositor's buffers (see `capture_pw_dmabuf`).
+    dma: Option<std::sync::Arc<PwDma>>,
+    /// The `Meta` params the stream was connected with, offered again with
+    /// each `update_params`.
+    metas: Vec<Vec<u8>>,
+    /// The session's configuration, for the formats offered again.
+    config: StreamingConfig,
+}
+
+/// Whether the screencast portal can leave the pointer out of the picture
+/// and send it as metadata, and the session wants that: the portal offers
+/// [`CursorMode::Metadata`]. When it does, the stream is asked for the
+/// metadata; otherwise the capture is as it was and the viewer keeps
+/// whatever pointer there is in the picture. The feed is told the picture
+/// has no pointer in it only once the PipeWire capture thread holds the
+/// stream ([`spawn_pipewire_capture`]), so a session that fails later, or
+/// falls back to another way, never leaves it saying so.
+async fn metadata_cursor(
+    screencast: &Screencast,
+    cursor: Option<&CursorFeed>,
+) -> Option<(CursorMode, CursorFeed)> {
+    let feed = cursor?;
+    let modes = tokio::time::timeout(Duration::from_secs(3), screencast.available_cursor_modes())
+        .await
+        .ok()?
+        .ok()?;
+    if !modes.contains(CursorMode::Metadata) {
+        info!("The screencast portal offers no cursor metadata: the pointer stays as it was");
+        return None;
+    }
+    Some((CursorMode::Metadata, feed.clone()))
 }
 
 /// Choose the PipeWire stream for the requested monitor from
@@ -60,6 +105,7 @@ pub async fn start_capture(
     frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
     screen_grant: Option<std::path::PathBuf>,
+    cursor: Option<CursorFeed>,
 ) -> Result<CaptureSession> {
     info!(
         "Starting screen capture: {}x{}@{}fps",
@@ -74,6 +120,7 @@ pub async fn start_capture(
             frame_tx.clone(),
             cancel.clone(),
             crate::streaming::portal_input::wanted(),
+            cursor.clone(),
         )
         .await
         {
@@ -95,6 +142,7 @@ pub async fn start_capture(
             frame_tx.clone(),
             cancel.clone(),
             screen_grant.clone(),
+            cursor.clone(),
         )
         .await
         {
@@ -148,6 +196,8 @@ pub async fn start_capture(
         let (persist, token) =
             crate::portal_grant::request(screen_grant.is_some(), saved.as_deref());
         let persist_mode = persist_mode(persist);
+        let metadata = metadata_cursor(&screencast, cursor.as_ref()).await;
+        let pointer = metadata.as_ref().map(|(_, feed)| feed.clone());
         tokio::time::timeout(
             Duration::from_secs(10),
             screencast.select_sources(
@@ -155,6 +205,7 @@ pub async fn start_capture(
                 SelectSourcesOptions::default()
                     .set_sources(Some(source_types))
                     .set_multiple(Some(true))
+                    .set_cursor_mode(metadata.map(|(mode, _)| mode))
                     .set_persist_mode(persist_mode)
                     .set_restore_token(token),
             ),
@@ -221,11 +272,11 @@ pub async fn start_capture(
             "Selected node_id={} for monitor_index={}",
             node_id, config.monitor_index
         );
-        Ok::<u32, anyhow::Error>(node_id)
+        Ok::<(u32, Option<CursorFeed>), anyhow::Error>((node_id, pointer))
     }
     .await;
-    let node_id = match picked {
-        Ok(node_id) => node_id,
+    let (node_id, pointer) = match picked {
+        Ok(picked) => picked,
         Err(e) => {
             let _ = session.close().await;
             return Err(e);
@@ -239,29 +290,85 @@ pub async fn start_capture(
     });
 
     // Step 5: Spawn the PipeWire capture thread
-    spawn_pipewire_capture(node_id, config.clone(), frame_tx, cancel.clone())?;
+    let zero_copy =
+        spawn_pipewire_capture(node_id, config.clone(), frame_tx, cancel.clone(), pointer)?;
 
-    Ok(CaptureSession::new(config, cancel))
+    Ok(CaptureSession::new(config, cancel).with_zero_copy(zero_copy))
 }
 
-/// The PipeWire capture thread for the stream `node_id`.
+/// The PipeWire capture thread for the stream `node_id`. A `cursor` feed
+/// means the stream was asked for the pointer as metadata, which leaves it
+/// out of the picture: the feed says so from the moment the thread is
+/// running until it ends, however it ends, and not otherwise.
 pub(super) fn spawn_pipewire_capture(
     node_id: u32,
     config: StreamingConfig,
     frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
-) -> Result<()> {
+    cursor: Option<CursorFeed>,
+) -> Result<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+    spawn_pipewire_capture_with(node_id, config, frame_tx, cancel, cursor, false)
+}
+
+/// [`spawn_pipewire_capture`] for the stream of one window (`crop_meta`): the
+/// stream is asked for the rectangle of each buffer that is the picture, and
+/// each frame is cut to it.
+///
+/// The returned switch is the capture's DMA-BUF switch, for the session that
+/// carries it to the streamer (`CaptureSession::with_zero_copy`): true while
+/// the capture may hand over frames still on the card. It starts true only
+/// when the encoder could take them (the in-process VA-API one: Auto or
+/// VA-API), the owner has not asked for copies (`capture_copy`) and the
+/// stream is not a lent window's (cut on the processor, so it copies).
+pub(super) fn spawn_pipewire_capture_with(
+    node_id: u32,
+    config: StreamingConfig,
+    frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
+    cancel: CancellationToken,
+    cursor: Option<CursorFeed>,
+    crop_meta: bool,
+) -> Result<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+    let zero_copy = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(dmabuf_allowed(
+        &config,
+        crop_meta,
+        super::dmabuf::copy_forced(),
+    )));
+    let thread_zero_copy = zero_copy.clone();
+    // Held by the thread: dropped when it ends, and when the spawn fails.
+    let apart = cursor.as_ref().map(CursorFeed::apart);
     std::thread::Builder::new()
         .name("pipewire-capture".into())
         .spawn(move || {
-            if let Err(e) = run_pipewire_capture(node_id, &config, frame_tx, cancel) {
+            let _apart = apart;
+            if let Err(e) = run_pipewire_capture(
+                node_id,
+                &config,
+                frame_tx,
+                cancel,
+                cursor,
+                crop_meta,
+                thread_zero_copy,
+            ) {
                 error!("PipeWire capture thread exited with error: {e}");
             } else {
                 info!("PipeWire capture thread exited normally");
             }
         })
         .context("Failed to spawn PipeWire capture thread")?;
-    Ok(())
+    Ok(zero_copy)
+}
+
+/// Whether a PipeWire capture may start on DMA-BUF buffers: only the
+/// in-process VA-API encoder takes one (Auto, or VA-API pinned), the owner has
+/// not asked for copies, and the stream is not a lent window's, whose frames
+/// are cut to the window's rectangle on the processor.
+fn dmabuf_allowed(config: &StreamingConfig, crop_meta: bool, copy_forced: bool) -> bool {
+    !crop_meta
+        && !copy_forced
+        && matches!(
+            config.hardware_encoder,
+            super::HardwareEncoder::Auto | super::HardwareEncoder::Vaapi
+        )
 }
 
 /// How long the portal's Start may take: the first time, the owner reads
@@ -346,6 +453,7 @@ async fn start_remote_desktop_capture(
     frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
     screen_grant: Option<std::path::PathBuf>,
+    cursor: Option<CursorFeed>,
 ) -> Result<CaptureSession> {
     use ashpd::desktop::remote_desktop::{DeviceType, RemoteDesktop, SelectDevicesOptions};
     let unavailable =
@@ -386,13 +494,16 @@ async fn start_remote_desktop_capture(
         .await
         .map_err(|_| unavailable())?
         .context("Failed to select the keyboard and pointer")?;
+        let metadata = metadata_cursor(&screencast, cursor.as_ref()).await;
+        let pointer = metadata.as_ref().map(|(_, feed)| feed.clone());
         tokio::time::timeout(
             Duration::from_secs(10),
             screencast.select_sources(
                 &session,
                 SelectSourcesOptions::default()
                     .set_sources(Some(ashpd::enumflags2::BitFlags::from(SourceType::Monitor)))
-                    .set_multiple(Some(true)),
+                    .set_multiple(Some(true))
+                    .set_cursor_mode(metadata.map(|(mode, _)| mode)),
             ),
         )
         .await
@@ -435,10 +546,10 @@ async fn start_remote_desktop_capture(
             "Remote desktop session: node_id={node_id}, {}x{}, input through the portal",
             size.0, size.1
         );
-        Ok::<(u32, (u32, u32)), anyhow::Error>((node_id, size))
+        Ok::<(u32, (u32, u32), Option<CursorFeed>), anyhow::Error>((node_id, size, pointer))
     }
     .await;
-    let (node_id, size) = match picked {
+    let (node_id, size, pointer) = match picked {
         Ok(picked) => picked,
         Err(e) => {
             let _ = session.close().await;
@@ -487,8 +598,11 @@ async fn start_remote_desktop_capture(
         let _ = session.close().await;
     });
 
-    spawn_pipewire_capture(node_id, config.clone(), frame_tx, cancel.clone())?;
-    Ok(CaptureSession::new(config, cancel).with_input_refused(refused_rx))
+    let zero_copy =
+        spawn_pipewire_capture(node_id, config.clone(), frame_tx, cancel.clone(), pointer)?;
+    Ok(CaptureSession::new(config, cancel)
+        .with_zero_copy(zero_copy)
+        .with_input_refused(refused_rx))
 }
 
 /// Make the portal call that turns the wheel, if any. A smooth call says
@@ -594,8 +708,21 @@ fn run_pipewire_capture(
     config: &StreamingConfig,
     frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
+    cursor: Option<CursorFeed>,
+    crop_meta: bool,
+    zero_copy: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<()> {
     info!("PipeWire capture thread started, connecting to node {node_id}");
+
+    // Before the probe: it runs the card's EGL and VA-API on this thread, and
+    // a session that ended meanwhile need not pay for it.
+    if cancel.is_cancelled() {
+        return Ok(());
+    }
+
+    // The card's side of the DMA-BUF capture (what it takes, found before the
+    // stream offers anything); none when this session copies.
+    let dma = PwDma::open(config, &zero_copy);
 
     // Initialize PipeWire
     pipewire::init();
@@ -625,6 +752,17 @@ fn run_pipewire_capture(
     let stream = pipewire::stream::StreamBox::new(&core, "pocketdesk-capture", stream_props)
         .context("Failed to create PipeWire stream")?;
 
+    // The `Meta` params: with the pointer as metadata (local cursor) the
+    // buffers are asked to carry its record, and a lent window's to say which
+    // part of them is the window. Offered again with each `update_params`.
+    let mut metas: Vec<Vec<u8>> = Vec::new();
+    if cursor.is_some() {
+        metas.push(super::capture_cursor_pw::meta_param_pod()?);
+    }
+    if crop_meta {
+        metas.push(super::capture_video_crop::meta_param_pod()?);
+    }
+
     // Set up shared state for callbacks
     let user_data = StreamUserData {
         frame_tx,
@@ -632,18 +770,44 @@ fn run_pipewire_capture(
         width: AtomicU32::new(config.width),
         height: AtomicU32::new(config.height),
         frame_count: AtomicU64::new(0),
+        cursor: cursor.map(|feed| std::sync::Mutex::new(PwCursor::new(feed))),
+        crop_meta,
+        last_crop: std::sync::Mutex::new(None),
+        dma: dma.clone(),
+        metas: metas.clone(),
+        config: config.clone(),
     };
 
     // Create local listener with param_changed and process callbacks
     let _listener = stream
         .add_local_listener_with_user_data(user_data)
-        .param_changed(|_stream, ud, id, param| {
-            on_param_changed(id, param, ud);
+        .param_changed(|stream, ud, id, param| {
+            on_param_changed(stream, id, param, ud);
+        })
+        .add_buffer(|_stream, ud, buffer| {
+            if let Some(dma) = &ud.dma {
+                dma.buffer_added(buffer);
+            }
+        })
+        .remove_buffer(|_stream, ud, buffer| {
+            if let Some(dma) = &ud.dma {
+                dma.buffer_removed(buffer);
+            }
         })
         .state_changed(|_stream, ud, _old, new| {
             if let Some(why) = stream_failed(&new) {
+                // With DMA-BUF offered the failure may be DMA-BUF's (a
+                // `Buffers` param nobody can satisfy, a link that breaks
+                // after the DMA-BUF-only format, a buffer that cannot be
+                // mapped): the main loop connects the stream again with the
+                // memory format, once.
+                if let Some(dma) = &ud.dma
+                    && dma.stream_error(&why) == OnError::Reconnect
+                {
+                    return;
+                }
                 // A link that cannot agree a format (a portal offering none of
-                // BGRx and BGRA) or that breaks: said, and the capture ends,
+                // the formats) or that breaks: said, and the capture ends,
                 // rather than an active stream with no frame (review N2).
                 error!("{why}");
                 ud.cancel.cancel();
@@ -660,10 +824,26 @@ fn run_pipewire_capture(
     // link stays unnegotiated and no frame ever comes (seen on KDE Plasma
     // 6.8, 2026-10-31). Memory buffers, as no modifier is offered; the
     // format chosen is learned in the param_changed callback.
+    // With DMA-BUF buffers possible, the format with the modifiers the card
+    // takes comes first and the memory format after it.
+    let dma_format = match &dma {
+        Some(dma) => Some(video_format_pod_with(config, dma.modifiers())?),
+        None => None,
+    };
+    let dma_format = dma_format
+        .as_deref()
+        .map(|bytes| {
+            libspa::pod::Pod::from_bytes(bytes)
+                .context("The capture's DMA-BUF video format is not a pod")
+        })
+        .transpose()?;
     let format = video_format_pod(config)?;
     let format =
         libspa::pod::Pod::from_bytes(&format).context("The capture's video format is not a pod")?;
-    let mut params = [format];
+    let meta_pods = pods_of(&metas)?;
+    let mut params: Vec<&libspa::pod::Pod> = dma_format.into_iter().collect();
+    params.push(format);
+    params.extend(meta_pods);
     stream
         .connect(
             libspa::utils::Direction::Input,
@@ -680,9 +860,50 @@ fn run_pipewire_capture(
 
     info!("PipeWire stream connected and active, entering main loop");
 
+    // A frame still on the card holds its stream buffer until the encoder is
+    // done with it, and gives it back from another thread: a descriptor that
+    // wakes this loop is how the buffer gets back to the stream's own thread.
+    let _wake = match &dma {
+        Some(dma) => Some(mainloop.loop_().add_io(
+            std::fs::File::from(dma.wake_fd()?),
+            libspa::support::system::IoFlags::IN,
+            |wake| {
+                use std::io::Read;
+                // Reading clears the counter; nothing is lost if it is empty.
+                let _ = wake.read(&mut [0u8; 8]);
+            },
+        )),
+        None => None,
+    };
+
     // Run the main loop until cancellation
     loop {
         mainloop.loop_().iterate(Duration::from_millis(100));
+        if let Some(dma) = &dma {
+            for buffer in dma.returned() {
+                // SAFETY: a buffer of this stream that no frame holds any
+                // more and that the stream has not freed (`returned` names
+                // only live ones), queued back on the stream's own thread.
+                unsafe { stream.queue_raw_buffer(buffer) };
+            }
+            if dma.reconnect_wanted()
+                && let Err(e) = reconnect_for_memory(&stream, node_id, config, &metas)
+            {
+                error!("The PipeWire stream did not connect again on memory buffers: {e:#}");
+                cancel.cancel();
+            }
+            if dma.plain_wanted() {
+                ask_for_memory(&stream, config, &metas);
+            }
+            if dma.memory_ignored() {
+                // Asked for memory buffers and still sent DMA-BUF ones: a
+                // frozen picture is worse than an ended capture that says why.
+                error!(
+                    "The compositor keeps sending DMA-BUF buffers after being asked for memory ones; the capture ends"
+                );
+                cancel.cancel();
+            }
+        }
         if cancel.is_cancelled() {
             info!("Cancellation received, exiting PipeWire main loop");
             break;
@@ -690,6 +911,10 @@ fn run_pipewire_capture(
     }
 
     info!("PipeWire capture thread shutting down");
+    if let Some(dma) = &dma {
+        // Frames that outlive the stream give nothing back to it.
+        dma.close();
+    }
 
     // Clean up
     let _ = stream.set_active(false);
@@ -702,10 +927,19 @@ fn run_pipewire_capture(
 /// encoder reads as `bgra` (BGRx first, as compositors share no alpha), any
 /// size, any rate up to 1000 fps, preferring the configured ones.
 fn video_format_pod(config: &StreamingConfig) -> Result<Vec<u8>> {
+    video_format_pod_with(config, &[])
+}
+
+/// [`video_format_pod`] for DMA-BUF buffers when `modifiers` is not empty: the
+/// same format and size and rate, with the modifiers the card takes (tiled
+/// first) as a choice the compositor picks from. The modifier is mandatory
+/// and left unfixed (`DONT_FIXATE`), the way compositors expect a consumer
+/// that has a GPU of its own to offer it: the one allocating chooses.
+fn video_format_pod_with(config: &StreamingConfig, modifiers: &[u64]) -> Result<Vec<u8>> {
     use libspa::param::format::{FormatProperties, MediaSubtype, MediaType};
     use libspa::param::video::VideoFormat;
     use libspa::utils::{Fraction, Rectangle};
-    let object = libspa::pod::object!(
+    let mut object = libspa::pod::object!(
         libspa::utils::SpaTypes::ObjectParamFormat,
         libspa::param::ParamType::EnumFormat,
         libspa::pod::property!(FormatProperties::MediaType, Id, MediaType::Video),
@@ -753,6 +987,29 @@ fn video_format_pod(config: &StreamingConfig) -> Result<Vec<u8>> {
             }
         ),
     );
+    if !modifiers.is_empty() {
+        use libspa::pod::{ChoiceValue, Property, PropertyFlags, Value};
+        use libspa::utils::{Choice, ChoiceEnum, ChoiceFlags};
+        let all: Vec<i64> = modifiers.iter().map(|&m| m as i64).collect();
+        let modifier = Property {
+            key: FormatProperties::VideoModifier.as_raw(),
+            flags: PropertyFlags::MANDATORY | PropertyFlags::DONT_FIXATE,
+            value: Value::Choice(ChoiceValue::Long(Choice(
+                ChoiceFlags::empty(),
+                ChoiceEnum::Enum {
+                    default: all[0],
+                    alternatives: all,
+                },
+            ))),
+        };
+        // After the format, before the size: the order of the keys.
+        let at = object
+            .properties
+            .iter()
+            .position(|p| p.key == FormatProperties::VideoSize.as_raw())
+            .unwrap_or(object.properties.len());
+        object.properties.insert(at, modifier);
+    }
     let (cursor, _) = libspa::pod::serialize::PodSerializer::serialize(
         std::io::Cursor::new(Vec::new()),
         &libspa::pod::Value::Object(object),
@@ -761,18 +1018,136 @@ fn video_format_pod(config: &StreamingConfig) -> Result<Vec<u8>> {
     Ok(cursor.into_inner())
 }
 
+/// The format the capture settled on with the DMA-BUF `modifier` fixed: what
+/// it answers a compositor that left the modifier for the consumer to pick.
+fn fixed_format_pod(
+    config: &StreamingConfig,
+    format: libspa::param::video::VideoFormat,
+    size: libspa::utils::Rectangle,
+    modifier: u64,
+) -> Result<Vec<u8>> {
+    use libspa::param::format::{FormatProperties, MediaSubtype, MediaType};
+    use libspa::pod::{Property, PropertyFlags, Value};
+    use libspa::utils::Fraction;
+    let mut modifier = Property::new(
+        FormatProperties::VideoModifier.as_raw(),
+        Value::Long(modifier as i64),
+    );
+    modifier.flags = PropertyFlags::MANDATORY;
+    let mut object = libspa::pod::object!(
+        libspa::utils::SpaTypes::ObjectParamFormat,
+        libspa::param::ParamType::EnumFormat,
+        libspa::pod::property!(FormatProperties::MediaType, Id, MediaType::Video),
+        libspa::pod::property!(FormatProperties::MediaSubtype, Id, MediaSubtype::Raw),
+        libspa::pod::property!(FormatProperties::VideoFormat, Id, format),
+        libspa::pod::property!(FormatProperties::VideoSize, Rectangle, size),
+        libspa::pod::property!(
+            FormatProperties::VideoFramerate,
+            Choice,
+            Range,
+            Fraction,
+            Fraction {
+                num: config.fps.max(1),
+                denom: 1
+            },
+            Fraction { num: 0, denom: 1 },
+            Fraction {
+                num: 1000,
+                denom: 1
+            }
+        ),
+    );
+    object.properties.insert(3, modifier);
+    let (cursor, _) = libspa::pod::serialize::PodSerializer::serialize(
+        std::io::Cursor::new(Vec::new()),
+        &libspa::pod::Value::Object(object),
+    )
+    .map_err(|e| anyhow::anyhow!("The capture's fixed video format did not serialize: {e:?}"))?;
+    Ok(cursor.into_inner())
+}
+
+/// `bytes` as pods.
+fn pods_of(bytes: &[Vec<u8>]) -> Result<Vec<&libspa::pod::Pod>> {
+    bytes
+        .iter()
+        .map(|b| libspa::pod::Pod::from_bytes(b).context("A param of the capture is not a pod"))
+        .collect()
+}
+
+/// Send the stream's params: `first` then the `Meta` params. A failure is
+/// said and the stream goes on as it was.
+fn update(stream: &pipewire::stream::Stream, first: &[Vec<u8>], metas: &[Vec<u8>]) {
+    let all: Vec<Vec<u8>> = first.iter().chain(metas).cloned().collect();
+    match pods_of(&all) {
+        Ok(mut pods) => {
+            if let Err(e) = stream.update_params(&mut pods) {
+                warn!("The PipeWire stream did not take its new params: {e}");
+            }
+        }
+        Err(e) => warn!("{e:#}"),
+    }
+}
+
+/// DMA-BUF is given up: the stream is offered the memory format only and
+/// memory buffers, so the compositor settles on those.
+fn ask_for_memory(stream: &pipewire::stream::Stream, config: &StreamingConfig, metas: &[Vec<u8>]) {
+    let (Ok(format), Ok(buffers)) = (
+        video_format_pod(config),
+        pw_dma::buffers_param_pod(pw_dma::Kind::Memory),
+    ) else {
+        return;
+    };
+    update(stream, &[format, buffers], metas);
+}
+
+/// The stream failed with DMA-BUF offered: disconnect it and connect it
+/// again with the memory format only (no `Buffers` param is left over from
+/// the first connection to ask for DMA-BUFs).
+fn reconnect_for_memory(
+    stream: &pipewire::stream::Stream,
+    node_id: u32,
+    config: &StreamingConfig,
+    metas: &[Vec<u8>],
+) -> Result<()> {
+    let _ = stream.disconnect();
+    let format = video_format_pod(config)?;
+    let format =
+        libspa::pod::Pod::from_bytes(&format).context("The capture's video format is not a pod")?;
+    let meta_pods = pods_of(metas)?;
+    let mut params: Vec<&libspa::pod::Pod> = vec![format];
+    params.extend(meta_pods);
+    stream
+        .connect(
+            libspa::utils::Direction::Input,
+            Some(node_id),
+            StreamFlags::AUTOCONNECT | StreamFlags::MAP_BUFFERS,
+            &mut params,
+        )
+        .with_context(|| format!("Failed to connect stream to node {node_id} again"))?;
+    stream
+        .set_active(true)
+        .context("Failed to activate stream again")?;
+    info!("The PipeWire stream is connected again, memory buffers only");
+    Ok(())
+}
+
 /// What to say when the stream reached `state` and failed.
 fn stream_failed(state: &pipewire::stream::StreamState) -> Option<String> {
     match state {
-        pipewire::stream::StreamState::Error(why) => Some(format!(
-            "The screen's PipeWire stream failed ({why}); it offers BGRx and BGRA only"
-        )),
+        pipewire::stream::StreamState::Error(why) => {
+            Some(format!("The screen's PipeWire stream failed ({why})"))
+        }
         _ => None,
     }
 }
 
 /// Handle the param_changed callback to learn the negotiated video format.
-fn on_param_changed(id: u32, param: Option<&libspa::pod::Pod>, user_data: &StreamUserData) {
+fn on_param_changed(
+    stream: &pipewire::stream::Stream,
+    id: u32,
+    param: Option<&libspa::pod::Pod>,
+    user_data: &StreamUserData,
+) {
     if id != libspa::param::ParamType::Format.as_raw() {
         return;
     }
@@ -798,6 +1173,37 @@ fn on_param_changed(id: u32, param: Option<&libspa::pod::Pod>, user_data: &Strea
     // Update the actual dimensions for frame capture
     user_data.width.store(size.width, Ordering::Relaxed);
     user_data.height.store(size.height, Ordering::Relaxed);
+
+    // DMA-BUF: a format with a modifier asks for more than a memory one.
+    let Some(dma) = &user_data.dma else {
+        return;
+    };
+    match dma.step(pw_dma::modifier_prop(param).as_ref()) {
+        Step::Memory => debug!("The PipeWire stream settled on memory buffers"),
+        // The modifier was left open for the consumer to pick: fix it, and
+        // the compositor answers with the fixed format (below).
+        Step::Fixate(modifier) => match fixed_format_pod(&user_data.config, format, size, modifier)
+        {
+            Ok(fixed) => {
+                debug!("Fixing the PipeWire stream's DMA-BUF modifier to {modifier:#x}");
+                update(stream, &[fixed], &user_data.metas);
+            }
+            Err(e) => warn!("{e:#}"),
+        },
+        // The format is fixed and the card takes it: ask for DMA-BUF buffers.
+        Step::Ready(modifier) => match pw_dma::buffers_param_pod(pw_dma::Kind::DmaBuf) {
+            Ok(buffers) => {
+                info!(
+                    "The PipeWire stream settled on DMA-BUF buffers (modifier {modifier:#x}), {}x{}",
+                    size.width, size.height
+                );
+                update(stream, &[buffers], &user_data.metas);
+            }
+            Err(e) => warn!("{e:#}"),
+        },
+        // Said when it was decided; the main loop sends the memory format.
+        Step::GiveUp(_) => {}
+    }
 }
 
 /// The video format a `param_changed` of `id` settled on, when it is the
@@ -840,15 +1246,131 @@ fn chunk_pixels(
     Some((start..end, stride))
 }
 
+/// A buffer taken from the stream, handed back as it is dropped. The safe
+/// `pipewire::buffer::Buffer` does the same but shows no metadata, which
+/// the pointer's record (local cursor) is.
+struct Dequeued<'s> {
+    stream: &'s pipewire::stream::Stream,
+    raw: *mut pipewire::sys::pw_buffer,
+}
+
+impl<'s> Dequeued<'s> {
+    fn take(stream: &'s pipewire::stream::Stream) -> Option<Self> {
+        // SAFETY: the pointer is checked for null, and handed back to the
+        // same stream exactly once, by `Drop`.
+        let raw = unsafe { stream.dequeue_raw_buffer() };
+        (!raw.is_null()).then_some(Self { stream, raw })
+    }
+
+    fn spa(&self) -> *mut libspa::sys::spa_buffer {
+        // SAFETY: `raw` is a valid `pw_buffer` until it is queued again.
+        unsafe { (*self.raw).buffer }
+    }
+
+    fn datas_mut(&mut self) -> &mut [libspa::buffer::Data] {
+        let buffer = self.spa();
+        // SAFETY: the same reading of the `spa_buffer` as
+        // `pipewire::buffer::Buffer::datas_mut` makes: `Data` is a
+        // transparent wrapper of `spa_data`.
+        unsafe {
+            if !buffer.is_null() && (*buffer).n_datas > 0 && !(*buffer).datas.is_null() {
+                std::slice::from_raw_parts_mut(
+                    (*buffer).datas as *mut libspa::buffer::Data,
+                    (*buffer).n_datas as usize,
+                )
+            } else {
+                &mut []
+            }
+        }
+    }
+
+    /// The raw buffer, which a frame now holds: it is not queued back when
+    /// `self` is dropped (a lease gives it back later).
+    fn keep(self) -> *mut pipewire::sys::pw_buffer {
+        let this = std::mem::ManuallyDrop::new(self);
+        this.raw
+    }
+
+    /// The pointer's record in this buffer, if it carries one.
+    fn cursor_record(&self) -> Option<&[u8]> {
+        // SAFETY: the buffer is valid and not queued while `self` lives.
+        unsafe { super::capture_cursor_pw::cursor_meta(self.spa()) }
+    }
+
+    /// The rectangle of this buffer that is the picture, if it carries a record
+    /// (an empty one is returned as it is: [`part`](super::capture_video_crop::part) drops it).
+    fn crop_record(&self) -> Option<(i32, i32, i32, i32)> {
+        // SAFETY: the buffer is valid and not queued while `self` lives.
+        unsafe { super::capture_video_crop::crop_meta(self.spa()) }
+            .and_then(super::capture_video_crop::parse)
+    }
+}
+
+impl Drop for Dequeued<'_> {
+    fn drop(&mut self) {
+        // SAFETY: `raw` came from this stream's `dequeue_raw_buffer`.
+        unsafe { self.stream.queue_raw_buffer(self.raw) };
+    }
+}
+
 /// Handle the process callback -- dequeue frames and send them through the channel.
 fn on_process(stream: &pipewire::stream::Stream, user_data: &StreamUserData) {
     // Dequeue an available buffer
-    let mut buffer = match stream.dequeue_buffer() {
-        Some(b) => b,
-        None => {
-            trace!("No buffer available in process callback");
-            return;
+    let Some(mut buffer) = Dequeued::take(stream) else {
+        trace!("No buffer available in process callback");
+        return;
+    };
+
+    // The pointer's record comes before the picture is looked at: a buffer
+    // that only moved the pointer carries no picture (local cursor).
+    if let Some(cursor) = &user_data.cursor
+        && let Some(record) = buffer.cursor_record()
+    {
+        let width = user_data.width.load(Ordering::Relaxed);
+        let height = user_data.height.load(Ordering::Relaxed);
+        cursor
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .update(record, width, height);
+    }
+
+    // A DMA-BUF buffer (the card imports it where it is) becomes a frame that
+    // holds the stream's buffer; anything else is copied out below.
+    if let Some(dma) = &user_data.dma {
+        let width = user_data.width.load(Ordering::Relaxed);
+        let height = user_data.height.load(Ordering::Relaxed);
+        match dma.take(buffer.raw, width, height) {
+            Take::Copy => {}
+            Take::Nothing | Take::Drop => return,
+            Take::Frame(gpu) => {
+                buffer.keep();
+                let count = user_data.frame_count.fetch_add(1, Ordering::Relaxed);
+                if count.is_multiple_of(30) {
+                    debug!("Captured DMA-BUF frame #{count}: {width}x{height}");
+                }
+                send_frame(
+                    user_data,
+                    VideoFrame {
+                        data: Vec::new(),
+                        width,
+                        height,
+                        stride: width * 4,
+                        timestamp: Instant::now(),
+                        gpu: Some(gpu),
+                        repeat: false,
+                    },
+                );
+                return;
+            }
         }
+    }
+
+    // The part of the buffer that is the picture, copied out before the
+    // buffer's data is borrowed.
+    let crop = if user_data.crop_meta {
+        buffer.crop_record()
+    } else {
+        None
     };
 
     // Access the buffer data
@@ -898,15 +1420,44 @@ fn on_process(stream: &pipewire::stream::Stream, user_data: &StreamUserData) {
         debug!("Captured frame #{count}: size={size}B, {width}x{height}, stride={stride}");
     }
 
-    let frame = VideoFrame {
+    let mut frame = VideoFrame {
         data: frame_data,
         width,
         height,
         stride,
         timestamp: Instant::now(),
         gpu: None,
+        repeat: false,
     };
-    // Send the frame through the channel.
+    // A lent window: only the part the stream says is the window, and when
+    // that cannot be told, nothing (the stream is a screen's size with the
+    // window in a corner).
+    if user_data.crop_meta {
+        use super::capture_video_crop::{Part, part};
+        let mut last = user_data
+            .last_crop
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        match part(width, height, crop, *last) {
+            Part::Whole => *last = None,
+            Part::Cut((x, y, w, h)) => {
+                if !frame.crop_region(x, y, w, h) {
+                    debug!("A lent window's frame could not be cut: dropped");
+                    return;
+                }
+                *last = Some((x, y, w, h));
+            }
+            Part::Drop => {
+                debug!("A lent window's frame is not shown to be the window: dropped");
+                return;
+            }
+        }
+    }
+    send_frame(user_data, frame);
+}
+
+/// Send the frame through the channel.
+fn send_frame(user_data: &StreamUserData, frame: VideoFrame) {
     // Use try_send to implement Latest-Frame-Wins by dropping the newest frame if full.
     match user_data.frame_tx.try_send(frame) {
         Ok(_) => {}
@@ -1113,6 +1664,7 @@ fn run_x11_capture_loop(
                             stride,
                             timestamp: Instant::now(),
                             gpu: None,
+                            repeat: false,
                         };
                         // Send frame to pipeline. prev_frame only advances when
                         // the frame actually reached the pipeline — if the
@@ -1225,6 +1777,93 @@ mod tests {
         };
         assert_eq!(default, Fraction { num: 30, denom: 1 });
         assert_eq!(min, Fraction { num: 0, denom: 1 });
+    }
+
+    #[test]
+    fn dma_buf_buffers_are_for_the_in_process_vaapi_encoder_and_whole_screens_only() {
+        use crate::streaming::HardwareEncoder;
+        let with = |hardware_encoder| StreamingConfig {
+            hardware_encoder,
+            ..StreamingConfig::default()
+        };
+        assert!(dmabuf_allowed(&with(HardwareEncoder::Auto), false, false));
+        assert!(dmabuf_allowed(&with(HardwareEncoder::Vaapi), false, false));
+        assert!(!dmabuf_allowed(&with(HardwareEncoder::Nvenc), false, false));
+        assert!(!dmabuf_allowed(
+            &with(HardwareEncoder::Software),
+            false,
+            false
+        ));
+        // The owner's setting, and a lent window's stream (cut on the processor).
+        assert!(!dmabuf_allowed(&with(HardwareEncoder::Auto), false, true));
+        assert!(!dmabuf_allowed(&with(HardwareEncoder::Auto), true, false));
+    }
+
+    #[test]
+    fn the_dma_buf_format_offers_the_modifiers_unfixed_and_the_memory_one_has_none() {
+        use libspa::param::format::FormatProperties;
+        use libspa::pod::{PropertyFlags, Value};
+        let config = StreamingConfig::default();
+        let tiled = 0x0100_0000_0000_0002u64;
+        let bytes = video_format_pod_with(&config, &[tiled, 0]).unwrap();
+        let (_, value) =
+            libspa::pod::deserialize::PodDeserializer::deserialize_any_from(&bytes).unwrap();
+        let Value::Object(object) = value else {
+            panic!("not an object");
+        };
+        // The keys stay in order: format, modifier, size, rate.
+        let keys: Vec<u32> = object.properties.iter().map(|p| p.key).collect();
+        let at = |k: FormatProperties| keys.iter().position(|&x| x == k.as_raw()).unwrap();
+        assert!(at(FormatProperties::VideoFormat) < at(FormatProperties::VideoModifier));
+        assert!(at(FormatProperties::VideoModifier) < at(FormatProperties::VideoSize));
+        let prop = &object.properties[at(FormatProperties::VideoModifier)];
+        assert!(prop.flags.contains(PropertyFlags::MANDATORY));
+        assert!(prop.flags.contains(PropertyFlags::DONT_FIXATE));
+        // Read back as the capture reads a compositor's: ours, tiled first.
+        let pod = libspa::pod::Pod::from_bytes(&bytes).unwrap();
+        assert_eq!(
+            pw_dma::modifier_prop(pod),
+            Some(pw_dma::ModifierProp::Open(vec![tiled, 0]))
+        );
+        // The memory format has no modifier at all.
+        let plain = video_format_pod(&config).unwrap();
+        let pod = libspa::pod::Pod::from_bytes(&plain).unwrap();
+        assert_eq!(pw_dma::modifier_prop(pod), None);
+    }
+
+    #[test]
+    fn the_fixed_format_names_one_modifier_and_keeps_the_negotiated_size() {
+        use libspa::param::format::FormatProperties;
+        use libspa::param::video::VideoFormat;
+        use libspa::pod::Value;
+        use libspa::utils::Rectangle;
+        let config = StreamingConfig::default();
+        let size = Rectangle {
+            width: 1920,
+            height: 1080,
+        };
+        let modifier = 0x0100_0000_0000_0001u64;
+        let bytes = fixed_format_pod(&config, VideoFormat::BGRx, size, modifier).unwrap();
+        let pod = libspa::pod::Pod::from_bytes(&bytes).unwrap();
+        assert_eq!(
+            pw_dma::modifier_prop(pod),
+            Some(pw_dma::ModifierProp::Fixed(modifier))
+        );
+        let (_, value) =
+            libspa::pod::deserialize::PodDeserializer::deserialize_any_from(&bytes).unwrap();
+        let Value::Object(object) = value else {
+            panic!("not an object");
+        };
+        let size_prop = object
+            .properties
+            .iter()
+            .find(|p| p.key == FormatProperties::VideoSize.as_raw())
+            .unwrap();
+        assert_eq!(size_prop.value, Value::Rectangle(size));
+        // The settled format parses as a video format the capture reads.
+        let info = negotiated(libspa::param::ParamType::Format.as_raw(), pod).unwrap();
+        assert_eq!(info.format(), VideoFormat::BGRx);
+        assert_eq!(info.size().width, 1920);
     }
 
     #[test]

@@ -95,13 +95,13 @@ The stream is QUIC (`pocketdesk-stream`).
   - `[0xFF,0x00]` + u32 LE, the screen;
   - `[0xFE,0x00]` + length u8 + UTF-8, its device id;
   - `[0xFC,0x00]` + length u8 + UTF-8, its iroh key;
-  - `[0xFD,0x00]` + u8, its codec capabilities (bit 0, HEVC);
+  - `[0xFD,0x00]` + u8, its codec capabilities (bit 0, HEVC; bit 1, needs no idle repeats: a screen that has not changed need not be sent again once a second, as the client holds the link by the connection's keepalive; a host that does not know it ignores it; bit 2, draws the other computer's pointer itself, so a host that can takes its pointer out of the picture and sends it apart on streams of kind `5` (`docs/protocol.md`), first a mode message saying whether it has, and again whenever that changes, with the whole pointer said again every 1.5 s so a lost message heals);
   - `[0xFB,0x00]` + u8, the session mode: `1` input only, `2` cast, `3` sound, `4` the phone's sound alone (none: a screen session). A sound session gets the computer's sound and no picture; the phone's sound alone sends a cast's sound streams and gets nothing but its ready stream; a computer that sends it a picture does not know the mode, and the client closes it.
 
   A cast then sends `[0xFA,…]` streams. Input travels as tagged packets, tags 0 to 15. The tables are in `docs/protocol.md` §3.2, from `core/src/streaming/{client,streamer,input_packet}.rs`.
 - **From the computer:** each frame or audio packet goes on its own uni-stream, with an 18-byte header, little-endian:
   - sequence, u64;
-  - kind, u8: `0` video, `1` audio, `2` ready (a session without a picture was admitted; a sound session's carries one byte: bit 7 set, bit 0 the computer's sound sent, bit 1 the phone's mic played; a screen session's, sent as it is admitted, one byte of what the computer takes: bit 7 set, bit 0 a pen, only with the Input permission, bit 1 input taken at all (BK7), bit 2 its system said and bit 3 that system Windows (PC4)), `3` keyframe wanted (a cast);
+  - kind, u8: `0` video, `1` audio, `2` ready (a session without a picture was admitted; a sound session's carries one byte: bit 7 set, bit 0 the computer's sound sent, bit 1 the phone's mic played; a screen session's, sent as it is admitted, one byte of what the computer takes: bit 7 set, bit 0 a pen, only with the Input permission, bit 1 input taken at all (BK7), bit 2 its system said and bit 3 that system Windows (PC4)), `3` keyframe wanted (a cast), `5` a message about the host's pointer (only to a client that set bit 2 above);
   - a keyframe flag, u8;
   - a timestamp in microseconds, u64.
 

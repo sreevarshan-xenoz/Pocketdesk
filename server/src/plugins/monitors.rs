@@ -56,7 +56,7 @@ pub(crate) fn answer() -> NetworkPacket {
 
 /// Each listed monitor's origin, in index order: what the capture matches a
 /// monitor index against (`capture_screencopy::monitor_rect_physical`).
-pub(crate) fn origins() -> Vec<(i32, i32)> {
+pub fn origins() -> Vec<(i32, i32)> {
     xcap::Monitor::all()
         .map(|all| {
             all.iter()

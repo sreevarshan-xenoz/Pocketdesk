@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 
 use super::awake::KeepAwake;
 use super::badge;
+use super::drag_window::Rules;
 use super::drive::{
     Action, Captured, Driver, LayoutFiles, OpenChannel, SavedLayout, layout_from, reachable,
 };
@@ -80,6 +81,26 @@ const GAME_EVERY: Duration = Duration::from_millis(500);
 const PROBE_WAIT: Duration = Duration::from_millis(100);
 /// How long, as a driver ends, what it just sent may take to go.
 const FLUSH_WAIT: Duration = Duration::from_millis(300);
+
+/// Whether a window dragged to the edge goes across, as the settings say:
+/// `drag_windows_across` with `lend_windows`, and how a drag is told.
+fn drag_rules(config: &pocketdesk_core::local::config::Config) -> Rules {
+    Rules::from_settings(
+        config.drag_windows_across,
+        config.lend_windows,
+        &config.drag_window_trigger,
+    )
+}
+
+/// [`drag_rules`], or none while the settings read is `stale`: no new drag is
+/// read on settings that may be old, as the clipboard is not.
+fn drag_rules_now(config: &pocketdesk_core::local::config::Config, stale: bool) -> Rules {
+    if stale {
+        Rules::default()
+    } else {
+        drag_rules(config)
+    }
+}
 
 /// What Hyprland's window in front says for the gaming lock: full screen
 /// (Hyprland 0.42 and later say 2 for it, 3 with maximized too; 1 is only
@@ -327,6 +348,15 @@ impl<B: Backend> Glue<B> {
                             badge::flash(&said_here, badge::SWITCH_FOR);
                         }
                     }
+                    // A window dragged to the edge goes to the computer the
+                    // pointer went to, and one dragged back comes home: the
+                    // compositor is read off this loop.
+                    Action::DragWindow(handover) => {
+                        tokio::spawn(super::drag_window::hand_over(handover));
+                    }
+                    Action::DragBack(back) => {
+                        tokio::spawn(super::drag_window::bring_back(back));
+                    }
                     // Win+L is Windows' (its hook spots it); the mode, the
                     // park and the cursor are the portal glue's.
                     Action::LockHere
@@ -514,6 +544,7 @@ pub(super) fn drive<B: Backend>(
     let mut driver = Driver::new(&me.device_id, layout)
         .with_game_lock(game_lock_on, config.shared_input_lock_programs.clone());
     driver.set_clipboard(config.shared_input_clipboard);
+    driver.set_drag(drag_rules(&config));
     let actions = driver.on(foreground_now(&runtime, game_lock_on));
     glue.apply(&mut driver, actions);
     // The files, the settings, the screens and Hyprland's scale every two
@@ -770,6 +801,10 @@ pub(super) fn drive<B: Backend>(
             quick_on = config.shared_input_low_latency;
             glue.pacer.set(quick_on);
             driver.set_clipboard(config.shared_input_clipboard && !stale);
+            // A window dragged across: new drags are not read on a stale read
+            // (like the clipboard), and what was handed over is kept through
+            // it ([`Driver::set_drag`]).
+            driver.set_drag(drag_rules_now(config, stale));
             glue.sound_on = config.shared_input_sound;
             let actions =
                 driver.set_game_lock(game_lock_on, config.shared_input_lock_programs.clone());
@@ -939,6 +974,37 @@ mod tests {
             "address": "0x1", "class": class, "fullscreen": fullscreen,
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn a_stale_settings_read_reads_no_new_drag_and_a_fresh_one_follows_the_settings() {
+        let config = pocketdesk_core::local::config::Config {
+            drag_windows_across: true,
+            lend_windows: true,
+            drag_window_trigger: "any".to_string(),
+            ..Default::default()
+        };
+        let fresh = drag_rules_now(&config, false);
+        assert!(fresh.on);
+        assert_eq!(
+            fresh.trigger,
+            crate::shared_input::drag_window::Trigger::Any
+        );
+        assert!(!drag_rules_now(&config, true).on, "no drag on old settings");
+        let off = pocketdesk_core::local::config::Config {
+            drag_windows_across: false,
+            ..Default::default()
+        };
+        assert!(!drag_rules_now(&off, false).on, "off when turned off");
+        let no_lending = pocketdesk_core::local::config::Config {
+            lend_windows: false,
+            ..Default::default()
+        };
+        assert!(!drag_rules_now(&no_lending, false).on, "needs lending");
+        assert!(
+            drag_rules_now(&pocketdesk_core::local::config::Config::default(), false).on,
+            "on by default"
+        );
     }
 
     #[test]

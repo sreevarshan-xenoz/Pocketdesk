@@ -41,6 +41,26 @@ pub struct Config {
     /// phone's "Full quality" turns it off for its session.
     #[serde(default = "default_true")]
     pub slow_link_frame_rate: bool,
+    /// Smooth keyframes: no whole keyframe every two seconds, which is a
+    /// hitch in the picture's timing each time (it is several times the size
+    /// of any other frame). An encoder that can (libx264, NVENC) spreads it
+    /// over the stream instead, the rest send one every ten seconds, and a
+    /// viewer that loses a frame still gets a whole one at once. On by
+    /// default; off, every encoder sends a whole keyframe every two seconds
+    /// as it did before (`streaming::keyframes`). The server reads it at its
+    /// start.
+    #[serde(default = "default_true")]
+    pub smooth_keyframes: bool,
+    /// Copy the screen through memory, as every capture did before the
+    /// zero-copy capture: on a wlroots desktop, and on GNOME and KDE through
+    /// PipeWire, with VA-API the compositor renders into buffers on the
+    /// graphics card and the encoder reads them there, with no copy and no
+    /// upload. Turn this on to go back to the copy, if that picture ever
+    /// misbehaves on a card or driver
+    /// (`POCKETDESK_CAPTURE_COPY=1` does the same for one run). Off by
+    /// default. The server reads it at its start.
+    #[serde(default)]
+    pub capture_copy: bool,
     /// Draw a phone's laser dot (G4): the air mouse in Remote moves a red
     /// dot on the screen instead of the pointer. On by default; drawn on
     /// Windows and on wlroots compositors (N10).
@@ -263,6 +283,41 @@ pub struct Config {
     /// Let a phone with Input add a screen of its own shape (T10j; Sway and Hyprland).
     #[serde(default = "default_true")]
     pub virtual_screens: bool,
+    /// Let the owner's other computers (paired both ways, with Input) borrow
+    /// this computer's windows: the window moves to a hidden screen of its
+    /// own size here, is streamed there, and goes back on return (Sway,
+    /// Hyprland; on Windows the window stays where it is and is driven; on
+    /// GNOME it stays where it is and is only looked at). On by default, and
+    /// only for the owner's own computers (paired both ways, with Input); off,
+    /// no window leaves the screen it is on.
+    #[serde(default = "default_true")]
+    pub lend_windows: bool,
+    /// A window borrowed from another of the owner's computers takes the
+    /// size of the window that shows it here: as that window is resized,
+    /// maximised or moved to a screen of another scale, the other computer
+    /// sizes the window (and the hidden screen it is on) to the picture area
+    /// in pixels, so the picture stays sharp, a pixel to a pixel; until the
+    /// new one is in, the old picture is scaled to the window. Read by an
+    /// open window at once. On by default; off, a borrowed window keeps the
+    /// size it was lent at and its picture is scaled.
+    #[serde(default = "default_true")]
+    pub borrowed_window_follows_size: bool,
+    /// Drag a window past this computer's edge onto another of the owner's
+    /// computers (window handoff, phase 4): while the keyboard and mouse are
+    /// shared, a floating window dragged to the edge that leads to another
+    /// computer is lent to it and shown there where it is dropped (Sway and
+    /// Hyprland; needs `lend_windows`). The computer it goes to needs this
+    /// on too: it is the one that opens the window. On by default; off, a
+    /// drag that crosses an edge only moves the pointer.
+    #[serde(default = "default_true")]
+    pub drag_windows_across: bool,
+    /// What marks such a drag as a window being moved, not a text selection
+    /// or a file being dragged: `mod` (the default) wants the compositor's
+    /// modifier (Super or Alt) held with the left button, as its move
+    /// binding does; `any` takes any left-button drag that reaches the edge
+    /// from a floating window, a title-bar drag included.
+    #[serde(default = "default_drag_window_trigger")]
+    pub drag_window_trigger: String,
     /// Let phones with the Peek permission see this screen as one still,
     /// with no session (BF2). On: the permission, off for every phone until
     /// chosen, is what lets one.
@@ -556,6 +611,28 @@ pub struct Config {
     /// Read as each view dials. On by default.
     #[serde(default = "default_true")]
     pub computer_view_hevc: bool,
+    /// The window that shows another computer's screen asks the other
+    /// computer to send nothing while its screen is still: the window keeps
+    /// the last picture and the link is held by the connection's own
+    /// keepalive, so a still screen costs no bandwidth and no decoding
+    /// (`CODEC_CAP_NO_IDLE_REPEATS`, phase 1a of the window handoff). Off,
+    /// the other computer repeats a still screen's picture once a second,
+    /// as before. Read as each view dials. On by default.
+    #[serde(default = "default_true")]
+    pub computer_view_no_idle_repeats: bool,
+    /// The window that shows another computer's screen draws that computer's
+    /// pointer itself, as this computer's own pointer, so it moves with no
+    /// wait for the picture (`CODEC_CAP_LOCAL_CURSOR`, the window handoff's
+    /// local cursor). The other computer takes its pointer out of the
+    /// picture where it can (a wlroots compositor such as Sway or Hyprland,
+    /// GNOME, KDE through the screen-sharing portal) and sends the pointer's
+    /// shape apart; where it cannot (Windows, X11, an older version) the
+    /// picture keeps its pointer, as before. While this computer's pointer
+    /// is locked to the window, the pointer is drawn where the other
+    /// computer says it is. Off, the pointer stays as the picture has it.
+    /// Read as each view starts. On by default.
+    #[serde(default = "default_true")]
+    pub computer_view_local_cursor: bool,
     /// The other computer is locked as the window that shows its screen
     /// closes (PC8), with that computer's own lock, which its "Lock, sleep,
     /// privacy and wake others" switch for this one allows. Off until
@@ -588,6 +665,15 @@ pub struct Config {
     /// two. On by default.
     #[serde(default = "default_true")]
     pub smooth_scrolling: bool,
+    /// The app's windows show a picture the moment it is drawn, not at the
+    /// display's next refresh: the swap does not wait for vsync, so a
+    /// computer's screen in a window comes about a frame sooner (elsewhere
+    /// than Wayland the picture can tear, and no window draws more than
+    /// twice the display's refresh a second). On Wayland it changes
+    /// nothing: the swap never waits there. Read as the app starts. Off by
+    /// default.
+    #[serde(default)]
+    pub display_no_vsync: bool,
     /// The microphone a computer's screen window sends to that computer
     /// with "Send my mic" (PC10): part of its name as Windows lists it, or
     /// the source's name on Linux. None (blank) is the system's default
@@ -622,6 +708,10 @@ fn default_phone_camera_height() -> u32 {
 
 fn default_phone_camera_fps() -> u32 {
     30
+}
+
+fn default_drag_window_trigger() -> String {
+    "mod".to_string()
 }
 
 fn default_computer_view_quality() -> String {
@@ -787,6 +877,8 @@ impl Default for Config {
             pairing_required: true,
             allow_hevc: false,
             slow_link_frame_rate: true,
+            smooth_keyframes: true,
+            capture_copy: false,
             laser_pointer: true,
             internet_files: true,
             keep_file_dates: true,
@@ -834,6 +926,10 @@ impl Default for Config {
             link_rules: Vec::new(),
             share_state: true,
             virtual_screens: true,
+            lend_windows: true,
+            borrowed_window_follows_size: true,
+            drag_windows_across: true,
+            drag_window_trigger: default_drag_window_trigger(),
             peek: true,
             notes_file: String::new(),
             clipboard_push: true,
@@ -902,10 +998,13 @@ impl Default for Config {
             computer_view_grab_keys: true,
             computer_view_hw_decode: true,
             computer_view_hevc: true,
+            computer_view_no_idle_repeats: true,
+            computer_view_local_cursor: true,
             computer_view_lock_on_close: false,
             computer_view_fit: false,
             computer_view_scancodes: false,
             smooth_scrolling: true,
+            display_no_vsync: false,
             computer_view_mic_device: None,
             computer_wake_facts: true,
             version_hints: true,
@@ -1084,6 +1183,8 @@ impl Config {
         "pairing_required",
         "allow_hevc",
         "slow_link_frame_rate",
+        "smooth_keyframes",
+        "capture_copy",
         "laser_pointer",
         "internet_files",
         "keep_file_dates",
@@ -1129,6 +1230,10 @@ impl Config {
         "link_rules",
         "share_state",
         "virtual_screens",
+        "lend_windows",
+        "borrowed_window_follows_size",
+        "drag_windows_across",
+        "drag_window_trigger",
         "peek",
         "notes_file",
         "clipboard_push",
@@ -1199,10 +1304,13 @@ impl Config {
         "computer_view_grab_keys",
         "computer_view_hw_decode",
         "computer_view_hevc",
+        "computer_view_no_idle_repeats",
+        "computer_view_local_cursor",
         "computer_view_lock_on_close",
         "computer_view_fit",
         "computer_view_scancodes",
         "smooth_scrolling",
+        "display_no_vsync",
         "computer_view_mic_device",
         "computer_wake_facts",
         "version_hints",
@@ -1752,6 +1860,26 @@ phone_battery = \"x\"
         );
     }
 
+    /// The app waits for the display's refresh to show a picture until
+    /// told not to, and the choice saves and reads back.
+    #[test]
+    fn the_app_waits_for_the_displays_refresh_until_told_not_to() {
+        let path = temp("display-no-vsync");
+        std::fs::write(&path, "").unwrap();
+        assert!(!Config::load_from(&path).unwrap().display_no_vsync);
+        assert!(!Config::default().display_no_vsync);
+        let chosen = Config {
+            display_no_vsync: true,
+            ..Config::default()
+        };
+        chosen.save_keys_to(&path, &["display_no_vsync"]).unwrap();
+        assert!(Config::load_from(&path).unwrap().display_no_vsync);
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["display_no_vsync"]
+        );
+    }
+
     /// PC5: the window decodes on the graphics card until turned off, and the
     /// choice saves and reads back.
     #[test]
@@ -1791,6 +1919,59 @@ phone_battery = \"x\"
         assert_eq!(
             Config::default().changed_keys(&chosen),
             ["computer_view_hevc"]
+        );
+    }
+
+    /// Phase 1a of the window handoff: the window asks the other computer
+    /// to send nothing while its screen is still until turned off, and the
+    /// choice saves and reads back.
+    #[test]
+    fn a_computers_window_asks_for_no_idle_repeats_until_turned_off() {
+        let path = temp("computer-view-no-idle-repeats");
+        std::fs::write(&path, "").unwrap();
+        assert!(
+            Config::load_from(&path)
+                .unwrap()
+                .computer_view_no_idle_repeats
+        );
+        assert!(Config::default().computer_view_no_idle_repeats);
+        let chosen = Config {
+            computer_view_no_idle_repeats: false,
+            ..Config::default()
+        };
+        chosen
+            .save_keys_to(&path, &["computer_view_no_idle_repeats"])
+            .unwrap();
+        assert!(
+            !Config::load_from(&path)
+                .unwrap()
+                .computer_view_no_idle_repeats
+        );
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["computer_view_no_idle_repeats"]
+        );
+    }
+
+    /// The window draws the other computer's pointer itself until turned
+    /// off, and the choice saves and reads back.
+    #[test]
+    fn a_computers_window_draws_its_pointer_until_turned_off() {
+        let path = temp("computer-view-local-cursor");
+        std::fs::write(&path, "").unwrap();
+        assert!(Config::load_from(&path).unwrap().computer_view_local_cursor);
+        assert!(Config::default().computer_view_local_cursor);
+        let chosen = Config {
+            computer_view_local_cursor: false,
+            ..Config::default()
+        };
+        chosen
+            .save_keys_to(&path, &["computer_view_local_cursor"])
+            .unwrap();
+        assert!(!Config::load_from(&path).unwrap().computer_view_local_cursor);
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["computer_view_local_cursor"]
         );
     }
 
@@ -1982,6 +2163,30 @@ phone_battery = \"x\"
     }
 
     #[test]
+    fn smooth_keyframes_are_on_by_default_and_the_choice_saves() {
+        assert!(Config::default().smooth_keyframes);
+        let path = temp("smooth-keyframes");
+        let mut config = Config::load_from(&path).unwrap();
+        assert!(config.smooth_keyframes, "a file without the key");
+        config.smooth_keyframes = false;
+        config.save_to(&path).unwrap();
+        assert!(!Config::load_from(&path).unwrap().smooth_keyframes);
+        assert!(Config::KNOWN_KEYS.contains(&"smooth_keyframes"));
+    }
+
+    #[test]
+    fn capture_copy_is_off_by_default_and_the_choice_saves() {
+        assert!(!Config::default().capture_copy);
+        let path = temp("capture-copy");
+        let mut config = Config::load_from(&path).unwrap();
+        assert!(!config.capture_copy, "a file without the key");
+        config.capture_copy = true;
+        config.save_to(&path).unwrap();
+        assert!(Config::load_from(&path).unwrap().capture_copy);
+        assert!(Config::KNOWN_KEYS.contains(&"capture_copy"));
+    }
+
+    #[test]
     fn contact_names_are_kept_by_default_and_the_choice_saves() {
         assert!(Config::default().sms_names);
         let path = temp("sms-names");
@@ -2014,6 +2219,82 @@ phone_battery = \"x\"
             "the clipboard crosses to other computers only when asked (2g)"
         );
         assert!(Config::default().kdeconnect_compat, "on by default (3a)");
+    }
+
+    #[test]
+    fn windows_are_lent_until_turned_off_and_the_choice_saves() {
+        assert!(
+            Config::default().lend_windows,
+            "on by default, for the owner's own computers"
+        );
+        let path = temp("lend-windows");
+        let mut config = Config::load_from(&path).unwrap();
+        assert!(config.lend_windows, "a file without the key");
+        config.lend_windows = false;
+        config.save_to(&path).unwrap();
+        assert!(!Config::load_from(&path).unwrap().lend_windows);
+        Config::default().save_to(&path).unwrap();
+        assert!(
+            Config::load_from(&path).unwrap().lend_windows,
+            "turned back on"
+        );
+    }
+
+    #[test]
+    fn a_borrowed_window_follows_its_windows_size_until_turned_off() {
+        let path = temp("borrowed-follows");
+        std::fs::write(&path, "").unwrap();
+        assert!(
+            Config::load_from(&path)
+                .unwrap()
+                .borrowed_window_follows_size
+        );
+        assert!(Config::default().borrowed_window_follows_size);
+        let chosen = Config {
+            borrowed_window_follows_size: false,
+            ..Config::default()
+        };
+        chosen
+            .save_keys_to(&path, &["borrowed_window_follows_size"])
+            .unwrap();
+        assert!(
+            !Config::load_from(&path)
+                .unwrap()
+                .borrowed_window_follows_size
+        );
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["borrowed_window_follows_size"]
+        );
+    }
+
+    #[test]
+    fn dragging_a_window_across_is_on_until_turned_off_and_the_choices_save() {
+        let config = Config::default();
+        assert!(
+            config.drag_windows_across,
+            "on by default (it needs lend_windows and the shared keyboard and mouse too)"
+        );
+        assert_eq!(config.drag_window_trigger, "mod", "needs the modifier");
+        let path = temp("drag-windows");
+        std::fs::write(&path, "").unwrap();
+        assert!(Config::load_from(&path).unwrap().drag_windows_across);
+        assert_eq!(Config::load_from(&path).unwrap().drag_window_trigger, "mod");
+        let chosen = Config {
+            drag_windows_across: false,
+            drag_window_trigger: "any".to_string(),
+            ..Config::default()
+        };
+        chosen
+            .save_keys_to(&path, &["drag_windows_across", "drag_window_trigger"])
+            .unwrap();
+        let read = Config::load_from(&path).unwrap();
+        assert!(!read.drag_windows_across);
+        assert_eq!(read.drag_window_trigger, "any");
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["drag_windows_across", "drag_window_trigger"]
+        );
     }
 
     #[test]

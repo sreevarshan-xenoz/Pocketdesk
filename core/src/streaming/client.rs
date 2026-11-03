@@ -250,6 +250,25 @@ impl SessionMode {
 /// H.264 is assumed for every client; future bits cover AV1 etc.
 pub const CODEC_CAP_HEVC: u8 = 0b0000_0001;
 
+/// `CODEC_CAPS_MARKER` bit 1: the client needs no idle repeats. A screen
+/// that has not changed is not sent again once a second to show the link is
+/// alive; the client keeps the last picture and holds the link by the
+/// connection's own keepalive. Only another computer's window sets it (the
+/// phone's decoder reads ten silent seconds as a dead link and keeps the
+/// repeats). A host that does not know the bit reads only bit 0 and goes on
+/// repeating, and a client that never sets it gets the repeats as before.
+pub const CODEC_CAP_NO_IDLE_REPEATS: u8 = 0b0000_0010;
+
+/// `CODEC_CAPS_MARKER` bit 2: the client draws the other computer's pointer
+/// itself (local cursor). A host that can take its pointer out of the
+/// picture does, and sends the pointer's shape and visibility on streams of
+/// their own ([`super::transport::STREAM_KIND_CURSOR`],
+/// [`crate::protocol::cursor`]), first saying with a `Mode` message whether
+/// it has. A host that does not know the bit ignores it and keeps the
+/// pointer in the picture; a client that never sets it gets the picture it
+/// always did, and no cursor stream.
+pub const CODEC_CAP_LOCAL_CURSOR: u8 = 0b0000_0100;
+
 /// R4 E3 — compositor-true end-to-end latency probe.
 ///
 /// Every video packet header carries the frame's *age at send* measured on
@@ -474,6 +493,9 @@ pub struct RemoteFlags {
     pub too_old: Arc<std::sync::atomic::AtomicBool>,
     /// Control batches the computer sent a cast (C8), for the phone to take.
     pub control: Arc<ControlInbox>,
+    /// What the computer says of its pointer, when this session asked it to
+    /// ([`CODEC_CAP_LOCAL_CURSOR`]): shapes, whether it shows, where it is.
+    pub cursor: Arc<super::cursor_feed::CursorInbox>,
 }
 
 /// Control batches waiting for the phone's control service (C8): bounded,
@@ -818,6 +840,9 @@ impl StreamingClient {
                 ),
                 phone_sound: mode == SessionMode::PhoneSound,
                 sound: mode == SessionMode::Sound,
+                cursor: Arc::new(super::cursor_feed::CursorInbox::new(
+                    !input_only && codec_caps.is_some_and(|c| c & CODEC_CAP_LOCAL_CURSOR != 0),
+                )),
                 ..Default::default()
             },
         };
@@ -1021,6 +1046,41 @@ fn remote_stream(kind: u8, input_only: bool, sound: bool) -> RemoteStream {
         RemoteStream::TooOld
     } else {
         RemoteStream::Media
+    }
+}
+
+/// How long a pointer message may take to arrive whole before it is given
+/// up (the host says it again soon).
+const CURSOR_READ: Duration = Duration::from_secs(2);
+
+/// How many pointer messages wait to be read; a host that opens more has
+/// the rest dropped.
+const CURSOR_QUEUE: usize = 64;
+
+/// The pointer's message streams, each with its number, read one after
+/// another into `inbox` until the receive loop that feeds them ends. A
+/// message cut short, late or not understood is dropped.
+async fn read_cursor_messages(
+    mut streams: mpsc::Receiver<(u64, Box<dyn super::connection::InStream>)>,
+    inbox: Arc<super::cursor_feed::CursorInbox>,
+) {
+    while let Some((sequence, mut stream)) = streams.recv().await {
+        let Ok(Ok(data)) = tokio::time::timeout(
+            CURSOR_READ,
+            stream.read_to_end(crate::protocol::cursor::MAX_MESSAGE),
+        )
+        .await
+        else {
+            continue;
+        };
+        match crate::protocol::cursor::CursorMessage::decode(&data) {
+            Ok(Some(message)) => {
+                inbox.push(sequence, message);
+            }
+            // A kind a newer computer sends: skipped.
+            Ok(None) => {}
+            Err(e) => debug!(error = %e, "Pointer message not read"),
+        }
     }
 }
 
@@ -1302,6 +1362,13 @@ async fn recv_with_cancel(
 
     let mut audio_dropped = 0u64;
     let mut audio_consumer_gone = false;
+    // The reader of the pointer's messages (local cursor), for a session
+    // that asked for them. It ends with this loop, which owns its queue.
+    let cursor_reader = remote.cursor.wanted().then(|| {
+        let (tx, rx) = mpsc::channel(CURSOR_QUEUE);
+        tokio::spawn(read_cursor_messages(rx, remote.cursor.clone()));
+        tx
+    });
 
     loop {
         tokio::select! {
@@ -1329,6 +1396,21 @@ async fn recv_with_cancel(
                                 continue;
                             }
                         };
+
+                        // The other computer's pointer (local cursor):
+                        // read only by a session that asked for it, and
+                        // never as a picture. Its messages are read in a
+                        // task of their own, one after another, so one that
+                        // stalls holds up no picture; a message that is cut
+                        // short or late, or past the few waiting, is
+                        // dropped, and the host says it again (it refreshes
+                        // the whole pointer every 1.5 s).
+                        if header.stream_kind == transport::STREAM_KIND_CURSOR {
+                            if let Some(readers) = &cursor_reader {
+                                let _ = readers.try_send((header.sequence, recv_stream));
+                            }
+                            continue;
+                        }
 
                         // T10i: an input-only session is admitted, or met a
                         // computer that streams to it anyway (too old to know

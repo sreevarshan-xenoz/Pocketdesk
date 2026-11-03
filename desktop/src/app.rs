@@ -1027,7 +1027,84 @@ impl PocketdeskApp {
     /// Open a window on the computer `device_id`'s screen (BK7), at the
     /// quality, view-only and stats the settings start it with.
     fn show_computer(&mut self, ctx: &egui::Context, device_id: &str, name: &str) {
-        let (preset, view_only, stats) = self.config.as_ref().map_or(
+        let (preset, view_only, stats) = self.computer_view_choices();
+        let opened = self
+            .computer_view_ready(ctx)
+            .open(device_id, name, 0, preset, view_only, stats);
+        if let Err(e) = opened {
+            self.notice = crate::notice::Notice::error(e);
+        }
+    }
+
+    /// Open a window on the window `pick` names of another computer ("Borrow
+    /// a window..."): the other computer is asked to lend it, and it is
+    /// given back as this window closes. The quality, view-only and stats
+    /// are as for a computer's screen.
+    fn borrow_computer_window(
+        &mut self,
+        ctx: &egui::Context,
+        pick: &crate::computers_view::BorrowPick,
+    ) {
+        let (preset, view_only, stats) = self.computer_view_choices();
+        let opened = self.computer_view_ready(ctx).open_borrowed(
+            ctx,
+            &pick.device_id,
+            &pick.name,
+            &pick.window,
+            &pick.title,
+            preset,
+            view_only,
+            stats,
+        );
+        if let Err(e) = opened {
+            self.notice = crate::notice::Notice::error(e);
+        }
+    }
+
+    /// Open the window `dropped` names of the paired computer `computer`,
+    /// dragged here ("Drag windows to my other computers" there): a
+    /// borrowed window as "Borrow a window..." opens one, at the place it
+    /// was let go. A computer that is not one of this one's is ignored.
+    fn open_dropped_window(
+        &mut self,
+        ctx: &egui::Context,
+        computer: &str,
+        dropped: &pocketdesk_core::local::app_open::DroppedWindow,
+    ) {
+        let Some(known) = pocketdesk_core::local::computers::read(&self.state_dir)
+            .computers
+            .into_iter()
+            .find(|c| c.device_id == computer)
+        else {
+            return;
+        };
+        let (preset, view_only, stats) = self.computer_view_choices();
+        let place = crate::computer_view::Placement {
+            x: dropped.x,
+            y: dropped.y,
+            width: dropped.width,
+            height: dropped.height,
+        };
+        let opened = self.computer_view_ready(ctx).open_borrowed_at(
+            ctx,
+            computer,
+            &known.name,
+            &dropped.window,
+            &dropped.title,
+            Some(place),
+            preset,
+            view_only,
+            stats,
+        );
+        if let Err(e) = opened {
+            self.notice = crate::notice::Notice::error(e);
+        }
+    }
+
+    /// The quality preset, view-only and stats a computer's window starts
+    /// with, as the settings say.
+    fn computer_view_choices(&self) -> (u8, bool, bool) {
+        self.config.as_ref().map_or(
             (
                 pocketdesk_core::streaming::input_packet::PRESET_AUTO,
                 false,
@@ -1040,7 +1117,15 @@ impl PocketdeskApp {
                     c.computer_view_stats,
                 )
             },
-        );
+        )
+    }
+
+    /// The computer windows' worker, made as first needed, with every
+    /// setting a window follows brought up to date.
+    fn computer_view_ready(
+        &mut self,
+        ctx: &egui::Context,
+    ) -> &mut crate::computer_view::ComputerView {
         let view = self.computer_view.get_or_insert_with(|| {
             crate::computer_view::ComputerView::new(
                 ctx,
@@ -1050,6 +1135,12 @@ impl PocketdeskApp {
         });
         // PC5: the next view asks for HEVC, or not, as Settings say.
         view.set_hevc(self.config.as_ref().is_none_or(|c| c.computer_view_hevc));
+        // The next view draws the other computer's pointer here, or not.
+        view.set_local_cursor(
+            self.config
+                .as_ref()
+                .is_none_or(|c| c.computer_view_local_cursor),
+        );
         // PC5: the next view decodes on the card, or not, as Settings say.
         view.set_hw_decode(
             self.config
@@ -1077,11 +1168,15 @@ impl PocketdeskApp {
         );
         // Item 8: "Fit the screen to this window" starts a window so.
         view.set_fit_default(self.config.as_ref().is_some_and(|c| c.computer_view_fit));
+        // A borrowed window takes the size of its window here, or not.
+        view.set_borrow_follow(
+            self.config
+                .as_ref()
+                .is_none_or(|c| c.borrowed_window_follows_size),
+        );
         // Fine scrolling: "Smooth scrolling" too.
         view.set_smooth_scrolling(self.config.as_ref().is_none_or(|c| c.smooth_scrolling));
-        if let Err(e) = view.open(device_id, name, 0, preset, view_only, stats) {
-            self.notice = crate::notice::Notice::error(e);
-        }
+        view
     }
 
     /// Go to the page the tray program or a second launch asked for, and
@@ -1095,6 +1190,15 @@ impl PocketdeskApp {
             if open.quits(self.started_unix) {
                 self.quitting = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            return;
+        }
+        // Window handoff 4: a window of another computer dragged here and let
+        // go. It opens as a borrowed window where it was let go and does not
+        // raise this window.
+        if open.page == pocketdesk_core::local::app_open::BORROW_DROP {
+            if let (Some(computer), Some(dropped)) = (&open.phone, &open.dropped) {
+                self.open_dropped_window(ctx, computer, dropped);
             }
             return;
         }
@@ -3648,6 +3752,7 @@ impl PocketdeskApp {
                             view.set_grab_keys(form.saved_computer_view_grab_keys());
                             view.set_lock_on_close(form.saved_computer_view_lock_on_close());
                             view.set_fit_default(form.saved_computer_view_fit());
+                            view.set_borrow_follow(form.saved_borrowed_window_follows_size());
                             view.set_smooth_scrolling(form.saved_smooth_scrolling());
                         }
                         self.notice = crate::notice::Notice::done("Saved.");
@@ -4765,6 +4870,11 @@ impl eframe::App for PocketdeskApp {
             {
                 self.open_asked(ctx, open);
             }
+            // Windows dragged here from other computers, one file each so
+            // two at once are both opened.
+            for open in pocketdesk_core::local::app_open::take_drops(&self.state_dir, now_unix()) {
+                self.open_asked(ctx, open);
+            }
             self.watch_phone_open(ctx);
             self.raise_for_approvals(ctx);
             self.raise_for_tasks(ctx);
@@ -4775,6 +4885,11 @@ impl eframe::App for PocketdeskApp {
         self.computers.tick(&self.state_dir);
         if let Some((device_id, name)) = self.computers.take_view() {
             self.show_computer(ctx, &device_id, &name);
+        }
+        // "Borrow a window": one window of another computer, picked in the
+        // list under Settings, Other computers.
+        if let Some(pick) = self.computers.take_borrow() {
+            self.borrow_computer_window(ctx, &pick);
         }
         if self.computers.waking().is_some() {
             ctx.request_repaint_after(Duration::from_millis(500));
@@ -4859,7 +4974,8 @@ impl eframe::App for PocketdeskApp {
         ctx.request_repaint_after(REFRESH);
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        crate::frame_pacing::watch_refresh(frame);
         self.take_files_to_send(ui.ctx());
         // Ctrl+Page Down and Up move through the pages as listed (I3).
         let (next, previous) = ui.input_mut(|i| {

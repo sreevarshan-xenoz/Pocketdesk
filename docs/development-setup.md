@@ -125,6 +125,62 @@ PD_PORTAL_PROBE_DIR="$XDG_RUNTIME_DIR/pd-grant" PD_PORTAL_PROBE_INPUT=1 \
 The file lists its other knobs: naming itself as the server does, a list of
 clicks and keys, and snapshots of the screen.
 
+### 3a-2. Lending a GNOME window, live (headless GNOME Shell)
+
+`server/tests/lend_window_gnome_live.rs` (ignored) lends a window of a throwaway
+headless GNOME Shell and records it. The rig is a throwaway container (an Arch
+bootstrap image with gnome-shell, mutter, pipewire, wireplumber, gtk4, wev and
+python-gobject, booted with `systemd-nspawn -b --private-network` and only
+`/dev/dri/renderD128` bound in, a lingering user with a user unit running
+`gnome-shell --headless --wayland --no-x11 --virtual-monitor 1280x720`; the
+user manager needs `XDG_CURRENT_DESKTOP=GNOME` and `WAYLAND_DISPLAY` for the
+portal and a local target that pulls `graphical-session.target` in, none of
+which the lend needs). The test binary is built on the host and reaches the
+container's session bus and PipeWire through `/proc/<gnome-shell pid>/root`:
+
+```bash
+P=$(pgrep -u "$(id -u)" -f '^/usr/bin/gnome-shell' | head -1)
+PD_GNOME_RIG_BUS="unix:path=/proc/$P/root/run/user/$(id -u)/bus" \
+PD_GNOME_RIG_RUNTIME="/proc/$P/root/run/user/$(id -u)" \
+PD_GNOME_RIG_SHELL=stock \
+  cargo test -p pocketdesk-server --test lend_window_gnome_live -- --ignored --nocapture
+```
+
+`stock` (the Shell as it ships) checks the refusal of the window list;
+`open` (the Shell restarted with `--unsafe-mode`, a stand-in for a Shell
+extension) needs one `wev` window in the rig and lends it, counts the frames
+and checks they are the window's size; `PD_GNOME_RIG_CLOSE_CMD` closes the
+window to try the closed-window rule and `PD_GNOME_RIG_SNAP` writes the frame
+as a PPM. The test refuses to run against this process's own session bus.
+
+### 3a-3. The PipeWire DMA-BUF capture, live (headless GNOME Shell)
+
+`core/tests/pw_dmabuf_live.rs` (ignored) captures a throwaway headless GNOME
+Shell through mutter's ScreenCast (no dialog) into the in-process VA-API
+encoder: the keyframe from DMA-BUF buffers, what the capture costs against the
+copy (`POCKETDESK_CAPTURE_COPY=1`) and what it leaves open, the switch back to
+copies, the setting. The rig is §3a-2's (an Arch bootstrap container with
+gnome-shell, mutter, pipewire, wireplumber and gtk4-demos, booted with
+`systemd-nspawn -b --private-network` and only `/dev/dri/renderD128` bound in)
+with a user unit running `gtk4-demo --run fishbowl` as the moving window. The
+test refuses to run unless `PD_PW_RIG=1` and the bus and runtime folder are
+under `/proc/<pid>/root` (the container's), and is built in release for the
+numbers:
+
+```bash
+P=$(pgrep -u "$(id -u)" -f '^/usr/bin/gnome-shell' | head -1)
+PD_PW_RIG=1 PD_LIVE_COMPOSITOR_PID=$P POCKETDESK_VAAPI_DEVICE=/dev/dri/renderD128 \
+DBUS_SESSION_BUS_ADDRESS="unix:path=/proc/$P/root/run/user/$(id -u)/bus" \
+XDG_RUNTIME_DIR="/proc/$P/root/run/user/$(id -u)" \
+  cargo test -p pocketdesk-core --release --test pw_dmabuf_live -- --ignored --nocapture --test-threads=1
+```
+
+`PD_LIVE_LOG=1` shows the capture's log (the offered modifiers, the one fixed),
+`PD_LIVE_OUT=<file>` writes the first keyframe (decode it with `ffmpeg` to look
+at it), `POCKETDESK_CAPTURE_DMABUF_MODIFIER=linear|<hex>` offers one modifier.
+The rig's user units need no portal: the Shell, `pipewire.socket` and
+`wireplumber.service` are enough for mutter's own ScreenCast.
+
 ### 3b. The wake helper's packet, live (Linux)
 
 `core/src/streaming/wake_helper_net.rs` has an ignored test that starts a wake

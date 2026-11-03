@@ -38,6 +38,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use super::badge;
+use super::drag_window::{self, Evidence, Handover, Return, Rules};
 use super::game_lock::{self, Foreground, Lock};
 use super::held::HeldInput;
 use super::keys_windows::evdev_from_scan;
@@ -158,6 +159,13 @@ pub enum Action {
     Ping(String),
     /// Lock this computer (Win+L while away, home first).
     LockHere,
+    /// A drag that began here ended on the computer the pointer went to:
+    /// the window it held is offered there (window handoff 4,
+    /// [`drag_window`]).
+    DragWindow(Handover),
+    /// The pointer came home with the left button held, dragging back the
+    /// window handed over there: it goes home.
+    DragBack(Return),
 }
 
 /// Where the keyboard and mouse are while away.
@@ -172,6 +180,9 @@ struct Away {
     /// Where the cursor was just before it crossed (this computer's own
     /// space): where it returns if the crossing itself failed.
     from: (i32, i32),
+    /// Where the pointer crossed the edge, when this visit began by a push
+    /// off an edge (not by the switch key): where a drag began here.
+    crossed: Option<(i32, i32)>,
 }
 
 /// The driver's word that is no switch, as a badge.
@@ -242,6 +253,16 @@ pub struct Driver {
     /// A computer's screen window here holds the pointer (PC7): no edge
     /// leads anywhere, and the switch key waits, until it lets go.
     view_held: bool,
+    /// Whether a window dragged to an edge goes across, and how the drag is
+    /// told (`drag_windows_across`, `drag_window_trigger`).
+    drag: Rules,
+    /// What this visit shows of a drag under way as the pointer crossed.
+    evidence: Evidence,
+    /// The computer a window was last offered to: only a drag home from it
+    /// can be a window dragged back. The windows handed over, and whether one
+    /// is the dragged one, are [`drag_window`]'s to say; this only keeps a
+    /// crossing home that is none of them from asking.
+    handed_to: Option<String>,
 }
 
 impl Driver {
@@ -271,7 +292,19 @@ impl Driver {
             visits: 0,
             driven: None,
             view_held: false,
+            drag: Rules::default(),
+            evidence: Evidence::default(),
+            handed_to: None,
         }
+    }
+
+    /// Whether a window dragged to an edge goes across, and how a drag is
+    /// told (`drag_windows_across` and `lend_windows` on, `drag_window_trigger`).
+    /// Read again as the settings are.
+    pub fn set_drag(&mut self, rules: Rules) {
+        // What was handed over stays handed over through a setting read
+        // that is stale or briefly off: the way back is not lost with it.
+        self.drag = rules;
     }
 
     /// Whether the clipboard follows the mouse (`shared_input_clipboard`):
@@ -525,6 +558,13 @@ impl Driver {
                     };
                     self.held.note(&msg);
                     out.push(Action::Send(away.to.clone(), msg));
+                } else if !down && self.away.is_some() {
+                    // A button let go of that this visit never saw go down:
+                    // a drag was under way as the pointer crossed.
+                    if self.reading_drag() {
+                        self.evidence.button_up(button);
+                        self.hand_over(&mut out);
+                    }
                 }
             }
             Captured::Wheel { dx, dy } => {
@@ -557,7 +597,86 @@ impl Driver {
             };
             self.held.note(&msg);
             out.push(Action::Send(away.to.clone(), msg));
+        } else if !down
+            && self.away.is_some()
+            && drag_window::is_modifier(code)
+            && self.reading_drag()
+        {
+            // The window-move modifier let go of, never seen down here: it
+            // was held as the pointer crossed.
+            self.evidence.modifier_up();
+            self.hand_over(out);
         }
+    }
+
+    /// Whether a drag may still be read from this visit: windows go across,
+    /// the visit began by a push off an edge, and its drag is not dealt with.
+    fn reading_drag(&self) -> bool {
+        self.drag.on
+            && !self.evidence.is_spent()
+            && self.away.as_ref().is_some_and(|a| a.crossed.is_some())
+    }
+
+    /// The screen of `device` that has `at`, else its first.
+    fn screen_at(&self, device: &str, at: (i32, i32)) -> Option<Screen> {
+        let placed = self
+            .layout
+            .computers
+            .iter()
+            .find(|c| c.device_id == device)?;
+        placed
+            .screens
+            .iter()
+            .find(|s| contains(s, at))
+            .or(placed.screens.first())
+            .copied()
+    }
+
+    /// A drag that crossed has ended (its button, and as the trigger asks
+    /// its modifier, let go of) on the computer driven: the window it held
+    /// is offered there, once.
+    fn hand_over(&mut self, out: &mut Vec<Action>) {
+        if !self.drag.on || !self.evidence.ready(self.drag.trigger) {
+            return;
+        }
+        let Some(away) = self.away.clone() else {
+            return;
+        };
+        let (Some(crossed_at), Some(screen)) = (away.crossed, self.screen_at(&away.to, away.at))
+        else {
+            return;
+        };
+        self.evidence.spend();
+        self.handed_to = Some(away.to.clone());
+        out.push(Action::DragWindow(Handover {
+            to: away.to,
+            crossed_at,
+            drop_at: away.at,
+            screen,
+        }));
+    }
+
+    /// The pointer is about to come home at `at` from `away`: when the left
+    /// button is held (and the window-move modifier, as the trigger asks)
+    /// and a window was offered to that computer, a window may be dragged
+    /// back: [`drag_window::bring_back`] asks that computer whether it is,
+    /// and takes the window home only if it says so.
+    fn drag_back(&mut self, away: &Away, at: (i32, i32)) -> Option<Action> {
+        if !self.drag.on || self.handed_to.as_deref() != Some(away.to.as_str()) {
+            return None;
+        }
+        let moving = self.held.holds_button(drag_window::LEFT)
+            && (self.drag.trigger == drag_window::Trigger::Any
+                || drag_window::modifier_held(|code| self.held.holds_key(code)));
+        if !moving {
+            return None;
+        }
+        let screen = self.screen_at(&self.this, at)?;
+        Some(Action::DragBack(Return {
+            from: away.to.clone(),
+            at,
+            screen,
+        }))
     }
 
     /// The time is `now` (called several times a second): away, the
@@ -568,6 +687,7 @@ impl Driver {
     /// answers again; meanwhile it is pinged from home.
     pub fn tick(&mut self, now: Instant) -> Vec<Action> {
         let mut out = Vec::new();
+        self.evidence.tick(now);
         if let Some(away) = self.away.clone() {
             let heard = *self.heard.get_or_insert(now);
             if now.saturating_duration_since(heard) >= ANSWER_WITHIN {
@@ -853,6 +973,9 @@ impl Driver {
         {
             let park = self.park_for(at);
             self.go_away(out, &crossing.to, crossing.at, park, at);
+            if let Some(away) = self.away.as_mut() {
+                away.crossed = Some(at);
+            }
         }
     }
 
@@ -873,7 +996,10 @@ impl Driver {
         let at = self.layout.clamp(&away.to, to);
         match self.layout.crossing(&away.to, at, dx, dy) {
             Some(crossing) if crossing.to == self.this => {
+                // Read before the buttons are let go of on the way home.
+                let back = self.drag_back(&away, crossing.at);
                 self.go_home(out, crossing.at, true, None);
+                out.extend(back);
             }
             Some(crossing) if self.can_cross(&crossing.to) => {
                 self.leave(out);
@@ -1010,7 +1136,9 @@ impl Driver {
             at,
             park,
             from,
+            crossed: None,
         });
+        self.evidence.reset();
         // Parked before the mouse is swallowed, so no movement is measured
         // from where the cursor was before.
         out.push(Action::ParkCursor(park.0, park.1));
@@ -2981,5 +3109,330 @@ mod tests {
             );
             assert_eq!(d.mode(), Mode::Off);
         }
+    }
+
+    // ---- A window dragged past the edge (window handoff 4) ----
+
+    use super::super::drag_window::Trigger;
+
+    const META: u16 = 125;
+    const CTRL: u16 = 29;
+
+    fn edge_right() -> Captured {
+        Captured::Edge {
+            x: 3455,
+            y: 480,
+            dx: 1,
+            dy: 0,
+        }
+    }
+
+    fn button(button: u8, down: bool) -> Captured {
+        Captured::Button { button, down }
+    }
+
+    fn ev(code: u16, down: bool) -> Captured {
+        Captured::EvKey { code, down }
+    }
+
+    /// A driver with windows going across, whose pointer has just pushed
+    /// off W's right edge onto L at (0, 480): a drag under way, if the
+    /// owner's hand held a button.
+    fn crossed_with(trigger: Trigger) -> Driver {
+        let mut d = driver(desk(false), &["L"]);
+        d.set_drag(Rules { on: true, trigger });
+        d.start();
+        d.on(edge_right());
+        assert_eq!(d.away_on(), Some("L"));
+        d
+    }
+
+    fn handovers(actions: &[Action]) -> Vec<Handover> {
+        actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::DragWindow(h) => Some(h.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn returns(actions: &[Action]) -> Vec<Return> {
+        actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::DragBack(r) => Some(r.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// L's one screen.
+    const L_SCREEN: Screen = Screen {
+        x: 0,
+        y: 0,
+        width: 1600,
+        height: 1000,
+    };
+
+    #[test]
+    fn a_drag_that_crossed_and_ended_over_there_hands_its_window_over_where_it_ended() {
+        let mut d = crossed_with(Trigger::Modifier);
+        // The pointer goes on across L's screen, the button still held.
+        let step = d.on(moved(PARK.0 + 100, PARK.1 + 50));
+        assert!(handovers(&step).is_empty());
+        // The modifier, then the button, let go of: neither was pressed here.
+        let up = d.on(ev(META, false));
+        assert!(handovers(&up).is_empty(), "no button yet: {up:?}");
+        assert_eq!(sends(&up), vec![], "never sent: it was never sent down");
+        let ended = d.on(button(0, false));
+        assert_eq!(
+            handovers(&ended),
+            vec![Handover {
+                to: "L".into(),
+                crossed_at: (3455, 480),
+                drop_at: (100, 530),
+                screen: L_SCREEN,
+            }]
+        );
+        assert_eq!(sends(&ended), vec![], "no stray click goes over there");
+        // Once a visit: the same drag is not read again.
+        assert!(handovers(&d.on(button(0, false))).is_empty());
+        assert!(handovers(&d.on(ev(META, false))).is_empty());
+    }
+
+    #[test]
+    fn the_button_may_be_let_go_of_before_the_modifier() {
+        let mut d = crossed_with(Trigger::Modifier);
+        d.on(moved(PARK.0 + 100, PARK.1 + 50));
+        let up = d.on(button(0, false));
+        assert!(handovers(&up).is_empty(), "the modifier is waited for");
+        let ended = d.on(ev(META, false));
+        assert_eq!(handovers(&ended).len(), 1, "{ended:?}");
+        assert_eq!(handovers(&ended)[0].drop_at, (100, 530));
+    }
+
+    #[test]
+    fn with_the_modifier_trigger_a_selection_or_a_file_drag_takes_no_window() {
+        let mut d = crossed_with(Trigger::Modifier);
+        d.on(moved(PARK.0 + 100, PARK.1));
+        // The button let go of, no modifier ever: a text selection.
+        assert!(handovers(&d.on(button(0, false))).is_empty());
+        let now = Instant::now();
+        d.tick(now);
+        d.tick(now + drag_window::MODIFIER_GRACE);
+        // Late is too late.
+        assert!(handovers(&d.on(ev(META, false))).is_empty());
+        // Control is no modifier a move is bound to.
+        let mut d = crossed_with(Trigger::Modifier);
+        d.on(ev(CTRL, false));
+        assert!(handovers(&d.on(button(0, false))).is_empty());
+    }
+
+    #[test]
+    fn with_the_any_trigger_the_button_alone_is_enough() {
+        let mut d = crossed_with(Trigger::Any);
+        d.on(moved(PARK.0 + 100, PARK.1 + 50));
+        let ended = d.on(button(0, false));
+        assert_eq!(handovers(&ended).len(), 1, "{ended:?}");
+    }
+
+    #[test]
+    fn nothing_is_read_while_windows_do_not_go_across_or_after_a_switch_key_visit() {
+        // Off by default.
+        let mut d = driver(desk(false), &["L"]);
+        d.start();
+        d.on(edge_right());
+        d.on(ev(META, false));
+        assert!(handovers(&d.on(button(0, false))).is_empty());
+        // On, then off again: nothing from then on.
+        let mut d = crossed_with(Trigger::Any);
+        d.set_drag(Rules::default());
+        assert!(handovers(&d.on(button(0, false))).is_empty());
+        // The switch key is no push off an edge: no drag crossed with it.
+        let mut d = driver(desk(false), &["L"]);
+        d.set_drag(Rules {
+            on: true,
+            trigger: Trigger::Any,
+        });
+        d.start();
+        d.on(Captured::Hotkey);
+        assert_eq!(d.away_on(), Some("L"));
+        assert!(handovers(&d.on(button(0, false))).is_empty());
+        // At home a button going up is nothing either.
+        let mut d = driver(desk(false), &["L"]);
+        d.set_drag(Rules {
+            on: true,
+            trigger: Trigger::Any,
+        });
+        d.start();
+        assert!(d.on(button(0, false)).is_empty());
+    }
+
+    #[test]
+    fn the_right_button_resizes_and_never_hands_a_window_over() {
+        let mut d = crossed_with(Trigger::Any);
+        d.on(ev(META, false));
+        assert!(handovers(&d.on(button(2, false))).is_empty());
+        assert!(
+            handovers(&d.on(button(0, false))).is_empty(),
+            "the visit's drag was a resize"
+        );
+    }
+
+    #[test]
+    fn a_button_pressed_and_let_go_of_over_there_is_a_click_not_a_drag() {
+        let mut d = crossed_with(Trigger::Any);
+        let down = d.on(button(0, true));
+        assert_eq!(
+            sends(&down),
+            vec![sent(
+                "L",
+                Msg::Button {
+                    button: 0,
+                    pressed: true
+                }
+            )]
+        );
+        let up = d.on(button(0, false));
+        assert!(handovers(&up).is_empty(), "it was sent down: {up:?}");
+        assert_eq!(
+            sends(&up),
+            vec![sent(
+                "L",
+                Msg::Button {
+                    button: 0,
+                    pressed: false
+                }
+            )]
+        );
+    }
+
+    #[test]
+    fn a_new_visit_starts_with_no_drag_read() {
+        let mut d = crossed_with(Trigger::Any);
+        d.on(moved(PARK.0 - 20, PARK.1));
+        assert_eq!(d.away_on(), None, "home");
+        d.on(edge_right());
+        assert_eq!(d.away_on(), Some("L"));
+        assert_eq!(
+            handovers(&d.on(button(0, false))).len(),
+            1,
+            "the first visit's spent drag does not carry over"
+        );
+    }
+
+    /// The window handed over is dragged back: the left button and the
+    /// modifier held as the pointer crosses home.
+    fn dragged_back(trigger: Trigger, hold: &[Captured]) -> Vec<Action> {
+        let mut d = crossed_with(trigger);
+        d.on(moved(PARK.0 + 100, PARK.1 + 50));
+        d.on(ev(META, false));
+        let ended = d.on(button(0, false));
+        assert_eq!(handovers(&ended).len(), 1);
+        for held in hold {
+            d.on(held.clone());
+        }
+        // Left across L's screen, over its left edge.
+        let home = d.on(moved(PARK.0 - 300, PARK.1));
+        assert_eq!(d.away_on(), None, "{home:?}");
+        home
+    }
+
+    #[test]
+    fn dragging_the_window_back_over_the_edge_brings_it_home_where_the_pointer_comes_in() {
+        let layout = desk(false);
+        let coming = layout.crossing("L", (0, 530), -300, 0).unwrap();
+        assert_eq!(coming.to, "W");
+        let home = dragged_back(Trigger::Modifier, &[button(0, true), ev(META, true)]);
+        assert_eq!(
+            returns(&home),
+            vec![Return {
+                from: "L".into(),
+                at: coming.at,
+                screen: screen(1920, 0, 1536, 960),
+            }]
+        );
+        // The button and the key are let go of over there first, then the
+        // window comes home.
+        let last = home.last().unwrap();
+        assert!(matches!(last, Action::DragBack(_)), "{home:?}");
+        let sent_all = sends(&home);
+        assert!(sent_all.contains(&sent(
+            "L",
+            Msg::Button {
+                button: 0,
+                pressed: false
+            }
+        )));
+        assert!(sent_all.contains(&sent("L", evdev(META, false))));
+    }
+
+    #[test]
+    fn a_return_needs_the_button_held_and_the_modifier_when_the_trigger_asks() {
+        // The modifier trigger: the button alone is a plain crossing home.
+        let home = dragged_back(Trigger::Modifier, &[button(0, true)]);
+        assert!(returns(&home).is_empty(), "{home:?}");
+        // No button held: the pointer just comes home.
+        let home = dragged_back(Trigger::Any, &[]);
+        assert!(returns(&home).is_empty());
+        // The right button is no move.
+        let home = dragged_back(Trigger::Any, &[button(2, true)]);
+        assert!(returns(&home).is_empty());
+        // Any: the button alone brings it.
+        let home = dragged_back(Trigger::Any, &[button(0, true)]);
+        assert_eq!(returns(&home).len(), 1);
+    }
+
+    #[test]
+    fn nothing_is_brought_back_that_was_not_handed_over_or_when_windows_stay() {
+        // No window handed over on this visit or any: the same drag home.
+        let mut d = crossed_with(Trigger::Any);
+        d.on(button(0, true));
+        let home = d.on(moved(PARK.0 - 300, PARK.1));
+        assert_eq!(d.away_on(), None);
+        assert!(returns(&home).is_empty(), "{home:?}");
+        // Turned off after the handover: nothing comes back.
+        let mut d = crossed_with(Trigger::Any);
+        d.on(button(0, false));
+        d.on(button(0, true));
+        d.set_drag(Rules::default());
+        let home = d.on(moved(PARK.0 - 300, PARK.1));
+        assert!(returns(&home).is_empty());
+    }
+
+    #[test]
+    fn a_return_that_failed_can_be_dragged_again_and_a_stale_read_keeps_the_hand_over() {
+        // The driver does not forget a hand over as it asks for the window
+        // back (a return that failed is tried by the next drag home): what
+        // was handed over, and whether this is it, is the other side's to
+        // say ([`drag_window::bring_back`]).
+        let mut d = crossed_with(Trigger::Any);
+        d.on(button(0, false));
+        d.on(button(0, true));
+        assert_eq!(returns(&d.on(moved(PARK.0 - 300, PARK.1))).len(), 1);
+        d.on(edge_right());
+        d.on(button(0, true));
+        assert_eq!(
+            returns(&d.on(moved(PARK.0 - 300, PARK.1))).len(),
+            1,
+            "asked again"
+        );
+        // A read of the settings that is stale, or says off a moment, and
+        // then on again: the window handed over can still be dragged back.
+        d.on(edge_right());
+        d.set_drag(Rules::default());
+        d.on(button(0, true));
+        assert!(
+            returns(&d.on(moved(PARK.0 - 300, PARK.1))).is_empty(),
+            "off: nothing is asked for"
+        );
+        d.on(edge_right());
+        d.set_drag(Rules {
+            on: true,
+            trigger: Trigger::Any,
+        });
+        d.on(button(0, true));
+        assert_eq!(returns(&d.on(moved(PARK.0 - 300, PARK.1))).len(), 1);
     }
 }

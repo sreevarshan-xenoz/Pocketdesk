@@ -100,19 +100,38 @@ const STATS_EVERY: Duration = Duration::from_secs(1);
 /// I3: the app's sidecar decodes, not this process) and
 /// `computer_view_hevc` and `computer_view_hw_decode` are on here
 /// (`wanted`; review M10: HEVC on the processor is slower than H.264);
-/// else H.264 alone, said by sending none. An app before PC5 never asks,
-/// so it never hears HEVC.
-pub fn codec_caps(asked: bool, wanted: bool) -> Option<u8> {
-    (asked && wanted).then_some(pocketdesk_core::streaming::client::CODEC_CAP_HEVC)
+/// else H.264 alone. An app before PC5 never asks, so it never hears HEVC.
+/// With the bit that says the window needs no idle repeats when `quiet`
+/// (`computer_view_no_idle_repeats`, on by default): the window keeps a
+/// still screen's last picture and holds the link by the connection's own
+/// keepalive, so the other computer sends nothing while the screen is still
+/// (a host before it ignores the bit and goes on repeating). Off, the bit
+/// stays clear and the other computer repeats a still screen as before.
+/// With the bit that says the window draws the other computer's pointer
+/// itself when `pointer` (the app asked for it and
+/// `computer_view_local_cursor` is on here): the other computer then takes
+/// the pointer out of its picture where it can and sends the pointer apart;
+/// a host before it ignores the bit and keeps the pointer in the picture.
+pub fn codec_caps(asked: bool, wanted: bool, quiet: bool, pointer: bool) -> u8 {
+    use pocketdesk_core::streaming::client::{
+        CODEC_CAP_HEVC, CODEC_CAP_LOCAL_CURSOR, CODEC_CAP_NO_IDLE_REPEATS,
+    };
+    let hevc = if asked && wanted { CODEC_CAP_HEVC } else { 0 };
+    let still = if quiet { CODEC_CAP_NO_IDLE_REPEATS } else { 0 };
+    let cursor = if pointer { CODEC_CAP_LOCAL_CURSOR } else { 0 };
+    still | hevc | cursor
 }
 
 /// The codecs a view the app asked for (`asked` HEVC or not) offers now.
-fn view_codec_caps(asked: bool) -> Option<u8> {
+fn view_codec_caps(asked: bool, cursor: bool) -> Option<u8> {
     let config = crate::events::current_config();
-    codec_caps(
+    let wanted = config.computer_view_hevc && config.computer_view_hw_decode;
+    Some(codec_caps(
         asked,
-        config.computer_view_hevc && config.computer_view_hw_decode,
-    )
+        wanted,
+        config.computer_view_no_idle_repeats,
+        cursor && config.computer_view_local_cursor,
+    ))
 }
 
 /// What a keyframe says the stream is (PC5): H.264 of the size its SPS
@@ -224,8 +243,20 @@ pub enum Command {
         device_id: String,
         monitor: u32,
         hevc: bool,
+        /// The app draws the other computer's pointer itself (local
+        /// cursor).
+        cursor: bool,
         window: u8,
         fit: Option<FitSize>,
+        /// Show the window with this id of that computer instead of a
+        /// screen ([`crate::borrow_window`]): it is asked to lend it, the
+        /// view shows the screen it was moved to, and gives it back as the
+        /// view ends. `monitor` is not used, and `fit` is not a fitted
+        /// screen's size but the size of the picture area of the window that
+        /// shows the borrowed one: the host makes the window that size, so the
+        /// picture is the window's, a pixel to a pixel (a host before it lends
+        /// the window as it is).
+        borrow: Option<String>,
     },
     /// Stop showing it: the view `session_id` when given (one since
     /// replaced is left alone, BK7 review M1), else the one the window
@@ -639,6 +670,8 @@ pub async fn race<T: Send + 'static>(
 #[derive(Debug)]
 enum Event {
     Status(ViewStatus),
+    /// What the other computer says of its pointer (local cursor).
+    Cursor(pocketdesk_core::protocol::cursor::CursorMessage),
     /// The stream's codec and size, as the window is told it.
     Config(Message),
     Frame {
@@ -1002,18 +1035,103 @@ enum Outcome {
     Lost(Option<String>),
 }
 
+/// One view, until it ends: [`session_run`], and, for a borrowed window, also
+/// until that computer says the window is gone (closed, or lending turned
+/// off), which ends the view with the reason.
+#[allow(clippy::too_many_arguments)]
+async fn session(
+    session_id: u64,
+    state_dir: PathBuf,
+    computer: PeerComputer,
+    asked_monitor: u32,
+    hevc: bool,
+    cursor: bool,
+    window: u8,
+    fit: Option<FitSize>,
+    borrow: Option<String>,
+    dialer: Arc<Dialer>,
+    events: mpsc::Sender<(u64, Event)>,
+    input: mpsc::Receiver<InputPacket>,
+    mic: Arc<MicLink>,
+) {
+    let Some(borrowed) = borrow.clone() else {
+        return session_run(
+            session_id,
+            state_dir,
+            computer,
+            asked_monitor,
+            hevc,
+            cursor,
+            window,
+            fit,
+            None,
+            dialer,
+            events,
+            input,
+            mic,
+        )
+        .await;
+    };
+    // Listening before the view starts, so a word that comes first is heard.
+    let mut gone = crate::borrow_window::gone();
+    let say = Say {
+        session_id,
+        events: events.clone(),
+    };
+    let (device_id, name) = (computer.device_id.clone(), computer.name.clone());
+    tokio::select! {
+        () = session_run(
+            session_id,
+            state_dir,
+            computer,
+            asked_monitor,
+            hevc,
+            cursor,
+            window,
+            fit,
+            borrow,
+            dialer,
+            events,
+            input,
+            mic,
+        ) => {}
+        reason = crate::borrow_window::wait_gone(&mut gone, &device_id, &borrowed) => {
+            tracing::info!(device_id = %device_id, "A borrowed window is gone; ending its view");
+            say.say(Event::Ended(gone_words(&name, reason.as_deref()))).await;
+        }
+    }
+    // Whichever ended it, nothing is lent to this view any more: no drag back
+    // of that window is this view's.
+    crate::borrow_window::view_ended(&device_id, &borrowed);
+}
+
+/// What a window says when the window it was asked to borrow is already
+/// shown in another window here.
+const ALREADY_SHOWN: &str = "That window is already shown in another window here.";
+
+/// What the window says when the computer it borrowed from lost the window.
+fn gone_words(name: &str, reason: Option<&str>) -> String {
+    match reason {
+        // Dragged back over the edge (window handoff 4).
+        Some("returned") => format!("The window went back to {name}."),
+        _ => format!("{name} closed that window, or stopped lending its windows."),
+    }
+}
+
 /// One view, until it ends: dialled, shown, and after a drop dialled again
 /// by itself with [`backoff`] for about two minutes (PC2). A Stop or a
 /// window closed aborts it, so it never dials again after one.
 #[allow(clippy::too_many_arguments)]
-async fn session(
+async fn session_run(
     session_id: u64,
     state_dir: PathBuf,
     mut computer: PeerComputer,
     asked_monitor: u32,
     hevc: bool,
+    cursor: bool,
     window: u8,
     fit: Option<FitSize>,
+    borrow: Option<String>,
     dialer: Arc<Dialer>,
     events: mpsc::Sender<(u64, Event)>,
     input: mpsc::Receiver<InputPacket>,
@@ -1026,7 +1144,7 @@ async fn session(
     let mut monitor = asked_monitor;
     let mut status = ViewStatus {
         monitor,
-        fit: Box::new(if fit.is_some() {
+        fit: Box::new(if fit.is_some() || borrow.is_some() {
             ViewFit::Asking
         } else {
             ViewFit::Off
@@ -1035,7 +1153,31 @@ async fn session(
     };
     crate::peer_computers::ask_screens(&computer.device_id);
     say.say(Event::Status(status.clone())).await;
-    if let Some(size) = fit {
+    // A borrowed window is asked for again before each dial after the first
+    // (the host gives the same screen back while it is still lent), and as
+    // the first when a resize's ask could not reach the host (below).
+    let mut relend = false;
+    if let Some(borrowed) = &borrow {
+        // A window not lent is no view: the screen asked for would be the
+        // computer's own, never what was picked.
+        match apply_borrow(&computer, borrowed, fit, &mut status).await {
+            Ok(index) => {
+                monitor = index;
+                crate::borrow_window::view_lent(&computer.device_id, borrowed);
+                say.say(Event::Status(status.clone())).await;
+            }
+            // A resize's ask (it carries the size: a window's first ask
+            // never does) for a window already lent and shown: a blip on the way to the host is a failed try like a
+            // dial's, on the same backoff, never the end of the view. A
+            // window's first ask carries none, and ends as a dial that does
+            // not reach does.
+            Err(why) if !lend_ends_view(&why, fit) => relend = true,
+            Err(why) => {
+                say.say(Event::Ended(borrow_failed(&name, &why))).await;
+                return;
+            }
+        }
+    } else if let Some(size) = fit {
         monitor = apply_fit(&computer, window, size, asked_monitor, &mut status).await;
         say.say(Event::Status(status.clone())).await;
     }
@@ -1049,11 +1191,41 @@ async fn session(
     let mut reconnect = Reconnect::default();
     let mut shown_once = false;
     loop {
+        let mut lend_unreached = false;
+        if relend && let Some(borrowed) = &borrow {
+            match apply_borrow(&computer, borrowed, fit, &mut status).await {
+                Ok(index) => {
+                    monitor = index;
+                    relend = false;
+                    crate::borrow_window::view_lent(&computer.device_id, borrowed);
+                    say.say(Event::Status(status.clone())).await;
+                }
+                // The host said no (closed, not lent, another has it): the
+                // view ends with its reason.
+                Err(crate::borrow_window::LendError::Refused(why)) => {
+                    say.say(Event::Ended(borrow_failed(&name, &why))).await;
+                    return;
+                }
+                // A gap in the network, no link yet, no answer: a failed try
+                // like a failed dial, on the same backoff.
+                Err(crate::borrow_window::LendError::Unreached(_)) => lend_unreached = true,
+            }
+        }
         let dial_started = Instant::now();
         // HEVC too when the window's decoder reads it (PC5), as this
         // computer's settings say at each dial.
-        let next = match dialer.dial(&computer, monitor, view_codec_caps(hevc)).await {
-            Err(why) if !shown_once => {
+        let dialled = if lend_unreached {
+            None
+        } else {
+            Some(
+                dialer
+                    .dial(&computer, monitor, view_codec_caps(hevc, cursor))
+                    .await,
+            )
+        };
+        let next = match dialled {
+            None => reconnect.failed(Instant::now()),
+            Some(Err(why)) if !shown_once => {
                 // Its addresses stay out of the log at info (BK7 review M8):
                 // the window says them to the owner.
                 tracing::info!(device_id = %computer.device_id, "Another computer's screen not reached");
@@ -1062,11 +1234,11 @@ async fn session(
                     .await;
                 return;
             }
-            Err(why) => {
+            Some(Err(why)) => {
                 tracing::debug!(device_id = %computer.device_id, attempt = status.reconnecting, "Another computer's screen not reached again: {why}");
                 reconnect.failed(Instant::now())
             }
-            Ok(dialed) => {
+            Some(Ok(dialed)) => {
                 let dial_ms = millis(dial_started.elapsed());
                 let outcome = attempt(
                     &computer,
@@ -1109,6 +1281,19 @@ async fn session(
             say.say(Event::Ended(gave_up_words(&name))).await;
             return;
         };
+        // The other computer's pointer went with its session (local
+        // cursor): the relay forgets it, and the window goes back to its
+        // own pointer until the next session says it sends one apart (its
+        // places are then asked for again, which the new session knows
+        // nothing of).
+        // Only to a window that asked: one before it does not know the
+        // message.
+        if cursor {
+            say.say(Event::Cursor(
+                pocketdesk_core::protocol::cursor::CursorMessage::Mode { separate: false },
+            ))
+            .await;
+        }
         status = ViewStatus {
             phase: Phase::Connecting,
             monitor: status.monitor,
@@ -1138,11 +1323,93 @@ async fn session(
         // The fitted screen asked for again (it is the same one, kept there
         // while the window lives), as a computer that restarted has none and
         // its screen numbers may have moved on.
-        if let Some(size) = fit {
+        if borrow.is_some() {
+            relend = true;
+        } else if let Some(size) = fit {
             monitor = apply_fit(&computer, window, size, asked_monitor, &mut status).await;
             say.say(Event::Status(status.clone())).await;
         }
     }
+}
+
+/// Whether a borrowed window's first ask failing as `why` says ends the view:
+/// the host's no does, and so does a gap before the host when the ask carries
+/// no `size` (nothing was shown yet, as a dial that does not reach). One that
+/// carries a size is a resize of a window already shown: a gap there is tried
+/// again on the backoff ([`Reconnect`]), as a dial's, never ending it.
+fn lend_ends_view(why: &crate::borrow_window::LendError, size: Option<FitSize>) -> bool {
+    match why {
+        crate::borrow_window::LendError::Refused(_) => true,
+        crate::borrow_window::LendError::Unreached(_) => size.is_none(),
+    }
+}
+
+/// [`crate::borrow_window::lend`] with a size, and, when the host refuses
+/// it, once more without: a resize that cannot be done is no refusal of the
+/// window (the host answers the screen as it is), so the same window is asked
+/// for as it is, and only a refusal of that is the host's no. A gap on the
+/// way to the host (`Unreached`) is the caller's to try again.
+async fn lend_following(
+    device_id: &str,
+    borrowed: &str,
+    size: Option<FitSize>,
+) -> Result<crate::fit_screen::Fitted, crate::borrow_window::LendError> {
+    lend_following_with(size, |size| {
+        crate::borrow_window::lend(device_id, borrowed, size)
+    })
+    .await
+}
+
+/// [`lend_following`], asking as `lend` does.
+async fn lend_following_with<F, Fut>(
+    size: Option<FitSize>,
+    lend: F,
+) -> Result<crate::fit_screen::Fitted, crate::borrow_window::LendError>
+where
+    F: Fn(Option<FitSize>) -> Fut,
+    Fut: std::future::Future<
+            Output = Result<crate::fit_screen::Fitted, crate::borrow_window::LendError>,
+        >,
+{
+    match lend(size).await {
+        Err(crate::borrow_window::LendError::Refused(why)) if size.is_some() => {
+            tracing::info!("A window was refused at the size asked ({why}); asked at its own");
+            lend(None).await
+        }
+        other => other,
+    }
+}
+
+/// Ask the computer to lend `borrowed` ([`crate::borrow_window`]), at `size`
+/// when the window that shows it has measured one (the other computer sizes
+/// the window and its screen to it), and say how it went in `status`: the
+/// screen's number and size. The screen to dial, or why the window was not
+/// lent.
+async fn apply_borrow(
+    computer: &PeerComputer,
+    borrowed: &str,
+    size: Option<FitSize>,
+    status: &mut ViewStatus,
+) -> Result<u32, crate::borrow_window::LendError> {
+    match lend_following(&computer.device_id, borrowed, size).await {
+        Ok(lent) => {
+            *status.fit = ViewFit::Borrowed {
+                width: lent.width,
+                height: lent.height,
+            };
+            status.monitor = lent.index;
+            Ok(lent.index)
+        }
+        Err(why) => {
+            tracing::info!(device_id = %computer.device_id, "A window was not lent: {why}");
+            Err(why)
+        }
+    }
+}
+
+/// What the window says when the computer would not lend the window picked.
+fn borrow_failed(name: &str, why: &dyn std::fmt::Display) -> String {
+    format!("Could not borrow that window from {name}: {why}")
 }
 
 /// Ask the computer for the window's fitted screen ([`crate::fit_screen`])
@@ -1395,6 +1662,13 @@ async fn attempt(
     let mut screens_link_ups = crate::peer_computers::link_ups(&computer.device_id);
     loop {
         tokio::select! {
+            // The other computer's pointer (local cursor): nothing comes
+            // unless the window asked for it.
+            () = remote.cursor.arrived() => {
+                for message in remote.cursor.drain() {
+                    say.say(Event::Cursor(message)).await;
+                }
+            }
             packet = frames.recv() => {
                 let Some(packet) = packet else { break };
                 admitted = true;
@@ -2010,6 +2284,39 @@ struct View {
     /// 8): taken away there as the view ends, unless the window's next view
     /// of the same computer carries it on.
     fit_held: Option<String>,
+    /// The computer and the id of the window this view borrowed from it:
+    /// given back as the view ends, unless the window's next view of the
+    /// same window carries it on.
+    borrow_held: Option<(String, String)>,
+    /// The other computer's pointer as last told (local cursor), for a
+    /// window that joins, and whether the window was too slow for a message
+    /// of it (the state is then sent whole, with the next frame).
+    cursor: pocketdesk_core::protocol::cursor::CursorState,
+    cursor_lost: bool,
+    /// The window asked for the pointer (`Command::Start`'s `cursor`): only
+    /// then does it know the messages about it.
+    cursor_asked: bool,
+}
+
+impl View {
+    /// What brings the window to the pointer as the relay holds it: its
+    /// state when the computer sends the pointer apart. A window that lost
+    /// a message (`held`: it may hold a pointer from before) is told a mode
+    /// of `false` when the computer keeps the pointer in the picture, which
+    /// drops what it holds; a window that is only joining holds nothing.
+    /// Nothing to a window that did not ask.
+    fn cursor_catch_up(&self, held: bool) -> Vec<pocketdesk_core::protocol::cursor::CursorMessage> {
+        use pocketdesk_core::protocol::cursor::CursorMessage;
+        if !self.cursor_asked {
+            return Vec::new();
+        }
+        match self.cursor.snapshot() {
+            snapshot if snapshot.is_empty() && held => {
+                vec![CursorMessage::Mode { separate: false }]
+            }
+            snapshot => snapshot,
+        }
+    }
 }
 
 impl Drop for View {
@@ -2019,6 +2326,10 @@ impl Drop for View {
         }
         if let Some(device_id) = self.fit_held.take() {
             crate::fit_screen::release(&device_id, self.window);
+        }
+        if let Some((device_id, window)) = self.borrow_held.take() {
+            crate::borrow_window::view_ended(&device_id, &window);
+            crate::borrow_window::give_back(&device_id, &window);
         }
     }
 }
@@ -2166,7 +2477,7 @@ pub async fn run_with(
                 let Some(command) = command else { break };
                 let shown: Vec<Option<u64>> =
                     views.iter().map(|v| v.as_ref().map(|v| v.session_id)).collect();
-                let Command::Start { device_id, monitor, hevc, window, fit } = command else {
+                let Command::Start { device_id, monitor, hevc, cursor, window, fit, borrow } = command else {
                     match command {
                         Command::Stop { session_id, window } => {
                             if let Some(i) = stop_slot(&shown, session_id, window)
@@ -2227,11 +2538,27 @@ pub async fn run_with(
                     .computers
                     .into_iter()
                     .find(|c| c.device_id == device_id);
+                // (A borrowed window's `fit` is the size to lend it at, not a
+                // screen made to fit: it holds none.)
                 if fit.is_some()
+                    && borrow.is_none()
                     && computer.is_some()
                     && let Some(old) = views[slot].as_mut().filter(|v| v.device_id == device_id)
                 {
                     old.fit_held = None;
+                }
+                // The same window borrowed again (a reconnect the app asks
+                // for) is still lent: the old view's end does not give it
+                // back just before the new one asks for it. Another window,
+                // or a plain screen, gives the old one back as it ends.
+                if let Some(borrowed) = &borrow
+                    && computer.is_some()
+                    && let Some(old) = views[slot].as_mut().filter(|v| {
+                        v.device_id == device_id
+                            && v.borrow_held.as_ref().is_some_and(|(_, w)| w == borrowed)
+                    })
+                {
+                    old.borrow_held = None;
                 }
                 end(&mut views[slot], &mut viewers[slot], &state_dir, None);
                 next_id += 1;
@@ -2254,16 +2581,37 @@ pub async fn run_with(
                     holders: mic_holders.clone(),
                     ..MicLink::default()
                 });
-                let (task, ended) = match computer {
-                    Some(computer) => (
+                // A borrowed window that is no window id, or that another
+                // window here already shows (one loan, one view: closing one
+                // would return it under the other), is no view: said, never
+                // a fallback to the computer's own screen.
+                let refused = borrow.as_deref().and_then(|w| {
+                    if !crate::lend_window::is_window_id(w) {
+                        return Some("That is not a window of another computer.".to_string());
+                    }
+                    let shown_elsewhere = views.iter().enumerate().any(|(i, v)| {
+                        i != slot
+                            && v.as_ref().is_some_and(|v| {
+                                v.ended.is_none()
+                                    && v.device_id == device_id
+                                    && v.borrow_held.as_ref().is_some_and(|(_, held)| held == w)
+                            })
+                    });
+                    shown_elsewhere.then(|| ALREADY_SHOWN.to_string())
+                });
+                let (task, ended) = match (computer, refused) {
+                    (_, Some(why)) => (None, Some((why, Instant::now()))),
+                    (Some(computer), None) => (
                         Some(tokio::spawn(session(
                             session_id,
                             state_dir.clone(),
                             computer,
                             monitor,
                             hevc,
+                            cursor,
                             window,
                             fit,
+                            borrow.clone(),
                             dialer.clone(),
                             events_tx.clone(),
                             input_rx,
@@ -2271,7 +2619,7 @@ pub async fn run_with(
                         ))),
                         None,
                     ),
-                    None => (
+                    (None, None) => (
                         None,
                         Some((NOT_PAIRED.to_string(), Instant::now())),
                     ),
@@ -2281,7 +2629,15 @@ pub async fn run_with(
                     None => (None, ViewPrivacy::Off),
                 };
                 // A view that never started has no screen to take away.
-                let fit_held = (fit.is_some() && task.is_some()).then(|| device_id.clone());
+                let fit_held =
+                    (fit.is_some() && borrow.is_none() && task.is_some()).then(|| device_id.clone());
+                // A borrowed window is given back as the view ends.
+                let borrow_held = borrow
+                    .filter(|_| task.is_some())
+                    .map(|window| (device_id.clone(), window));
+                if let Some((device, window)) = &borrow_held {
+                    crate::borrow_window::view_started(device, window);
+                }
                 views[slot] = Some(View {
                     session_id,
                     window,
@@ -2301,6 +2657,10 @@ pub async fn run_with(
                     window_dropped: 0,
                     focus_said: None,
                     fit_held,
+                    borrow_held,
+                    cursor: Default::default(),
+                    cursor_lost: false,
+                    cursor_asked: cursor,
                 });
             }
             Some((session_id, event)) = events.recv() => {
@@ -2349,7 +2709,31 @@ pub async fn run_with(
                             *viewer = None;
                         }
                     }
+                    Event::Cursor(message) => {
+                        // The state is kept whether or not a window watches,
+                        // so one that joins is brought to it.
+                        current.cursor.apply(message.clone());
+                        if let Some(v) = watching
+                            && !current.cursor_lost
+                            && v.tx.try_send(Message::Cursor(message)).is_err()
+                        {
+                            current.cursor_lost = true;
+                        }
+                    }
                     Event::Frame { keyframe, seq, data } => {
+                        // A pointer message the window was too slow for: the
+                        // state is sent whole, once the queue has room.
+                        if current.cursor_lost
+                            && let Some(v) = watching
+                        {
+                            let catch_up = current.cursor_catch_up(true);
+                            if v.tx.capacity() >= catch_up.len() {
+                                for message in catch_up {
+                                    let _ = v.tx.try_send(Message::Cursor(message));
+                                }
+                                current.cursor_lost = false;
+                            }
+                        }
                         if let Some(v) = watching
                             && v.tx.try_send(Message::Frame { keyframe, seq, data }).is_err()
                         {
@@ -2406,6 +2790,12 @@ pub async fn run_with(
                 if let Some(config) = v.config.clone() {
                     let _ = joined.tx.try_send(config);
                 }
+                // The pointer as it is now (local cursor), for a window that
+                // joins late.
+                for message in v.cursor_catch_up(false) {
+                    let _ = joined.tx.try_send(Message::Cursor(message));
+                }
+                v.cursor_lost = false;
                 if let Some((why, _)) = &v.ended {
                     let _ = joined.tx.try_send(Message::End { why: why.clone() });
                     end(view, &mut None, &state_dir, None);
@@ -2434,6 +2824,11 @@ pub async fn run_with(
                     continue;
                 }
                 v.focus_said = Some((focused, now));
+                // A borrowed window's computer asks, as the pointer comes
+                // back over the edge, whether this is the window dragged.
+                if let Some((device, window)) = &v.borrow_held {
+                    crate::borrow_window::view_focused(device, window, focused);
+                }
                 window_focus(v.device_id.clone(), focused, v.status.control);
             }
             Some((session_id, device_id, ask)) = privacy_rx.recv() => {
@@ -3139,6 +3534,80 @@ fn start_viewer(
 mod tests {
     use super::*;
 
+    fn lent_at(width: u32, height: u32) -> crate::fit_screen::Fitted {
+        crate::fit_screen::Fitted {
+            index: 2,
+            width,
+            height,
+        }
+    }
+
+    fn size(width: u32, height: u32) -> FitSize {
+        FitSize { width, height }
+    }
+
+    /// A resize is cosmetic: a host that refuses the size is asked again for
+    /// the window as it is, and its answer then is the answer; the host's no
+    /// to the window itself still is a no; a gap is the caller's to retry; a
+    /// first ask (no size) is asked once.
+    #[tokio::test]
+    async fn a_resize_the_host_refuses_is_asked_again_without_its_size() {
+        use crate::borrow_window::LendError;
+        let asked = std::sync::Mutex::new(Vec::new());
+        // Refused with the size, lent without: the old size, the view stands.
+        let kept = lend_following_with(Some(size(1000, 600)), |s| {
+            asked.lock().unwrap().push(s);
+            std::future::ready(match s {
+                Some(_) => Err(LendError::Refused("no resize".into())),
+                None => Ok(lent_at(1280, 720)),
+            })
+        })
+        .await;
+        assert_eq!(kept, Ok(lent_at(1280, 720)));
+        assert_eq!(*asked.lock().unwrap(), [Some(size(1000, 600)), None]);
+        // Refused both ways: the host's no to the window is final.
+        asked.lock().unwrap().clear();
+        let no = lend_following_with(Some(size(1000, 600)), |s| {
+            asked.lock().unwrap().push(s);
+            std::future::ready(Err(LendError::Refused("closed".into())))
+        })
+        .await;
+        assert_eq!(no, Err(LendError::Refused("closed".into())));
+        assert_eq!(asked.lock().unwrap().len(), 2);
+        // A gap is passed on as it is, asked once: the caller's backoff.
+        asked.lock().unwrap().clear();
+        let gap = lend_following_with(Some(size(1000, 600)), |s| {
+            asked.lock().unwrap().push(s);
+            std::future::ready(Err(LendError::Unreached("no link".into())))
+        })
+        .await;
+        assert_eq!(gap, Err(LendError::Unreached("no link".into())));
+        assert_eq!(asked.lock().unwrap().len(), 1);
+        // No size asked, nothing to leave off: refused is asked once.
+        asked.lock().unwrap().clear();
+        let first = lend_following_with(None, |s| {
+            asked.lock().unwrap().push(s);
+            std::future::ready(Err(LendError::Refused("off".into())))
+        })
+        .await;
+        assert_eq!(first, Err(LendError::Refused("off".into())));
+        assert_eq!(asked.lock().unwrap().len(), 1);
+    }
+
+    /// Only the host's no (or a window's first ask that never reached it)
+    /// ends a borrowed view; a resize's ask that did not reach the host is
+    /// tried again on the backoff.
+    #[test]
+    fn a_resize_that_does_not_reach_the_host_does_not_end_the_view() {
+        use crate::borrow_window::LendError;
+        let gap = LendError::Unreached("no link".into());
+        let no = LendError::Refused("closed".into());
+        assert!(lend_ends_view(&gap, None), "a first ask: as a dial");
+        assert!(!lend_ends_view(&gap, Some(size(1000, 600))), "a resize");
+        assert!(lend_ends_view(&no, None));
+        assert!(lend_ends_view(&no, Some(size(1000, 600))));
+    }
+
     async fn loopback_endpoint() -> iroh::Endpoint {
         iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
             .alpns(vec![pocketdesk_core::protocol::ALPN_CONTROL.to_vec()])
@@ -3244,10 +3713,19 @@ mod tests {
     /// before PC5 never asks.
     #[test]
     fn hevc_is_offered_only_when_the_app_asks_and_the_setting_lets_it() {
-        let hevc = pocketdesk_core::streaming::client::CODEC_CAP_HEVC;
-        assert_eq!(codec_caps(true, true), Some(hevc));
-        assert_eq!(codec_caps(true, false), None, "turned off here");
-        assert_eq!(codec_caps(false, true), None, "the app did not ask");
+        use pocketdesk_core::streaming::client::{CODEC_CAP_HEVC, CODEC_CAP_NO_IDLE_REPEATS};
+        let (hevc, still) = (CODEC_CAP_HEVC, CODEC_CAP_NO_IDLE_REPEATS);
+        assert_eq!(codec_caps(true, true, true, false), hevc | still);
+        assert_eq!(
+            codec_caps(true, false, true, false),
+            still,
+            "turned off here"
+        );
+        assert_eq!(
+            codec_caps(false, true, true, false),
+            still,
+            "the app did not ask"
+        );
         let older: pocketdesk_core::local::computers::ComputerRequest = serde_json::from_str(
             r#"{"id":"a","ask":"view","device_id":"desk","monitor":0,"created_unix":1}"#,
         )
@@ -3256,7 +3734,63 @@ mod tests {
         else {
             panic!("a view");
         };
-        assert_eq!(codec_caps(asked, true), None, "an app before PC5");
+        assert_eq!(
+            codec_caps(asked, true, true, false),
+            still,
+            "an app before PC5"
+        );
+    }
+
+    /// With "Send nothing while the other screen is still" on (the default),
+    /// every view says its window needs no idle repeats, whatever codecs it
+    /// offers: a still screen is shown by its last picture. Off, the bit is
+    /// clear for every view and the codecs are unchanged.
+    #[test]
+    fn a_view_says_it_needs_no_idle_repeats_only_while_the_setting_is_on() {
+        use pocketdesk_core::streaming::client::{CODEC_CAP_HEVC, CODEC_CAP_NO_IDLE_REPEATS};
+        for asked in [false, true] {
+            for wanted in [false, true] {
+                let on = codec_caps(asked, wanted, true, false);
+                assert_ne!(on & CODEC_CAP_NO_IDLE_REPEATS, 0);
+                let off = codec_caps(asked, wanted, false, false);
+                assert_eq!(off & CODEC_CAP_NO_IDLE_REPEATS, 0);
+                assert_eq!(off, on & CODEC_CAP_HEVC, "only the bit differs");
+            }
+        }
+    }
+
+    /// Local cursor: a view says its window draws the other computer's
+    /// pointer only when the app asked for it and the setting here is on;
+    /// the bit never changes what else is offered, and an app before it
+    /// (whose ask has no field) never sets it.
+    #[test]
+    fn a_view_says_it_draws_the_other_pointer_only_when_asked_and_allowed() {
+        use pocketdesk_core::streaming::client::{
+            CODEC_CAP_HEVC, CODEC_CAP_LOCAL_CURSOR, CODEC_CAP_NO_IDLE_REPEATS,
+        };
+        for asked in [false, true] {
+            for wanted in [false, true] {
+                for quiet in [false, true] {
+                    let without = codec_caps(asked, wanted, quiet, false);
+                    let with = codec_caps(asked, wanted, quiet, true);
+                    assert_eq!(without & CODEC_CAP_LOCAL_CURSOR, 0);
+                    assert_ne!(with & CODEC_CAP_LOCAL_CURSOR, 0);
+                    assert_eq!(
+                        with & (CODEC_CAP_HEVC | CODEC_CAP_NO_IDLE_REPEATS),
+                        without,
+                        "only its own bit differs"
+                    );
+                }
+            }
+        }
+        let older: pocketdesk_core::local::computers::ComputerRequest = serde_json::from_str(
+            r#"{"id":"a","ask":"view","device_id":"desk","monitor":0,"created_unix":1}"#,
+        )
+        .unwrap();
+        let pocketdesk_core::local::computers::ComputerAsk::View { cursor, .. } = older.ask else {
+            panic!("a view");
+        };
+        assert!(!cursor, "an app before the local cursor never asks");
     }
 
     fn computer(addresses: &[&str], endpoint: Option<serde_json::Value>) -> PeerComputer {
