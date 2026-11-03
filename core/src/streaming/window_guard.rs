@@ -539,6 +539,7 @@ mod tests {
             generation: 1,
             identity: Identity { pid: PID, tid: 8 },
             device: "0123456789abcdef".into(),
+            native: String::new(),
         }
     }
 

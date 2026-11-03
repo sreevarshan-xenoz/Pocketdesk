@@ -71,6 +71,11 @@ pub struct Lease {
     pub identity: Identity,
     /// The device the window was lent to.
     pub device: String,
+    /// The compositor's own name for the window when the host is not Windows
+    /// (`gnome:<id>`, see [`gnome_native`]); empty for a Windows handle. A
+    /// native id is never reused by its compositor, so no program-and-thread
+    /// check is needed for it; the registration holding is the whole of it.
+    pub native: String,
 }
 
 /// Why a window could not be registered.
@@ -101,6 +106,7 @@ struct Entry {
     generation: u64,
     identity: Identity,
     device: String,
+    native: String,
 }
 
 impl Entry {
@@ -111,6 +117,7 @@ impl Entry {
             generation: self.generation,
             identity: self.identity,
             device: self.device.clone(),
+            native: self.native.clone(),
         }
     }
 }
@@ -139,12 +146,26 @@ impl Table {
         identity: Identity,
         prefer: Option<u32>,
     ) -> Result<(Lease, bool), RegisterError> {
+        self.register_with(hwnd, "", device, identity, prefer)
+    }
+
+    /// [`Table::register`] for a window of any host: a Windows handle with
+    /// its owner (`native` empty), or a compositor's own id (`native` set,
+    /// the handle a name made from it, the owner none).
+    fn register_with(
+        &mut self,
+        hwnd: isize,
+        native: &str,
+        device: &str,
+        identity: Identity,
+        prefer: Option<u32>,
+    ) -> Result<(Lease, bool), RegisterError> {
         if hwnd == 0 || device.is_empty() {
             return Err(RegisterError::Nothing);
         }
         if let Some(at) = self.entries.iter().position(|e| e.hwnd == hwnd) {
             let held = &self.entries[at];
-            if held.identity == identity {
+            if held.identity == identity && held.native == native {
                 return if held.device == device {
                     Ok((held.lease(), false))
                 } else {
@@ -172,6 +193,7 @@ impl Table {
             generation: self.generation,
             identity,
             device: device.to_string(),
+            native: native.to_string(),
         };
         let lease = entry.lease();
         self.entries.push(entry);
@@ -208,6 +230,7 @@ impl Table {
                 && e.hwnd == lease.hwnd
                 && e.identity == lease.identity
                 && e.device == lease.device
+                && e.native == lease.native
         })
     }
 
@@ -268,6 +291,64 @@ pub fn register(
     made
 }
 
+/// Register the window a compositor names `native` (see [`gnome_native`]) as
+/// lent to `device`, as [`register`] does a Windows handle: the lease, and
+/// whether this call made the registration.
+pub fn register_native(
+    native: &str,
+    device: &str,
+    prefer: Option<u32>,
+) -> Result<(Lease, bool), RegisterError> {
+    if native.is_empty() {
+        return Err(RegisterError::Nothing);
+    }
+    let made = table().register_with(
+        native_handle(native),
+        native,
+        device,
+        Identity::default(),
+        prefer,
+    );
+    if matches!(made, Ok((_, true))) {
+        notify();
+    }
+    made
+}
+
+/// The handle a compositor's window name is registered under: a stable,
+/// non-zero number made from the name (FNV-1a), so the table's rules for a
+/// handle apply to it. Two names that gave one handle would be taken for a
+/// reused handle, which voids the older grant: never the other way round.
+pub fn native_handle(native: &str) -> isize {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in native.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    // Never zero, and positive on every pointer width the table is read on.
+    ((hash & 0x7fff_ffff) | 1) as isize
+}
+
+/// What a window of GNOME is called to the table: `gnome:` and the id mutter
+/// gives it in decimal.
+pub fn gnome_native(id: u64) -> String {
+    format!("gnome:{id}")
+}
+
+/// The mutter window id a native name holds: `gnome:` and plain decimal
+/// digits (no sign, no spaces, no leading zero, one that fits), nothing else.
+pub fn gnome_id(native: &str) -> Option<u64> {
+    let digits = native.strip_prefix("gnome:")?;
+    if digits.is_empty()
+        || digits.len() > 20
+        || !digits.bytes().all(|b| b.is_ascii_digit())
+        || (digits.len() > 1 && digits.starts_with('0'))
+    {
+        return None;
+    }
+    digits.parse::<u64>().ok().filter(|id| *id != 0)
+}
+
 /// Remove the registration `lease` is, if it is still that one: the sessions
 /// bound to it end. Nothing happens to a registration made since.
 pub fn unregister(lease: &Lease) {
@@ -290,10 +371,28 @@ pub fn lease_holds(lease: &Lease) -> bool {
 }
 
 /// Whether the lease still stands: the registration is exactly the lease's
-/// and the handle still names the window that was lent (not a window Windows
-/// gave the handle to later). Nothing stands off Windows.
+/// and, for a Windows handle, the handle still names the window that was lent
+/// (not a window Windows gave the handle to later). A Windows lease stands
+/// nowhere else. A compositor's window (a native lease) has no handle to be
+/// reused: its id is never given to another window, the server ends the grant
+/// when its window is closed, and the stream of it ends with the window.
 pub fn lease_alive(lease: &Lease) -> bool {
-    lease_holds(lease) && same_window(lease.hwnd, lease.identity)
+    lease_holds(lease)
+        && if lease.native.is_empty() {
+            same_window(lease.hwnd, lease.identity)
+        } else {
+            true
+        }
+}
+
+/// Whether a session on this lease may send input at all. A Windows window
+/// may (its guard places and checks every packet). A compositor's window may
+/// not: no compositor that a program can ask says whether another window
+/// covers the lent one, or which window has the keyboard, so nothing a
+/// borrower sent could be shown to land only in that window; the session is
+/// view-only, as the guard's every answer of "no" would make it anyway.
+pub fn takes_input(lease: &Lease) -> bool {
+    lease.native.is_empty()
 }
 
 /// The lease on whatever is registered under `index`, for tests.
@@ -510,8 +609,10 @@ mod live {
 
 #[cfg(not(windows))]
 impl Os for Machine {
-    fn lease_holds(&self, _lease: &Lease) -> bool {
-        false
+    fn lease_holds(&self, lease: &Lease) -> bool {
+        // A compositor's window stands while its grant does; the rest of the
+        // guard's questions have no answer there, so every one is "no".
+        lease_alive(lease)
     }
     fn frame(&self, _lease: &Lease) -> Option<Rect> {
         None
@@ -740,6 +841,140 @@ mod tests {
         assert!(!table.holds(&old), "the old window's sessions end");
         assert!(table.holds(&new));
         assert_eq!(new.identity, recycled);
+    }
+
+    fn native_made(
+        table: &mut Table,
+        id: u64,
+        device: &str,
+    ) -> Result<(Lease, bool), RegisterError> {
+        let native = gnome_native(id);
+        table.register_with(
+            native_handle(&native),
+            &native,
+            device,
+            Identity::default(),
+            None,
+        )
+    }
+
+    #[test]
+    fn a_gnome_window_is_named_by_plain_decimal_digits_and_nothing_else() {
+        assert_eq!(gnome_native(2609479513), "gnome:2609479513");
+        assert_eq!(gnome_id("gnome:2609479513"), Some(2609479513));
+        assert_eq!(gnome_id("gnome:1"), Some(1));
+        assert_eq!(gnome_id(&gnome_native(u64::MAX)), Some(u64::MAX));
+        for bad in [
+            "",
+            "gnome:",
+            "gnome:0",
+            "gnome:01",
+            "gnome:-1",
+            "gnome:+1",
+            "gnome: 1",
+            "gnome:1 ",
+            "gnome:1x",
+            "gnome:0x10",
+            "gnome:1.5",
+            "gnome:18446744073709551616",
+            "gnome:111111111111111111111",
+            "GNOME:1",
+            "kde:1",
+            "2609479513",
+            "gnome:\u{661}",
+        ] {
+            assert_eq!(gnome_id(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_native_name_has_a_handle_that_is_never_zero_and_names_it_alone() {
+        let handles: Vec<isize> = (1..500u64)
+            .map(|id| native_handle(&gnome_native(id)))
+            .collect();
+        assert!(handles.iter().all(|h| *h > 0));
+        let mut sorted = handles.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), handles.len(), "no two of these share one");
+        assert_eq!(
+            native_handle("gnome:5"),
+            native_handle("gnome:5"),
+            "the same name, the same handle"
+        );
+        assert_eq!(native_handle(""), native_handle("") | 1, "odd, so non-zero");
+    }
+
+    #[test]
+    fn a_compositors_window_is_registered_like_a_handle_with_its_own_name_in_the_lease() {
+        let mut table = Table::default();
+        let (lease, created) = native_made(&mut table, 2609479513, DEVICE).unwrap();
+        assert!(created);
+        assert_eq!(lease.native, "gnome:2609479513");
+        assert!(is_window_index(lease.index));
+        assert!(table.holds(&lease));
+        // Asked again: the same lease, nothing made.
+        assert_eq!(
+            native_made(&mut table, 2609479513, DEVICE).unwrap(),
+            (lease.clone(), false)
+        );
+        // Lent to one device, it is not lent to another.
+        assert_eq!(
+            native_made(&mut table, 2609479513, OTHER).unwrap_err(),
+            RegisterError::Held
+        );
+        // Another window of the same device is another lease.
+        let (other, _) = native_made(&mut table, 2609479514, DEVICE).unwrap();
+        assert_ne!(other.index, lease.index);
+        assert_ne!(other.generation, lease.generation);
+        // Only the name that was registered is the lease's.
+        let renamed = Lease {
+            native: "gnome:2609479514".into(),
+            ..lease.clone()
+        };
+        assert!(!table.holds(&renamed));
+        let windows = Lease {
+            native: String::new(),
+            ..lease.clone()
+        };
+        assert!(!table.holds(&windows), "a handle is not a native window");
+        // Given back, it holds nothing.
+        assert!(table.unregister(&lease));
+        assert!(!table.holds(&lease));
+        assert!(table.holds(&other));
+    }
+
+    #[test]
+    fn a_compositors_window_lends_no_input_and_a_windows_one_does() {
+        let mut table = Table::default();
+        let (native, _) = native_made(&mut table, 2609479515, DEVICE).unwrap();
+        assert!(!takes_input(&native), "view only: nothing to confine it by");
+        let handle = made(&mut table, 0x7C01);
+        assert!(takes_input(&handle));
+    }
+
+    #[test]
+    fn a_native_lease_stands_while_its_grant_does_and_a_handle_lease_off_windows_never() {
+        let device = "native-lease-device";
+        let native = gnome_native(2609479516);
+        let (lease, _) = register_native(&native, device, None).unwrap();
+        assert!(lease_alive(&lease), "holds, and has no handle to reuse");
+        if cfg!(not(windows)) {
+            let machine = Machine;
+            assert!(machine.lease_holds(&lease));
+            // Every other question the guard asks has no answer: no move is
+            // placed, nothing is in front, nothing is hit, nothing raised.
+            assert_eq!(machine.frame(&lease), None);
+            assert!(!machine.front_is_lent(&lease));
+            assert!(!machine.hit_is_lent(&lease, (1, 1)));
+            machine.raise(&lease);
+        }
+        unregister(&lease);
+        assert!(!lease_alive(&lease), "given back, it stands no more");
+        assert_eq!(
+            register_native("", device, None).unwrap_err(),
+            RegisterError::Nothing
+        );
     }
 
     #[test]

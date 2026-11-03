@@ -98,6 +98,11 @@ use crate::virtual_screen::{Desk, Output};
 mod desktop;
 #[cfg(windows)]
 mod win32;
+// What lending a window is on GNOME (phase 6): a capture in place, to look at
+// only. The rules and flow over a fake or the real Shell.
+#[cfg(target_os = "linux")]
+mod gnome_shell;
+mod place;
 
 /// The file what is lent is kept in.
 pub const STATE_FILE: &str = "lent_windows.json";
@@ -1520,9 +1525,22 @@ fn here() -> &'static dyn Env {
 }
 
 /// What lending runs against: this computer's compositor (Sway or Hyprland),
-/// or, on Windows, its desktop ([`desktop`]).
+/// its GNOME Shell ([`place`]), or, on Windows, its desktop ([`desktop`]).
 #[cfg(not(windows))]
 fn here() -> &'static dyn Env {
+    #[cfg(target_os = "linux")]
+    {
+        // Sway and Hyprland name themselves; GNOME is only asked after them.
+        if crate::virtual_screen::desk().is_none()
+            && pocketdesk_core::streaming::gnome_unattended::is_gnome(
+                std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+            )
+        {
+            static GNOME: std::sync::OnceLock<place::PlaceEnv<gnome_shell::Gnome>> =
+                std::sync::OnceLock::new();
+            return GNOME.get_or_init(|| place::PlaceEnv::new(gnome_shell::Gnome));
+        }
+    }
     &Live
 }
 
@@ -1712,6 +1730,15 @@ impl Env for Live {
         pocketdesk_core::secure_fs::write_private(&tmp, json.as_bytes())?;
         pocketdesk_core::atomic_file::replace(&tmp, path)
     }
+}
+
+/// The tests of every kind of lend share the process-wide table of window
+/// indexes: the ones that lend take turns, so a test that fills the table does
+/// not starve another.
+#[cfg(test)]
+fn table_turn() -> std::sync::MutexGuard<'static, ()> {
+    static TURN: Mutex<()> = Mutex::new(());
+    TURN.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 #[cfg(test)]

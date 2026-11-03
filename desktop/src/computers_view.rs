@@ -1503,6 +1503,14 @@ pub fn windows_words(why: &str, computer: &str) -> String {
         format!(
             "{computer} cannot lend a window: only a Linux computer on Sway or Hyprland can for now."
         )
+    } else if why.contains("Unattended on GNOME") {
+        format!(
+            "{computer} lends a GNOME window only with \"Unattended on GNOME\" on. On {computer}, turn it on in Settings, Connection."
+        )
+    } else if why.contains("Shell extension") {
+        format!(
+            "{computer} runs GNOME, which does not let a program list its windows, so it has none to offer: that would take a GNOME Shell extension."
+        )
     } else {
         format!("{computer}: {why}")
     }
@@ -2468,6 +2476,20 @@ mod tests {
             .contains("paired both ways")
         );
         assert!(windows_words("The computer made no screen", "Tower").starts_with("Tower: "));
+        assert!(
+            windows_words(
+                "This computer lends a window of GNOME only with \"Unattended on GNOME\" on (Settings, Connection): GNOME's own screen cast is what shows it with no dialog",
+                "Tower"
+            )
+            .starts_with("Tower lends a GNOME window only with")
+        );
+        assert!(
+            windows_words(
+                "Could not read this computer's windows: GNOME Shell does not give a program its list of windows (only GNOME's own apps may ask), so this computer cannot offer one to lend without a Shell extension",
+                "Tower"
+            )
+            .contains("would take a GNOME Shell extension")
+        );
         let mut window = lendable("5", "Notes", "app.notes");
         assert_eq!(
             window_facts(&window),

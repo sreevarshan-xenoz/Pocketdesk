@@ -212,7 +212,9 @@ video_quality = "balanced"
 # back where it was when it is returned, the other computer's session ends,
 # or this server stops. On Windows there is no hidden screen: the window stays
 # where it is, is shown on the other computer, and is clicked and typed into
-# there. Off until turned on.
+# there. On GNOME (with gnome_unattended on, and a Shell that gives its window
+# list) the window stays where it is and the other computer only looks at it.
+# Off until turned on.
 # lend_windows = false
 # A window borrowed from another of my computers takes the size of the window
 # that shows it here: resized, maximised or moved to a screen of another

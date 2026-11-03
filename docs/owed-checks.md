@@ -2,17 +2,17 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1402 open items.
+1414 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 100 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 202 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 205 |
 | A phone with a SIM | 40 |
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
-| A second computer | 235 |
+| A second computer | 244 |
 | A Linux desktop (the Azure VM serves for some) | 253 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 95 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
@@ -746,6 +746,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The host's "Let my computers borrow my windows" turned off while a window is lent: the window is given back within about two seconds, the viewer's window ends, the list is refused. The viewer's computer going away (network cable out, app killed): the window is back within a few seconds to a minute (the sweep and the 60 s lease). The host's server stopped from the tray or by `pocketdesk stop` (the owner does this, never the build): every window is put back as it was. (where: owner)
 - A server crash or kill while a window is lent (the owner does this): the window stays at the size the viewer last gave it and is not touched again at the next start (handles are not kept), and nothing is lent after the restart. (where: owner)
 
+**281. A GNOME computer lends a window to look at (phase 6 of the window handoff: GNOME as the source)**
+
+- GNOME's screen-sharing indicator shows in the top bar while a window is lent and goes when it ends; the host's own pointer and keyboard are not affected at any moment. (where: owner)
+- A Shell extension, once one exists (not built), that answers the list with places, stacking and focus: whether input can then be confined as it is on Windows; the window guard's questions it would answer. (where: owner)
+- KDE Plasma (not built): the measured facts to confirm on a real Plasma 6 desk: an ordinary program can load a KWin script and read the windows, stacking and active window; whether `zkde_screencast_unstable_v1` and `org_kde_kwin_fake_input` are offered to a program with no desktop-file entry. (where: owner)
+
 ## A phone with a SIM
 
 **11. WAN over iroh (R1)**
@@ -1453,6 +1459,18 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - **Confinement, the keys:** the viewer types into the lent Notepad while the host's browser is in front and Windows refuses to give the focus back: nothing is typed into the browser (the keys are dropped, none sticks: Shift or Ctrl held in the viewer is let go on the host), and typing works again as soon as the lent window is in front. Pressing the Windows key, Win+D, Win+L, Alt+Tab, Alt+Esc, Ctrl+Esc, Ctrl+Shift+Esc, Print Screen and the volume and power keys in the viewer does nothing on the host (never run Win+L or a power key against the owner's own computer: watch for nothing happening). Alt+F4 in the viewer closes the lent window and only it. A dialog of the lent window (Notepad's Save As, a menu) takes the keys and the clicks without the window being raised over it. (where: second computer)
 - **Confinement, the end of a lend:** the viewer keeps clicking and typing in its window while the host's owner gives the window back (from the host's side: the switch turned off, the window closed, or a return sent from the viewer's own second view): the session ends within about a second and nothing more reaches the host (no stray click, no key left pressed); lending another window to the same viewer is a new session. Lending, returning and lending the same window again in quick succession: the first session never drives the second. (where: second computer)
 - **Confinement, what may be lent:** the desktop (Progman), the taskbar, Task Manager or any program run as administrator, and the app and server's own windows are not in the list, and a lend of one of their handles sent by hand (`0x` and hex) is refused as "No such window on this computer"; a window closed and another program started at once (a handle that may be reused) is never moved, sized or driven by the old lend (not forceable; unit-tested only). A borrowed window carries no sound of the host and no microphone. (where: second computer)
+
+**281. A GNOME computer lends a window to look at (phase 6 of the window handoff: GNOME as the source)**
+
+- A real GNOME desk (stock, no extension), "Let my computers borrow my windows" on, "Unattended on GNOME" on: the other computer's "Borrow a window…" says GNOME Shell does not give its window list and that it would take a Shell extension, in the picker's words; no window is lent and nothing is registered. With "Unattended on GNOME" off it says that instead. (where: second computer)
+- A real GNOME desk where the list is given (a Shell started in its unsafe mode, from a throwaway session): the picker lists the windows by title and app, none of Pocketdesk's own and no hidden one; Borrow opens a window on the viewer within about two seconds showing that one window alone, at its own size, with no pointer of the host in it and none of the rest of the screen. Say how long to the first picture and how it looks scaled. (where: second computer)
+- View only: clicking, scrolling and typing in the viewer's window do nothing on the host (no pointer movement, no focus change, no key typed into any window); the viewer's window says view-only (the ready stream clears input) and its screen buttons are the view-only ones. Say what the viewer shows. (where: second computer)
+- The lent window covered by another (open a browser over it), and on another workspace: the viewer's picture is still the lent window's own, not the cover. Say what a covered window and a window on another workspace give (a frame, nothing, the last frame). (where: second computer)
+- The lent window resized by its owner, maximised, and moved to another monitor while lent: the viewer's picture follows the window's size (the crop record changes; the encoder is rebuilt at the new size) with no frame of the whole screen in between; say how long it takes and whether any frame is the stage-sized one. (where: second computer)
+- A window minimised while lent stays lent (not ended) and its picture stops or stays; restored, the picture comes back. A window closed ends the viewer's view within about two seconds, with its borrower told it closed and no leftover on the host. (where: second computer)
+- Return by closing the viewer's window, the other computer going away (cable out, app killed), the switch turned off, the server stopped: each ends the capture within a second or two (the host's screen-sharing indicator goes), and a restart of the server lends nothing (no file is written). (where: second computer)
+- A third paired computer dialling the lent index (1000 to 1007, found by trying them) is refused at once with the words of a window not lent; the window is not shown to it. (where: second computer)
+- The phone's apps and the computer's other captures run beside a lent window with no change (a screen session of the host's monitor while a window is lent; the index range does not collide). (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 

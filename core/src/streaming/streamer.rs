@@ -866,7 +866,14 @@ impl StreamingServer {
         // Without input, the session is view-only whatever the phone asks:
         // the phone's own view-only switch can tighten this, never lift it.
         // A sound session gives no input at all (N5).
-        let force_view_only = !permissions.allows(Capability::Input) || sound || phone_sound_only;
+        // A window of a Linux compositor is lent to look at only: nothing
+        // could be shown to land in it alone (`window_target::takes_input`).
+        let force_view_only = !permissions.allows(Capability::Input)
+            || sound
+            || phone_sound_only
+            || window_lease
+                .as_ref()
+                .is_some_and(|lease| !super::window_target::takes_input(lease));
         let laser = self.laser;
         // A computer's mic needs control too (PC10 review): never in a
         // session that may not drive this one.
