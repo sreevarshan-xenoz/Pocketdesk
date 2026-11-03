@@ -2,19 +2,19 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1333 open items.
+1347 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 94 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 95 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 199 |
 | A phone with a SIM | 40 |
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
 | A second computer | 196 |
-| A Linux desktop (the Azure VM serves for some) | 245 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 82 |
+| A Linux desktop (the Azure VM serves for some) | 251 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 89 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
@@ -226,6 +226,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The OPPO as the viewer of a computer with the setting on (VA-API and the software encoder in turn): the picture starts at once, plays as before, and a stalled link that comes back shows a picture again within a few seconds (the computer's keyframe on request, `RequestKeyframe`); say how long a "decoder took no input" skip waits for the next whole keyframe (10 s on VA-API, 30 s on the software encoder: no phone asks for one then yet). (where: here)
 - A phone that joins mid-session, and one that reconnects after a drop, with the setting on: each gets a picture as fast as with it off (every connection opens its own encoder, which starts on a keyframe). (where: here)
 - A phone's own screen cast to the computer (the phone is the encoder): unchanged by this setting (its keyframe every five seconds and on request). (where: here)
+
+**277. Zero-copy capture (low-latency window handoff, phase 2: the screen goes from the compositor to VA-API as a DMA-BUF)**
+
+- The Settings row "Copy the screen through memory" on this Windows box's app: it shows under Phones, saves with the rest, and says the server reads it at its start. (where: here)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -1977,6 +1981,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The setting off: the pointer is in the picture as before (and, from a GNOME or KDE host, as the portal gave it) and the window's pointer is the system arrow. A change applies from the next view. (where: linux)
 - A very large pointer (an accessibility size, over 256 pixels) shows shrunk, not cut; a pointer that changes often (a program animating it) costs no more than the shapes it sends, each sent once. (where: linux)
 
+**277. Zero-copy capture (low-latency window handoff, phase 2: the screen goes from the compositor to VA-API as a DMA-BUF)**
+
+- A real Sway on its DRM backend (not headless), a monitor at its native size: "Zero-copy capture: ..." in the log, the picture right, no tearing, a still desktop sends one frame a second, and the frames a second under a moving window are the monitor's rate. (where: linux)
+- The owner's Hyprland session, whole screen: the capture takes DMA-BUFs (a Hyprland screencopy that reports no damage at once: a still screen sends its heartbeat each second, as repeats only while the picture is the same, read back by the card), the picture is right, and a window crop from a phone (Hyprland's toplevel export) still works and still copies. (where: linux)
+- A window crop on a host without the toplevel export (Sway), set mid-session from a phone: the log says "Capture back to copies through memory", the stream goes on at the crop's size, and a second session starts on DMA-BUFs again. (where: linux)
+- An output whose size changes mid-session (a monitor's mode, a window's fitted screen resized): new buffers are made and checked, the encoder is rebuilt at the new size, and the stream goes on. (where: linux)
+- GNOME, KDE (the portal and PipeWire) and X11 hosts: unchanged, the capture copies as before, and the new Settings row is shown and harmless. (where: linux)
+- PipeWire's DMA-BUF negotiation (`SPA_DATA_DmaBuf` with the modifiers the card imports) for GNOME and KDE hosts: not built. (where: linux)
+
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
 **13. PiP + multitask (Tier-3 #14, DeX)**
@@ -2231,6 +2244,16 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Windows with an NVIDIA card, in-process NVENC, H.264, the setting on: the stream opens, plays, and a keyframe still comes on request (`forced-idr`), with no keyframe on a two second beat in the log of a session; HEVC through NVENC with the setting on gets whole keyframes every 10 s and on request (no intra refresh: a wave's start is told from an IDR only for H.264). `h264_nvenc` with `intra-refresh` is untested on a real card. (where: other hardware)
 - An AMD, Intel Windows or NVIDIA-on-Linux computer (the FFmpeg sidecar): with the setting on nothing changes (a keyframe every two seconds, no intra refresh), and the setting off is as before. (where: other hardware)
+
+**277. Zero-copy capture (low-latency window handoff, phase 2: the screen goes from the compositor to VA-API as a DMA-BUF)**
+
+- A wlroots compositor that answers `failed` to the import of a modifier it advertises (a driver quirk; Sway on this card imports all it offers): the next modifier is used, or the capture copies with one warning, and the connection is never closed with `invalid_wl_buffer`. (where: other hardware)
+- A compositor whose `zwp_linux_dmabuf_v1` is version 3 or older (no main device): the log says once that the capture copies because the compositor's GPU is not named, and the stream plays. (where: other hardware)
+- AMD and other Intel generations: the output surface of the video processor is ready when the conversion returns (the unit test `the_buffer_is_free_when_the_conversion_returns` passes and is not skipped), and an empty desktop reaches the card as linear after a few seconds. (where: other hardware)
+- AMD (radeonsi VA-API) with Sway or Hyprland: the log's "Zero-copy capture: ... modifier=..." line names a modifier the compositor and the card agree on, the picture is the same as with "Copy the screen through memory" on (look at it, then compare the frames a second and the host's processor use), and a card whose import fails turns the capture back to copies with one warning. (where: other hardware)
+- Other Intel generations (Gen 8 and 9 with i965 or iHD, Xe with its 4-tiled modifiers): the same, and the modifiers with a second plane (compressed ones) are skipped. (where: other hardware)
+- A hybrid laptop whose compositor renders on the discrete card while the encoder opens the integrated one: the log says "the compositor renders on another GPU" once and the capture copies; with both on one card the DMA-BUF capture works. (where: other hardware)
+- NVIDIA (proprietary driver; NVENC or the software encoder as the encoder): no DMA-BUF is made (only the in-process VA-API encoder takes one) and the capture is unchanged. (where: other hardware)
 
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 

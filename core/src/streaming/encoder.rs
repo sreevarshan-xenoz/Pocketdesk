@@ -353,6 +353,18 @@ impl VideoEncoder {
         }
     }
 
+    /// Whether this encoder takes a frame still on the card (a DMA-BUF from
+    /// the Linux capture) as it is, with no read back: the in-process VA-API
+    /// encoder with its conversion on the card. Every other encoder needs
+    /// the pixels in memory, so a capture is turned back to copies for it.
+    pub fn takes_dmabuf(&self) -> bool {
+        match self {
+            #[cfg(all(target_os = "linux", feature = "inproc"))]
+            Self::VaapiInProcess(e) => e.takes_dmabuf(),
+            _ => false,
+        }
+    }
+
     /// Number of frames submitted so far.
     pub fn sequence(&self) -> u64 {
         match self {

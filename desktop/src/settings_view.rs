@@ -139,6 +139,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     ("slow_link_frame_rate", "Slow links", Section::Phones),
     ("smooth_keyframes", "Smooth keyframes", Section::Phones),
     (
+        "capture_copy",
+        "Copy the screen through memory",
+        Section::Phones,
+    ),
+    (
         "laser_pointer",
         "Laser pointer from phones",
         Section::Phones,
@@ -1519,6 +1524,19 @@ impl SettingsForm {
                          it over the stream; the rest send one every ten seconds. A viewer that \
                          loses a frame still gets a whole picture at once. Read when the \
                          server starts.",
+                    );
+                });
+                row(ui, "capture_copy", |ui| {
+                    ui.checkbox(
+                        &mut e.capture_copy,
+                        "copy the screen through memory instead of the graphics card",
+                    )
+                    .on_hover_text(
+                        "On a Linux desktop built on wlroots (Sway, Hyprland), with a graphics \
+                         card that does video, the screen is rendered into a buffer on the card \
+                         and encoded from there, with no copy through memory. Turn this on to \
+                         copy it through memory as before, if the picture ever misbehaves with \
+                         your card or driver. Read when the server starts.",
                     );
                 });
                 row(ui, "laser_pointer", |ui| {

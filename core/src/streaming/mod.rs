@@ -13,12 +13,16 @@ pub mod connection;
 pub mod cursor_feed;
 #[cfg(feature = "wan")]
 pub mod dht;
+#[cfg(target_os = "linux")]
+pub mod dmabuf;
 pub mod encoder_detect;
 pub mod ffmpeg_flags;
 mod frame_pool;
 #[cfg(all(windows, feature = "capture", feature = "inproc-windows"))]
 mod gpu_frame;
 pub mod h264_sps;
+#[cfg(target_os = "linux")]
+pub use dmabuf::GpuFrame;
 #[cfg(all(windows, feature = "capture", feature = "inproc-windows"))]
 pub use gpu_frame::GpuFrame;
 pub mod gnome_unattended;
@@ -382,12 +386,19 @@ pub struct VideoFrame {
     pub repeat: bool,
 }
 
-/// Without zero-copy (BG10) no frame is on the GPU.
-#[cfg(not(all(windows, feature = "capture", feature = "inproc-windows")))]
+/// Without zero-copy (BG10 on Windows, the DMA-BUF capture on Linux) no frame
+/// is on the GPU.
+#[cfg(not(any(
+    all(windows, feature = "capture", feature = "inproc-windows"),
+    target_os = "linux"
+)))]
 #[derive(Debug, Clone)]
 pub enum GpuFrame {}
 
-#[cfg(not(all(windows, feature = "capture", feature = "inproc-windows")))]
+#[cfg(not(any(
+    all(windows, feature = "capture", feature = "inproc-windows"),
+    target_os = "linux"
+)))]
 impl GpuFrame {
     fn offset(&mut self, _x: u32, _y: u32) {
         match *self {}
@@ -454,6 +465,20 @@ impl VideoFrame {
         let h = height.min(self.height - y) & !1;
         if w == 0 || h == 0 {
             return false;
+        }
+        // A frame on the card from the DMA-BUF capture (Linux) is read back
+        // and cropped like any other; the streamer then turns the capture
+        // back to copies (`dmabuf`), so this is a frame or two.
+        #[cfg(target_os = "linux")]
+        if self.gpu.is_some() {
+            match self.downloaded() {
+                Ok(Some(mut cpu)) => {
+                    self.data = std::mem::take(&mut cpu.data);
+                    self.stride = cpu.stride;
+                    self.gpu = None;
+                }
+                _ => return false,
+            }
         }
         // A frame on the GPU (BG10) is cropped by narrowing its region; the
         // encoder copies only that.
