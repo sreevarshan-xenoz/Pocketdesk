@@ -855,6 +855,66 @@ fn return_with(lends: &Lends, env: &dyn Env, device: &str, window: Option<&str>)
     }
 }
 
+/// Where a lent window goes when it is returned, for a window dragged back
+/// across the edge: its place is put where the pointer comes in. Only a
+/// floating window has a place of its own to change (a tiled one goes back
+/// into its layout); whether the record was changed.
+fn retarget_with(
+    lends: &Lends,
+    env: &dyn Env,
+    device: &str,
+    window: &str,
+    origin: [i32; 2],
+) -> bool {
+    let _one = lends.one.lock().unwrap_or_else(|e| e.into_inner());
+    let mut all = lends.all();
+    let Some(lent) = all
+        .iter_mut()
+        .find(|l| l.device == device && l.window == window && l.floating)
+    else {
+        return false;
+    };
+    let (dx, dy) = (origin[0] - lent.origin[0], origin[1] - lent.origin[1]);
+    lent.origin = origin;
+    lent.at = [lent.at[0] + dx, lent.at[1] + dy];
+    if let Err(e) = env.save(&all) {
+        tracing::warn!("Could not write the list of lent windows: {e}");
+    }
+    true
+}
+
+/// [`return_with`] for one window, put where `origin` says (its container's
+/// top left in the layout) when it floats: a window dragged back over the
+/// edge lands where the pointer came in.
+fn return_dragged_with(
+    lends: &Lends,
+    env: &dyn Env,
+    device: &str,
+    window: &str,
+    origin: [i32; 2],
+) -> Value {
+    retarget_with(lends, env, device, window, origin);
+    return_with(lends, env, device, Some(window))
+}
+
+/// A window of `device`'s dragged back over the edge: returned, to `origin`
+/// if it floats (see [`return_dragged_with`]). Blocking.
+pub fn return_dragged(device: &str, window: &str, origin: [i32; 2]) -> Value {
+    if !is_window_id(window) {
+        return error("not a window");
+    }
+    return_dragged_with(lends(), &Live, device, window, origin)
+}
+
+/// Why `device` may not borrow a window now, as a `lend` would refuse it:
+/// the shared input's drag asks before it offers a window.
+pub fn may_lend(device: &str) -> Result<(), &'static str> {
+    match refusal("lend", enabled(), is_owner_computer(device)) {
+        Some(why) => Err(why),
+        None => Ok(()),
+    }
+}
+
 /// Put back what is lent on `output`, as it is about to be removed; the
 /// windows that would not go (still lent, their records kept).
 fn give_back_output_with(lends: &Lends, env: &dyn Env, output: &str) -> Vec<Lent> {
@@ -1177,6 +1237,15 @@ async fn tell(ended: &Ended) {
     }
 }
 
+/// Tell `device`, whose view shows its window `window`, that the window went
+/// home by being dragged back (`{lent_gone, reason: returned}`): the view
+/// ends there. Whether it could hear.
+pub async fn tell_returned(device: &str, window: &str) -> bool {
+    let packet = NetworkPacket::new(crate::virtual_screen::PACKET)
+        .with_body(json!({ "lent_gone": window, "reason": "returned" }));
+    crate::remote_devices::send_to_computer(device, packet).await
+}
+
 /// Watch what is lent, for the server's life: asleep while nothing is lent
 /// (a lend wakes it), a look a second while something is ([`sweep_with`]).
 pub async fn run_watcher() {
@@ -1254,7 +1323,7 @@ struct File {
 }
 
 /// Whether `device` is one of the owner's computers, paired both ways here.
-fn is_owner_computer(device: &str) -> bool {
+pub(crate) fn is_owner_computer(device: &str) -> bool {
     use pocketdesk_core::local::computers;
     use pocketdesk_core::protocol::kdeconnect::TrustStore;
     let (Ok(dir), Ok(trust)) = (crate::state::state_dir(), crate::state::trust_store_path()) else {
@@ -1630,6 +1699,8 @@ mod tests {
         /// What a failed move back says: `InvalidInput` is for good.
         back_is_for_good: bool,
         fail_save: bool,
+        /// The records the compositor was asked to put back, as they were.
+        backed: Mutex<Vec<Lent>>,
     }
 
     impl Fake {
@@ -1740,6 +1811,7 @@ mod tests {
             Ok(())
         }
         fn back(&self, lent: &Lent) -> std::io::Result<()> {
+            self.backed.lock().unwrap().push(lent.clone());
             self.calls
                 .lock()
                 .unwrap()
@@ -2386,6 +2458,66 @@ mod tests {
         assert!(lends.all().is_empty());
         assert!(fake.saved.lock().unwrap().is_empty());
         assert!(fake.screens.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_floating_window_dragged_back_goes_where_the_pointer_came_in() {
+        let mut floating = seen("5", 800, 600);
+        floating.floating = true;
+        floating.origin = [100, 73];
+        floating.at = [108, 100];
+        let fake = Fake::with(vec![floating, seen("6", 800, 600)]);
+        let lends = Lends::new();
+        lend_with(&lends, &fake, DEVICE, "5");
+        let reply = return_dragged_with(&lends, &fake, DEVICE, "5", [1100, 400]);
+        assert_eq!(reply, json!({ "returned": 1 }));
+        let backed = fake.backed.lock().unwrap();
+        assert_eq!(backed.len(), 1);
+        // The container's place is the pointer's; the window's own moves by
+        // as much (Sway counts the title bar, Hyprland the window).
+        assert_eq!(backed[0].origin, [1100, 400]);
+        assert_eq!(backed[0].at, [1108, 427]);
+        assert_eq!(backed[0].size, [800, 600], "its size is as it was");
+        assert!(lends.all().is_empty());
+        assert!(fake.saved.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_tiled_window_dragged_back_goes_into_its_layout_as_it_always_does() {
+        let fake = Fake::with(vec![seen("5", 800, 600)]);
+        let lends = Lends::new();
+        lend_with(&lends, &fake, DEVICE, "5");
+        assert!(!seen("5", 800, 600).floating);
+        let before = lends.all()[0].clone();
+        assert!(!retarget_with(&lends, &fake, DEVICE, "5", [1100, 400]));
+        assert_eq!(lends.all()[0], before, "no place to change");
+        let reply = return_dragged_with(&lends, &fake, DEVICE, "5", [1100, 400]);
+        assert_eq!(reply, json!({ "returned": 1 }));
+        assert_eq!(fake.backed.lock().unwrap()[0].origin, before.origin);
+    }
+
+    #[test]
+    fn a_window_of_another_computer_or_not_lent_is_not_moved_by_a_drag_back() {
+        let mut floating = seen("5", 800, 600);
+        floating.floating = true;
+        let fake = Fake::with(vec![floating]);
+        let lends = Lends::new();
+        lend_with(&lends, &fake, DEVICE, "5");
+        let before = lends.all()[0].clone();
+        let other = return_dragged_with(&lends, &fake, "fedcba9876543210", "5", [1, 2]);
+        assert_eq!(other["returned"], 0);
+        assert_eq!(
+            lends.all()[0],
+            before,
+            "another computer's drag changed nothing"
+        );
+        let unlent = return_dragged_with(&lends, &fake, DEVICE, "9", [1, 2]);
+        assert_eq!(unlent["returned"], 0);
+        assert_eq!(lends.all().len(), 1);
+        assert_eq!(
+            return_dragged("x", "5; exec true", [0, 0]),
+            json!({"error": "not a window"})
+        );
     }
 
     #[test]

@@ -300,9 +300,13 @@ pub fn close_list(dir: &Path, computer: &str) {
 
 // ---- A window gone ----
 
-/// A window a host says is gone, as `(host, window)`.
-fn gone_events() -> &'static broadcast::Sender<(String, String)> {
-    static GONE: std::sync::LazyLock<broadcast::Sender<(String, String)>> =
+/// What a host says of a window gone: the host, the window and the reason
+/// it gave (`closed`, `off`, or `returned` for a window dragged back).
+type Gone = (String, String, Option<String>);
+
+/// A window a host says is gone.
+fn gone_events() -> &'static broadcast::Sender<Gone> {
+    static GONE: std::sync::LazyLock<broadcast::Sender<Gone>> =
         std::sync::LazyLock::new(|| broadcast::channel(16).0);
     &GONE
 }
@@ -315,25 +319,30 @@ pub fn note_gone(device_id: &str, body: &Value) -> bool {
         return false;
     };
     // Nobody listening is fine: no view shows that window.
-    let _ = gone_events().send((device_id.to_string(), window.to_string()));
+    let reason = body
+        .get("reason")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let _ = gone_events().send((device_id.to_string(), window.to_string(), reason));
     true
 }
 
 /// Hear of windows gone from now on: take one before the view starts, so
 /// none is missed.
-pub fn gone() -> broadcast::Receiver<(String, String)> {
+pub fn gone() -> broadcast::Receiver<Gone> {
     gone_events().subscribe()
 }
 
-/// Wait until the computer `device_id` says its window `window` is gone.
+/// Wait until the computer `device_id` says its window `window` is gone:
+/// the reason it gave, if it gave one.
 pub async fn wait_gone(
-    events: &mut broadcast::Receiver<(String, String)>,
+    events: &mut broadcast::Receiver<Gone>,
     device_id: &str,
     window: &str,
-) {
+) -> Option<String> {
     loop {
         match events.recv().await {
-            Ok((from, gone)) if from == device_id && gone == window => return,
+            Ok((from, gone, reason)) if from == device_id && gone == window => return reason,
             Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
             // No sender left: nothing will say it.
             Err(broadcast::error::RecvError::Closed) => std::future::pending::<()>().await,
@@ -651,9 +660,21 @@ mod tests {
             "desk",
             &json!({ "lent_gone": "5", "reason": "closed" })
         ));
-        tokio::time::timeout(Duration::from_secs(2), wait_gone(&mut events, "desk", "5"))
-            .await
-            .expect("desk's window 5 said gone");
+        let reason =
+            tokio::time::timeout(Duration::from_secs(2), wait_gone(&mut events, "desk", "5"))
+                .await
+                .expect("desk's window 5 said gone");
+        assert_eq!(reason.as_deref(), Some("closed"));
+        // A window dragged back says so.
+        assert!(note_gone(
+            "desk",
+            &json!({ "lent_gone": "7", "reason": "returned" })
+        ));
+        let reason =
+            tokio::time::timeout(Duration::from_secs(2), wait_gone(&mut events, "desk", "7"))
+                .await
+                .unwrap();
+        assert_eq!(reason.as_deref(), Some("returned"));
         // Nothing else is left for it: the other two were not its window.
         let mut events = gone();
         assert!(note_gone("lap", &json!({ "lent_gone": "9" })));

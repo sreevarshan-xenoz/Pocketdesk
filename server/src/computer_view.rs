@@ -1095,9 +1095,9 @@ async fn session(
             input,
             mic,
         ) => {}
-        () = crate::borrow_window::wait_gone(&mut gone, &device_id, &borrowed) => {
+        reason = crate::borrow_window::wait_gone(&mut gone, &device_id, &borrowed) => {
             tracing::info!(device_id = %device_id, "A borrowed window is gone; ending its view");
-            say.say(Event::Ended(gone_words(&name))).await;
+            say.say(Event::Ended(gone_words(&name, reason.as_deref()))).await;
         }
     }
 }
@@ -1107,8 +1107,12 @@ async fn session(
 const ALREADY_SHOWN: &str = "That window is already shown in another window here.";
 
 /// What the window says when the computer it borrowed from lost the window.
-fn gone_words(name: &str) -> String {
-    format!("{name} closed that window, or stopped lending its windows.")
+fn gone_words(name: &str, reason: Option<&str>) -> String {
+    match reason {
+        // Dragged back over the edge (window handoff 4).
+        Some("returned") => format!("The window went back to {name}."),
+        _ => format!("{name} closed that window, or stopped lending its windows."),
+    }
 }
 
 /// One view, until it ends: dialled, shown, and after a drop dialled again
