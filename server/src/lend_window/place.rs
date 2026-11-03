@@ -554,7 +554,8 @@ mod tests {
         assert!(!keep_listed(&hidden));
         // An id the lend path could not take is not offered.
         assert!(!keep_listed(&window(0, "x", 800, 600)));
-        assert!(!keep_listed(&window(u64::MAX, "x", 800, 600)));
+        // The largest id is still one it takes (twenty digits).
+        assert!(keep_listed(&window(u64::MAX, "x", 800, 600)));
     }
 
     // ---- The flow ----
