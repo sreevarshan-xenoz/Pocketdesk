@@ -924,6 +924,14 @@ pub async fn respond(device: &str, body: &serde_json::Value) -> serde_json::Valu
     if is_internal_only(&action) {
         return said_with(body, serde_json::json!({ "error": "unknown action" }));
     }
+    // A computer that lent a window asks whether this computer's view of it is
+    // the window being dragged back (window handoff 4).
+    if action == "drag_back" {
+        return said_with(
+            body,
+            crate::shared_input::drag_window::answer_drag_back(device, body).await,
+        );
+    }
     // A computer's lending of one of its windows (phase 3a of the window
     // handoff) has its own gate and its own state.
     if matches!(action.as_str(), "lend" | "list" | "return") {

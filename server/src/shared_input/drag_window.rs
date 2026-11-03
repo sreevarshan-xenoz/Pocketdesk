@@ -668,6 +668,41 @@ pub async fn bring_back(r: Return) {
     }
 }
 
+// ---- Answering a drag back ----
+
+/// What the computer that lent a window is told when it asks, as the pointer
+/// came back over its edge, whether this computer's view of that window is
+/// the one being dragged: `{drag_back: "yes"}` when the window was lent to
+/// the view and the window showing it has the focus, `{drag_back: "no"}`
+/// otherwise, `{error}` from a computer that is not one of this one's own.
+fn drag_back_verdict(mine: bool, dragged: bool) -> Value {
+    if !mine {
+        return json!({ "error": "not one of this computer's own" });
+    }
+    json!({ "drag_back": if dragged { "yes" } else { "no" } })
+}
+
+/// The answer to `{action: drag_back, window}` from `device`: see
+/// [`drag_back_verdict`]. The window is named by the id its computer gave it.
+pub async fn answer_drag_back(device: &str, body: &Value) -> Value {
+    let Some(window) = body
+        .get("window")
+        .and_then(Value::as_str)
+        .filter(|w| crate::lend_window::is_window_id(w))
+    else {
+        return json!({ "error": "not a window" });
+    };
+    let (device, window) = (device.to_string(), window.to_string());
+    tokio::task::spawn_blocking(move || {
+        drag_back_verdict(
+            crate::lend_window::is_owner_computer(&device),
+            crate::borrow_window::is_dragged(&device, &window),
+        )
+    })
+    .await
+    .unwrap_or_else(|_| json!({ "error": "the computer failed to answer" }))
+}
+
 // ---- Taking an offer ----
 
 /// What the computer that is offered a window checks and does.
@@ -1642,6 +1677,30 @@ mod tests {
                 panic!("{w}x{h}: an offer");
             };
             assert_eq!(Offer::read(&offer.body()), Some(offer), "{w}x{h}");
+        }
+    }
+
+    #[test]
+    fn a_drag_back_is_answered_yes_only_for_a_dragged_view_of_a_computer_of_mine() {
+        assert_eq!(drag_back_verdict(true, true), json!({ "drag_back": "yes" }));
+        assert_eq!(
+            drag_back_verdict(true, false),
+            json!({ "drag_back": "no" }),
+            "no view of it with the focus: a drag of something else"
+        );
+        assert!(drag_back_verdict(false, true).get("drag_back").is_none());
+        assert!(drag_back_verdict(false, true).get("error").is_some());
+    }
+
+    #[tokio::test]
+    async fn a_drag_back_names_a_window_that_could_be_one() {
+        for bad in [
+            json!({}),
+            json!({ "window": 5 }),
+            json!({ "window": "5; x" }),
+        ] {
+            let said = answer_drag_back("desk", &bad).await;
+            assert_eq!(said, json!({ "error": "not a window" }), "{bad}");
         }
     }
 
