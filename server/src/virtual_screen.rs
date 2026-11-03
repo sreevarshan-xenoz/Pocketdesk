@@ -445,6 +445,16 @@ fn create_sway(width: u32, height: u32) -> std::io::Result<(String, i32)> {
     Ok((name, x))
 }
 
+/// The Sway command that gives the output `name` the mode `width`×`height`
+/// where it is (its place is kept): `None` unless `name` is an output Sway
+/// made with `create_output` and both sides are within
+/// [`MIN_SIDE`]..=[`MAX_SIDE`], so nothing else reaches a command.
+pub fn sway_mode_command(name: &str, width: u32, height: u32) -> Option<String> {
+    let side = MIN_SIDE..=MAX_SIDE;
+    (is_virtual(name) && side.contains(&width) && side.contains(&height))
+        .then(|| format!("output {name} mode --custom {width}x{height}"))
+}
+
 /// Give the output `name` (one this server made) the size `width`×`height`
 /// where it is, and wait up to 2 s for the compositor to show it; its `x`.
 fn resize(name: &str, width: u32, height: u32) -> std::io::Result<i32> {
@@ -458,8 +468,10 @@ fn resize(name: &str, width: u32, height: u32) -> std::io::Result<i32> {
             }
             resize_hyprland(&hypr, name, width, height, wait)
         }
-        Some(Desk::Sway) if is_virtual(name) => {
-            run(&format!("output {name} mode --custom {width}x{height}"))?;
+        Some(Desk::Sway) => {
+            let command = sway_mode_command(name, width, height)
+                .ok_or_else(|| std::io::Error::other("not a screen this computer makes"))?;
+            run(&command)?;
             wait_for_size(&outputs, name, width, height, wait)
         }
         _ => Err(std::io::Error::other("not a screen this computer makes")),
@@ -975,6 +987,15 @@ pub(crate) fn keep_for_lend(key: &str, name: &str) {
     save(&made);
 }
 
+/// Give the screen already made for a window lent under `key` the size
+/// `width`×`height` where it is (the borrowing computer's window was resized,
+/// [`crate::lend_window`]): `{name, index, width, height}` or `{error}`. It
+/// never makes a screen, and is not held to "Phones may add a screen": the
+/// window is already lent.
+pub(crate) fn resize_for_lend(key: &str, width: u32, height: u32) -> serde_json::Value {
+    answer_with(screens(), &Live, key, "lend_resize", width, height)
+}
+
 /// Take away the screen of `key` (see [`add_for_lend`]).
 pub(crate) fn drop_for_lend(key: &str) {
     answer_with(screens(), &Live, key, "remove", 0, 0);
@@ -1008,8 +1029,9 @@ fn answer_with(
         // `fit` (a computer's window) is `add` that also gives the screen it
         // has the window's new size. `lend` (a window of this computer moved
         // onto the screen, [`crate::lend_window`]) is `add` under its own
-        // switch, not this one's.
-        "add" | "fit" | "lend" => {
+        // switch, not this one's; `lend_resize` is `fit` for such a screen,
+        // and makes none.
+        "add" | "fit" | "lend" | "lend_resize" => {
             let Some((w, h)) = screen_size(width, height) else {
                 return json!({ "error": "not a screen size" });
             };
@@ -1029,7 +1051,7 @@ fn answer_with(
                     .ok()
                     .and_then(|all| all.into_iter().find(|o| o.name == name));
                 if let Some(mut output) = place {
-                    if action == "fit"
+                    if matches!(action, "fit" | "lend_resize")
                         && (output.rect.width, output.rect.height) != (w as i32, h as i32)
                     {
                         match host.resize(&name, w, h) {
@@ -1056,6 +1078,9 @@ fn answer_with(
                 }
                 // Gone from the compositor meanwhile: forget it and make another.
                 made().phones.remove(phone);
+            }
+            if action == "lend_resize" {
+                return json!({ "error": "no screen to resize" });
             }
             // A few at most, whatever ids phones announce.
             let held = made().phones.values().map(Vec::len).sum::<usize>();
@@ -1121,6 +1146,25 @@ mod tests {
             "at least the minimum"
         );
         assert_eq!(screen_size(0, 2400), None);
+    }
+
+    #[test]
+    fn sways_mode_command_is_only_for_its_own_headless_outputs_within_bounds() {
+        assert_eq!(
+            sway_mode_command("HEADLESS-2", 1000, 600).as_deref(),
+            Some("output HEADLESS-2 mode --custom 1000x600")
+        );
+        for (name, w, h) in [
+            ("DP-1", 1000, 600),
+            ("eDP-1", 1000, 600),
+            ("HEADLESS-", 1000, 600),
+            ("HEADLESS-2 pos 0 0", 1000, 600),
+            ("HEADLESS-2", 319, 600),
+            ("HEADLESS-2", 1000, 2561),
+            ("HEADLESS-2", 0, 0),
+        ] {
+            assert!(sway_mode_command(name, w, h).is_none(), "{name} {w}x{h}");
+        }
     }
 
     #[test]
@@ -1692,6 +1736,50 @@ mod tests {
             "made anew"
         );
         assert_eq!(gone["width"], 1000);
+    }
+
+    /// A borrowed window's screen follows its borrower's window: `lend_resize`
+    /// sizes the screen `lend` made, in place, and makes none of its own.
+    #[test]
+    fn a_lent_windows_screen_is_resized_in_place_and_never_made() {
+        let screens = Screens::new();
+        let host = FakeHost::default();
+        let key = "desk#lend-5";
+        let none = answer_with(&screens, &host, key, "lend_resize", 1000, 700);
+        assert!(none["error"].as_str().unwrap().contains("no screen"));
+        assert_eq!(host.made.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let first = answer_with(&screens, &host, key, "lend", 1280, 720);
+        let name = first["name"].as_str().unwrap().to_string();
+        // `lend` again, at another size, leaves the screen as it is.
+        let kept = answer_with(&screens, &host, key, "lend", 1000, 700);
+        assert_eq!(kept["width"], 1280);
+        assert!(host.resized.lock().unwrap().is_empty());
+        // `lend_resize` is the same screen at the new size, clamped as a
+        // screen's size is.
+        let resized = answer_with(&screens, &host, key, "lend_resize", 1001, 701);
+        assert_eq!(resized["name"].as_str(), Some(name.as_str()));
+        assert_eq!(
+            (resized["width"].as_u64(), resized["height"].as_u64()),
+            (Some(1000), Some(700))
+        );
+        let huge = answer_with(&screens, &host, key, "lend_resize", 5120, 2880);
+        assert_eq!(
+            (huge["width"].as_u64(), huge["height"].as_u64()),
+            (Some(2560), Some(1440))
+        );
+        assert_eq!(*host.resized.lock().unwrap(), [(1000, 700), (2560, 1440)]);
+        assert_eq!(host.made.load(std::sync::atomic::Ordering::SeqCst), 1);
+        // The screen gone from the compositor: nothing is made in its place.
+        host.outputs.lock().unwrap().clear();
+        let gone = answer_with(&screens, &host, key, "lend_resize", 800, 600);
+        assert!(gone.get("error").is_some(), "{gone}");
+        assert_eq!(host.made.load(std::sync::atomic::Ordering::SeqCst), 1);
+        // A size that is no screen is refused.
+        assert!(
+            answer_with(&screens, &host, key, "lend_resize", 0, 600)
+                .get("error")
+                .is_some()
+        );
     }
 
     #[test]
