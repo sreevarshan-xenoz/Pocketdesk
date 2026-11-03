@@ -79,11 +79,11 @@ pub trait Shell: Sync {
 
 // ---- The rules ----
 
-/// The window `id` names: plain decimal digits (one to twelve of them, no
+/// The window `id` names: plain decimal digits (one to twenty of them, no
 /// leading zero, not zero), the shape of every window id the lend path takes;
 /// nothing else is a window.
 pub fn parse_window(id: &str) -> Option<u64> {
-    if !(1..=12).contains(&id.len())
+    if !(1..=20).contains(&id.len())
         || !id.bytes().all(|b| b.is_ascii_digit())
         || id.starts_with('0')
     {
@@ -495,6 +495,8 @@ mod tests {
         assert_eq!(parse_window("2609479513"), Some(2609479513));
         assert_eq!(parse_window("1"), Some(1));
         assert_eq!(parse_window("999999999999"), Some(999_999_999_999));
+        assert_eq!(parse_window("1000000000000"), Some(1_000_000_000_000));
+        assert_eq!(parse_window("18446744073709551615"), Some(u64::MAX));
         for bad in [
             "",
             "0",
@@ -505,7 +507,9 @@ mod tests {
             " 1",
             "1 ",
             "1;2",
-            "1000000000000",
+            "18446744073709551616",
+            "100000000000000000000",
+            "100000000000000000000000",
             "gnome:1",
             "\u{661}",
             "1\n",
