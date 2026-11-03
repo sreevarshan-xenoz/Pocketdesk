@@ -1431,10 +1431,24 @@ fn hypr_all(requests: impl IntoIterator<Item = String>) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Whether Sway may refuse `command` without the window being the worse for
+/// it: `border csd` is refused for a window that never asked to draw its own
+/// decorations (the tree still says `csd` of it), and it keeps the border it
+/// has then. Found by the live test of dragging a window back, which first
+/// left such a window lent for good.
+fn may_be_refused(command: &str) -> bool {
+    command.ends_with(" border csd")
+}
+
 /// Sway commands, one by one.
 fn sway_all(commands: impl IntoIterator<Item = String>) -> std::io::Result<()> {
     for command in commands {
-        crate::virtual_screen::run(&command)?;
+        match crate::virtual_screen::run(&command) {
+            Err(e) if may_be_refused(&command) => {
+                tracing::debug!("Sway did not take `border csd` for a lent window: {e}");
+            }
+            done => done?,
+        }
     }
     Ok(())
 }
@@ -2458,6 +2472,26 @@ mod tests {
         assert!(lends.all().is_empty());
         assert!(fake.saved.lock().unwrap().is_empty());
         assert!(fake.screens.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn only_a_csd_border_may_be_refused_as_a_window_goes_back() {
+        let mut lent = Lent::new(DEVICE, &seen("5", 800, 600), "OUT-2");
+        lent.border = "csd".to_string();
+        let commands = sway_back(&lent).unwrap();
+        let csd = commands
+            .iter()
+            .filter(|c| may_be_refused(c))
+            .collect::<Vec<_>>();
+        assert_eq!(csd, ["[con_id=5] border csd"], "{commands:?}");
+        for command in commands.iter().filter(|c| !c.ends_with("border csd")) {
+            assert!(!may_be_refused(command), "{command}");
+        }
+        // Not a size, a place or a move to the workspace.
+        assert!(!may_be_refused(
+            "[con_id=5] move container to workspace \"3\""
+        ));
+        assert!(!may_be_refused("[con_id=5] border none"));
     }
 
     #[test]
