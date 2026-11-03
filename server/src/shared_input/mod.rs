@@ -19,7 +19,8 @@
 //! portal's [`barriers`], its keys in [`keys_evdev`]), staying put while a
 //! game is in front ([`game_lock`]); files dragged in Explorer and let go
 //! on the computer driven are sent to it ([`drag_files`], caught on Windows
-//! by `drop_windows`). A computer that will not be driven
+//! by `drop_windows`), and a window dragged to the edge is lent to the
+//! computer it leads to ([`drag_window`]). A computer that will not be driven
 //! says so ([`wire::Msg::Refuse`]); how things stand is written for the
 //! desktop app ([`status`]), and its requests are taken ([`asks`]). Each
 //! switch, and Identify, flashes a computer's name on its screens
@@ -36,6 +37,7 @@ pub mod capture_restore;
 #[cfg(windows)]
 pub mod capture_windows;
 pub mod drag_files;
+pub mod drag_window;
 pub mod drive;
 #[cfg(test)]
 mod driver_bench;
