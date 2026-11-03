@@ -29,7 +29,7 @@
 //! here instead of dying on the hardcoded `renderD128` the sidecar used.
 
 use std::collections::{HashMap, VecDeque};
-use std::ffi::{CStr, CString, c_void};
+use std::ffi::{CStr, CString, c_uint, c_void};
 use std::os::raw::c_int;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -226,6 +226,110 @@ impl CpuConvert {
     }
 }
 
+/// libva's `vaSyncSurface` and `vaQuerySurfaceStatus`, found at run time (no
+/// build or package needs the libva headers; FFmpeg has the library loaded
+/// already). Waiting for the processor's output surface is how the capture
+/// knows the card is done reading the compositor's buffer, with no reliance
+/// on the kernel's implicit fences between the card's engines and the
+/// compositor's renderer.
+#[derive(Clone, Copy)]
+struct VaSync {
+    display: *mut c_void,
+    sync: SyncFn,
+    #[cfg_attr(not(test), allow(dead_code))]
+    query: QueryFn,
+}
+
+/// `VASurfaceReady` of libva's `VASurfaceStatus`.
+#[cfg(test)]
+const VA_SURFACE_READY: c_int = 4;
+
+type SyncFn = unsafe extern "C" fn(*mut c_void, c_uint) -> c_int;
+type QueryFn = unsafe extern "C" fn(*mut c_void, c_uint, *mut c_int) -> c_int;
+
+/// The two libva functions, looked up once: `None` where libva cannot be
+/// opened (the handle is never closed: FFmpeg's own libva stays loaded).
+fn libva_functions() -> Option<(SyncFn, QueryFn)> {
+    static FUNCTIONS: std::sync::OnceLock<Option<(SyncFn, QueryFn)>> = std::sync::OnceLock::new();
+    *FUNCTIONS.get_or_init(|| {
+        // SAFETY: dlopen and dlsym of libva's own names; the functions have
+        // the signatures va.h declares (`VADisplay` is a pointer, a
+        // `VASurfaceID` an unsigned int, `VAStatus` an int).
+        unsafe {
+            let lib = libc::dlopen(c"libva.so.2".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL);
+            if lib.is_null() {
+                return None;
+            }
+            let sync = libc::dlsym(lib, c"vaSyncSurface".as_ptr());
+            let query = libc::dlsym(lib, c"vaQuerySurfaceStatus".as_ptr());
+            if sync.is_null() || query.is_null() {
+                return None;
+            }
+            Some((
+                std::mem::transmute::<*mut c_void, SyncFn>(sync),
+                std::mem::transmute::<*mut c_void, QueryFn>(query),
+            ))
+        }
+    })
+}
+
+impl VaSync {
+    /// The synchronisation for the VA display of `device_ref`, when libva can
+    /// be reached.
+    ///
+    /// # Safety
+    /// `device_ref` is a live VAAPI device reference.
+    unsafe fn new(device_ref: *mut ffmpeg::ffi::AVBufferRef) -> Option<Self> {
+        let (sync, query) = libva_functions()?;
+        // SAFETY: a VAAPI device's `hwctx` is an `AVVAAPIDeviceContext`, whose
+        // first member is the `VADisplay`.
+        let display = unsafe {
+            let device = (*device_ref).data as *mut ffmpeg::ffi::AVHWDeviceContext;
+            let hwctx = (*device).hwctx as *const *mut c_void;
+            if hwctx.is_null() {
+                return None;
+            }
+            *hwctx
+        };
+        (!display.is_null()).then_some(Self {
+            display,
+            sync,
+            query,
+        })
+    }
+
+    /// Wait until the card has finished with the VA surface of `frame` (an
+    /// `AV_PIX_FMT_VAAPI` frame: `data[3]` is the surface).
+    ///
+    /// # Safety
+    /// `frame` is a live VAAPI frame of this display.
+    unsafe fn wait(&self, frame: *const ffmpeg::ffi::AVFrame) -> anyhow::Result<()> {
+        // SAFETY: the display and surface are live, as the caller says.
+        let status = unsafe { (self.sync)(self.display, (*frame).data[3] as usize as c_uint) };
+        anyhow::ensure!(status == 0, "vaSyncSurface: status {status}");
+        Ok(())
+    }
+
+    /// Whether the card is done with the VA surface of `frame`, without
+    /// waiting (for the tests).
+    ///
+    /// # Safety
+    /// As [`Self::wait`].
+    #[cfg(test)]
+    unsafe fn is_ready(&self, frame: *const ffmpeg::ffi::AVFrame) -> bool {
+        let mut status: c_int = 0;
+        // SAFETY: as `wait`; `status` is a valid out pointer.
+        let r = unsafe {
+            (self.query)(
+                self.display,
+                (*frame).data[3] as usize as c_uint,
+                &mut status,
+            )
+        };
+        r == 0 && status == VA_SURFACE_READY
+    }
+}
+
 /// The conversion on the card: the capture's BGRA bytes are uploaded to a
 /// BGR0 VA surface (the alpha byte is ignored) and FFmpeg's `scale_vaapi`
 /// runs the VA-API video processor from there to an NV12 surface, which is
@@ -243,6 +347,9 @@ struct GpuConvert {
     /// The capture's DMA-BUFs, each imported as a BGR0 surface once and kept
     /// while its buffer is in use (the capture reuses a few).
     maps: HashMap<u64, Mapped>,
+    /// Waits for the processor's output, so the card is done with a DMA-BUF
+    /// before its lease is let go.
+    va: Option<VaSync>,
     /// Set when a frame went into the graph but none came out: the graph
     /// may still hold it, and every later frame would come out one behind.
     /// Each call then fails, so the streamer opens a new encoder.
@@ -275,6 +382,8 @@ impl GpuConvert {
             upload: std::ptr::null_mut(),
             view: std::ptr::null_mut(),
             maps: HashMap::new(),
+            // SAFETY: `device_ref` is the live device the caller opened.
+            va: unsafe { VaSync::new(device_ref) },
             stuck: false,
         };
         unsafe {
@@ -452,12 +561,11 @@ impl GpuConvert {
             !self.stuck,
             "video processor out of step: a frame went in and none came out"
         );
+        // Imports of buffers that are gone (the capture made new ones after a
+        // resize or a change of modifier, or ended) go first, every time: each
+        // frees the card's memory its surface kept alive.
+        self.maps.retain(|_, m| m.buf.strong_count() > 0);
         if !self.maps.contains_key(&buf.id) {
-            // Imports of buffers that are gone (the capture made new ones, or
-            // ended) go first: each frees the card's memory it kept alive.
-            if self.maps.len() >= MAPS_KEPT {
-                self.maps.retain(|_, m| m.buf.strong_count() > 0);
-            }
             // SAFETY: `upload_frames_ref` is the live BGR0 surface context.
             let frame = unsafe { map_dmabuf(self.upload_frames_ref, buf)? };
             self.maps.insert(
@@ -485,6 +593,15 @@ impl GpuConvert {
             let r = ffi::av_buffersink_get_frame(self.sink, out);
             self.stuck = r < 0;
             anyhow::ensure!(r >= 0, "video processor out: {}", describe_err(r));
+            // The processor has been told to read the buffer: wait until it
+            // is done, so the capture may give the buffer back to the
+            // compositor as soon as this returns.
+            if let Some(va) = &self.va
+                && let Err(e) = va.wait(out)
+            {
+                self.stuck = true;
+                return Err(e);
+            }
             if let Some(ts) = ts {
                 latency_trace::encoder_step(ts, Step::Converted);
             }
@@ -492,10 +609,6 @@ impl GpuConvert {
         Ok(())
     }
 }
-
-/// How many imported buffers a converter keeps before it lets go of those
-/// whose buffer is gone.
-const MAPS_KEPT: usize = 8;
 
 /// A DMA-BUF imported as a BGR0 VA surface. The driver took its own reference
 /// to the memory when it imported it, so the surface outlives the descriptor.
@@ -675,6 +788,23 @@ impl Importer {
     /// The render node the device opened on.
     pub(crate) fn node(&self) -> &str {
         &self.node
+    }
+
+    /// Whether the card has finished the conversion whose output `out` holds,
+    /// asked without waiting (for the tests): `None` where libva is out of
+    /// reach.
+    #[cfg(test)]
+    pub(crate) fn output_ready(&self) -> Option<bool> {
+        let va = self.convert.va.as_ref()?;
+        // SAFETY: `out` is the importer's own live frame.
+        Some(unsafe { va.is_ready(self.out) })
+    }
+
+    /// How many buffers the converter holds an imported surface of (for the
+    /// tests).
+    #[cfg(test)]
+    pub(crate) fn imported(&self) -> usize {
+        self.convert.maps.len()
     }
 
     /// Whether this importer was opened for pictures of this size.
@@ -1742,6 +1872,74 @@ mod tests {
         drop((on_card, in_memory));
         drop(pool);
         assert_eq!(dmabuf_fds(), before, "the buffers' descriptors are closed");
+    }
+
+    /// A converter and a few linear buffers on its node, or why not (the
+    /// tests below skip then).
+    fn importer_and_buffers(n: usize) -> Result<(Importer, Vec<Arc<DmaBuf>>), String> {
+        use crate::streaming::dmabuf::{DRM_FORMAT_XRGB8888, Gbm, MOD_LINEAR};
+        if !vaapi_available() {
+            return Err("no usable VAAPI device on this host".into());
+        }
+        let importer = Importer::open(1280, 720).map_err(|e| format!("{e:#}"))?;
+        let gbm = Gbm::open(importer.node()).map_err(|e| format!("{e:#}"))?;
+        let mut buffers = Vec::new();
+        for _ in 0..n {
+            let buf = gbm
+                .alloc(1280, 720, DRM_FORMAT_XRGB8888, MOD_LINEAR)
+                .map_err(|e| format!("{e:#}"))?;
+            buffers.push(Arc::new(buf));
+        }
+        Ok((importer, buffers))
+    }
+
+    /// When the converter hands its output back, the card is done reading the
+    /// buffer: the capture may give it to the compositor again.
+    #[test]
+    fn the_buffer_is_free_when_the_conversion_returns() {
+        use crate::streaming::dmabuf::DEVICE_TESTS;
+        let _only = DEVICE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let (mut importer, buffers) = match importer_and_buffers(1) {
+            Ok(m) => m,
+            Err(why) => {
+                eprintln!("skipping the sync test: {why}");
+                return;
+            }
+        };
+        for round in 0..50 {
+            importer.verify(&buffers[0]).expect("a conversion");
+            match importer.output_ready() {
+                Some(ready) => assert!(ready, "round {round}: the output was not done on return"),
+                None => {
+                    eprintln!("skipping the sync test: libva cannot be reached");
+                    return;
+                }
+            }
+        }
+    }
+
+    /// The surfaces of buffers the capture let go of are dropped with the next
+    /// conversion, not kept until the converter ends.
+    #[test]
+    fn surfaces_of_buffers_that_are_gone_are_dropped() {
+        use crate::streaming::dmabuf::DEVICE_TESTS;
+        let _only = DEVICE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let (mut importer, mut buffers) = match importer_and_buffers(3) {
+            Ok(m) => m,
+            Err(why) => {
+                eprintln!("skipping the surface test: {why}");
+                return;
+            }
+        };
+        for buf in &buffers {
+            importer.verify(buf).expect("a conversion");
+        }
+        assert_eq!(importer.imported(), 3);
+        // The pool the capture made them for is gone: two are let go.
+        let keep = buffers.remove(0);
+        buffers.clear();
+        importer.verify(&keep).expect("a conversion");
+        assert_eq!(importer.imported(), 1, "stale surfaces kept");
     }
 
     fn gradient_frame(w: u32, h: u32, shift: usize) -> VideoFrame {
