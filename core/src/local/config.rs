@@ -301,8 +301,9 @@ pub struct Config {
     /// computers (window handoff, phase 4): while the keyboard and mouse are
     /// shared, a floating window dragged to the edge that leads to another
     /// computer is lent to it and shown there where it is dropped (Sway and
-    /// Hyprland; needs `lend_windows`). Off by default: a drag that crosses
-    /// an edge only moves the pointer.
+    /// Hyprland; needs `lend_windows`). The computer it goes to needs this
+    /// on too: it is the one that opens the window. Off by default: a drag
+    /// that crosses an edge only moves the pointer.
     #[serde(default)]
     pub drag_windows_across: bool,
     /// What marks such a drag as a window being moved, not a text selection

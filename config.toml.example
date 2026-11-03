@@ -220,8 +220,8 @@ video_quality = "balanced"
 # Drag a window past the edge of this screen onto another of my computers
 # (the shared keyboard and mouse must be on, and lend_windows above): a
 # floating window dragged to the edge that leads there is lent to that
-# computer and shown there where I let go (Sway and Hyprland). Off until
-# turned on.
+# computer and shown there where I let go (Sway and Hyprland). The computer
+# it goes to needs this on too: it opens the window. Off until turned on.
 # drag_windows_across = false
 # What marks a drag as a window being moved: "mod" (the default) wants the
 # compositor's modifier, Super or Alt, held with the left button; "any" takes

@@ -2855,7 +2855,7 @@ impl SettingsForm {
                         ui.checkbox(&mut e.drag_windows_across, name("drag_windows_across"));
                         note(
                             ui,
-                            "With the shared keyboard and mouse on, drag a floating window to the screen's edge that leads to another of your computers and let go there: the window is lent to that computer and opens in a window of its own where you let go (Sway, Hyprland). Drag it back over the edge and it returns here. It needs \u{201c}Let my computers borrow my windows\u{201d} on and the other computer paired both ways with Input allowed, and it does nothing to a Windows computer yet. Tiled and full-screen windows are never taken. Read within a couple of seconds.",
+                            "With the shared keyboard and mouse on, drag a floating window to the screen's edge that leads to another of your computers and let go there: the window is lent to that computer and opens in a window of its own where you let go (Sway, Hyprland). Drag it back over the edge and it returns here, as long as its window there has the focus. It needs \u{201c}Let my computers borrow my windows\u{201d} on here, this switch on at the other computer too (it is the one that opens the window), and that computer paired both ways with Input allowed, and it does nothing to a Windows computer yet. Tiled and full-screen windows are never taken. Read within a couple of seconds.",
                         );
                     });
                 }

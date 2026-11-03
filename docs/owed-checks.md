@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1372 open items.
+1377 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 40 |
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
-| A second computer | 208 |
+| A second computer | 213 |
 | A Linux desktop (the Azure VM serves for some) | 253 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 95 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
@@ -1414,6 +1414,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The dropped window's place on a Linux desktop that honours it (X11, or a Wayland compositor that lets a program place its window) and on one that does not (Sway, Hyprland: the compositor floats it where it likes; say where); its size is the window's own, then follows the viewing window as in section 278. (where: second computer)
 - Drag the borrowed window by its bar back over the edge with Super and the left button held: the window comes home within about a second, put where the pointer comes in with the pointer where it held it, and the viewing window says "The window went back to ..." (it is not closed by itself: say if that is a nuisance). Without the key held, the pointer comes home and nothing returns. (where: second computer)
 - The window dragged out and back twice in a row, and out to one computer and back from it with a second computer in the row. (where: second computer)
+- Review fixes (PR #641): with a window handed over and its view open on the other computer, drag a text selection or a file, then another floating window with Super and the left button, back over the edge: nothing comes home, the view stays. Then drag the view itself back: it comes home. (where: second computer)
+- The window dragged back almost at once after it was let go, before its view opened (within a second): the offer is withdrawn, the window stays on this screen and the other computer's view says "That window was dragged back before it was lent" (or never opens). (where: second computer)
+- "Drag windows to my other computers" off on the other computer, on here: the window stays, nothing opens there. A window narrower or shorter than 64 px at the edge is not offered. (where: second computer)
+- Two windows dropped on the other computer in the same second (from two computers, or two drags): both open. (where: second computer)
+- A view that is view-only is not dragged back by its window (it reports no focus): say if that is a nuisance. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
