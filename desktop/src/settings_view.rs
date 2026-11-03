@@ -447,6 +447,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "borrowed_window_follows_size",
+        "Borrowed windows take the size of their window here",
+        Section::Computers,
+    ),
+    (
         "computer_view_quality",
         "Quality of a computer's screen here",
         Section::Computers,
@@ -812,6 +817,8 @@ pub fn applies_live(key: &str) -> bool {
             | "computer_introductions"
             // Window handoff 3a: read by the server at each ask.
             | "lend_windows"
+            // Read by an open borrowed window at once.
+            | "borrowed_window_follows_size"
             // BK7: read by this app as a computer's window opens.
             | "computer_view_quality"
             | "computer_view_only"
@@ -1060,6 +1067,11 @@ impl SettingsForm {
     /// Whether a computer's screen window shows its stats, as saved.
     pub fn saved_computer_view_stats(&self) -> bool {
         self.saved.computer_view_stats
+    }
+
+    /// Whether a borrowed window takes the size of its window here, as saved.
+    pub fn saved_borrowed_window_follows_size(&self) -> bool {
+        self.saved.borrowed_window_follows_size
     }
 
     /// The screen window's Stats switch saved `computer_view_stats` (PC2):
@@ -2798,6 +2810,18 @@ impl SettingsForm {
                         "A computer of yours paired both ways, with Input allowed, can see which windows are open here (their titles too) and move one of them (Sway, Hyprland) to a hidden screen of its own size and show it there. The program keeps running here; the window leaves your screen until it is returned, the other computer goes away, the window is closed or this server stops. Turning this off puts every window lent back at once, and nothing is listed or lent.",
                     );
                 });
+                // The window handoff's resize: a borrowed window here takes the
+                // size of its window.
+                row(ui, "borrowed_window_follows_size", |ui| {
+                    ui.checkbox(
+                        &mut e.borrowed_window_follows_size,
+                        name("borrowed_window_follows_size"),
+                    );
+                    note(
+                        ui,
+                        "A window you borrowed from another of your computers (\u{201c}Borrow a window\u{2026}\u{201d}) is given the size of the window that shows it here: resize it, maximise it or move it to a screen of another scale and, a moment after it stops changing, the other computer sizes the window to the picture area in real pixels, so the picture stays sharp instead of scaled. Until the new size is in, the old picture is scaled to fit. Off, the window keeps the size it was lent at and the picture is scaled. It needs this version on the other computer too (an older one lends the window as it is). Applies at once.",
+                    );
+                });
                 // BK7: "Show its screen" is on each computer's line below.
                 row(ui, "computer_view_quality", |ui| {
                     let named = e.computer_view_quality.trim().to_ascii_lowercase();
@@ -3772,6 +3796,7 @@ mod tests {
     #[test]
     fn a_computers_window_settings_are_with_the_computers() {
         for key in [
+            "borrowed_window_follows_size",
             "computer_view_quality",
             "computer_view_only",
             "computer_view_stats",

@@ -263,6 +263,14 @@ struct State {
     /// back until the window is measured.
     fit: view_fit::FitWindow,
     fit_waiting: Option<Waiting>,
+    /// "Borrowed windows take the size of their window here"
+    /// (`borrowed_window_follows_size`) turned off (a window that has not
+    /// heard from Settings follows, as the setting is on by default), the
+    /// size a borrowed window was last asked at (none until its picture area
+    /// has changed), and the size the area has held since when.
+    borrow_keeps_size: bool,
+    borrow_asked: Option<FitSize>,
+    borrow_seen: Option<(FitSize, Instant)>,
     /// Settings' "Smooth scrolling" off: the wheel goes in whole notches
     /// only (on, a touchpad's scroll goes in 120ths of a notch).
     notches_only: bool,
@@ -1346,8 +1354,12 @@ impl ComputerView {
             ));
         };
         let mut state = lock(&target);
-        // Never made to fit: a borrowed window is its own size.
+        // Never made to fit a screen: a borrowed window starts at its own
+        // size, and follows its window's from the first measure (when
+        // `borrowed_window_follows_size` is on).
         state.fit.on = false;
+        state.borrow_asked = None;
+        state.borrow_seen = None;
         state.hevc_refused = false;
         state.quality = quality;
         state.view_only = view_only;
@@ -1474,6 +1486,15 @@ impl ComputerView {
     /// Settings never restarts a view.
     pub fn set_fit_default(&self, on: bool) {
         self.each(|state| state.fit.default = on);
+    }
+
+    /// "Borrowed windows take the size of their window here" as Settings has
+    /// it: an open borrowed window follows it at once.
+    pub fn set_borrow_follow(&self, on: bool) {
+        self.each(|state| {
+            state.borrow_keeps_size = !on;
+            state.borrow_seen = None;
+        });
     }
 
     /// The bar's "Fit the screen to this window", saved since the last call
@@ -1749,6 +1770,7 @@ fn ask_with(
     // debounce afresh (item 8).
     state.fit_waiting = None;
     state.fit.seen = None;
+    state.borrow_seen = None;
     let hevc = hevc_ask(could, known);
     if wanted.fit && state.fit.area.is_none() {
         // The window has not been measured yet: the ask goes with its
@@ -1760,7 +1782,16 @@ fn ask_with(
             cursor: state.local_cursor,
         });
     } else {
-        let fit = wanted.fit.then_some(state.fit.area).flatten();
+        // A borrowed window's ask carries the size the other computer was
+        // last asked to make the window (its picture area's), so a reconnect
+        // keeps it; a fitted screen's, the picture area's now.
+        let fit = if wanted.borrow.is_some() {
+            (!state.borrow_keeps_size)
+                .then_some(state.borrow_asked)
+                .flatten()
+        } else {
+            wanted.fit.then_some(state.fit.area).flatten()
+        };
         send_view_ask(
             state_dir,
             &wanted,
@@ -2058,6 +2089,50 @@ fn follow_fit(
         view_fit::Step::Wait(wait) => Some(wait),
         view_fit::Step::Refit => {
             if let Some(wanted) = state.wanted.clone() {
+                let to = wanted.monitor;
+                if let Err(e) = carrying_ask(state_dir, state, wanted, to) {
+                    state.ended = Some(e);
+                }
+            }
+            None
+        }
+    }
+}
+
+/// Each pass: a borrowed window's picture area `measured` in pixels. One that
+/// has held a new size for [`view_fit::BORROW_DEBOUNCE`] (and is more than
+/// [`view_fit::BORROW_TOLERANCE`] pixels off the size the other computer's
+/// window has, or was last asked) asks again at it: the other computer sizes
+/// its window and the screen it is on to the area, and the view dials the
+/// same screen at its new size, so the picture is the area's, a pixel to a
+/// pixel. Until it comes the last picture is scaled to the area. One ask is in
+/// flight at a time (a window dragged on is followed when the new picture is
+/// in). When to look again, if the area is changing.
+fn follow_borrow(
+    state_dir: &Path,
+    state: &mut State,
+    measured: Option<FitSize>,
+    now: Instant,
+) -> Option<Duration> {
+    let area = measured?;
+    let borrowed = state.wanted.as_ref().is_some_and(|w| w.borrow.is_some());
+    // Not while the view has ended, or the picture of an ask is awaited.
+    if !borrowed || state.borrow_keeps_size || state.ended.is_some() || state.switching.is_some() {
+        state.borrow_seen = None;
+        return None;
+    }
+    // What the window there is: the size it was last asked, else the size it
+    // was lent at (the host's own answer).
+    let now_there = state.borrow_asked.or(match *state.status.fit {
+        ViewFit::Borrowed { width, height } => Some(FitSize { width, height }),
+        _ => None,
+    });
+    match view_fit::borrow_step(now_there, &mut state.borrow_seen, area, now) {
+        view_fit::Step::Idle => None,
+        view_fit::Step::Wait(wait) => Some(wait),
+        view_fit::Step::Refit => {
+            if let Some(wanted) = state.wanted.clone() {
+                state.borrow_asked = Some(area);
                 let to = wanted.monitor;
                 if let Err(e) = carrying_ask(state_dir, state, wanted, to) {
                     state.ended = Some(e);
@@ -3208,36 +3283,45 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                 });
             } else if let (Some(to), Some([w, h])) = (switching, drawn) {
                 // The last screen's picture, dimmed, until the next one's
-                // comes (PC11); nothing goes there meanwhile.
+                // comes (PC11); nothing goes there meanwhile. A borrowed
+                // window following this one's size keeps its picture as it
+                // is, scaled to the area, with no word over it: the new one
+                // is a moment away and the window is no other screen.
                 paint_picture(
                     ui,
                     &gpu,
                     on_gpu.is_some(),
                     texture.as_ref(),
                     letterbox(area, w, h),
-                    egui::Color32::from_gray(90),
+                    if borrowed {
+                        egui::Color32::WHITE
+                    } else {
+                        egui::Color32::from_gray(90)
+                    },
                 );
-                let to_name = choices
-                    .get(to as usize)
-                    .cloned()
-                    .unwrap_or_else(|| format!("Screen {}", to + 1));
-                ui.vertical_centered(|ui| {
-                    ui.add_space(area.height() / 3.0);
-                    egui::Frame::NONE
-                        .fill(egui::Color32::from_black_alpha(200))
-                        .corner_radius(6.0)
-                        .inner_margin(12.0)
-                        .show(ui, |ui| {
-                            ui.colored_label(
-                                egui::Color32::LIGHT_GRAY,
-                                if fit_on {
-                                    view_fit::FITTING.to_string()
-                                } else {
-                                    format!("Switching to {to_name}\u{2026}")
-                                },
-                            );
-                        });
-                });
+                if !borrowed {
+                    let to_name = choices
+                        .get(to as usize)
+                        .cloned()
+                        .unwrap_or_else(|| format!("Screen {}", to + 1));
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(area.height() / 3.0);
+                        egui::Frame::NONE
+                            .fill(egui::Color32::from_black_alpha(200))
+                            .corner_radius(6.0)
+                            .inner_margin(12.0)
+                            .show(ui, |ui| {
+                                ui.colored_label(
+                                    egui::Color32::LIGHT_GRAY,
+                                    if fit_on {
+                                        view_fit::FITTING.to_string()
+                                    } else {
+                                        format!("Switching to {to_name}\u{2026}")
+                                    },
+                                );
+                            });
+                    });
+                }
             } else if let Some(note) = &note {
                 ui.centered_and_justified(|ui| ui.colored_label(egui::Color32::LIGHT_GRAY, note));
             } else if let Some([w, h]) = drawn {
@@ -3287,6 +3371,16 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
             let mut state = lock(shared);
             // Item 8: the picture area's size, in pixels, for a fit.
             if let Some(wait) = follow_fit(
+                state_dir,
+                &mut state,
+                view_fit::area_size(area.size(), ctx.pixels_per_point()),
+                Instant::now(),
+            ) {
+                ctx.request_repaint_after(wait);
+            }
+            // A borrowed window: the other computer's window follows this
+            // one's size.
+            if let Some(wait) = follow_borrow(
                 state_dir,
                 &mut state,
                 view_fit::area_size(area.size(), ctx.pixels_per_point()),
@@ -7109,6 +7203,158 @@ mod tests {
                 title: title.into(),
             }),
         }
+    }
+
+    /// What the server was asked since the last call, as (borrow, fit).
+    fn borrow_asks(dir: &Path) -> Vec<(Option<String>, Option<FitSize>)> {
+        computers::take_all(dir, now_unix())
+            .into_iter()
+            .map(|r| match r.ask {
+                ComputerAsk::View { borrow, fit, .. } => (borrow, fit),
+                other => panic!("not a view ask: {other:?}"),
+            })
+            .collect()
+    }
+
+    /// Window handoff, resize follows the viewer: a borrowed window whose
+    /// picture area holds a new size asks the other computer again, carrying
+    /// the borrow and the size, one ask in flight at a time; the size is kept
+    /// by a reconnect; a pixel or two, a view that ended, a window that is
+    /// no borrowed one and the setting off ask nothing.
+    #[test]
+    fn a_borrowed_window_asks_for_its_new_size_once_it_holds() {
+        let dir = fit_dir("borrow-resize");
+        let t0 = Instant::now();
+        let ms = |n: u64| t0 + Duration::from_millis(n);
+        let mut state = State::default();
+        ask(&dir, &mut state, borrowed("0x5a", "Notes")).unwrap();
+        assert_eq!(borrow_asks(&dir), [(Some("0x5a".to_string()), None)]);
+        // Not lent yet: the size it has there is not known, nothing judged.
+        assert_eq!(
+            follow_borrow(&dir, &mut state, Some(fit_size(1000, 600)), t0),
+            None
+        );
+        *state.status.fit = ViewFit::Borrowed {
+            width: 1280,
+            height: 720,
+        };
+        // A pixel or two off what it was lent at is the same size.
+        assert_eq!(
+            follow_borrow(&dir, &mut state, Some(fit_size(1282, 718)), t0),
+            None
+        );
+        assert!(borrow_asks(&dir).is_empty());
+        // A new size is asked once it has held 200 ms, as a carrying ask.
+        let new = Some(fit_size(1000, 600));
+        assert_eq!(
+            follow_borrow(&dir, &mut state, new, t0),
+            Some(view_fit::BORROW_DEBOUNCE)
+        );
+        assert_eq!(
+            follow_borrow(&dir, &mut state, new, ms(120)),
+            Some(Duration::from_millis(80))
+        );
+        assert!(borrow_asks(&dir).is_empty(), "not yet");
+        assert_eq!(follow_borrow(&dir, &mut state, new, ms(200)), None);
+        assert_eq!(
+            borrow_asks(&dir),
+            [(Some("0x5a".to_string()), Some(fit_size(1000, 600)))]
+        );
+        assert!(state.switching.is_some(), "the last picture waits");
+        assert_eq!(state.borrow_asked, Some(fit_size(1000, 600)));
+        // While that is awaited a window dragged on asks nothing more.
+        assert_eq!(
+            follow_borrow(&dir, &mut state, Some(fit_size(900, 500)), ms(1000)),
+            None
+        );
+        assert!(borrow_asks(&dir).is_empty());
+        // The picture is in: what it is asked at is what it has.
+        state.switching = None;
+        *state.status.fit = ViewFit::Borrowed {
+            width: 1000,
+            height: 600,
+        };
+        assert_eq!(follow_borrow(&dir, &mut state, new, ms(1100)), None);
+        assert!(borrow_asks(&dir).is_empty());
+        // The window was dragged on meanwhile: the latest size is followed.
+        let later = Some(fit_size(900, 500));
+        assert!(follow_borrow(&dir, &mut state, later, ms(1200)).is_some());
+        assert_eq!(follow_borrow(&dir, &mut state, later, ms(1400)), None);
+        assert_eq!(
+            borrow_asks(&dir),
+            [(Some("0x5a".to_string()), Some(fit_size(900, 500)))]
+        );
+        // A reconnect (a plain ask for the same window) keeps the size.
+        ask(&dir, &mut state, borrowed("0x5a", "Notes")).unwrap();
+        assert_eq!(
+            borrow_asks(&dir),
+            [(Some("0x5a".to_string()), Some(fit_size(900, 500)))]
+        );
+        // An ended view asks nothing as the window is resized.
+        state.switching = None;
+        state.ended = Some("The view ended.".into());
+        assert_eq!(
+            follow_borrow(&dir, &mut state, Some(fit_size(500, 400)), ms(3000)),
+            None
+        );
+        assert_eq!(
+            follow_borrow(&dir, &mut state, Some(fit_size(500, 400)), ms(4000)),
+            None
+        );
+        assert!(borrow_asks(&dir).is_empty());
+        state.ended = None;
+        // A window that shows a screen is not followed.
+        let mut plain = State::default();
+        ask(&dir, &mut plain, fit_wanted(false)).unwrap();
+        borrow_asks(&dir);
+        *plain.status.fit = ViewFit::Borrowed {
+            width: 1280,
+            height: 720,
+        };
+        assert_eq!(
+            follow_borrow(&dir, &mut plain, Some(fit_size(500, 400)), t0),
+            None
+        );
+        assert_eq!(
+            follow_borrow(&dir, &mut plain, Some(fit_size(500, 400)), ms(500)),
+            None
+        );
+        assert!(borrow_asks(&dir).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The setting off: a borrowed window keeps the size it was lent at, asks
+    /// no size, and no size is carried by a reconnect.
+    #[test]
+    fn a_borrowed_window_keeps_its_size_when_the_setting_is_off() {
+        let dir = fit_dir("borrow-keeps");
+        let t0 = Instant::now();
+        let mut state = State {
+            borrow_keeps_size: true,
+            borrow_asked: Some(fit_size(800, 600)),
+            ..State::default()
+        };
+        ask(&dir, &mut state, borrowed("0x5a", "Notes")).unwrap();
+        assert_eq!(borrow_asks(&dir), [(Some("0x5a".to_string()), None)]);
+        *state.status.fit = ViewFit::Borrowed {
+            width: 1280,
+            height: 720,
+        };
+        assert_eq!(
+            follow_borrow(&dir, &mut state, Some(fit_size(500, 400)), t0),
+            None
+        );
+        assert_eq!(
+            follow_borrow(
+                &dir,
+                &mut state,
+                Some(fit_size(500, 400)),
+                t0 + Duration::from_secs(2)
+            ),
+            None
+        );
+        assert!(borrow_asks(&dir).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Borrowing a window: the window's own title names the view's window,

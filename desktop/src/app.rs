@@ -1128,6 +1128,12 @@ impl PocketdeskApp {
         );
         // Item 8: "Fit the screen to this window" starts a window so.
         view.set_fit_default(self.config.as_ref().is_some_and(|c| c.computer_view_fit));
+        // A borrowed window takes the size of its window here, or not.
+        view.set_borrow_follow(
+            self.config
+                .as_ref()
+                .is_none_or(|c| c.borrowed_window_follows_size),
+        );
         // Fine scrolling: "Smooth scrolling" too.
         view.set_smooth_scrolling(self.config.as_ref().is_none_or(|c| c.smooth_scrolling));
         view
@@ -3697,6 +3703,7 @@ impl PocketdeskApp {
                             view.set_grab_keys(form.saved_computer_view_grab_keys());
                             view.set_lock_on_close(form.saved_computer_view_lock_on_close());
                             view.set_fit_default(form.saved_computer_view_fit());
+                            view.set_borrow_follow(form.saved_borrowed_window_follows_size());
                             view.set_smooth_scrolling(form.saved_smooth_scrolling());
                         }
                         self.notice = crate::notice::Notice::done("Saved.");

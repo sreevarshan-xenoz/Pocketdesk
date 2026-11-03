@@ -212,6 +212,11 @@ video_quality = "balanced"
 # back where it was when it is returned, the other computer's session ends,
 # or this server stops. Off until turned on.
 # lend_windows = false
+# A window borrowed from another of my computers takes the size of the window
+# that shows it here: resized, maximised or moved to a screen of another
+# scale, the other computer sizes the window to the picture area in real
+# pixels, so the picture stays sharp. Read by an open window at once.
+# borrowed_window_follows_size = true
 # Let a phone with the Peek permission (off for every phone until turned
 # on in the desktop app, Devices) see this screen as one still, from its
 # Home, with no session.
