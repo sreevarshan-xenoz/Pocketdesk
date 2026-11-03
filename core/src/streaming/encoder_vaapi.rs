@@ -563,7 +563,10 @@ impl GpuConvert {
     /// `pts`, with no copy and no upload: the buffer is imported as a BGR0
     /// surface of the pool's context (once per buffer, kept) and goes into
     /// the same graph a frame of bytes does. `ts` is the frame the trace
-    /// names.
+    /// names. The card has only been told to read the buffer when this
+    /// returns: the caller [`settle`](Self::settle)s `out` before it lets the
+    /// buffer go back to the compositor (after it has handed `out` on, so the
+    /// wait overlaps nothing it must do first).
     ///
     /// # Safety
     /// `out` is a live, reusable `AVFrame`.
@@ -611,18 +614,30 @@ impl GpuConvert {
             let r = ffi::av_buffersink_get_frame(self.sink, out);
             self.stuck = r < 0;
             anyhow::ensure!(r >= 0, "video processor out: {}", describe_err(r));
-            // The processor has been told to read the buffer: wait until it
-            // is done, so the capture may give the buffer back to the
-            // compositor as soon as this returns.
-            if let Some(va) = &self.va
-                && let Err(e) = va.wait(out)
-            {
-                self.stuck = true;
-                return Err(e);
-            }
             if let Some(ts) = ts {
                 latency_trace::encoder_step(ts, Step::Converted);
             }
+        }
+        Ok(())
+    }
+}
+
+impl GpuConvert {
+    /// Wait until the card has finished the conversion whose output is `out`
+    /// (a frame [`Self::convert_dmabuf`] made): it is then done reading the
+    /// buffer, and the capture may give it back to the compositor. Where
+    /// libva cannot be reached this does nothing, and the buffer's return
+    /// rests on the kernel's implicit fences. A failed wait leaves the
+    /// converter stuck, and the streamer opens a new encoder.
+    ///
+    /// # Safety
+    /// `out` is a live VAAPI frame this converter made.
+    unsafe fn settle(&mut self, out: *const ffmpeg::ffi::AVFrame) -> anyhow::Result<()> {
+        if let Some(va) = &self.va
+            && let Err(e) = unsafe { va.wait(out) }
+        {
+            self.stuck = true;
+            return Err(e);
         }
         Ok(())
     }
@@ -859,7 +874,10 @@ impl Importer {
             "a buffer of another size"
         );
         // SAFETY: `out` is a live frame, reused.
-        unsafe { self.convert.convert_dmabuf(buf, 0, self.out, None) }
+        unsafe {
+            self.convert.convert_dmabuf(buf, 0, self.out, None)?;
+            self.convert.settle(self.out)
+        }
     }
 
     /// The picture in `buf` as NV12 bytes (Y rows, then the interleaved UV
@@ -1305,6 +1323,15 @@ impl VaapiEncoder {
             };
 
             let sr = ffi::avcodec_send_frame(self.encoder, hw);
+            // The card read the capture's buffer for the conversion, and the
+            // encode was submitted behind it: wait for the conversion now, so
+            // the buffer is free of the card when this frame is let go (the
+            // wait is part of the encode's own, which comes next).
+            if frame.gpu.is_some()
+                && let Convert::Gpu(gc) = &mut self.convert
+            {
+                gc.settle(hw)?;
+            }
             if sr < 0 && sr != averror_eagain() {
                 anyhow::bail!("avcodec_send_frame failed ({sr})");
             }
