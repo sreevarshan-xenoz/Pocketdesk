@@ -452,6 +452,16 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "drag_windows_across",
+        "Drag windows to my other computers",
+        Section::Computers,
+    ),
+    (
+        "drag_window_trigger",
+        "What starts a window drag across the edge",
+        Section::Computers,
+    ),
+    (
         "computer_view_quality",
         "Quality of a computer's screen here",
         Section::Computers,
@@ -673,6 +683,14 @@ fn drawn_in(key: &str) -> &str {
     }
 }
 
+/// What starts a window drag across the edge, as the page names it.
+pub fn drag_trigger_label(name: &str) -> &'static str {
+    match name {
+        "any" => "Any left-button drag",
+        _ => "Super or Alt held with the button",
+    }
+}
+
 /// A computer's window's quality, as the page names it (BK7).
 pub fn computer_quality_label(name: &str) -> &'static str {
     match name {
@@ -688,6 +706,10 @@ pub fn computer_quality_label(name: &str) -> &'static str {
 pub(crate) fn drawn_here(key: &str) -> bool {
     match key {
         "remember_screen_grant" | "gnome_unattended" => cfg!(target_os = "linux"),
+        // Window handoff, phase 4: the window dragged is this computer's own,
+        // lent through Sway's or Hyprland's compositor, and the drag is seen
+        // by Linux's input capture.
+        "drag_windows_across" | "drag_window_trigger" => cfg!(target_os = "linux"),
         // The direct link is made on Linux (NetworkManager) and on Windows
         // (the Mobile Hotspot).
         "direct_link" | "direct_link_band" | "direct_link_idle_minutes" => {
@@ -819,6 +841,10 @@ pub fn applies_live(key: &str) -> bool {
             | "lend_windows"
             // Read by an open borrowed window at once.
             | "borrowed_window_follows_size"
+            // Window handoff 4: read by the shared keyboard and mouse's loop
+            // within a couple of seconds.
+            | "drag_windows_across"
+            | "drag_window_trigger"
             // BK7: read by this app as a computer's window opens.
             | "computer_view_quality"
             | "computer_view_only"
@@ -2822,6 +2848,41 @@ impl SettingsForm {
                         "A window you borrowed from another of your computers (\u{201c}Borrow a window\u{2026}\u{201d}) is given the size of the window that shows it here: resize it, maximise it or move it to a screen of another scale and, a moment after it stops changing, the other computer sizes the window to the picture area in real pixels, so the picture stays sharp instead of scaled. Until the new size is in, the old picture is scaled to fit. Off, the window keeps the size it was lent at and the picture is scaled. It needs this version on the other computer too (an older one lends the window as it is). Applies at once.",
                     );
                 });
+                // Window handoff, phase 4: a window dragged past the edge the
+                // shared keyboard and mouse crosses goes to the other computer.
+                if drawn_here("drag_windows_across") {
+                    row(ui, "drag_windows_across", |ui| {
+                        ui.checkbox(&mut e.drag_windows_across, name("drag_windows_across"));
+                        note(
+                            ui,
+                            "With the shared keyboard and mouse on, drag a floating window to the screen's edge that leads to another of your computers and let go there: the window is lent to that computer and opens in a window of its own where you let go (Sway, Hyprland). Drag it back over the edge and it returns here, as long as its window there has the focus. It needs \u{201c}Let my computers borrow my windows\u{201d} on here, this switch on at the other computer too (it is the one that opens the window), and that computer paired both ways with Input allowed, and it does nothing to a Windows computer yet. Tiled and full-screen windows are never taken. Read within a couple of seconds.",
+                        );
+                    });
+                }
+                if drawn_here("drag_window_trigger") {
+                    row(ui, "drag_window_trigger", |ui| {
+                        let named = e.drag_window_trigger.trim().to_ascii_lowercase();
+                        egui::ComboBox::from_id_salt("drag-window-trigger")
+                            .selected_text(drag_trigger_label(&named))
+                            .show_ui(ui, |ui| {
+                                for choice in ["mod", "any"] {
+                                    if ui
+                                        .selectable_label(
+                                            named == choice,
+                                            drag_trigger_label(choice),
+                                        )
+                                        .clicked()
+                                    {
+                                        e.drag_window_trigger = choice.to_string();
+                                    }
+                                }
+                            });
+                        note(
+                            ui,
+                            "Super or Alt held with the left button (the keys the compositor moves a window with) keeps a text selection or a file drag from taking a window. Any left-button drag also takes a drag by the title bar, and a selection made inside a floating window that reaches the edge.",
+                        );
+                    });
+                }
                 // BK7: "Show its screen" is on each computer's line below.
                 row(ui, "computer_view_quality", |ui| {
                     let named = e.computer_view_quality.trim().to_ascii_lowercase();

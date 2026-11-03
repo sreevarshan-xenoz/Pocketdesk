@@ -323,6 +323,34 @@ struct State {
     keys_default: bool,
     /// "Games usually want Keys by position", offered once a window.
     position_hint: PositionHint,
+    /// Where and how large the window opens, for a window dragged here from
+    /// another computer (window handoff 4); none for any other window.
+    place: Option<Placement>,
+}
+
+/// Where a window dragged here from another computer opens: its top left in
+/// this computer's desktop space, and its size, in points. A compositor
+/// that does not let a program place its window (Wayland) puts it where it
+/// likes; the size holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Placement {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Placement {
+    /// The window builder for a window of this place: its top left and
+    /// size, the size never under what a window can be.
+    fn builder(self, builder: egui::ViewportBuilder) -> egui::ViewportBuilder {
+        builder
+            .with_position([self.x as f32, self.y as f32])
+            .with_inner_size([
+                (self.width as f32).max(320.0),
+                (self.height as f32).max(240.0),
+            ])
+    }
 }
 
 /// The window's offer of Keys by position as the pointer is locked (PC7
@@ -1074,12 +1102,12 @@ pub fn window_title(name: &str, screen: u32, mic_on: bool) -> String {
     }
 }
 
-/// A borrowed window's own title cleaned for a window's: no control
-/// characters, at most 120 characters.
+/// A borrowed window's own title cleaned for a window's: no control,
+/// bidirectional or other format characters, at most 120 characters.
 pub fn clean_title(title: &str) -> String {
     title
         .chars()
-        .filter(|c| !c.is_control())
+        .filter(|c| !pocketdesk_core::local::shared_input::is_hidden(*c))
         .take(120)
         .collect::<String>()
         .trim()
@@ -1329,6 +1357,7 @@ impl ComputerView {
                 .unwrap_or(state.keys_default);
             state.position_hint = PositionHint::default();
         }
+        state.place = None;
         state.later = false;
         let wanted = Wanted {
             device_id: device_id.to_string(),
@@ -1353,6 +1382,26 @@ impl ComputerView {
         name: &str,
         window: &str,
         title: &str,
+        quality: u8,
+        view_only: bool,
+        stats: bool,
+    ) -> Result<(), String> {
+        self.open_borrowed_at(
+            ctx, device_id, name, window, title, None, quality, view_only, stats,
+        )
+    }
+
+    /// [`Self::open_borrowed`] for a window dragged here from the computer
+    /// (window handoff 4): the window opens at `place`, where it was let go.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_borrowed_at(
+        &self,
+        ctx: &egui::Context,
+        device_id: &str,
+        name: &str,
+        window: &str,
+        title: &str,
+        place: Option<Placement>,
         quality: u8,
         view_only: bool,
         stats: bool,
@@ -1385,6 +1434,7 @@ impl ComputerView {
             .and_then(|c| c.keys_by_position)
             .unwrap_or(state.keys_default);
         state.position_hint = PositionHint::default();
+        state.place = place;
         // Not "Show its screen": a computer that lands a window's clicks over
         // its first screen is said so on the bar, as for any later window.
         state.later = true;
@@ -1656,6 +1706,7 @@ impl ComputerView {
         state.notches_only = from.notches_only;
         state.keys_by_position = from.keys_by_position;
         state.position_hint = from.position_hint;
+        state.place = None;
         state.later = true;
         // A computer that does not land a window's clicks on the screen it
         // shows takes them over its first screen (PR #570 review I4):
@@ -1692,10 +1743,15 @@ impl ComputerView {
             };
             (title, state.slot)
         };
+        let place = lock(&shared).place;
         let builder = egui::ViewportBuilder::default()
             .with_title(title)
             .with_inner_size([1280.0, 760.0])
             .with_min_inner_size([320.0, 240.0]);
+        let builder = match place {
+            Some(place) => place.builder(builder),
+            None => builder,
+        };
         let state_dir = self.state_dir.clone();
         let config = self.config.clone();
         ctx.show_viewport_deferred(viewport_id(slot), builder, move |ui, _class| {
@@ -7771,6 +7827,81 @@ mod tests {
         assert_eq!(borrowed_title("", "Desk"), "Window \u{b7} Desk");
         assert_eq!(clean_title("  Notes\u{2026}\u{7}\n x "), "Notes\u{2026} x");
         assert_eq!(clean_title(&"x".repeat(300)).chars().count(), 120);
+        // Bidirectional overrides and isolates and other format characters
+        // are no more shown than controls are.
+        assert_eq!(
+            clean_title("a\u{202E}b\u{2066}c\u{2069}d\u{200B}e\u{2060}f"),
+            "abcdef"
+        );
+    }
+
+    /// Window handoff 4: a window dragged here opens where it was let go,
+    /// at its own size; any other window opens with no place of its own, and
+    /// the next use of a window that had one forgets it.
+    #[test]
+    fn a_dragged_window_opens_where_it_was_let_go_and_only_that_one() {
+        let dir = std::env::temp_dir().join(format!("pd-computer-drop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let ctx = egui::Context::default();
+        let view = ComputerView::new(&ctx, dir.clone(), None);
+        let place = Placement {
+            x: -40,
+            y: 120,
+            width: 800,
+            height: 600,
+        };
+        view.open_borrowed_at(
+            &ctx,
+            "desk",
+            "Desk",
+            "0x5a",
+            "Notes",
+            Some(place),
+            3,
+            false,
+            false,
+        )
+        .unwrap();
+        {
+            let first = lock(&view.shared);
+            assert_eq!(first.place, Some(place));
+            assert!(first.wanted.as_ref().unwrap().borrow.is_some());
+        }
+        // Borrowed from the picker: no place.
+        view.open_borrowed(&ctx, "desk", "Desk", "0x6b", "Terminal", 3, false, false)
+            .unwrap();
+        let extras = view.extras.lock().unwrap();
+        assert_eq!(lock(&extras[0]).place, None, "a picked window has none");
+        drop(extras);
+        // A screen opened in the window that had one forgets it.
+        lock(&view.shared).wanted = None;
+        view.open("desk", "Desk", 0, 3, false, false).unwrap();
+        assert_eq!(lock(&view.shared).place, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The window's builder carries the place and the size, a size no window
+    /// can be being lifted to the smallest.
+    #[test]
+    fn a_places_builder_says_where_and_how_large() {
+        let base = egui::ViewportBuilder::default();
+        let built = Placement {
+            x: -40,
+            y: 120,
+            width: 800,
+            height: 600,
+        }
+        .builder(base.clone());
+        assert_eq!(built.position, Some(egui::pos2(-40.0, 120.0)));
+        assert_eq!(built.inner_size, Some(egui::vec2(800.0, 600.0)));
+        let small = Placement {
+            x: 0,
+            y: 0,
+            width: 64,
+            height: 64,
+        }
+        .builder(base);
+        assert_eq!(small.inner_size, Some(egui::vec2(320.0, 240.0)));
     }
 
     /// Borrowing a window: the view is asked for by the window's id, never

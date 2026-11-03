@@ -1373,6 +1373,9 @@ impl Glue {
                         super::badge::flash(&said_here, super::badge::SWITCH_FOR);
                     }
                 }
+                // A window dragged across is Linux's (Sway, Hyprland): the
+                // driver here never reads a drag.
+                Action::DragWindow(_) | Action::DragBack(_) => {}
             }
         }
     }

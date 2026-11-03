@@ -1095,11 +1095,14 @@ async fn session(
             input,
             mic,
         ) => {}
-        () = crate::borrow_window::wait_gone(&mut gone, &device_id, &borrowed) => {
+        reason = crate::borrow_window::wait_gone(&mut gone, &device_id, &borrowed) => {
             tracing::info!(device_id = %device_id, "A borrowed window is gone; ending its view");
-            say.say(Event::Ended(gone_words(&name))).await;
+            say.say(Event::Ended(gone_words(&name, reason.as_deref()))).await;
         }
     }
+    // Whichever ended it, nothing is lent to this view any more: no drag back
+    // of that window is this view's.
+    crate::borrow_window::view_ended(&device_id, &borrowed);
 }
 
 /// What a window says when the window it was asked to borrow is already
@@ -1107,8 +1110,12 @@ async fn session(
 const ALREADY_SHOWN: &str = "That window is already shown in another window here.";
 
 /// What the window says when the computer it borrowed from lost the window.
-fn gone_words(name: &str) -> String {
-    format!("{name} closed that window, or stopped lending its windows.")
+fn gone_words(name: &str, reason: Option<&str>) -> String {
+    match reason {
+        // Dragged back over the edge (window handoff 4).
+        Some("returned") => format!("The window went back to {name}."),
+        _ => format!("{name} closed that window, or stopped lending its windows."),
+    }
 }
 
 /// One view, until it ends: dialled, shown, and after a drop dialled again
@@ -1156,6 +1163,7 @@ async fn session_run(
         match apply_borrow(&computer, borrowed, fit, &mut status).await {
             Ok(index) => {
                 monitor = index;
+                crate::borrow_window::view_lent(&computer.device_id, borrowed);
                 say.say(Event::Status(status.clone())).await;
             }
             // A resize's ask (it carries the size: a window's first ask
@@ -1189,6 +1197,7 @@ async fn session_run(
                 Ok(index) => {
                     monitor = index;
                     relend = false;
+                    crate::borrow_window::view_lent(&computer.device_id, borrowed);
                     say.say(Event::Status(status.clone())).await;
                 }
                 // The host said no (closed, not lent, another has it): the
@@ -2319,6 +2328,7 @@ impl Drop for View {
             crate::fit_screen::release(&device_id, self.window);
         }
         if let Some((device_id, window)) = self.borrow_held.take() {
+            crate::borrow_window::view_ended(&device_id, &window);
             crate::borrow_window::give_back(&device_id, &window);
         }
     }
@@ -2625,6 +2635,9 @@ pub async fn run_with(
                 let borrow_held = borrow
                     .filter(|_| task.is_some())
                     .map(|window| (device_id.clone(), window));
+                if let Some((device, window)) = &borrow_held {
+                    crate::borrow_window::view_started(device, window);
+                }
                 views[slot] = Some(View {
                     session_id,
                     window,
@@ -2811,6 +2824,11 @@ pub async fn run_with(
                     continue;
                 }
                 v.focus_said = Some((focused, now));
+                // A borrowed window's computer asks, as the pointer comes
+                // back over the edge, whether this is the window dragged.
+                if let Some((device, window)) = &v.borrow_held {
+                    crate::borrow_window::view_focused(device, window, focused);
+                }
                 window_focus(v.device_id.clone(), focused, v.status.control);
             }
             Some((session_id, device_id, ask)) = privacy_rx.recv() => {

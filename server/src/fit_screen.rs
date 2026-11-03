@@ -96,6 +96,10 @@ pub fn heard(device_id: &str, body: &serde_json::Value) -> bool {
     if crate::borrow_window::note_gone(device_id, body) {
         return true;
     }
+    // Nor is a window it offers as it is dragged here (window handoff 4).
+    if crate::shared_input::drag_window::note_offer(device_id, body) {
+        return true;
+    }
     let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
     let at = match body.get("id").and_then(serde_json::Value::as_u64) {
         Some(id) => pending

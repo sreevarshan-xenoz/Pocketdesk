@@ -232,6 +232,11 @@ pub fn list() -> std::io::Result<(Vec<HyprWindow>, Option<HyprWindow>, Vec<HyprM
     Ok((shown, active, monitors))
 }
 
+/// Sway's `get_tree` reply now. Blocking.
+pub fn tree() -> std::io::Result<Value> {
+    crate::virtual_screen::ipc(GET_TREE, "")
+}
+
 /// The window `id` now, from the tree. Blocking.
 pub fn seen(id: i64) -> std::io::Result<Option<SwayWindow>> {
     Ok(find(&crate::virtual_screen::ipc(GET_TREE, "")?, id))

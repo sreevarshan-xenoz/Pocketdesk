@@ -19,7 +19,9 @@
 //!
 //! A window's title is personal: it is written for the app and never logged.
 
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use pocketdesk_core::local::computers::{self, FitSize, LendableWindow, WindowsThere};
@@ -300,9 +302,13 @@ pub fn close_list(dir: &Path, computer: &str) {
 
 // ---- A window gone ----
 
-/// A window a host says is gone, as `(host, window)`.
-fn gone_events() -> &'static broadcast::Sender<(String, String)> {
-    static GONE: std::sync::LazyLock<broadcast::Sender<(String, String)>> =
+/// What a host says of a window gone: the host, the window and the reason
+/// it gave (`closed`, `off`, or `returned` for a window dragged back).
+type Gone = (String, String, Option<String>);
+
+/// A window a host says is gone.
+fn gone_events() -> &'static broadcast::Sender<Gone> {
+    static GONE: std::sync::LazyLock<broadcast::Sender<Gone>> =
         std::sync::LazyLock::new(|| broadcast::channel(16).0);
     &GONE
 }
@@ -315,25 +321,30 @@ pub fn note_gone(device_id: &str, body: &Value) -> bool {
         return false;
     };
     // Nobody listening is fine: no view shows that window.
-    let _ = gone_events().send((device_id.to_string(), window.to_string()));
+    let reason = body
+        .get("reason")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let _ = gone_events().send((device_id.to_string(), window.to_string(), reason));
     true
 }
 
 /// Hear of windows gone from now on: take one before the view starts, so
 /// none is missed.
-pub fn gone() -> broadcast::Receiver<(String, String)> {
+pub fn gone() -> broadcast::Receiver<Gone> {
     gone_events().subscribe()
 }
 
-/// Wait until the computer `device_id` says its window `window` is gone.
+/// Wait until the computer `device_id` says its window `window` is gone:
+/// the reason it gave, if it gave one.
 pub async fn wait_gone(
-    events: &mut broadcast::Receiver<(String, String)>,
+    events: &mut broadcast::Receiver<Gone>,
     device_id: &str,
     window: &str,
-) {
+) -> Option<String> {
     loop {
         match events.recv().await {
-            Ok((from, gone)) if from == device_id && gone == window => return,
+            Ok((from, gone, reason)) if from == device_id && gone == window => return reason,
             Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
             // No sender left: nothing will say it.
             Err(broadcast::error::RecvError::Closed) => std::future::pending::<()>().await,
@@ -341,10 +352,141 @@ pub async fn wait_gone(
     }
 }
 
+// ---- The views of borrowed windows ----
+
+/// What a view of a borrowed window here says of itself.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct Shown {
+    /// The host lent the window (its `lend` was answered).
+    lent: bool,
+    /// The window that shows it has the focus (and controls it).
+    focused: bool,
+}
+
+/// The views of borrowed windows, by computer and window.
+#[derive(Default)]
+struct Views(Mutex<HashMap<(String, String), Shown>>);
+
+impl Views {
+    fn with<T>(&self, f: impl FnOnce(&mut HashMap<(String, String), Shown>) -> T) -> T {
+        f(&mut self.0.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    fn started(&self, device: &str, window: &str) {
+        // A loan carried on to a new view of the same window stays lent.
+        self.with(|all| {
+            all.entry((device.to_string(), window.to_string()))
+                .or_default()
+                .focused = false;
+        });
+    }
+
+    fn lent(&self, device: &str, window: &str) {
+        self.with(|all| {
+            if let Some(view) = all.get_mut(&(device.to_string(), window.to_string())) {
+                view.lent = true;
+            }
+        });
+    }
+
+    fn focused(&self, device: &str, window: &str, focused: bool) {
+        self.with(|all| {
+            if let Some(view) = all.get_mut(&(device.to_string(), window.to_string())) {
+                view.focused = focused;
+            }
+        });
+    }
+
+    fn ended(&self, device: &str, window: &str) {
+        self.with(|all| {
+            all.remove(&(device.to_string(), window.to_string()));
+        });
+    }
+
+    fn dragged(&self, device: &str, window: &str) -> bool {
+        self.with(|all| {
+            all.get(&(device.to_string(), window.to_string()))
+                .is_some_and(|view| view.lent && view.focused)
+        })
+    }
+}
+
+fn views() -> &'static Views {
+    static VIEWS: std::sync::LazyLock<Views> = std::sync::LazyLock::new(Views::default);
+    &VIEWS
+}
+
+/// A view of `window` of the computer `device` started here.
+pub fn view_started(device: &str, window: &str) {
+    views().started(device, window);
+}
+
+/// The computer `device` lent `window` to its view here.
+pub fn view_lent(device: &str, window: &str) {
+    views().lent(device, window);
+}
+
+/// The window showing `window` of `device` gained or lost the focus.
+pub fn view_focused(device: &str, window: &str, focused: bool) {
+    views().focused(device, window, focused);
+}
+
+/// The view of `window` of `device` is over (or replaced by one that
+/// carries the loan on, which starts again).
+pub fn view_ended(device: &str, window: &str) {
+    views().ended(device, window);
+}
+
+/// Whether the view here of `window`, borrowed from `device`, is the one
+/// being dragged: the window was lent to it and the window that shows it has
+/// the focus. A window dragged back over the edge is the one with the focus,
+/// so this is what the computer that lent it asks before it takes the window
+/// home; no other window's drag, a text or a file's, passes it.
+pub fn is_dragged(device: &str, window: &str) -> bool {
+    views().dragged(device, window)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use computers::ComputersFile;
+
+    #[test]
+    fn only_a_lent_view_with_the_focus_is_the_one_being_dragged() {
+        let v = Views::default();
+        assert!(!v.dragged("desk", "5"), "no view");
+        v.started("desk", "5");
+        v.focused("desk", "5", true);
+        assert!(!v.dragged("desk", "5"), "focused, but not lent yet");
+        v.lent("desk", "5");
+        assert!(v.dragged("desk", "5"));
+        assert!(!v.dragged("desk", "6"), "another window of it");
+        assert!(
+            !v.dragged("lap", "5"),
+            "another computer's window of that id"
+        );
+        v.focused("desk", "5", false);
+        assert!(!v.dragged("desk", "5"), "another window has the focus");
+        v.focused("desk", "5", true);
+        v.ended("desk", "5");
+        assert!(!v.dragged("desk", "5"), "the view is over");
+        // A focus or a lend for a view that is not there makes none.
+        v.focused("desk", "5", true);
+        v.lent("desk", "5");
+        assert!(!v.dragged("desk", "5"));
+    }
+
+    #[test]
+    fn a_loan_carried_to_a_new_view_stays_lent_but_not_focused() {
+        let v = Views::default();
+        v.started("desk", "5");
+        v.lent("desk", "5");
+        v.focused("desk", "5", true);
+        v.started("desk", "5");
+        assert!(!v.dragged("desk", "5"), "the new window has no focus yet");
+        v.focused("desk", "5", true);
+        assert!(v.dragged("desk", "5"), "still lent: asked again, not ended");
+    }
 
     fn window(address: &str, title: &str) -> Value {
         json!({ "address": address, "title": title, "class": "app", "width": 800, "height": 600, "workspace": "1" })
@@ -651,9 +793,21 @@ mod tests {
             "desk",
             &json!({ "lent_gone": "5", "reason": "closed" })
         ));
-        tokio::time::timeout(Duration::from_secs(2), wait_gone(&mut events, "desk", "5"))
-            .await
-            .expect("desk's window 5 said gone");
+        let reason =
+            tokio::time::timeout(Duration::from_secs(2), wait_gone(&mut events, "desk", "5"))
+                .await
+                .expect("desk's window 5 said gone");
+        assert_eq!(reason.as_deref(), Some("closed"));
+        // A window dragged back says so.
+        assert!(note_gone(
+            "desk",
+            &json!({ "lent_gone": "7", "reason": "returned" })
+        ));
+        let reason =
+            tokio::time::timeout(Duration::from_secs(2), wait_gone(&mut events, "desk", "7"))
+                .await
+                .unwrap();
+        assert_eq!(reason.as_deref(), Some("returned"));
         // Nothing else is left for it: the other two were not its window.
         let mut events = gone();
         assert!(note_gone("lap", &json!({ "lent_gone": "9" })));
