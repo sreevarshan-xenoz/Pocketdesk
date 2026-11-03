@@ -4870,6 +4870,11 @@ impl eframe::App for PocketdeskApp {
             {
                 self.open_asked(ctx, open);
             }
+            // Windows dragged here from other computers, one file each so
+            // two at once are both opened.
+            for open in pocketdesk_core::local::app_open::take_drops(&self.state_dir, now_unix()) {
+                self.open_asked(ctx, open);
+            }
             self.watch_phone_open(ctx);
             self.raise_for_approvals(ctx);
             self.raise_for_tasks(ctx);
