@@ -581,8 +581,12 @@ pub enum ComputerAsk {
         /// Show one window of that computer instead of a screen (borrowing
         /// a window): its id from `windows_there`. The server asks that
         /// computer to lend it, shows the screen it was moved to, and gives
-        /// it back as the view ends; `monitor` and `fit` are not used. A
-        /// server before it ignores the field and shows `monitor`.
+        /// it back as the view ends; `monitor` is not used. `fit`, with it,
+        /// is the size of the window's picture area in pixels, which the
+        /// server asks the computer to make the window (a window that
+        /// follows its viewer's, `borrowed_window_follows_size`); a server or
+        /// a computer before it ignores the size and the picture is scaled.
+        /// A server before borrowing ignores the field and shows `monitor`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         borrow: Option<String>,
     },

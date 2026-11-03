@@ -251,7 +251,11 @@ pub enum Command {
         /// Show the window with this id of that computer instead of a
         /// screen ([`crate::borrow_window`]): it is asked to lend it, the
         /// view shows the screen it was moved to, and gives it back as the
-        /// view ends. `monitor` and `fit` are not used.
+        /// view ends. `monitor` is not used, and `fit` is not a fitted
+        /// screen's size but the size of the picture area of the window that
+        /// shows the borrowed one: the host makes the window that size, so the
+        /// picture is the window's, a pixel to a pixel (a host before it lends
+        /// the window as it is).
         borrow: Option<String>,
     },
     /// Stop showing it: the view `session_id` when given (one since
@@ -1145,7 +1149,7 @@ async fn session_run(
     if let Some(borrowed) = &borrow {
         // A window not lent is no view: the screen asked for would be the
         // computer's own, never what was picked.
-        match apply_borrow(&computer, borrowed, &mut status).await {
+        match apply_borrow(&computer, borrowed, fit, &mut status).await {
             Ok(index) => monitor = index,
             // Not reached at all as the view starts: ended, as a dial that
             // does not reach is (a gap later is tried again).
@@ -1174,7 +1178,7 @@ async fn session_run(
     loop {
         let mut lend_unreached = false;
         if relend && let Some(borrowed) = &borrow {
-            match apply_borrow(&computer, borrowed, &mut status).await {
+            match apply_borrow(&computer, borrowed, fit, &mut status).await {
                 Ok(index) => {
                     monitor = index;
                     relend = false;
@@ -1312,15 +1316,18 @@ async fn session_run(
     }
 }
 
-/// Ask the computer to lend `borrowed` ([`crate::borrow_window`]) and say how
-/// it went in `status`: the screen's number and size. The screen to dial, or
-/// why the window was not lent.
+/// Ask the computer to lend `borrowed` ([`crate::borrow_window`]), at `size`
+/// when the window that shows it has measured one (the other computer sizes
+/// the window and its screen to it), and say how it went in `status`: the
+/// screen's number and size. The screen to dial, or why the window was not
+/// lent.
 async fn apply_borrow(
     computer: &PeerComputer,
     borrowed: &str,
+    size: Option<FitSize>,
     status: &mut ViewStatus,
 ) -> Result<u32, crate::borrow_window::LendError> {
-    match crate::borrow_window::lend(&computer.device_id, borrowed).await {
+    match crate::borrow_window::lend(&computer.device_id, borrowed, size).await {
         Ok(lent) => {
             *status.fit = ViewFit::Borrowed {
                 width: lent.width,
@@ -2466,7 +2473,10 @@ pub async fn run_with(
                     .computers
                     .into_iter()
                     .find(|c| c.device_id == device_id);
+                // (A borrowed window's `fit` is the size to lend it at, not a
+                // screen made to fit: it holds none.)
                 if fit.is_some()
+                    && borrow.is_none()
                     && computer.is_some()
                     && let Some(old) = views[slot].as_mut().filter(|v| v.device_id == device_id)
                 {
@@ -2554,7 +2564,8 @@ pub async fn run_with(
                     None => (None, ViewPrivacy::Off),
                 };
                 // A view that never started has no screen to take away.
-                let fit_held = (fit.is_some() && task.is_some()).then(|| device_id.clone());
+                let fit_held =
+                    (fit.is_some() && borrow.is_none() && task.is_some()).then(|| device_id.clone());
                 // A borrowed window is given back as the view ends.
                 let borrow_held = borrow
                     .filter(|_| task.is_some())
