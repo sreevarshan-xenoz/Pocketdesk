@@ -27,6 +27,51 @@ use pocketdesk_core::local::view::{ViewFit, ViewStatus};
 /// screen follows it: a drag of the window's edge makes many sizes.
 pub const DEBOUNCE: Duration = Duration::from_millis(500);
 
+/// How long a borrowed window's picture area must keep a size before the
+/// other computer's window follows it: shorter than a screen's fit, as a
+/// window's own size is a smaller thing to move than a screen, and the old
+/// picture is scaled meanwhile.
+pub const BORROW_DEBOUNCE: Duration = Duration::from_millis(200);
+
+/// How far, in pixels on a side, a borrowed window's area may differ from the
+/// size asked and still count as the same (a drag's last pixel, a scale
+/// rounding): below this nothing is asked.
+pub const BORROW_TOLERANCE: u32 = 2;
+
+/// How many asks in a row at a new size the other computer may answer with
+/// the size the window already had before a borrowed window stops asking for
+/// the rest of that view and is only scaled: a host before this ignores the
+/// size, and every ask of it would be a redial for nothing. One such answer
+/// can be a resize that failed there (said: the host answers the screen as it
+/// is), so the first is forgiven, and tried again at the next real size.
+pub const BORROW_MISSES: u8 = 2;
+
+/// What the other computer's answer to a borrowed window's ask for `asked`
+/// was, given the size `was` the window had before it and the size `given`
+/// it answers with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Answer {
+    /// The window has the size asked: followed.
+    Followed,
+    /// A size that is not the one asked and not the old one (bounded, or
+    /// rounded, by the other computer): the window did follow, as far as it
+    /// could; the same area is not asked for again.
+    Bounded,
+    /// The old size again: the size was ignored or the resize failed.
+    Kept,
+}
+
+/// Judge the answer `given` to an ask for `asked` of a window that was `was`.
+pub fn judge_answer(was: FitSize, asked: FitSize, given: FitSize) -> Answer {
+    if near(given, asked, BORROW_TOLERANCE) {
+        Answer::Followed
+    } else if near(given, was, BORROW_TOLERANCE) {
+        Answer::Kept
+    } else {
+        Answer::Bounded
+    }
+}
+
 /// The switch's label, on the bar and (said in full) in Settings.
 pub const LABEL: &str = "Fit the screen to this window";
 
@@ -74,6 +119,11 @@ pub enum Step {
     Refit,
 }
 
+/// Whether two sizes are the same within `tolerance` pixels on each side.
+pub fn near(a: FitSize, b: FitSize, tolerance: u32) -> bool {
+    a.width.abs_diff(b.width) <= tolerance && a.height.abs_diff(b.height) <= tolerance
+}
+
 /// Judge the area `area` at `now` against the size `asked`, debouncing its
 /// changes: `seen` is the size the area has held and since when.
 pub fn step(
@@ -82,27 +132,52 @@ pub fn step(
     area: FitSize,
     now: Instant,
 ) -> Step {
+    step_with(asked, seen, area, now, DEBOUNCE, 0)
+}
+
+/// [`step`] for a borrowed window: the other computer's window follows the
+/// window that shows it ([`BORROW_DEBOUNCE`], [`BORROW_TOLERANCE`]).
+pub fn borrow_step(
+    asked: Option<FitSize>,
+    seen: &mut Option<(FitSize, Instant)>,
+    area: FitSize,
+    now: Instant,
+) -> Step {
+    step_with(asked, seen, area, now, BORROW_DEBOUNCE, BORROW_TOLERANCE)
+}
+
+/// [`step`] with its own `debounce` and `tolerance`: an area within
+/// `tolerance` of the size asked is the size asked, and one that stays within
+/// `tolerance` of what it was first seen at has held.
+pub fn step_with(
+    asked: Option<FitSize>,
+    seen: &mut Option<(FitSize, Instant)>,
+    area: FitSize,
+    now: Instant,
+    debounce: Duration,
+    tolerance: u32,
+) -> Step {
     let Some(asked) = asked else {
         *seen = None;
         return Step::Idle;
     };
-    if area == asked {
+    if near(area, asked, tolerance) {
         *seen = None;
         return Step::Idle;
     }
     match *seen {
-        Some((size, since)) if size == area => {
+        Some((size, since)) if near(size, area, tolerance) => {
             let held = now.saturating_duration_since(since);
-            if held >= DEBOUNCE {
+            if held >= debounce {
                 *seen = None;
                 Step::Refit
             } else {
-                Step::Wait(DEBOUNCE - held)
+                Step::Wait(debounce - held)
             }
         }
         _ => {
             *seen = Some((area, now));
-            Step::Wait(DEBOUNCE)
+            Step::Wait(debounce)
         }
     }
 }
@@ -195,6 +270,87 @@ mod tests {
         ] {
             assert_eq!(area_size(odd, 1.0), None, "{odd:?}");
         }
+    }
+
+    /// A borrowed window's area follows after 200 ms of holding, and a change
+    /// of a couple of pixels is no change.
+    #[test]
+    fn a_borrowed_windows_resize_holds_briefly_and_ignores_a_pixel_or_two() {
+        let t0 = Instant::now();
+        let ms = |n: u64| t0 + Duration::from_millis(n);
+        let mut seen = None;
+        let asked = Some(size(1280, 720));
+        // Within the tolerance: the size asked.
+        for near in [size(1282, 720), size(1278, 722), size(1280, 720)] {
+            assert_eq!(
+                borrow_step(asked, &mut seen, near, t0),
+                Step::Idle,
+                "{near:?}"
+            );
+        }
+        assert!(seen.is_none());
+        // Three pixels is a change; it must hold 200 ms.
+        assert_eq!(
+            borrow_step(asked, &mut seen, size(1283, 720), t0),
+            Step::Wait(BORROW_DEBOUNCE)
+        );
+        assert_eq!(
+            borrow_step(asked, &mut seen, size(1283, 720), ms(120)),
+            Step::Wait(Duration::from_millis(80))
+        );
+        assert_eq!(
+            borrow_step(asked, &mut seen, size(1283, 720), ms(200)),
+            Step::Refit
+        );
+        // A drag keeps changing it: the clock starts over each time, and a
+        // jitter of a pixel within a held size does not.
+        assert_eq!(
+            borrow_step(asked, &mut seen, size(1000, 600), ms(300)),
+            Step::Wait(BORROW_DEBOUNCE)
+        );
+        assert_eq!(
+            borrow_step(asked, &mut seen, size(900, 600), ms(400)),
+            Step::Wait(BORROW_DEBOUNCE)
+        );
+        assert_eq!(
+            borrow_step(asked, &mut seen, size(901, 599), ms(500)),
+            Step::Wait(Duration::from_millis(100)),
+            "a pixel either way is the same size"
+        );
+        assert_eq!(
+            borrow_step(asked, &mut seen, size(901, 599), ms(600)),
+            Step::Refit
+        );
+        // Nothing asked yet (no picture, no lend): nothing to judge.
+        assert_eq!(
+            borrow_step(None, &mut seen, size(500, 500), ms(700)),
+            Step::Idle
+        );
+        // The screen's own debounce is as it was: exact, and 500 ms.
+        let mut screen = None;
+        assert_eq!(
+            step(asked, &mut screen, size(1282, 720), t0),
+            Step::Wait(DEBOUNCE)
+        );
+    }
+
+    /// The other computer's answer to a borrowed window's ask is judged by
+    /// the size it gives: the size asked, the old size again (ignored or
+    /// failed), or another (bounded).
+    #[test]
+    fn the_answer_to_a_borrowed_windows_ask_says_whether_it_was_followed() {
+        let was = size(1280, 720);
+        let asked = size(1000, 600);
+        assert_eq!(judge_answer(was, asked, size(1000, 600)), Answer::Followed);
+        assert_eq!(judge_answer(was, asked, size(1001, 599)), Answer::Followed);
+        assert_eq!(judge_answer(was, asked, size(1280, 720)), Answer::Kept);
+        assert_eq!(judge_answer(was, asked, size(1279, 721)), Answer::Kept);
+        // Asked for more than a screen can be: the most it is.
+        assert_eq!(
+            judge_answer(was, size(3000, 1800), size(2560, 1440)),
+            Answer::Bounded
+        );
+        assert_eq!(BORROW_MISSES, 2);
     }
 
     #[test]

@@ -287,6 +287,16 @@ pub struct Config {
     /// Hyprland). Off by default: a window leaves the screen it was on.
     #[serde(default)]
     pub lend_windows: bool,
+    /// A window borrowed from another of the owner's computers takes the
+    /// size of the window that shows it here: as that window is resized,
+    /// maximised or moved to a screen of another scale, the other computer
+    /// sizes the window (and the hidden screen it is on) to the picture area
+    /// in pixels, so the picture stays sharp, a pixel to a pixel; until the
+    /// new one is in, the old picture is scaled to the window. Read by an
+    /// open window at once. On by default; off, a borrowed window keeps the
+    /// size it was lent at and its picture is scaled.
+    #[serde(default = "default_true")]
+    pub borrowed_window_follows_size: bool,
     /// Let phones with the Peek permission see this screen as one still,
     /// with no session (BF2). On: the permission, off for every phone until
     /// chosen, is what lets one.
@@ -892,6 +902,7 @@ impl Default for Config {
             share_state: true,
             virtual_screens: true,
             lend_windows: false,
+            borrowed_window_follows_size: true,
             peek: true,
             notes_file: String::new(),
             clipboard_push: true,
@@ -1193,6 +1204,7 @@ impl Config {
         "share_state",
         "virtual_screens",
         "lend_windows",
+        "borrowed_window_follows_size",
         "peek",
         "notes_file",
         "clipboard_push",
@@ -2191,6 +2203,34 @@ phone_battery = \"x\"
         config.lend_windows = true;
         config.save_to(&path).unwrap();
         assert!(Config::load_from(&path).unwrap().lend_windows);
+    }
+
+    #[test]
+    fn a_borrowed_window_follows_its_windows_size_until_turned_off() {
+        let path = temp("borrowed-follows");
+        std::fs::write(&path, "").unwrap();
+        assert!(
+            Config::load_from(&path)
+                .unwrap()
+                .borrowed_window_follows_size
+        );
+        assert!(Config::default().borrowed_window_follows_size);
+        let chosen = Config {
+            borrowed_window_follows_size: false,
+            ..Config::default()
+        };
+        chosen
+            .save_keys_to(&path, &["borrowed_window_follows_size"])
+            .unwrap();
+        assert!(
+            !Config::load_from(&path)
+                .unwrap()
+                .borrowed_window_follows_size
+        );
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["borrowed_window_follows_size"]
+        );
     }
 
     #[test]

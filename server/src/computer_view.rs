@@ -251,7 +251,11 @@ pub enum Command {
         /// Show the window with this id of that computer instead of a
         /// screen ([`crate::borrow_window`]): it is asked to lend it, the
         /// view shows the screen it was moved to, and gives it back as the
-        /// view ends. `monitor` and `fit` are not used.
+        /// view ends. `monitor` is not used, and `fit` is not a fitted
+        /// screen's size but the size of the picture area of the window that
+        /// shows the borrowed one: the host makes the window that size, so the
+        /// picture is the window's, a pixel to a pixel (a host before it lends
+        /// the window as it is).
         borrow: Option<String>,
     },
     /// Stop showing it: the view `session_id` when given (one since
@@ -1142,19 +1146,29 @@ async fn session_run(
     };
     crate::peer_computers::ask_screens(&computer.device_id);
     say.say(Event::Status(status.clone())).await;
+    // A borrowed window is asked for again before each dial after the first
+    // (the host gives the same screen back while it is still lent), and as
+    // the first when a resize's ask could not reach the host (below).
+    let mut relend = false;
     if let Some(borrowed) = &borrow {
         // A window not lent is no view: the screen asked for would be the
         // computer's own, never what was picked.
-        match apply_borrow(&computer, borrowed, &mut status).await {
-            Ok(index) => monitor = index,
-            // Not reached at all as the view starts: ended, as a dial that
-            // does not reach is (a gap later is tried again).
+        match apply_borrow(&computer, borrowed, fit, &mut status).await {
+            Ok(index) => {
+                monitor = index;
+                say.say(Event::Status(status.clone())).await;
+            }
+            // A resize's ask (it carries the size: a window's first ask
+            // never does) for a window already lent and shown: a blip on the way to the host is a failed try like a
+            // dial's, on the same backoff, never the end of the view. A
+            // window's first ask carries none, and ends as a dial that does
+            // not reach does.
+            Err(why) if !lend_ends_view(&why, fit) => relend = true,
             Err(why) => {
                 say.say(Event::Ended(borrow_failed(&name, &why))).await;
                 return;
             }
         }
-        say.say(Event::Status(status.clone())).await;
     } else if let Some(size) = fit {
         monitor = apply_fit(&computer, window, size, asked_monitor, &mut status).await;
         say.say(Event::Status(status.clone())).await;
@@ -1168,13 +1182,10 @@ async fn session_run(
     let _forward = AbortOnDrop(tokio::spawn(forward_input(input, conn_rx)));
     let mut reconnect = Reconnect::default();
     let mut shown_once = false;
-    // A borrowed window is asked for again before each dial after the first
-    // (the host gives the same screen back while it is still lent).
-    let mut relend = false;
     loop {
         let mut lend_unreached = false;
         if relend && let Some(borrowed) = &borrow {
-            match apply_borrow(&computer, borrowed, &mut status).await {
+            match apply_borrow(&computer, borrowed, fit, &mut status).await {
                 Ok(index) => {
                     monitor = index;
                     relend = false;
@@ -1312,15 +1323,66 @@ async fn session_run(
     }
 }
 
-/// Ask the computer to lend `borrowed` ([`crate::borrow_window`]) and say how
-/// it went in `status`: the screen's number and size. The screen to dial, or
-/// why the window was not lent.
+/// Whether a borrowed window's first ask failing as `why` says ends the view:
+/// the host's no does, and so does a gap before the host when the ask carries
+/// no `size` (nothing was shown yet, as a dial that does not reach). One that
+/// carries a size is a resize of a window already shown: a gap there is tried
+/// again on the backoff ([`Reconnect`]), as a dial's, never ending it.
+fn lend_ends_view(why: &crate::borrow_window::LendError, size: Option<FitSize>) -> bool {
+    match why {
+        crate::borrow_window::LendError::Refused(_) => true,
+        crate::borrow_window::LendError::Unreached(_) => size.is_none(),
+    }
+}
+
+/// [`crate::borrow_window::lend`] with a size, and, when the host refuses
+/// it, once more without: a resize that cannot be done is no refusal of the
+/// window (the host answers the screen as it is), so the same window is asked
+/// for as it is, and only a refusal of that is the host's no. A gap on the
+/// way to the host (`Unreached`) is the caller's to try again.
+async fn lend_following(
+    device_id: &str,
+    borrowed: &str,
+    size: Option<FitSize>,
+) -> Result<crate::fit_screen::Fitted, crate::borrow_window::LendError> {
+    lend_following_with(size, |size| {
+        crate::borrow_window::lend(device_id, borrowed, size)
+    })
+    .await
+}
+
+/// [`lend_following`], asking as `lend` does.
+async fn lend_following_with<F, Fut>(
+    size: Option<FitSize>,
+    lend: F,
+) -> Result<crate::fit_screen::Fitted, crate::borrow_window::LendError>
+where
+    F: Fn(Option<FitSize>) -> Fut,
+    Fut: std::future::Future<
+            Output = Result<crate::fit_screen::Fitted, crate::borrow_window::LendError>,
+        >,
+{
+    match lend(size).await {
+        Err(crate::borrow_window::LendError::Refused(why)) if size.is_some() => {
+            tracing::info!("A window was refused at the size asked ({why}); asked at its own");
+            lend(None).await
+        }
+        other => other,
+    }
+}
+
+/// Ask the computer to lend `borrowed` ([`crate::borrow_window`]), at `size`
+/// when the window that shows it has measured one (the other computer sizes
+/// the window and its screen to it), and say how it went in `status`: the
+/// screen's number and size. The screen to dial, or why the window was not
+/// lent.
 async fn apply_borrow(
     computer: &PeerComputer,
     borrowed: &str,
+    size: Option<FitSize>,
     status: &mut ViewStatus,
 ) -> Result<u32, crate::borrow_window::LendError> {
-    match crate::borrow_window::lend(&computer.device_id, borrowed).await {
+    match lend_following(&computer.device_id, borrowed, size).await {
         Ok(lent) => {
             *status.fit = ViewFit::Borrowed {
                 width: lent.width,
@@ -2466,7 +2528,10 @@ pub async fn run_with(
                     .computers
                     .into_iter()
                     .find(|c| c.device_id == device_id);
+                // (A borrowed window's `fit` is the size to lend it at, not a
+                // screen made to fit: it holds none.)
                 if fit.is_some()
+                    && borrow.is_none()
                     && computer.is_some()
                     && let Some(old) = views[slot].as_mut().filter(|v| v.device_id == device_id)
                 {
@@ -2554,7 +2619,8 @@ pub async fn run_with(
                     None => (None, ViewPrivacy::Off),
                 };
                 // A view that never started has no screen to take away.
-                let fit_held = (fit.is_some() && task.is_some()).then(|| device_id.clone());
+                let fit_held =
+                    (fit.is_some() && borrow.is_none() && task.is_some()).then(|| device_id.clone());
                 // A borrowed window is given back as the view ends.
                 let borrow_held = borrow
                     .filter(|_| task.is_some())
@@ -3449,6 +3515,80 @@ fn start_viewer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn lent_at(width: u32, height: u32) -> crate::fit_screen::Fitted {
+        crate::fit_screen::Fitted {
+            index: 2,
+            width,
+            height,
+        }
+    }
+
+    fn size(width: u32, height: u32) -> FitSize {
+        FitSize { width, height }
+    }
+
+    /// A resize is cosmetic: a host that refuses the size is asked again for
+    /// the window as it is, and its answer then is the answer; the host's no
+    /// to the window itself still is a no; a gap is the caller's to retry; a
+    /// first ask (no size) is asked once.
+    #[tokio::test]
+    async fn a_resize_the_host_refuses_is_asked_again_without_its_size() {
+        use crate::borrow_window::LendError;
+        let asked = std::sync::Mutex::new(Vec::new());
+        // Refused with the size, lent without: the old size, the view stands.
+        let kept = lend_following_with(Some(size(1000, 600)), |s| {
+            asked.lock().unwrap().push(s);
+            std::future::ready(match s {
+                Some(_) => Err(LendError::Refused("no resize".into())),
+                None => Ok(lent_at(1280, 720)),
+            })
+        })
+        .await;
+        assert_eq!(kept, Ok(lent_at(1280, 720)));
+        assert_eq!(*asked.lock().unwrap(), [Some(size(1000, 600)), None]);
+        // Refused both ways: the host's no to the window is final.
+        asked.lock().unwrap().clear();
+        let no = lend_following_with(Some(size(1000, 600)), |s| {
+            asked.lock().unwrap().push(s);
+            std::future::ready(Err(LendError::Refused("closed".into())))
+        })
+        .await;
+        assert_eq!(no, Err(LendError::Refused("closed".into())));
+        assert_eq!(asked.lock().unwrap().len(), 2);
+        // A gap is passed on as it is, asked once: the caller's backoff.
+        asked.lock().unwrap().clear();
+        let gap = lend_following_with(Some(size(1000, 600)), |s| {
+            asked.lock().unwrap().push(s);
+            std::future::ready(Err(LendError::Unreached("no link".into())))
+        })
+        .await;
+        assert_eq!(gap, Err(LendError::Unreached("no link".into())));
+        assert_eq!(asked.lock().unwrap().len(), 1);
+        // No size asked, nothing to leave off: refused is asked once.
+        asked.lock().unwrap().clear();
+        let first = lend_following_with(None, |s| {
+            asked.lock().unwrap().push(s);
+            std::future::ready(Err(LendError::Refused("off".into())))
+        })
+        .await;
+        assert_eq!(first, Err(LendError::Refused("off".into())));
+        assert_eq!(asked.lock().unwrap().len(), 1);
+    }
+
+    /// Only the host's no (or a window's first ask that never reached it)
+    /// ends a borrowed view; a resize's ask that did not reach the host is
+    /// tried again on the backoff.
+    #[test]
+    fn a_resize_that_does_not_reach_the_host_does_not_end_the_view() {
+        use crate::borrow_window::LendError;
+        let gap = LendError::Unreached("no link".into());
+        let no = LendError::Refused("closed".into());
+        assert!(lend_ends_view(&gap, None), "a first ask: as a dial");
+        assert!(!lend_ends_view(&gap, Some(size(1000, 600))), "a resize");
+        assert!(lend_ends_view(&no, None));
+        assert!(lend_ends_view(&no, Some(size(1000, 600))));
+    }
 
     async fn loopback_endpoint() -> iroh::Endpoint {
         iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)

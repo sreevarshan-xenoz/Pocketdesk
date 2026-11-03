@@ -22,7 +22,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use pocketdesk_core::local::computers::{self, LendableWindow, WindowsThere};
+use pocketdesk_core::local::computers::{self, FitSize, LendableWindow, WindowsThere};
 use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
 use serde_json::{Value, json};
 use tokio::sync::broadcast;
@@ -96,20 +96,50 @@ where
     windows(&ask_body_via(send, device_id, body).await?)
 }
 
+/// The `lend` ask for `window`: with a `size` (the picture area of the window
+/// that shows it, in pixels) the host makes the window's screen that size,
+/// and gives an already lent window's screen it. A host before that ignores
+/// the two fields and lends the window at its own size, which the view then
+/// scales.
+fn lend_body(window: &str, size: Option<FitSize>) -> Value {
+    let mut body = json!({ "action": "lend", "window": window });
+    if let Some(size) = size {
+        body["width"] = size.width.into();
+        body["height"] = size.height.into();
+    }
+    body
+}
+
 /// Ask the computer `device_id` to lend `window`: the screen it was moved
-/// to. Asked again for a window already lent to this computer, the host
-/// answers with the same screen.
-pub async fn lend(device_id: &str, window: &str) -> Result<Fitted, LendError> {
-    lend_via(crate::fit_screen::link_to(device_id), device_id, window).await
+/// to, at `size` when the window that shows it has one it wants (the host
+/// follows). Asked again for a window already lent to this computer, the host
+/// answers with the same screen (resized when `size` is new).
+pub async fn lend(
+    device_id: &str,
+    window: &str,
+    size: Option<FitSize>,
+) -> Result<Fitted, LendError> {
+    lend_via(
+        crate::fit_screen::link_to(device_id),
+        device_id,
+        window,
+        size,
+    )
+    .await
 }
 
 /// [`lend`], sent as `send` sends.
-async fn lend_via<F, Fut>(send: F, device_id: &str, window: &str) -> Result<Fitted, LendError>
+async fn lend_via<F, Fut>(
+    send: F,
+    device_id: &str,
+    window: &str,
+    size: Option<FitSize>,
+) -> Result<Fitted, LendError>
 where
     F: Fn(NetworkPacket) -> Fut,
     Fut: std::future::Future<Output = Result<(), String>>,
 {
-    let body = json!({ "action": "lend", "window": window });
+    let body = lend_body(window, size);
     let answer = ask_body_via(send, device_id, body)
         .await
         .map_err(LendError::Unreached)?;
@@ -500,6 +530,7 @@ mod tests {
             ),
             "borrow-test-lend",
             "5",
+            None,
         )
         .await
         .unwrap();
@@ -518,6 +549,49 @@ mod tests {
         assert!(crate::virtual_screen::is_request(&asked[0]));
     }
 
+    /// The size rides on the `lend` ask as `width` and `height`, and is left
+    /// off when none is wanted (a host before it reads the ask as it did).
+    #[tokio::test]
+    async fn a_lend_names_the_size_of_the_window_that_shows_it_when_there_is_one() {
+        assert_eq!(
+            lend_body("5", None),
+            json!({ "action": "lend", "window": "5" })
+        );
+        assert_eq!(
+            lend_body(
+                "5",
+                Some(FitSize {
+                    width: 1000,
+                    height: 600
+                })
+            ),
+            json!({ "action": "lend", "window": "5", "width": 1000, "height": 600 })
+        );
+        let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let lent = lend_via(
+            host(
+                "borrow-test-sized",
+                json!({ "name": "PD-x-1", "index": 3, "width": 1000, "height": 600, "window": "5" }),
+                asked.clone(),
+            ),
+            "borrow-test-sized",
+            "5",
+            Some(FitSize {
+                width: 1000,
+                height: 600,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!((lent.width, lent.height), (1000, 600));
+        let asked = asked.lock().unwrap();
+        assert_eq!(
+            (asked[0]["width"].as_u64(), asked[0]["height"].as_u64()),
+            (Some(1000), Some(600))
+        );
+        assert!(crate::virtual_screen::is_request(&asked[0]));
+    }
+
     #[tokio::test]
     async fn a_host_that_refuses_is_the_reason_given() {
         let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -529,6 +603,7 @@ mod tests {
             ),
             "borrow-test-refuse",
             "5",
+            None,
         )
         .await;
         assert_eq!(
@@ -547,6 +622,7 @@ mod tests {
             |_: NetworkPacket| std::future::ready(Err("no link".to_string())),
             "borrow-test-nolink",
             "5",
+            None,
         )
         .await;
         assert_eq!(
@@ -559,6 +635,7 @@ mod tests {
             |_: NetworkPacket| std::future::ready(Ok(())),
             "borrow-test-silent",
             "5",
+            None,
         )
         .await;
         assert!(matches!(silent, Err(LendError::Unreached(why)) if why.contains("did not answer")));

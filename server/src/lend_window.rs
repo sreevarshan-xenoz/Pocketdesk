@@ -25,6 +25,17 @@
 //!   says `ok` even to a window that is not there, so each step is checked
 //!   in `j/clients`.
 //!
+//! **Following the borrower's window** ([`lend_sized`]): a `lend` that names a
+//! size (`width` and `height`, the picture area of the window that shows the
+//! window, in pixels; a host before this ignores them) gives the screen
+//! already made for the window that size where it is
+//! ([`crate::virtual_screen::resize_for_lend`], bounded as any screen is), and
+//! the window follows: on Sway `resize set` and `move absolute position` once
+//! the output's mode is in, on Hyprland the compositor's own full screen
+//! fills the new mode (and is set again if it did not). The borrower's view
+//! then dials the same screen at its new size, so the picture is the window's,
+//! one pixel to a pixel. A window not yet lent is lent at that size.
+//!
 //! **The list:** `list` answers the windows this computer would lend (id,
 //! title, app, size, workspace; [`listed`]) so the other computer's owner can
 //! pick one. Titles are personal: they are sent to the asker and never
@@ -299,6 +310,16 @@ pub fn sway_place(id: i64, x: i32, y: i32, width: i32, height: i32) -> Vec<Strin
     ]
 }
 
+/// The commands that size a lent window to the screen `to` after the screen
+/// took a new mode, and put it at the screen's corner: Sway counts the layout
+/// from the outputs' own places, so the corner is `to`'s. `resize set` before
+/// `move absolute position` (a window that shrinks with its screen would be
+/// put at a place that is then outside it).
+pub fn sway_follow(id: i64, to: &Output, width: u32, height: u32) -> Option<Vec<String>> {
+    let (w, h) = (i32::try_from(width).ok()?, i32::try_from(height).ok()?);
+    (is_plain(&to.name) && w > 0 && h > 0).then(|| sway_place(id, to.rect.x, to.rect.y, w, h))
+}
+
 /// The commands that put a lent window back: onto its workspace (by name,
 /// else number, else its output), tiled again if it was, with its border,
 /// and, if it floated, its size and place; full screen again if it was. `None`
@@ -423,6 +444,17 @@ pub fn hypr_place(address: &str, x: i32, y: i32, width: i32, height: i32) -> Opt
     })
 }
 
+/// Take a window that fills its screen out of full screen and put it in
+/// again, so the compositor sizes it to the screen's new mode (the way a
+/// screen's mode that changed under a window that did not follow is put
+/// right).
+pub fn hypr_refill(address: &str) -> Option<Vec<String>> {
+    Some(vec![
+        hypr_fullscreen(address, 0, 0)?,
+        hypr_fullscreen(address, 2, 0)?,
+    ])
+}
+
 /// A window of `j/clients`, with what lending reads.
 #[derive(Debug, Deserialize)]
 struct Client {
@@ -487,9 +519,14 @@ trait Env: Sync {
     /// `{name, index, width, height}` or `{error}`.
     fn add_screen(&self, key: &str, width: u32, height: u32) -> Value;
     fn drop_screen(&self, key: &str);
+    /// The screen of the key, given `width`×`height` where it is:
+    /// `{name, index, width, height}` or `{error}`; none is made.
+    fn resize_screen(&self, key: &str, width: u32, height: u32) -> Value;
     fn output(&self, name: &str) -> Option<Output>;
     /// Put the window alone on `to`, `width`×`height`.
     fn send(&self, lent: &Lent, to: &Output, width: u32, height: u32) -> std::io::Result<()>;
+    /// The window, alone on `to`, takes the size its screen was just given.
+    fn follow(&self, lent: &Lent, to: &Output, width: u32, height: u32) -> std::io::Result<()>;
     /// Put the window back where `lent` says. `Ok` also when the window is
     /// gone; an `InvalidInput` error says the record can never be put back
     /// (no place it names is safe to send), any other that it may yet.
@@ -585,9 +622,35 @@ fn error(why: impl Into<String>) -> Value {
     json!({ "error": why.into() })
 }
 
-/// Lend `window` to `device`: `{name, index, width, height, window}` or
-/// `{error}`.
+/// The size a `lend` asks the screen to be, from its `width` and `height`:
+/// the screen's size for them ([`lend_size`]), or `None` when it names none
+/// (a borrower before this) or none that is a size, so the window's own is
+/// kept.
+pub fn asked_size(body: &Value) -> Option<(u32, u32)> {
+    let side = |key: &str| {
+        body.get(key)
+            .and_then(Value::as_u64)
+            .and_then(|v| i32::try_from(v).ok())
+    };
+    lend_size([side("width")?, side("height")?])
+}
+
+/// [`lend_sized`] with no size asked: the window's own.
+#[cfg(test)]
 fn lend_with(lends: &Lends, env: &dyn Env, device: &str, window: &str) -> Value {
+    lend_sized(lends, env, device, window, None)
+}
+
+/// Lend `window` to `device`: `{name, index, width, height, window}` or
+/// `{error}`. With a `size` asked ([`asked_size`]) the screen is that size
+/// (a window already lent is given its screen's new size, and follows it).
+fn lend_sized(
+    lends: &Lends,
+    env: &dyn Env,
+    device: &str,
+    window: &str,
+    size: Option<(u32, u32)>,
+) -> Value {
     if let Some(why) = env.cannot() {
         return error(why);
     }
@@ -601,8 +664,16 @@ fn lend_with(lends: &Lends, env: &dyn Env, device: &str, window: &str) -> Value 
         if held.device != device {
             return error("Another computer has borrowed that window");
         }
-        // Asked again: the same screen (a session may be showing it).
+        // Asked again: the same screen (a session may be showing it), at the
+        // new size when the borrower's window has one.
         if let Some(screen) = env.output(&held.output) {
+            let now = (
+                u32::try_from(screen.rect.width).unwrap_or(0),
+                u32::try_from(screen.rect.height).unwrap_or(0),
+            );
+            if let Some((w, h)) = size.filter(|s| *s != now) {
+                return follow_borrower(lends, env, &held, &key, now, w, h);
+            }
             let mut reply = env.add_screen(
                 &key,
                 u32::try_from(screen.rect.width).unwrap_or(0),
@@ -622,7 +693,7 @@ fn lend_with(lends: &Lends, env: &dyn Env, device: &str, window: &str) -> Value 
         Ok(None) => return error("No such window on this computer (it may have closed)"),
         Err(e) => return error(format!("Could not read this computer's windows: {e}")),
     };
-    let Some((width, height)) = lend_size(seen.size) else {
+    let Some((width, height)) = size.or_else(|| lend_size(seen.size)) else {
         return error("not a window size");
     };
     let mut reply = env.add_screen(&key, width, height);
@@ -672,6 +743,77 @@ fn lend_with(lends: &Lends, env: &dyn Env, device: &str, window: &str) -> Value 
             error(format!("Could not move the window: {e}"))
         }
     }
+}
+
+/// The borrower's window changed size: the screen `held` is on is given
+/// `width`×`height` where it is and the window is sized to it, so the picture
+/// is the borrower's window's, a pixel to a pixel. Answers as `lend` does,
+/// with the size the screen has.
+///
+/// A resize is cosmetic: whatever goes wrong with it (the compositor refuses
+/// the mode, the screen is slow to show it, the window does not follow) is
+/// logged and the answer is the screen as it is then, never an error, so the
+/// borrower's view carries on at the size it had. The screen is read again
+/// after the attempt, succeeded or not: a mode that took but was not seen in
+/// time, or a screen the compositor moved, is what the answer and the record
+/// (the index the lease check and a restart capture it by) say.
+fn follow_borrower(
+    lends: &Lends,
+    env: &dyn Env,
+    held: &Lent,
+    key: &str,
+    old: (u32, u32),
+    width: u32,
+    height: u32,
+) -> Value {
+    let tried = env.resize_screen(key, width, height);
+    let resized = tried.get("error").is_none();
+    if let Some(why) = tried.get("error") {
+        tracing::warn!("A lent window's screen was not resized, the view keeps its size: {why}");
+    }
+    let Some(screen) = env.output(&held.output) else {
+        return error("The computer resized the screen but does not show it");
+    };
+    let (w, h) = (
+        u32::try_from(screen.rect.width).unwrap_or(old.0),
+        u32::try_from(screen.rect.height).unwrap_or(old.1),
+    );
+    // The screen as it is now: a resize that went through said so; one that
+    // did not (or ran out of wait) is the same screen asked for again, its
+    // index read again.
+    let mut reply = if resized {
+        tried
+    } else {
+        env.add_screen(key, w, h)
+    };
+    if reply.get("error").is_some() {
+        return reply;
+    }
+    // The window follows the screen it has (one that kept its size has a
+    // window that is already there).
+    if (resized || (w, h) != old)
+        && let Err(e) = env.follow(held, &screen, w, h)
+    {
+        tracing::warn!("A lent window did not take its screen's new size: {e}");
+    }
+    // The screen's place can move with its size (Hyprland puts it right of
+    // the others again, even when the wait for the mode ran out): the index a
+    // session captures it by follows.
+    let index = reply["index"].as_u64().and_then(|i| u32::try_from(i).ok());
+    {
+        let mut all = lends.all();
+        if let Some(record) = all.iter_mut().find(|l| l.window == held.window)
+            && record.index != index
+        {
+            record.index = index;
+            if let Err(e) = env.save(&all) {
+                tracing::warn!("Could not write the list of lent windows: {e}");
+            }
+        }
+    }
+    tracing::info!("A lent window follows its borrower's window to {w}x{h}");
+    reply["window"] = held.window.as_str().into();
+    reply
 }
 
 /// The windows `device` may borrow: `{windows: [..]}` or `{error}`. Read
@@ -1133,13 +1275,14 @@ pub async fn answer(device: &str, body: &Value) -> Value {
         .get("window")
         .and_then(Value::as_str)
         .map(str::to_string);
+    let size = asked_size(body);
     let device = device.to_string();
     tokio::task::spawn_blocking(move || {
         if let Some(why) = refusal(&action, enabled(), is_owner_computer(&device)) {
             return error(why);
         }
         match (action.as_str(), window.as_deref()) {
-            ("lend", Some(window)) => lend_with(lends(), &Live, &device, window),
+            ("lend", Some(window)) => lend_sized(lends(), &Live, &device, window, size),
             ("lend", None) => error("no window named"),
             ("list", _) => list_with(lends(), &Live, &device),
             ("return", window) => return_with(lends(), &Live, &device, window),
@@ -1227,6 +1370,30 @@ fn sway_all(commands: impl IntoIterator<Item = String>) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Size the Sway window `id` to the screen `to` (`width`×`height`) and put it
+/// at its corner. The size takes a moment after a move or a new mode (sent
+/// with the move, it was lost): asked again once.
+fn sway_sized(id: i64, to: &Output, width: u32, height: u32) -> std::io::Result<()> {
+    let (w, h) = (width as i32, height as i32);
+    for _ in 0..2 {
+        sway_all(
+            sway_follow(id, to, width, height)
+                .ok_or_else(|| other("not an output this computer makes"))?,
+        )?;
+        let there = wait_for(Duration::from_secs(1), || {
+            crate::sway_tree::seen(id)
+                .ok()
+                .flatten()
+                .filter(|s| s.size == [w, h] && s.at == [to.rect.x, to.rect.y])
+        });
+        if there.is_some() {
+            return Ok(());
+        }
+    }
+    tracing::warn!("A lent window did not take its screen's size");
+    Ok(())
+}
+
 /// The compositor this server runs in.
 struct Live;
 
@@ -1260,6 +1427,10 @@ impl Env for Live {
         crate::virtual_screen::drop_for_lend(key);
     }
 
+    fn resize_screen(&self, key: &str, width: u32, height: u32) -> Value {
+        crate::virtual_screen::resize_for_lend(key, width, height)
+    }
+
     fn output(&self, name: &str) -> Option<Output> {
         crate::virtual_screen::outputs()
             .ok()?
@@ -1287,21 +1458,7 @@ impl Env for Live {
                         .filter(|s| s.output == to.name)
                 })
                 .ok_or_else(|| other("Sway did not move it"))?;
-                // The size takes a moment after the move: asked again once.
-                for _ in 0..2 {
-                    sway_all(sway_place(id, to.rect.x, to.rect.y, w, h))?;
-                    let there = wait_for(Duration::from_secs(1), || {
-                        crate::sway_tree::seen(id)
-                            .ok()
-                            .flatten()
-                            .filter(|s| s.size == [w, h] && s.at == [to.rect.x, to.rect.y])
-                    });
-                    if there.is_some() {
-                        return Ok(());
-                    }
-                }
-                tracing::warn!("A lent window did not take its screen's size");
-                Ok(())
+                sway_sized(id, to, width, height)
             }
             Some(Desk::Hyprland) => {
                 let a = lent.window.as_str();
@@ -1318,6 +1475,40 @@ impl Env for Live {
                 })
                 .map(|_| ())
                 .ok_or_else(|| other("Hyprland did not put it alone on the screen"))
+            }
+            None => Err(other("not running under Sway or Hyprland")),
+        }
+    }
+
+    fn follow(&self, lent: &Lent, to: &Output, width: u32, height: u32) -> std::io::Result<()> {
+        match crate::virtual_screen::desk() {
+            Some(Desk::Sway) => {
+                let id: i64 = lent
+                    .window
+                    .parse()
+                    .map_err(|_| other("not a Sway window id"))?;
+                sway_sized(id, to, width, height)
+            }
+            Some(Desk::Hyprland) => {
+                let a = lent.window.as_str();
+                let (w, h) = (width as i32, height as i32);
+                let fills = || {
+                    wait_for(Duration::from_secs(1), || {
+                        seen_now(a)
+                            .ok()
+                            .flatten()
+                            .filter(|s| s.output == to.name && s.size == [w, h])
+                    })
+                };
+                // Full screen on the compositor's side follows the screen's
+                // mode by itself; one that did not is put in again.
+                if fills().is_some() {
+                    return Ok(());
+                }
+                hypr_all(hypr_refill(a).ok_or_else(|| other("not a Hyprland window address"))?)?;
+                fills()
+                    .map(|_| ())
+                    .ok_or_else(|| other("Hyprland did not fill the resized screen"))
             }
             None => Err(other("not running under Sway or Hyprland")),
         }
@@ -1426,6 +1617,13 @@ mod tests {
         calls: Mutex<Vec<String>>,
         saved: Mutex<Vec<Lent>>,
         fail_send: bool,
+        fail_follow: bool,
+        /// A resize the compositor refuses: the screen keeps its mode.
+        fail_resize: bool,
+        /// A resize whose mode took but whose wait ran out (an error said),
+        /// and the screen's index the compositor then gives it.
+        resize_late: bool,
+        index: Mutex<Option<u32>>,
         /// Whether the window will not go back (set and cleared as a test
         /// likes).
         fail_back: std::sync::atomic::AtomicBool,
@@ -1443,6 +1641,10 @@ mod tests {
         }
         fn calls(&self) -> Vec<String> {
             self.calls.lock().unwrap().clone()
+        }
+        /// The index the screens answer with: 1 until a test moves it.
+        fn index_now(&self) -> u32 {
+            self.index.lock().unwrap().unwrap_or(1)
         }
         fn back_fails(&self, fails: bool) {
             self.fail_back
@@ -1469,7 +1671,7 @@ mod tests {
         fn add_screen(&self, key: &str, width: u32, height: u32) -> Value {
             let mut screens = self.screens.lock().unwrap();
             if let Some((_, name, w, h)) = screens.iter().find(|s| s.0 == key) {
-                return json!({ "name": name, "index": 1, "width": w, "height": h });
+                return json!({ "name": name, "index": self.index_now(), "width": w, "height": h });
             }
             if screens.len() >= 4 {
                 return error("The computer has as many extra screens as it takes");
@@ -1481,6 +1683,27 @@ mod tests {
         fn drop_screen(&self, key: &str) {
             self.calls.lock().unwrap().push(format!("drop {key}"));
             self.screens.lock().unwrap().retain(|s| s.0 != key);
+        }
+        fn resize_screen(&self, key: &str, width: u32, height: u32) -> Value {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("resize {key} {width}x{height}"));
+            if self.fail_resize {
+                return error("Could not resize the screen: refused");
+            }
+            let mut screens = self.screens.lock().unwrap();
+            match screens.iter_mut().find(|s| s.0 == key) {
+                Some(screen) => {
+                    screen.2 = width;
+                    screen.3 = height;
+                    if self.resize_late {
+                        return error("Could not resize the screen: the compositor was slow");
+                    }
+                    json!({ "name": screen.1, "index": self.index_now(), "width": width, "height": height })
+                }
+                None => error("no screen to resize"),
+            }
         }
         fn output(&self, name: &str) -> Option<Output> {
             let screens = self.screens.lock().unwrap().clone();
@@ -1503,6 +1726,16 @@ mod tests {
             ));
             if self.fail_send {
                 return Err(other("refused"));
+            }
+            Ok(())
+        }
+        fn follow(&self, lent: &Lent, to: &Output, width: u32, height: u32) -> std::io::Result<()> {
+            self.calls.lock().unwrap().push(format!(
+                "follow {} on {} {width}x{height}",
+                lent.window, to.name
+            ));
+            if self.fail_follow {
+                return Err(other("stuck"));
             }
             Ok(())
         }
@@ -1548,11 +1781,17 @@ mod tests {
         fn drop_screen(&self, key: &str) {
             self.0.drop_screen(key)
         }
+        fn resize_screen(&self, key: &str, width: u32, height: u32) -> Value {
+            self.0.resize_screen(key, width, height)
+        }
         fn output(&self, name: &str) -> Option<Output> {
             self.0.output(name)
         }
         fn send(&self, lent: &Lent, to: &Output, width: u32, height: u32) -> std::io::Result<()> {
             self.0.send(lent, to, width, height)
+        }
+        fn follow(&self, lent: &Lent, to: &Output, width: u32, height: u32) -> std::io::Result<()> {
+            self.0.follow(lent, to, width, height)
         }
         fn back(&self, lent: &Lent) -> std::io::Result<()> {
             if lent.window == self.1 {
@@ -1833,6 +2072,210 @@ mod tests {
             (Some(2560), Some(720))
         );
         assert_eq!(fake.calls(), ["send 5 to PD-0a1b2c3d-1 2560x720"]);
+    }
+
+    #[test]
+    fn a_size_asked_is_the_screens_size_for_it_or_none() {
+        let ask =
+            |w: Value, h: Value| asked_size(&json!({ "action": "lend", "width": w, "height": h }));
+        assert_eq!(ask(json!(1280), json!(720)), Some((1280, 720)));
+        assert_eq!(ask(json!(1281), json!(721)), Some((1280, 720)), "even");
+        assert_eq!(ask(json!(100), json!(100)), Some((320, 320)), "raised");
+        assert_eq!(ask(json!(5120), json!(2880)), Some((2560, 1440)), "scaled");
+        for odd in [json!(0), json!(-4), json!("wide"), json!(null), json!(1.5)] {
+            assert_eq!(ask(odd, json!(720)), None);
+        }
+        assert_eq!(ask(json!(1280), json!(u64::MAX)), None);
+        assert_eq!(
+            asked_size(&json!({ "action": "lend", "width": 1280 })),
+            None,
+            "one side is no size"
+        );
+        assert_eq!(asked_size(&json!({ "action": "lend" })), None);
+    }
+
+    #[test]
+    fn a_window_lent_with_a_size_gets_a_screen_and_a_place_of_that_size() {
+        let fake = Fake::with(vec![seen("5", 1280, 720)]);
+        let reply = lend_sized(&Lends::new(), &fake, DEVICE, "5", Some((1000, 600)));
+        assert_eq!(
+            (reply["width"].as_u64(), reply["height"].as_u64()),
+            (Some(1000), Some(600)),
+            "{reply}"
+        );
+        assert_eq!(fake.calls(), ["send 5 to PD-0a1b2c3d-1 1000x600"]);
+    }
+
+    #[test]
+    fn a_borrowers_new_size_resizes_the_screen_and_the_window_follows() {
+        let fake = Fake::with(vec![seen("5", 1280, 720)]);
+        let lends = Lends::new();
+        let key = format!("{DEVICE}#lend-5");
+        lend_sized(&lends, &fake, DEVICE, "5", None);
+        // The same size, or none: no resize, no move.
+        for same in [None, Some((1280, 720))] {
+            let again = lend_sized(&lends, &fake, DEVICE, "5", same);
+            assert_eq!(again["width"], 1280, "{again}");
+        }
+        assert_eq!(fake.calls().len(), 1, "{:?}", fake.calls());
+        // A new one: the screen first, then the window onto its new size.
+        let reply = lend_sized(&lends, &fake, DEVICE, "5", Some((1000, 600)));
+        assert_eq!(reply["name"], "PD-0a1b2c3d-1");
+        assert_eq!(reply["window"], "5");
+        assert_eq!(
+            (reply["width"].as_u64(), reply["height"].as_u64()),
+            (Some(1000), Some(600))
+        );
+        assert_eq!(
+            fake.calls()[1..],
+            [
+                format!("resize {key} 1000x600"),
+                "follow 5 on PD-0a1b2c3d-1 1000x600".to_string()
+            ]
+        );
+        // Still one loan, and what puts it back is as it was.
+        let held = lends.all().clone();
+        assert_eq!(held.len(), 1);
+        assert_eq!(held[0].size, [1280, 720]);
+        assert_eq!(held[0].from_output, "OUT-1");
+        // The same size again is a no-op.
+        lend_sized(&lends, &fake, DEVICE, "5", Some((1000, 600)));
+        assert_eq!(fake.calls().len(), 3);
+    }
+
+    #[test]
+    fn a_window_that_does_not_follow_leaves_the_screen_resized_and_answers() {
+        let mut fake = Fake::with(vec![seen("5", 1280, 720)]);
+        fake.fail_follow = true;
+        let lends = Lends::new();
+        lend_sized(&lends, &fake, DEVICE, "5", None);
+        let reply = lend_sized(&lends, &fake, DEVICE, "5", Some((1000, 600)));
+        assert!(reply.get("error").is_none(), "{reply}");
+        assert_eq!(reply["width"], 1000);
+        assert_eq!(lends.all().len(), 1, "still lent");
+    }
+
+    /// A resize is cosmetic: a screen that cannot be resized answers as it
+    /// is (its old size), no error, and the loan, the window and the borrower's
+    /// view stand.
+    #[test]
+    fn a_screen_that_cannot_be_resized_answers_as_it_is_and_the_loan_stands() {
+        let mut fake = Fake::with(vec![seen("5", 1280, 720)]);
+        fake.fail_resize = true;
+        let lends = Lends::new();
+        lend_sized(&lends, &fake, DEVICE, "5", None);
+        let reply = lend_sized(&lends, &fake, DEVICE, "5", Some((1000, 600)));
+        assert!(reply.get("error").is_none(), "{reply}");
+        assert_eq!(
+            (reply["width"].as_u64(), reply["height"].as_u64()),
+            (Some(1280), Some(720)),
+            "the size it has"
+        );
+        assert_eq!(reply["window"], "5");
+        assert!(!fake.calls().iter().any(|c| c.starts_with("follow")));
+        assert_eq!(lends.all().len(), 1);
+        assert_eq!(lends.all()[0].index, Some(1));
+        // Asked the same size again: tried again (nothing is remembered), and
+        // answered the same.
+        let again = lend_sized(&lends, &fake, DEVICE, "5", Some((1000, 600)));
+        assert_eq!(again["width"], 1280, "{again}");
+    }
+
+    /// Hyprland's rule can apply and the wait for the mode run out: the error
+    /// is not the answer, the screen is read again, its index (it may have
+    /// moved) and its new size are what the answer and the record say, and the
+    /// record that the lease check reads is saved, so the window is not
+    /// returned for a screen it is not on.
+    #[test]
+    fn a_resize_that_took_but_ran_out_of_wait_refreshes_the_index_and_the_record() {
+        let mut fake = Fake::with(vec![seen("5", 1280, 720)]);
+        fake.resize_late = true;
+        let lends = Lends::new();
+        lend_sized(&lends, &fake, DEVICE, "5", None);
+        assert_eq!(lends.all()[0].index, Some(1));
+        *fake.index.lock().unwrap() = Some(3);
+        let reply = lend_sized(&lends, &fake, DEVICE, "5", Some((1000, 600)));
+        assert!(reply.get("error").is_none(), "{reply}");
+        assert_eq!(reply["index"], 3);
+        assert_eq!(
+            (reply["width"].as_u64(), reply["height"].as_u64()),
+            (Some(1000), Some(600)),
+            "the mode did take"
+        );
+        assert_eq!(lends.all()[0].index, Some(3));
+        assert_eq!(fake.saved.lock().unwrap()[0].index, Some(3), "saved");
+        assert!(
+            fake.calls()
+                .contains(&"follow 5 on PD-0a1b2c3d-1 1000x600".to_string()),
+            "{:?}",
+            fake.calls()
+        );
+    }
+
+    #[test]
+    fn another_computer_cannot_resize_a_window_it_did_not_borrow() {
+        let fake = Fake::with(vec![seen("5", 1280, 720)]);
+        let lends = Lends::new();
+        lend_sized(&lends, &fake, DEVICE, "5", None);
+        let refused = lend_sized(&lends, &fake, "fedcba9876543210", "5", Some((900, 500)));
+        assert!(
+            refused["error"]
+                .as_str()
+                .unwrap()
+                .contains("Another computer"),
+            "{refused}"
+        );
+        assert_eq!(fake.calls().len(), 1, "{:?}", fake.calls());
+    }
+
+    #[test]
+    fn a_follow_that_moves_the_screens_index_keeps_the_record_current() {
+        let fake = Fake::with(vec![seen("5", 1280, 720)]);
+        let lends = Lends::new();
+        lend_sized(&lends, &fake, DEVICE, "5", None);
+        assert_eq!(lends.all()[0].index, Some(1));
+        *fake.index.lock().unwrap() = Some(3);
+        let reply = lend_sized(&lends, &fake, DEVICE, "5", Some((1000, 600)));
+        assert_eq!(reply["index"], 3);
+        assert_eq!(lends.all()[0].index, Some(3));
+        assert_eq!(fake.saved.lock().unwrap()[0].index, Some(3), "saved");
+    }
+
+    #[test]
+    fn the_sway_and_lua_commands_that_follow_a_resize_are_checked() {
+        let to = Output {
+            name: "HEADLESS-2".into(),
+            rect: Rect {
+                x: 1920,
+                y: 0,
+                width: 1000,
+                height: 600,
+            },
+        };
+        assert_eq!(
+            sway_follow(7, &to, 1000, 600).unwrap(),
+            [
+                "[con_id=7] resize set width 1000 px height 600 px",
+                "[con_id=7] move absolute position 1920 0"
+            ]
+        );
+        assert!(sway_follow(7, &to, 0, 600).is_none());
+        let odd = Output {
+            name: "X\"; exec true".into(),
+            ..to.clone()
+        };
+        assert!(sway_follow(7, &odd, 1000, 600).is_none(), "no odd name");
+        let refill = hypr_refill("0x1a2b").unwrap();
+        assert_eq!(refill.len(), 2);
+        assert!(refill[0].contains("fullscreen_state({ internal = 0, client = 0"));
+        assert!(refill[1].contains("fullscreen_state({ internal = 2, client = 0"));
+        for r in &refill {
+            assert!(r.starts_with("eval hl.dispatch("));
+            assert!(r.contains("address:0x1a2b"));
+        }
+        for bad in ["", "0x", "5", "0x1\")os.execute(\"true\")--"] {
+            assert!(hypr_refill(bad).is_none(), "{bad}");
+        }
     }
 
     #[test]
@@ -2541,11 +2984,17 @@ mod tests {
             fn drop_screen(&self, key: &str) {
                 self.0.drop_screen(key)
             }
+            fn resize_screen(&self, key: &str, width: u32, height: u32) -> Value {
+                self.0.resize_screen(key, width, height)
+            }
             fn output(&self, name: &str) -> Option<Output> {
                 self.0.output(name)
             }
             fn send(&self, lent: &Lent, to: &Output, w: u32, h: u32) -> std::io::Result<()> {
                 self.0.send(lent, to, w, h)
+            }
+            fn follow(&self, lent: &Lent, to: &Output, w: u32, h: u32) -> std::io::Result<()> {
+                self.0.follow(lent, to, w, h)
             }
             fn back(&self, lent: &Lent) -> std::io::Result<()> {
                 self.0.back(lent)
