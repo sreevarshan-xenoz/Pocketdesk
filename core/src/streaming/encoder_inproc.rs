@@ -672,7 +672,9 @@ mod tests {
     #[test]
     #[ignore]
     fn test_inprocess_encode_annexb_roundtrip() {
-        let mut encoder = InProcessEncoder::new(software_config(VideoCodec::H264)).unwrap();
+        // Periodic keyframes are the thing under test: smooth is the default.
+        let mut encoder =
+            InProcessEncoder::with_smooth(software_config(VideoCodec::H264), false).unwrap();
 
         let mut packets = Vec::new();
         for i in 0..70 {

@@ -54,7 +54,7 @@
 //! **Who may ask:** only a computer paired both ways ("both are mine"), with
 //! the Input permission (held to it before this runs, on a connection and on
 //! the link), and only while "Let my computers borrow my windows"
-//! (`lend_windows`, off by default) is on, for `lend` and `list` alike;
+//! (`lend_windows`, on by default) is on, for `lend` and `list` alike;
 //! taking a window back is never refused. Window ids are digits (Sway's container id) or `0x` and hex
 //! (Hyprland's address), and nothing else reaches a command or the Lua.
 //!
