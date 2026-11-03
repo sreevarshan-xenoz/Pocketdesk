@@ -51,10 +51,11 @@ pub struct Config {
     #[serde(default)]
     pub smooth_keyframes: bool,
     /// Copy the screen through memory, as every capture did before the
-    /// zero-copy capture: on a wlroots desktop with VA-API the compositor
-    /// renders into buffers on the graphics card and the encoder reads them
-    /// there, with no copy and no upload. Turn this on to go back to the
-    /// copy, if that picture ever misbehaves on a card or driver
+    /// zero-copy capture: on a wlroots desktop, and on GNOME and KDE through
+    /// PipeWire, with VA-API the compositor renders into buffers on the
+    /// graphics card and the encoder reads them there, with no copy and no
+    /// upload. Turn this on to go back to the copy, if that picture ever
+    /// misbehaves on a card or driver
     /// (`POCKETDESK_CAPTURE_COPY=1` does the same for one run). Off by
     /// default. The server reads it at its start.
     #[serde(default)]
