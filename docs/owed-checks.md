@@ -2,19 +2,19 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1355 open items.
+1358 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 96 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 97 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 200 |
 | A phone with a SIM | 40 |
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
-| A second computer | 200 |
+| A second computer | 201 |
 | A Linux desktop (the Azure VM serves for some) | 252 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 90 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 91 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
@@ -224,6 +224,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **278. A borrowed window takes the size of its window (resize follows the viewer, window handoff)**
 
 - The setting off with a window already borrowed: the open window stops following at once and keeps its size; turned back on, it follows the window's size again without reopening. (where: here)
+- The pointer locked, or the mic sent, in a borrowed window that is then resized (a tiling window manager, a keyboard shortcut): the lock stays and the mic carries on across the redial, with no click and no word on the bar. (where: here)
 
 **276. Smooth keyframes (low-latency window handoff, phase 1: no whole keyframe on a two second beat)**
 
@@ -1376,8 +1377,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A real second computer (the Windows app or the laptop's Linux app as the viewer, a Sway or Hyprland host): borrow a window, drag the viewing window's edge, maximise it, restore it, and the real window on the host follows each time with the text sharp (look at small text 1:1), the old picture scaled and undimmed meanwhile with no black frame, and the new picture in a moment (say how long it took on the home network). (where: second computer)
 - A real program with a minimum size (a browser, a terminal with its own steps of a character cell): asked for a size smaller than it takes, the host's window ends larger than the screen or at its own steps, the viewing picture shows what is there (scaled, letterboxed) and nothing loops asking again. (where: second computer)
-- The host on an older Pocketdesk (it ignores `width` and `height`): the borrowed window keeps its size, the viewing picture is scaled, and nothing is asked over and over. (where: second computer)
+- The host on an older Pocketdesk (it ignores `width` and `height`): the borrowed window keeps its size, the viewing picture is scaled, and after two asks nothing is asked again for that view (a reconnect carries no size). (where: second computer)
 - A short network gap or a drop while a resize is in flight: the view dials again, the host's screen keeps the last size asked, and the window there is not left at a size that does not match its screen. (where: second computer)
+- The viewer's server cannot reach the host just as a resize is asked (the link dropped for a moment): the view does not end; it tries again on the reconnect backoff and the window comes back at the new size. (where: second computer)
 
 **275. The other computer's pointer drawn here (local cursor, phase 2 of the window handoff)**
 
@@ -2262,6 +2264,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **278. A borrowed window takes the size of its window (resize follows the viewer, window handoff)**
 
 - Hyprland 0.56 as the host (never started on the Arch laptop beside the owner's session): the lent window fills its resized screen at once through the compositor's full screen, and `hypr_refill` (out of full screen and in again) puts one right that did not; the index a session captures it by is still right after the output is placed right of the others again (`j/monitors`, then the next view's dial). (where: other hardware)
+- A resize the host cannot do (Hyprland refuses the monitor rule, or the mode takes more than 2 s to show): the borrowed view stays up at the size it had, the window is not returned, a later resize is tried again, and the loan's capture index is right after it (the window is still there a minute later). (where: other hardware)
 
 **276. Smooth keyframes (low-latency window handoff, phase 1: no whole keyframe on a two second beat)**
 
