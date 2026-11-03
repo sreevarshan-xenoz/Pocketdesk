@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -713,6 +714,10 @@ pub struct ComputerRequest {
     /// second are taken in order (BK7 review M1). 0 in files from before.
     #[serde(default)]
     pub created_ms: u16,
+    /// This app's count of requests left, so two in one millisecond are
+    /// taken in the order they were left. 0 in files from before.
+    #[serde(default)]
+    pub seq: u64,
 }
 
 /// The computers and the last pairing. A missing or unreadable file is
@@ -735,6 +740,9 @@ pub fn try_read(state_dir: &Path) -> io::Result<ComputersFile> {
 /// The server's writes, one at a time. On Windows a contended save holds it up to
 /// about half a second (`atomic_file::replace` waits out another handle).
 static WRITING: Mutex<()> = Mutex::new(());
+
+/// The next request's [`ComputerRequest::seq`].
+static NEXT_SEQ: AtomicU64 = AtomicU64::new(1);
 
 /// Change the file under `change` (the server's side), written whole and
 /// owner-only, so a reader never sees it half-written. A file that does not
@@ -765,6 +773,7 @@ pub fn request(state_dir: &Path, ask: ComputerAsk, now_unix: u64) -> io::Result<
         ask,
         created_unix: now_unix,
         created_ms,
+        seq: NEXT_SEQ.fetch_add(1, Ordering::Relaxed),
     };
     let file = request_path(state_dir, &request.id)?;
     std::fs::create_dir_all(state_dir.join(COMPUTERS_DIR))?;
@@ -823,7 +832,7 @@ pub fn take_all(state_dir: &Path, now_unix: u64) -> Vec<ComputerRequest> {
             taken.push(request);
         }
     }
-    taken.sort_by_key(|r| (r.created_unix, r.created_ms));
+    taken.sort_by_key(|r| (r.created_unix, r.created_ms, r.seq));
     taken
 }
 
@@ -1145,11 +1154,12 @@ mod tests {
             },
             created_unix: 1,
             created_ms: 2,
+            seq: 3,
         })
         .unwrap();
         assert_eq!(
             wire,
-            serde_json::json!({"id": "a", "ask": "stop_view", "session_id": 9, "created_unix": 1, "created_ms": 2})
+            serde_json::json!({"id": "a", "ask": "stop_view", "session_id": 9, "created_unix": 1, "created_ms": 2, "seq": 3})
         );
         let asked: ComputerRequest =
             serde_json::from_str(r#"{"id":"a","ask":"view","device_id":"desk","created_unix":1}"#)
@@ -1302,6 +1312,48 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Two requests left in one millisecond (a fast machine opening and
+    /// closing the window picker) are taken in the order they were left.
+    #[test]
+    fn requests_in_one_millisecond_keep_their_order() {
+        let dir = temp_dir("one-ms");
+        let open = request(
+            &dir,
+            ComputerAsk::WindowsThere {
+                device_id: "desk".to_string(),
+            },
+            100,
+        )
+        .unwrap();
+        let close = request(
+            &dir,
+            ComputerAsk::CloseWindowsThere {
+                device_id: "desk".to_string(),
+            },
+            100,
+        )
+        .unwrap();
+        // Both files say the same millisecond, the open one with the later
+        // id, so neither the clock nor the directory's order can decide.
+        for (req, id) in [
+            (&open, "ffffffff-0000-4000-8000-000000000000"),
+            (&close, "00000000-0000-4000-8000-000000000000"),
+        ] {
+            let mut same = req.clone();
+            same.created_ms = 5;
+            std::fs::remove_file(request_path(&dir, &req.id).unwrap()).unwrap();
+            same.id = id.to_string();
+            std::fs::write(
+                request_path(&dir, id).unwrap(),
+                serde_json::to_string(&same).unwrap(),
+            )
+            .unwrap();
+        }
+        let asks: Vec<ComputerAsk> = take_all(&dir, 100).into_iter().map(|r| r.ask).collect();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(asks, [open.ask, close.ask]);
+    }
+
     /// BK7 review M1: requests left in one second are taken in the order
     /// they were left, by their milliseconds, so a window closed and opened
     /// again at once is not ended by its own Stop.
@@ -1408,11 +1460,12 @@ mod tests {
             },
             created_unix: 1,
             created_ms: 0,
+            seq: 0,
         })
         .unwrap();
         assert_eq!(
             wire,
-            serde_json::json!({"id": "a", "ask": "forget", "device_id": "desk", "created_unix": 1, "created_ms": 0})
+            serde_json::json!({"id": "a", "ask": "forget", "device_id": "desk", "created_unix": 1, "created_ms": 0, "seq": 0})
         );
     }
 
