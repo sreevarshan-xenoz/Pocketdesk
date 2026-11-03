@@ -92,6 +92,16 @@ fn drag_rules(config: &pocketdesk_core::local::config::Config) -> Rules {
     )
 }
 
+/// [`drag_rules`], or none while the settings read is `stale`: no new drag is
+/// read on settings that may be old, as the clipboard is not.
+fn drag_rules_now(config: &pocketdesk_core::local::config::Config, stale: bool) -> Rules {
+    if stale {
+        Rules::default()
+    } else {
+        drag_rules(config)
+    }
+}
+
 /// What Hyprland's window in front says for the gaming lock: full screen
 /// (Hyprland 0.42 and later say 2 for it, 3 with maximized too; 1 is only
 /// maximized) and its class as the program.
@@ -791,12 +801,10 @@ pub(super) fn drive<B: Backend>(
             quick_on = config.shared_input_low_latency;
             glue.pacer.set(quick_on);
             driver.set_clipboard(config.shared_input_clipboard && !stale);
-            // A window dragged across: like the clipboard, not on a stale read.
-            driver.set_drag(if stale {
-                Rules::default()
-            } else {
-                drag_rules(config)
-            });
+            // A window dragged across: new drags are not read on a stale read
+            // (like the clipboard), and what was handed over is kept through
+            // it ([`Driver::set_drag`]).
+            driver.set_drag(drag_rules_now(config, stale));
             glue.sound_on = config.shared_input_sound;
             let actions =
                 driver.set_game_lock(game_lock_on, config.shared_input_lock_programs.clone());
@@ -966,6 +974,25 @@ mod tests {
             "address": "0x1", "class": class, "fullscreen": fullscreen,
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn a_stale_settings_read_reads_no_new_drag_and_a_fresh_one_follows_the_settings() {
+        let config = pocketdesk_core::local::config::Config {
+            drag_windows_across: true,
+            lend_windows: true,
+            drag_window_trigger: "any".to_string(),
+            ..Default::default()
+        };
+        let fresh = drag_rules_now(&config, false);
+        assert!(fresh.on);
+        assert_eq!(
+            fresh.trigger,
+            crate::shared_input::drag_window::Trigger::Any
+        );
+        assert!(!drag_rules_now(&config, true).on, "no drag on old settings");
+        let off = pocketdesk_core::local::config::Config::default();
+        assert!(!drag_rules_now(&off, false).on, "off until asked");
     }
 
     #[test]

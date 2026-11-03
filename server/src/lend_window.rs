@@ -582,6 +582,8 @@ impl Lends {
             match settle(env, &lent) {
                 Ok(()) => {
                     self.forget(env, |l| l.window == lent.window);
+                    // Back, whichever way: nothing is left to drag back.
+                    crate::shared_input::drag_window::forget(&lent.device, &lent.window);
                     released.done.push(lent);
                 }
                 Err(e) => released.failed.push((lent, e)),
@@ -1351,7 +1353,18 @@ pub async fn answer(device: &str, body: &Value) -> Value {
             return error(why);
         }
         match (action.as_str(), window.as_deref()) {
-            ("lend", Some(window)) => lend_sized(lends(), &Live, &device, window, size),
+            ("lend", Some(window)) => {
+                // A window dragged back before this lend was asked for stays
+                // where it is: its offer was withdrawn.
+                if crate::shared_input::drag_window::offer_withdrawn(&device, window) {
+                    return error("That window was dragged back before it was lent");
+                }
+                let reply = lend_sized(lends(), &Live, &device, window, size);
+                if reply.get("error").is_none() {
+                    crate::shared_input::drag_window::note_lent(&device, window);
+                }
+                reply
+            }
             ("lend", None) => error("no window named"),
             ("list", _) => list_with(lends(), &Live, &device),
             ("return", window) => return_with(lends(), &Live, &device, window),

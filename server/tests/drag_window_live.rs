@@ -32,7 +32,7 @@ use pocketdesk_core::local::computers::{self, PeerComputer};
 use pocketdesk_core::local::paths::TRUST_FILE;
 use pocketdesk_core::protocol::kdeconnect::TrustStore;
 use pocketdesk_server::hyprland::HyprWindow;
-use pocketdesk_server::shared_input::drag_window::{self, Handover, Why};
+use pocketdesk_server::shared_input::drag_window::{self, Handover, Return, Why};
 use pocketdesk_server::shared_input::wire::Screen;
 use pocketdesk_server::{lend_window, sway_tree, virtual_screen};
 use serde_json::{Value, json};
@@ -320,13 +320,31 @@ fn a_floating_window_at_the_edge_is_picked_and_dragged_back_where_the_pointer_ca
         width: 2560,
         height: 1440,
     };
-    runtime.block_on(drag_window::hand_over(Handover {
-        to: BORROWER.to_string(),
-        crossed_at: crossed,
-        drop_at: (1000, 700),
-        screen,
-    }));
-    std::thread::sleep(Duration::from_millis(500));
+    // Meanwhile the pointer comes back over the edge with the window's button
+    // held, before the other computer has borrowed the window (the offer is
+    // still waiting for its answer): the offer is withdrawn, never a silent
+    // success, and the lend its app would ask next is refused.
+    runtime.block_on(async {
+        let offer = tokio::spawn(drag_window::hand_over(Handover {
+            to: BORROWER.to_string(),
+            crossed_at: crossed,
+            drop_at: (1000, 700),
+            screen,
+        }));
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        drag_window::bring_back(Return {
+            from: BORROWER.to_string(),
+            at: (home.x + 5, rect[1] + 60),
+            screen: Screen {
+                x: home.x,
+                y: home.y,
+                width: u32::try_from(home.width).unwrap(),
+                height: u32::try_from(home.height).unwrap(),
+            },
+        })
+        .await;
+        offer.await.unwrap();
+    });
     assert_eq!(
         container(pid),
         Some(rect),
@@ -338,6 +356,36 @@ fn a_floating_window_at_the_edge_is_picked_and_dragged_back_where_the_pointer_ca
     );
     let there = window_of(pid).unwrap();
     assert_eq!(there.workspace.name, first.workspace.name);
+    let refused = ask(
+        &runtime,
+        BORROWER,
+        json!({ "action": "lend", "id": 1, "window": first.address }),
+    );
+    assert!(
+        refused["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("dragged back")),
+        "{refused}"
+    );
+    assert!(
+        !state.join(lend_window::STATE_FILE).exists(),
+        "a refused lend lends nothing"
+    );
+    assert_eq!(container(pid), Some(rect));
+    // A drag back of a window nobody handed over asks no one and moves
+    // nothing, and the window is lent as any borrow lends it (once: the
+    // refusal was one).
+    runtime.block_on(drag_window::bring_back(Return {
+        from: BORROWER.to_string(),
+        at: (home.x + 5, rect[1] + 60),
+        screen: Screen {
+            x: home.x,
+            y: home.y,
+            width: u32::try_from(home.width).unwrap(),
+            height: u32::try_from(home.height).unwrap(),
+        },
+    }));
+    assert_eq!(container(pid), Some(rect));
 
     // The other computer borrows it (the ask its view makes), and the window
     // is dragged back over the edge: it goes home with its container's top

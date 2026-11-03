@@ -482,33 +482,206 @@ fn offer_taken(answer: &Result<Value, String>) -> Result<(), String> {
         .collect())
 }
 
-/// A window handed over and not yet taken back.
-#[derive(Debug, Clone)]
+/// A window handed over, and where it stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Dragged {
     window: String,
     grab: (i32, i32),
     size: (i32, i32),
+    /// When it was offered or, once lent, when it was.
     at: Instant,
+    /// This computer lent it to the other (its `lend` was answered): before
+    /// that the window is only offered, and has not moved.
+    lent: bool,
 }
 
-/// How long a window handed over may be dragged back: after this the
-/// ordinary rules of a lend (its borrower, the lease) are all that holds it.
-const BACK_WITHIN: Duration = Duration::from_secs(6 * 3600);
+/// How long an offer may wait for the other computer to borrow the window:
+/// the app opens the view within a second or two, its `lend` follows.
+const PENDING_FOR: Duration = Duration::from_secs(30);
 
-/// What was handed over, by the computer it went to.
-fn dragged() -> &'static Mutex<HashMap<String, Dragged>> {
-    static DRAGGED: std::sync::LazyLock<Mutex<HashMap<String, Dragged>>> =
-        std::sync::LazyLock::new(Default::default);
-    &DRAGGED
+/// How long a window lent after a drag may be dragged back. A lend ends by
+/// itself (its view closing, its lease, the switch), and ends this with it
+/// ([`forget`]); this is only the cap on a record nothing ended.
+const BACK_WITHIN: Duration = Duration::from_secs(3600);
+
+/// How long a withdrawn offer's window is refused a lend (one lend, once).
+const WITHDRAWN_FOR: Duration = Duration::from_secs(30);
+
+impl Dragged {
+    fn expired(&self, now: Instant) -> bool {
+        let keep = if self.lent { BACK_WITHIN } else { PENDING_FOR };
+        now.saturating_duration_since(self.at) >= keep
+    }
 }
 
-/// The window handed to `device`, taken off the list (once).
-fn take_dragged(device: &str) -> Option<Dragged> {
-    let found = dragged()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .remove(device)?;
-    (found.at.elapsed() < BACK_WITHIN).then_some(found)
+/// What a drag back finds for the computer the pointer comes from.
+#[derive(Debug, PartialEq, Eq)]
+enum Plan {
+    /// No window was handed over there, or its record is old.
+    Nothing,
+    /// A window was offered there and not lent yet: the offer is withdrawn.
+    Withdrawn(String),
+    /// A window was lent after a drag: the other computer is asked whether
+    /// its view of it is the one being dragged.
+    Ask(Dragged),
+}
+
+/// What a drag back did to a window lent after a drag.
+#[derive(Debug, PartialEq, Eq)]
+enum Finished {
+    /// It is home.
+    Home,
+    /// It is not lent to that computer any more: nothing to return.
+    Gone,
+    /// It would not go back: still lent, and the record kept for another try.
+    Retry,
+}
+
+/// The windows handed to other computers, one for each computer, and the
+/// offers withdrawn before they were lent.
+#[derive(Default)]
+struct Handed {
+    by_device: Mutex<HashMap<String, Dragged>>,
+    withdrawn: Mutex<Vec<(String, String, Instant)>>,
+}
+
+impl Handed {
+    fn all(&self) -> std::sync::MutexGuard<'_, HashMap<String, Dragged>> {
+        self.by_device.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// `window` is offered to `device`, before the offer is sent: a drag
+    /// back that comes before the other computer has lent it finds it.
+    fn offered(
+        &self,
+        device: &str,
+        window: &str,
+        grab: (i32, i32),
+        size: (i32, i32),
+        now: Instant,
+    ) {
+        self.all().insert(
+            device.to_string(),
+            Dragged {
+                window: window.to_string(),
+                grab,
+                size,
+                at: now,
+                lent: false,
+            },
+        );
+    }
+
+    /// The offer of `window` to `device` was not taken: it was never handed
+    /// over. A window already lent, or another one, is not this offer's.
+    fn dropped(&self, device: &str, window: &str) {
+        let mut all = self.all();
+        if all
+            .get(device)
+            .is_some_and(|d| d.window == window && !d.lent)
+        {
+            all.remove(device);
+        }
+    }
+
+    /// This computer lent `window` to `device`. Whether it is the one handed
+    /// over there (a lend for a window nobody dragged there is none).
+    fn lent(&self, device: &str, window: &str, now: Instant) -> bool {
+        match self.all().get_mut(device) {
+            Some(d) if d.window == window => {
+                d.lent = true;
+                d.at = now;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// `window`'s lend to `device` ended (it was returned, closed, swept):
+    /// no drag back of it is left.
+    fn forget(&self, device: &str, window: &str) {
+        let mut all = self.all();
+        if all.get(device).is_some_and(|d| d.window == window) {
+            all.remove(device);
+        }
+    }
+
+    /// The pointer came back from `device` with the window's button held.
+    fn plan(&self, device: &str, now: Instant) -> Plan {
+        let mut all = self.all();
+        let Some(was) = all.get(device).cloned() else {
+            return Plan::Nothing;
+        };
+        if was.expired(now) {
+            all.remove(device);
+            return Plan::Nothing;
+        }
+        if was.lent {
+            return Plan::Ask(was);
+        }
+        // Dragged back before the other computer borrowed it: nothing has
+        // moved, and nothing will, for the lend it is about to ask is refused.
+        all.remove(device);
+        drop(all);
+        let mut withdrawn = self.withdrawn.lock().unwrap_or_else(|e| e.into_inner());
+        withdrawn.retain(|(_, _, at)| now.saturating_duration_since(*at) < WITHDRAWN_FOR);
+        withdrawn.push((device.to_string(), was.window.clone(), now));
+        Plan::Withdrawn(was.window)
+    }
+
+    /// Whether `device`'s lend of `window` is refused because its offer was
+    /// withdrawn (once: the next lend of it, from a picker, is its own).
+    fn refuses(&self, device: &str, window: &str, now: Instant) -> bool {
+        let mut withdrawn = self.withdrawn.lock().unwrap_or_else(|e| e.into_inner());
+        withdrawn.retain(|(_, _, at)| now.saturating_duration_since(*at) < WITHDRAWN_FOR);
+        match withdrawn
+            .iter()
+            .position(|(d, w, _)| d == device && w == window)
+        {
+            Some(i) => {
+                withdrawn.remove(i);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// What the compositor's answer to the return says of the record.
+    fn finish(&self, device: &str, window: &str, reply: &Value) -> Finished {
+        if reply.get("error").is_some() {
+            // Still lent: dragged again, or returned by closing its view.
+            return Finished::Retry;
+        }
+        self.forget(device, window);
+        if reply.get("returned").and_then(Value::as_u64).unwrap_or(0) >= 1 {
+            Finished::Home
+        } else {
+            Finished::Gone
+        }
+    }
+}
+
+/// The windows handed to the other computers.
+fn handed() -> &'static Handed {
+    static HANDED: std::sync::LazyLock<Handed> = std::sync::LazyLock::new(Handed::default);
+    &HANDED
+}
+
+/// This computer lent `window` to `device` (the lend answered): if it is the
+/// one just handed over there, it may now be dragged back.
+pub fn note_lent(device: &str, window: &str) {
+    handed().lent(device, window, Instant::now());
+}
+
+/// The lend of `window` to `device` is over: it cannot be dragged back.
+pub fn forget(device: &str, window: &str) {
+    handed().forget(device, window);
+}
+
+/// Whether the lend of `window` to `device` is refused because the window
+/// was dragged back before it was lent, said once.
+pub fn offer_withdrawn(device: &str, window: &str) -> bool {
+    handed().refuses(device, window, Instant::now())
 }
 
 /// What deciding a handover needs of this computer.
@@ -602,30 +775,30 @@ pub async fn hand_over(h: Handover) {
             return;
         }
     };
-    // The other computer answers whether it took the offer: only then is the
-    // window handed over (an offer it dropped, or never heard, is not).
+    // Recorded before it is sent, so a drag back that comes first finds it;
+    // the other computer answers whether it took the offer, and one it
+    // dropped, or never heard, is struck off again.
+    let size = (picked.rect[2], picked.rect[3]);
+    handed().offered(&h.to, &picked.id, picked.grab, size, Instant::now());
     let answer = crate::fit_screen::ask_body(&h.to, offer.body()).await;
-    if note_handed(&answer, &h.to, &picked) {
+    if settle_offer(handed(), &answer, &h.to, &picked.id) {
         tracing::info!("Shared input: a dragged window is taken by the computer the pointer is on");
     }
 }
 
-/// The offer's `answer` came: the window is recorded as handed to `device`
-/// only if it was taken there. Whether it was.
-fn note_handed(answer: &Result<Value, String>, device: &str, picked: &Picked) -> bool {
+/// The offer's `answer` came: a window the other computer did not take was
+/// never handed over, and its record goes. Whether it was taken.
+fn settle_offer(
+    handed: &Handed,
+    answer: &Result<Value, String>,
+    device: &str,
+    window: &str,
+) -> bool {
     if let Err(why) = offer_taken(answer) {
         tracing::debug!("Shared input: a dragged window was not taken there: {why}");
+        handed.dropped(device, window);
         return false;
     }
-    dragged().lock().unwrap_or_else(|e| e.into_inner()).insert(
-        device.to_string(),
-        Dragged {
-            window: picked.id.clone(),
-            grab: picked.grab,
-            size: (picked.rect[2], picked.rect[3]),
-            at: Instant::now(),
-        },
-    );
     true
 }
 
@@ -639,31 +812,64 @@ pub struct Return {
     pub screen: Screen,
 }
 
-/// The window handed to `r.from` goes home, with the pointer where it comes
-/// in at the same place in it, and the view of it there ends.
+/// Whether the other computer's answer to the ask `drag_back` says its view of
+/// the window is the one being dragged.
+fn confirmed(answer: &Result<Value, String>) -> bool {
+    matches!(answer, Ok(body)
+        if body.get("error").is_none()
+            && body.get("drag_back").and_then(Value::as_str) == Some("yes"))
+}
+
+/// The pointer came back from `r.from` with the window's button held. The
+/// window handed to that computer goes home, with the pointer where it comes
+/// in at the same place in it, and the view of it there ends, only when that
+/// computer says its view of that window is the one being dragged: a text or
+/// a file dragged back, or another window, is no business of the window
+/// handed over. One offered and not yet lent is withdrawn instead (nothing
+/// has moved; the lend it would ask is refused).
 pub async fn bring_back(r: Return) {
-    let Some(was) = take_dragged(&r.from) else {
-        tracing::debug!("Shared input: nothing was handed over there to bring back");
-        return;
+    let was = match handed().plan(&r.from, Instant::now()) {
+        Plan::Nothing => {
+            tracing::debug!("Shared input: nothing was handed over there to bring back");
+            return;
+        }
+        Plan::Withdrawn(_) => {
+            tracing::info!(
+                "Shared input: dragged back before it was lent: the offered window stays"
+            );
+            return;
+        }
+        Plan::Ask(was) => was,
     };
+    let ask = crate::fit_screen::ask_body(
+        &r.from,
+        json!({ "action": "drag_back", "window": was.window }),
+    )
+    .await;
+    if !confirmed(&ask) {
+        tracing::debug!("Shared input: not the window handed over that was dragged back");
+        return;
+    }
     let (x, y) = place(&r.screen, r.at, was.grab, was.size);
     let (device, window) = (r.from.clone(), was.window.clone());
     let back = tokio::task::spawn_blocking(move || {
         crate::lend_window::return_dragged(&device, &window, [x, y])
     })
     .await;
-    match back {
-        Ok(answer) if answer.get("error").is_none() => {
+    let finished = match &back {
+        Ok(reply) => handed().finish(&r.from, &was.window, reply),
+        Err(_) => Finished::Retry,
+    };
+    match finished {
+        Finished::Home => {
             tracing::info!("Shared input: a dragged window went home");
             crate::lend_window::tell_returned(&r.from, &was.window).await;
         }
-        _ => {
+        Finished::Gone => {
+            tracing::debug!("Shared input: the window was not lent there any more");
+        }
+        Finished::Retry => {
             tracing::warn!("Shared input: a dragged window could not be brought home");
-            // Still lent: dragged again, or returned by closing its view.
-            dragged()
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .insert(r.from, was);
         }
     }
 }
@@ -1626,13 +1832,8 @@ mod tests {
 
     #[test]
     fn only_an_acknowledged_offer_is_a_window_handed_over() {
-        let picked = Picked {
-            id: "0xaa".into(),
-            title: String::new(),
-            rect: [0, 0, 800, 600],
-            grab: (3, 4),
-        };
-        let handed = |device: &str| dragged().lock().unwrap().contains_key(device);
+        let handed = Handed::default();
+        let t = at(0);
         let no_link: Result<Value, String> = Err("it was not asked: no link to it".into());
         let refused = Ok(json!({ "id": 1, "drag_window_ack": false, "reason": "off" }));
         let silent = Ok(json!({ "id": 1 }));
@@ -1641,19 +1842,37 @@ mod tests {
             ("ack-refused", refused),
             ("ack-silent", silent),
         ] {
-            assert!(!note_handed(&answer, device, &picked), "{device}");
+            // Recorded as it is sent, struck off when it was not taken.
+            handed.offered(device, "0xaa", (3, 4), (800, 600), t);
+            assert!(handed.all().contains_key(device));
+            assert!(!settle_offer(&handed, &answer, device, "0xaa"), "{device}");
             assert!(
-                !handed(device),
+                !handed.all().contains_key(device),
                 "{device}: an offer not taken is not recorded"
             );
         }
         let yes = Ok(json!({ "id": 1, "drag_window_ack": true }));
-        assert!(note_handed(&yes, "ack-taken", &picked));
-        assert!(handed("ack-taken"));
-        take_dragged("ack-taken");
+        handed.offered("ack-taken", "0xaa", (3, 4), (800, 600), t);
+        assert!(settle_offer(&handed, &yes, "ack-taken", "0xaa"));
+        assert!(handed.all().contains_key("ack-taken"));
         // The reason is a short word, flattened for the log.
         let sly = Ok(json!({ "drag_window_ack": false, "reason": "a\nb\u{202E}c; rm -rf /" }));
         assert_eq!(offer_taken(&sly).unwrap_err(), "abc rm -rf ");
+    }
+
+    #[test]
+    fn a_refused_offer_does_not_strike_off_another_window_or_one_already_lent() {
+        let handed = Handed::default();
+        handed.offered("desk", "0xaa", (0, 0), (800, 600), at(0));
+        assert!(handed.lent("desk", "0xaa", at(1_000)));
+        handed.dropped("desk", "0xaa");
+        assert!(
+            handed.all().contains_key("desk"),
+            "a window already lent is not undone by a late no"
+        );
+        handed.offered("desk", "0xbb", (0, 0), (800, 600), at(2_000));
+        handed.dropped("desk", "0xaa");
+        assert_eq!(handed.all()["desk"].window, "0xbb", "another window's");
     }
 
     #[test]
@@ -1715,22 +1934,117 @@ mod tests {
 
     // ---- what was handed over ----
 
+    fn lent_to(handed: &Handed, device: &str, window: &str) {
+        handed.offered(device, window, (3, 4), (800, 600), at(0));
+        assert!(handed.lent(device, window, at(500)));
+    }
+
     #[test]
-    fn a_window_handed_over_is_taken_back_once() {
-        let mut map = dragged().lock().unwrap();
-        map.insert(
-            "taken-back".to_string(),
-            Dragged {
-                window: "0xaa".into(),
-                grab: (3, 4),
-                size: (800, 600),
-                at: Instant::now(),
-            },
+    fn a_drag_back_of_something_else_leaves_the_window_handed_over_alone() {
+        let handed = Handed::default();
+        lent_to(&handed, "desk", "0xaa");
+        // Every crossing home with the button held asks the other computer,
+        // and its answer decides: no, or no answer, takes nothing.
+        for _ in 0..3 {
+            assert!(matches!(handed.plan("desk", at(1_000)), Plan::Ask(_)));
+        }
+        for no in [
+            Ok(json!({ "drag_back": "no" })),
+            Ok(json!({ "error": "not a window" })),
+            Ok(json!({ "drag_back": "yes", "error": "x" })),
+            Ok(json!({})),
+            Err("it did not answer".to_string()),
+        ] {
+            assert!(!confirmed(&no), "{no:?}");
+        }
+        assert!(confirmed(&Ok(json!({ "id": 3, "drag_back": "yes" }))));
+        assert!(
+            matches!(handed.plan("desk", at(2_000)), Plan::Ask(_)),
+            "still handed over: nothing was consumed"
         );
-        drop(map);
-        let got = take_dragged("taken-back").unwrap();
-        assert_eq!((got.window.as_str(), got.grab), ("0xaa", (3, 4)));
-        assert!(take_dragged("taken-back").is_none(), "once");
-        assert!(take_dragged("never-handed-over").is_none());
+        // Nothing was handed to another computer.
+        assert_eq!(handed.plan("lap", at(2_000)), Plan::Nothing);
+    }
+
+    #[test]
+    fn a_drag_back_before_the_lend_withdraws_the_offer_and_refuses_that_lend_once() {
+        let handed = Handed::default();
+        handed.offered("desk", "0xaa", (3, 4), (800, 600), at(0));
+        // The pointer is back before the other computer lent the window.
+        assert_eq!(
+            handed.plan("desk", at(400)),
+            Plan::Withdrawn("0xaa".to_string())
+        );
+        assert!(handed.all().is_empty(), "nothing left to drag back");
+        // The lend its app was about to ask is refused, with a reason, once.
+        assert!(handed.refuses("desk", "0xaa", at(900)));
+        assert!(!handed.refuses("desk", "0xaa", at(901)), "once");
+        // A lend that came first is no lend of a handed over window now.
+        assert!(!handed.lent("desk", "0xaa", at(1_000)));
+        // Another window, or computer, was not withdrawn.
+        handed.offered("desk", "0xaa", (3, 4), (800, 600), at(2_000));
+        assert_eq!(
+            handed.plan("desk", at(2_100)),
+            Plan::Withdrawn("0xaa".to_string())
+        );
+        assert!(!handed.refuses("desk", "0xbb", at(2_200)));
+        assert!(!handed.refuses("lap", "0xaa", at(2_200)));
+        // A withdrawal does not outlive its offer.
+        assert!(!handed.refuses("desk", "0xaa", at(2_100) + WITHDRAWN_FOR));
+    }
+
+    #[test]
+    fn a_return_that_failed_is_asked_again_and_a_return_of_nothing_is_no_success() {
+        let handed = Handed::default();
+        lent_to(&handed, "desk", "0xaa");
+        let failed = json!({ "error": "Could not put a window back: busy", "returned": 0 });
+        assert_eq!(handed.finish("desk", "0xaa", &failed), Finished::Retry);
+        assert!(
+            matches!(handed.plan("desk", at(1_000)), Plan::Ask(_)),
+            "kept for another drag"
+        );
+        let home = json!({ "returned": 1 });
+        assert_eq!(handed.finish("desk", "0xaa", &home), Finished::Home);
+        assert_eq!(handed.plan("desk", at(1_100)), Plan::Nothing, "once");
+        // Nothing lent there any more: not told as a window gone home.
+        lent_to(&handed, "desk", "0xbb");
+        let none = json!({ "returned": 0 });
+        assert_eq!(handed.finish("desk", "0xbb", &none), Finished::Gone);
+        assert_eq!(handed.plan("desk", at(1_200)), Plan::Nothing);
+    }
+
+    #[test]
+    fn a_lend_that_ended_or_an_old_record_leaves_no_drag_back() {
+        let handed = Handed::default();
+        lent_to(&handed, "desk", "0xaa");
+        // The view closed (or the window was closed): the lend is over.
+        handed.forget("desk", "0xbb");
+        assert!(handed.all().contains_key("desk"), "another window's end");
+        handed.forget("lap", "0xaa");
+        assert!(handed.all().contains_key("desk"), "another computer's");
+        handed.forget("desk", "0xaa");
+        assert_eq!(handed.plan("desk", at(1_000)), Plan::Nothing);
+        // An offer nobody lent in time is gone, and so is a lend's record.
+        handed.offered("desk", "0xcc", (0, 0), (800, 600), at(0));
+        assert_eq!(handed.plan("desk", at(0) + PENDING_FOR), Plan::Nothing);
+        lent_to(&handed, "desk", "0xdd");
+        assert!(matches!(
+            handed.plan("desk", at(500) + BACK_WITHIN - Duration::from_secs(1)),
+            Plan::Ask(_)
+        ));
+        assert_eq!(handed.plan("desk", at(500) + BACK_WITHIN), Plan::Nothing);
+        assert!(BACK_WITHIN <= Duration::from_secs(3600));
+    }
+
+    #[test]
+    fn only_the_window_handed_over_is_marked_lent() {
+        let handed = Handed::default();
+        assert!(!handed.lent("desk", "0xaa", at(0)), "nothing was offered");
+        handed.offered("desk", "0xaa", (0, 0), (800, 600), at(0));
+        assert!(!handed.lent("desk", "0xbb", at(10)), "another window");
+        assert!(!handed.lent("lap", "0xaa", at(10)), "another computer");
+        assert!(!handed.all()["desk"].lent);
+        assert!(handed.lent("desk", "0xaa", at(10)));
+        assert!(handed.all()["desk"].lent);
     }
 }

@@ -258,8 +258,10 @@ pub struct Driver {
     drag: Rules,
     /// What this visit shows of a drag under way as the pointer crossed.
     evidence: Evidence,
-    /// The computer a window was last handed to: dragging one back from it
-    /// brings it home.
+    /// The computer a window was last offered to: only a drag home from it
+    /// can be a window dragged back. The windows handed over, and whether one
+    /// is the dragged one, are [`drag_window`]'s to say; this only keeps a
+    /// crossing home that is none of them from asking.
     handed_to: Option<String>,
 }
 
@@ -300,10 +302,9 @@ impl Driver {
     /// told (`drag_windows_across` and `lend_windows` on, `drag_window_trigger`).
     /// Read again as the settings are.
     pub fn set_drag(&mut self, rules: Rules) {
+        // What was handed over stays handed over through a setting read
+        // that is stale or briefly off: the way back is not lost with it.
         self.drag = rules;
-        if !rules.on {
-            self.handed_to = None;
-        }
     }
 
     /// Whether the clipboard follows the mouse (`shared_input_clipboard`):
@@ -657,7 +658,9 @@ impl Driver {
 
     /// The pointer is about to come home at `at` from `away`: when the left
     /// button is held (and the window-move modifier, as the trigger asks)
-    /// and a window was handed to that computer, it is dragged back.
+    /// and a window was offered to that computer, a window may be dragged
+    /// back: [`drag_window::bring_back`] asks that computer whether it is,
+    /// and takes the window home only if it says so.
     fn drag_back(&mut self, away: &Away, at: (i32, i32)) -> Option<Action> {
         if !self.drag.on || self.handed_to.as_deref() != Some(away.to.as_str()) {
             return None;
@@ -669,7 +672,6 @@ impl Driver {
             return None;
         }
         let screen = self.screen_at(&self.this, at)?;
-        self.handed_to = None;
         Some(Action::DragBack(Return {
             from: away.to.clone(),
             at,
@@ -3397,13 +3399,40 @@ mod tests {
         d.set_drag(Rules::default());
         let home = d.on(moved(PARK.0 - 300, PARK.1));
         assert!(returns(&home).is_empty());
-        // A window comes back once: the next crossing home is plain.
+    }
+
+    #[test]
+    fn a_return_that_failed_can_be_dragged_again_and_a_stale_read_keeps_the_hand_over() {
+        // The driver does not forget a hand over as it asks for the window
+        // back (a return that failed is tried by the next drag home): what
+        // was handed over, and whether this is it, is the other side's to
+        // say ([`drag_window::bring_back`]).
         let mut d = crossed_with(Trigger::Any);
         d.on(button(0, false));
         d.on(button(0, true));
         assert_eq!(returns(&d.on(moved(PARK.0 - 300, PARK.1))).len(), 1);
         d.on(edge_right());
         d.on(button(0, true));
-        assert!(returns(&d.on(moved(PARK.0 - 300, PARK.1))).is_empty());
+        assert_eq!(
+            returns(&d.on(moved(PARK.0 - 300, PARK.1))).len(),
+            1,
+            "asked again"
+        );
+        // A read of the settings that is stale, or says off a moment, and
+        // then on again: the window handed over can still be dragged back.
+        d.on(edge_right());
+        d.set_drag(Rules::default());
+        d.on(button(0, true));
+        assert!(
+            returns(&d.on(moved(PARK.0 - 300, PARK.1))).is_empty(),
+            "off: nothing is asked for"
+        );
+        d.on(edge_right());
+        d.set_drag(Rules {
+            on: true,
+            trigger: Trigger::Any,
+        });
+        d.on(button(0, true));
+        assert_eq!(returns(&d.on(moved(PARK.0 - 300, PARK.1))).len(), 1);
     }
 }
