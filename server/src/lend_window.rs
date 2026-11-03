@@ -926,7 +926,7 @@ pub fn return_dragged(device: &str, window: &str, origin: [i32; 2]) -> Value {
     if !is_window_id(window) {
         return error("not a window");
     }
-    return_dragged_with(lends(), live(), device, window, origin)
+    return_dragged_with(lends(), here(), device, window, origin)
 }
 
 /// Why `device` may not borrow a window now, as a `lend` would refuse it:
@@ -962,7 +962,7 @@ pub fn give_back_for_output(output: &str) -> bool {
     if !lends().all().iter().any(|l| l.output == output) {
         return true;
     }
-    let failed = give_back_output_with(lends(), live(), output);
+    let failed = give_back_output_with(lends(), here(), output);
     for lent in &failed {
         crate::virtual_screen::keep_for_lend(&lent.key(), &lent.output);
     }
@@ -1002,7 +1002,7 @@ pub fn return_left_over() -> Vec<String> {
             continue;
         }
         tracing::info!("Putting back a window a stopped server left lent");
-        match settle(live(), &lent) {
+        match settle(here(), &lent) {
             Ok(()) => {
                 crate::virtual_screen::remove(&lent.output);
                 removed.push(lent.output);
@@ -1018,7 +1018,7 @@ pub fn return_left_over() -> Vec<String> {
         WATCH_NOTE.notify_one();
     }
     all.extend(kept);
-    if let Err(e) = live().save(&all) {
+    if let Err(e) = here().save(&all) {
         tracing::warn!("Could not write the list of lent windows: {e}");
     }
     removed
@@ -1031,9 +1031,9 @@ pub async fn return_all_on_stop() {
     let work = || {
         let lends = lends();
         let _one = lends.one.lock().unwrap_or_else(|e| e.into_inner());
-        let released = lends.put_back(live(), |_| true);
+        let released = lends.put_back(here(), |_| true);
         for lent in &released.done {
-            live().drop_screen(&lent.key());
+            here().drop_screen(&lent.key());
         }
         for (_, e) in &released.failed {
             tracing::warn!("Could not put a lent window back at stop: {e}");
@@ -1240,7 +1240,7 @@ pub fn sweep_once(enabled: bool, live: &[String], looks: &mut Looks) -> usize {
     };
     // A window lent a moment ago is judged as one lent a while ago.
     let now = Instant::now() + NEWLY_LENT;
-    sweep_with(lends(), live(), enabled, &present, looks, now).len()
+    sweep_with(lends(), here(), enabled, &present, looks, now).len()
 }
 
 /// Tell the computer a window was lent to that it is gone, if the way to it
@@ -1313,7 +1313,7 @@ where
             };
             let ended = sweep_with(
                 lends(),
-                live(),
+                here(),
                 looking,
                 &present,
                 &mut looks,
@@ -1380,15 +1380,15 @@ pub async fn answer(device: &str, body: &Value) -> Value {
                 if crate::shared_input::drag_window::offer_withdrawn(&device, window) {
                     return error("That window was dragged back before it was lent");
                 }
-                let reply = lend_sized(lends(), live(), &device, window, size);
+                let reply = lend_sized(lends(), here(), &device, window, size);
                 if reply.get("error").is_none() {
                     crate::shared_input::drag_window::note_lent(&device, window);
                 }
                 reply
             }
             ("lend", None) => error("no window named"),
-            ("list", _) => list_with(lends(), live(), &device),
-            ("return", window) => return_with(lends(), live(), &device, window),
+            ("list", _) => list_with(lends(), here(), &device),
+            ("return", window) => return_with(lends(), here(), &device, window),
             _ => error("unknown action"),
         }
     })
@@ -1514,7 +1514,7 @@ fn sway_sized(id: i64, to: &Output, width: u32, height: u32) -> std::io::Result<
 /// What lending runs against: this computer's compositor (Sway or Hyprland),
 /// or, on Windows, its desktop ([`desktop`]).
 #[cfg(windows)]
-fn live() -> &'static dyn Env {
+fn here() -> &'static dyn Env {
     static DESKTOP: std::sync::OnceLock<desktop::WinEnv<win32::Win32>> = std::sync::OnceLock::new();
     DESKTOP.get_or_init(|| desktop::WinEnv::new(win32::Win32))
 }
@@ -1522,7 +1522,7 @@ fn live() -> &'static dyn Env {
 /// What lending runs against: this computer's compositor (Sway or Hyprland),
 /// or, on Windows, its desktop ([`desktop`]).
 #[cfg(not(windows))]
-fn live() -> &'static dyn Env {
+fn here() -> &'static dyn Env {
     &Live
 }
 

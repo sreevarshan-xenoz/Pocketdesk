@@ -981,7 +981,7 @@ mod tests {
     }
 
     #[test]
-    fn a_maximised_window_is_restored_to_be_sized_and_goes_back_maximised() {
+    fn a_maximised_window_is_lent_as_it_is_and_goes_back_maximised() {
         let _turn = serial();
         let hwnd = 0x8108;
         let (lends, env) = setup(hwnd);
