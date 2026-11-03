@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use tracing::{debug, info, warn};
 
-use super::{ModifierProp, Step, decide};
+use super::{Disposition, ModifierProp, Step, decide, disposition};
 use crate::streaming::StreamingConfig;
 use crate::streaming::dmabuf::{
     self, DRM_FORMAT_XRGB8888, DmaBuf, Gbm, GpuFrame, MOD_INVALID, MOD_LINEAR,
@@ -199,7 +199,9 @@ impl PwDma {
         match &step {
             Step::Memory => st.modifier = None,
             Step::Ready(m) => st.modifier = Some(*m),
-            Step::Fixate(_) => {}
+            // The renegotiation's old modifier must not outlive it: until
+            // the fixed format comes back nothing is negotiated.
+            Step::Fixate(_) => st.modifier = None,
             Step::GiveUp(why) => {
                 st.modifier = None;
                 if !st.gave_up {
@@ -274,12 +276,14 @@ impl PwDma {
             return Take::Nothing;
         }
         let mut st = self.lock();
-        if st.gave_up || !self.switch.load(Ordering::Relaxed) {
-            return Take::Drop;
-        }
-        let Some(modifier) = st.modifier else {
-            return Take::Drop;
-        };
+        let modifier =
+            match disposition(st.gave_up, self.switch.load(Ordering::Relaxed), st.modifier) {
+                Disposition::Drop => return Take::Drop,
+                // A DMA-BUF on a format with no modifier: PipeWire mapped it
+                // (`MAP_BUFFERS`) and the caller copies it out.
+                Disposition::Copy => return Take::Copy,
+                Disposition::Import(modifier) => modifier,
+            };
         if planes != 1 {
             self.give_up(&mut st, "the compositor's buffers have several planes");
             return Take::Drop;
@@ -587,6 +591,29 @@ mod tests {
             d.step(Some(&ModifierProp::Fixed(0x0100_0000_0000_0001))),
             Step::GiveUp(None)
         ));
+    }
+
+    #[test]
+    fn fixating_forgets_the_modifier_of_the_last_format() {
+        let d = dma(vec![MOD_LINEAR, 0x0100_0000_0000_0001]);
+        assert_eq!(
+            d.step(Some(&ModifierProp::Fixed(MOD_LINEAR))),
+            Step::Ready(MOD_LINEAR)
+        );
+        assert_eq!(d.lock().modifier, Some(MOD_LINEAR));
+        // A renegotiation that leaves the modifier open: until the fixed
+        // format comes back nothing is negotiated, and no give-up is owed.
+        assert_eq!(
+            d.step(Some(&ModifierProp::Open(vec![0x0100_0000_0000_0001]))),
+            Step::Fixate(0x0100_0000_0000_0001)
+        );
+        assert_eq!(d.lock().modifier, None);
+        assert!(!d.lock().gave_up);
+        assert_eq!(
+            d.step(Some(&ModifierProp::Fixed(0x0100_0000_0000_0001))),
+            Step::Ready(0x0100_0000_0000_0001)
+        );
+        assert_eq!(d.lock().modifier, Some(0x0100_0000_0000_0001));
     }
 
     #[test]

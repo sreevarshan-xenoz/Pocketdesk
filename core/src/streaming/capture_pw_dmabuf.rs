@@ -125,7 +125,7 @@ pub(super) fn decide(prop: Option<&ModifierProp>, ours: &[u64], copies_asked: bo
     match prop {
         ModifierProp::Fixed(m) if ours.contains(m) => Step::Ready(*m),
         ModifierProp::Fixed(m) => Step::GiveUp(Some(format!(
-            "the compositor chose DMA-BUF modifier {m:#x}, which the card did not take"
+            "the compositor fixed DMA-BUF modifier {m:#x}, which is not among those the capture offered"
         ))),
         ModifierProp::Open(theirs) => match choose_modifier(theirs, ours) {
             Some(m) => Step::Fixate(m),
@@ -133,6 +133,34 @@ pub(super) fn decide(prop: Option<&ModifierProp>, ours: &[u64], copies_asked: bo
                 "the compositor offers no DMA-BUF modifier the card takes".into(),
             )),
         },
+    }
+}
+
+/// What to do with a DMA-BUF buffer that arrived.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Disposition {
+    /// Not usable now (DMA-BUF was given up, or the streamer wants the
+    /// pixels and the stream is not yet back on memory): queue it back.
+    Drop,
+    /// No modifier was negotiated (a legacy format): the buffer is mapped
+    /// memory as far as the capture is concerned, copy it out.
+    Copy,
+    /// A modifier was negotiated: import the buffer with it.
+    Import(u64),
+}
+
+/// What to do with a DMA-BUF buffer: after a give-up it is dropped, with no
+/// modifier negotiated it is a copy (a compositor that delivers DMA-BUFs on
+/// a modifier-less format must not freeze the picture), and otherwise it is
+/// imported unless the streamer has asked for copies.
+pub(super) fn disposition(gave_up: bool, switch_on: bool, modifier: Option<u64>) -> Disposition {
+    if gave_up {
+        return Disposition::Drop;
+    }
+    match modifier {
+        None => Disposition::Copy,
+        Some(_) if !switch_on => Disposition::Drop,
+        Some(m) => Disposition::Import(m),
     }
 }
 
@@ -319,6 +347,22 @@ mod tests {
             decide(Some(&ModifierProp::Open(vec![LINEAR])), &ours, true),
             Step::GiveUp(None)
         );
+    }
+
+    #[test]
+    fn a_dma_buf_without_a_modifier_is_a_copy_until_the_capture_gives_up() {
+        // A legacy format delivered in DMA-BUFs: mapped and copied.
+        assert_eq!(disposition(false, true, None), Disposition::Copy);
+        assert_eq!(disposition(false, false, None), Disposition::Copy);
+        // After a give-up they are dropped, modifier or not.
+        assert_eq!(disposition(true, true, None), Disposition::Drop);
+        assert_eq!(disposition(true, true, Some(X_TILED)), Disposition::Drop);
+        // With a modifier: imported, unless the streamer asked for copies.
+        assert_eq!(
+            disposition(false, true, Some(X_TILED)),
+            Disposition::Import(X_TILED)
+        );
+        assert_eq!(disposition(false, false, Some(X_TILED)), Disposition::Drop);
     }
 
     #[test]
