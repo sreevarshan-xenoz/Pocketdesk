@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1424 open items.
+1425 open items.
 
 | Where | Items |
 |---|---|
@@ -14,7 +14,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | Away from home: another network, or through a router | 43 |
 | A second computer | 244 |
 | A Linux desktop (the Azure VM serves for some) | 259 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 98 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 99 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
@@ -2380,6 +2380,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **282. Zero-copy capture on the PipeWire path (low-latency window handoff, phase 2b: GNOME's and KDE's screen goes from the compositor to VA-API as a DMA-BUF)**
 
 - AMD (radeonsi VA-API) with GNOME or KDE: the offered list, the modifier the compositor fixes, the picture, and that PipeWire's mapping of the buffers (the stream is connected with `MAP_BUFFERS`) does not fail for a buffer the card cannot map into memory. If the stream errors in DMA-BUF mode the capture connects it again on memory buffers once (the log says "the stream failed with DMA-BUF offered" and "connected again, memory buffers only") and ends only if that fails too: say which happened. (where: other hardware)
+- NVIDIA or a hybrid laptop with the proprietary driver: the capture's probe runs libEGL and VA-API inside the server process, so a driver that crashes there takes the server down (no process isolation is built); start a session with the PipeWire capture and say whether the probe returned or the server died. (where: other hardware)
 - Other Intel generations (Gen 8 and 9 with i965 or iHD, Xe with its 4-tiled modifiers) and NVIDIA (the proprietary driver: no VA-API device, so nothing is offered and the capture is unchanged). (where: other hardware)
 - A hybrid laptop whose compositor renders on the discrete card while the encoder opens the integrated one: the card refuses the compositor's buffer, the log says once that the capture is back to copies, and the stream plays. (where: other hardware)
 

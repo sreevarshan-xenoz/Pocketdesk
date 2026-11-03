@@ -714,6 +714,12 @@ fn run_pipewire_capture(
 ) -> Result<()> {
     info!("PipeWire capture thread started, connecting to node {node_id}");
 
+    // Before the probe: it runs the card's EGL and VA-API on this thread, and
+    // a session that ended meanwhile need not pay for it.
+    if cancel.is_cancelled() {
+        return Ok(());
+    }
+
     // The card's side of the DMA-BUF capture (what it takes, found before the
     // stream offers anything); none when this session copies.
     let dma = PwDma::open(config, &zero_copy);
