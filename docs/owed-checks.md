@@ -2,19 +2,19 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1347 open items.
+1355 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 95 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 96 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 199 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 200 |
 | A phone with a SIM | 40 |
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
-| A second computer | 196 |
-| A Linux desktop (the Azure VM serves for some) | 251 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 89 |
+| A second computer | 200 |
+| A Linux desktop (the Azure VM serves for some) | 252 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 90 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
@@ -220,6 +220,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **271. VA-API converts BGRA to NV12 on the card (phase 1c of the window handoff: `scale_vaapi`, no processor conversion)**
 
 - The phone on a real device: the OPPO against a throwaway server on this laptop's VA-API encoder at 1080p60 and 1080p30, H.264 and HEVC (`allow_hevc`): a smooth picture for a minute, colours as before (compare a known test picture on the phone's screen with the old build's), the HUD's delay no higher, and a keyframe after a pause and a rejoin within about 2 seconds. (where: here)
+
+**278. A borrowed window takes the size of its window (resize follows the viewer, window handoff)**
+
+- The setting off with a window already borrowed: the open window stops following at once and keeps its size; turned back on, it follows the window's size again without reopening. (where: here)
 
 **276. Smooth keyframes (low-latency window handoff, phase 1: no whole keyframe on a two second beat)**
 
@@ -714,6 +718,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Held fingers survive nothing: hold a mapped key, then pull the desktop's network cable or kill the desktop app, stop the control stream (stop the relay), turn the phone's "Separate windows" off, stop Shizuku, and just stay still with a key held for longer than two seconds (it stays down, kept by the half-second keep-alive in "Pointer location"): after a dropped stream, the switch off or two seconds of silence the touch is gone; with a helper killed (`kill` its process) the next open window works without a phantom touch. (where: OPPO)
 - The limits: a desktop test loop sending 1000 finger downs a second to one window lets about 100 through a second (the rest are not seen in "Pointer location"), finger lifts of fingers that were down always arrive, no finger stays down afterwards, and ordinary aiming at 144 Hz is not cut. (where: OPPO)
 - The typing rule: with keys on, letters typed in the window go nowhere (not to the phone's text fields), Backspace and Enter and Escape (Back) still work when not mapped, and Ctrl+key shortcuts are not taken as keys. (where: OPPO)
+
+**278. A borrowed window takes the size of its window (resize follows the viewer, window handoff)**
+
+- The viewing window moved between a 100 % and a 150 % or 200 % scale monitor: the host's window takes the new physical size (not the point size) and the picture is sharp on both. (where: owner)
 
 **273. The window's wait for the display (phase 1d of the window handoff: a setting to draw without vsync, and the window's stage trace)**
 
@@ -1361,8 +1369,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A borrowed window's `return` lost (the link up but the packet not delivered, for instance the viewing server killed at the moment the window closes): within about a minute the host takes the window back without the viewer. (where: second computer)
 - Two windows cannot borrow the same window: its Borrow is greyed in the picker once lent, and a second view asked for by the local API says it is already shown. (where: second computer)
 - The app quit while the picker is open (or killed): the windows' titles are gone from the state folder's `computers.json` within a minute (and at the server's next start). (where: second computer)
-- A borrowed window resized on the host (dragged, or its program resizing itself) keeps showing its first size: following the viewer's size and the host's is later (the status history says so). (where: second computer)
+- A borrowed window resized on the host (dragged, or its program resizing itself) keeps showing its first size: following the host's own resize is still later (its screen stays the size lent); following the viewer's window is section 278. (where: second computer)
 - A window with a very long or odd title (emoji, right-to-left text) in the picker and in the viewing window's title bar: shown cut and without control characters, never garbled past the picker. (where: second computer)
+
+**278. A borrowed window takes the size of its window (resize follows the viewer, window handoff)**
+
+- A real second computer (the Windows app or the laptop's Linux app as the viewer, a Sway or Hyprland host): borrow a window, drag the viewing window's edge, maximise it, restore it, and the real window on the host follows each time with the text sharp (look at small text 1:1), the old picture scaled and undimmed meanwhile with no black frame, and the new picture in a moment (say how long it took on the home network). (where: second computer)
+- A real program with a minimum size (a browser, a terminal with its own steps of a character cell): asked for a size smaller than it takes, the host's window ends larger than the screen or at its own steps, the viewing picture shows what is there (scaled, letterboxed) and nothing loops asking again. (where: second computer)
+- The host on an older Pocketdesk (it ignores `width` and `height`): the borrowed window keeps its size, the viewing picture is scaled, and nothing is asked over and over. (where: second computer)
+- A short network gap or a drop while a resize is in flight: the view dials again, the host's screen keeps the last size asked, and the window there is not left at a size that does not match its screen. (where: second computer)
 
 **275. The other computer's pointer drawn here (local cursor, phase 2 of the window handoff)**
 
@@ -1962,6 +1977,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The same on Hyprland 0.56 as the host (a headless Hyprland, or a real session): `list` names the windows, a click aimed at the lent screen lands on the window (the live test's check, which has only run on Sway). (where: linux)
 
+**278. A borrowed window takes the size of its window (resize follows the viewer, window handoff)**
+
+- Sway: several outputs placed right of the lent screen (a second lent window's screen) when the first is enlarged: their pictures stay their own (Sway's outputs keep their places, so a larger one overlaps the next one's; the capture takes each by its own origin). (where: linux)
+
 **273. The window's wait for the display (phase 1d of the window handoff: a setting to draw without vsync, and the window's stage trace)**
 
 - On a real Hyprland desktop (and a real GNOME and KDE session), the setting off then on, the window showing a moving screen at the display's refresh: the picture is a frame sooner (a high-speed camera or the probe's marker against a stopwatch shows it), and Wayland shows no tearing. (where: linux)
@@ -2239,6 +2258,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The first check, per Android: "Use my phone's hotspot" starts the phone's Wi-Fi hotspot within about 15 seconds with no tap and no screen on the phone, under its own saved name and password (the computer sent neither), Android shows its usual hotspot indicator, and the helper's log line says it started. Record the Android version and maker for each phone tried; if the helper logs "no tethering manager" or "did not start", record the exact line (the call may need another route on that Android). Android 11, 12, 13, 14 and 15 are each owed. (where: other hardware)
 - An older phone (a build before this) or an older computer: the computer shows no buttons for a phone that never reported `hotspot`; an older phone drops an `hotspot_on` ask it does not know and nothing breaks. (where: other hardware)
+
+**278. A borrowed window takes the size of its window (resize follows the viewer, window handoff)**
+
+- Hyprland 0.56 as the host (never started on the Arch laptop beside the owner's session): the lent window fills its resized screen at once through the compositor's full screen, and `hypr_refill` (out of full screen and in again) puts one right that did not; the index a session captures it by is still right after the output is placed right of the others again (`j/monitors`, then the next view's dial). (where: other hardware)
 
 **276. Smooth keyframes (low-latency window handoff, phase 1: no whole keyframe on a two second beat)**
 
