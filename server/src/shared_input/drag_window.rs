@@ -212,6 +212,9 @@ pub enum Why {
     Fullscreen,
     /// The window in front is not where the pointer crossed.
     NotUnderPointer,
+    /// The window is smaller or larger than the other computer takes (an
+    /// offer outside [`LEAST_SIDE`] to [`MOST_SIDE`] would be dropped there).
+    Size,
 }
 
 /// How far from the window's edge a crossing still counts as being on it:
@@ -384,7 +387,10 @@ pub struct Offer {
 }
 
 /// The longest side an offered window may have.
-const MOST_SIDE: u32 = 16384;
+pub const MOST_SIDE: u32 = 16384;
+
+/// The shortest side an offered window may have.
+pub const LEAST_SIDE: u32 = 64;
 
 impl Offer {
     /// The packet body.
@@ -412,7 +418,7 @@ impl Offer {
         let side = |key: &str| {
             u32::try_from(num(key)?)
                 .ok()
-                .filter(|v| (64..=MOST_SIDE).contains(v))
+                .filter(|v| (LEAST_SIDE..=MOST_SIDE).contains(v))
         };
         let spot = |key: &str| {
             i32::try_from(num(key)?)
@@ -455,6 +461,25 @@ pub struct Handover {
     pub drop_at: (i32, i32),
     /// The other computer's screen the drag ended on.
     pub screen: Screen,
+}
+
+/// What the other computer said to an offer: whether it took the window, and
+/// if not why (a short word of its own, cut and flattened here, for the
+/// log).
+fn offer_taken(answer: &Result<Value, String>) -> Result<(), String> {
+    let body = answer.as_ref().map_err(String::clone)?;
+    if body.get("drag_window_ack").and_then(Value::as_bool) == Some(true) {
+        return Ok(());
+    }
+    let why = body
+        .get("reason")
+        .and_then(Value::as_str)
+        .unwrap_or("it did not say");
+    Err(why
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | ' ' | '-'))
+        .take(40)
+        .collect())
 }
 
 /// A window handed over and not yet taken back.
@@ -516,19 +541,33 @@ fn decide(env: &dyn Source, h: &Handover) -> Decided {
         Err(why) => return Decided::Nothing(why),
     };
     let size = (picked.rect[2], picked.rect[3]);
+    // The same bounds as the computer that is offered it holds an offer to:
+    // one outside them would be dropped there, and this computer must not
+    // think it handed the window over.
+    let side = |v: i32| {
+        u32::try_from(v)
+            .ok()
+            .filter(|v| (LEAST_SIDE..=MOST_SIDE).contains(v))
+    };
+    let (Some(width), Some(height)) = (side(size.0), side(size.1)) else {
+        return Decided::Nothing(Why::Size);
+    };
     let (x, y) = place(&h.screen, h.drop_at, picked.grab, size);
     let offer = Offer {
         window: picked.id.clone(),
         title: clean_title(&picked.title),
         x,
         y,
-        width: u32::try_from(size.0).unwrap_or(0),
-        height: u32::try_from(size.1).unwrap_or(0),
+        width,
+        height,
     };
     Decided::Offer(offer, picked)
 }
 
 struct Live;
+
+/// The pause of each computer that offers windows to this one.
+static PAUSES: std::sync::LazyLock<Pause> = std::sync::LazyLock::new(Pause::default);
 
 impl Source for Live {
     fn may_lend_to(&self, device: &str) -> Result<(), &'static str> {
@@ -563,21 +602,31 @@ pub async fn hand_over(h: Handover) {
             return;
         }
     };
-    let packet = NetworkPacket::new(crate::virtual_screen::PACKET).with_body(offer.body());
-    if !crate::remote_devices::send_to_computer(&h.to, packet).await {
-        tracing::debug!("Shared input: a dragged window could not be offered: no link");
-        return;
+    // The other computer answers whether it took the offer: only then is the
+    // window handed over (an offer it dropped, or never heard, is not).
+    let answer = crate::fit_screen::ask_body(&h.to, offer.body()).await;
+    if note_handed(&answer, &h.to, &picked) {
+        tracing::info!("Shared input: a dragged window is taken by the computer the pointer is on");
     }
-    tracing::info!("Shared input: a dragged window is offered to the computer the pointer is on");
+}
+
+/// The offer's `answer` came: the window is recorded as handed to `device`
+/// only if it was taken there. Whether it was.
+fn note_handed(answer: &Result<Value, String>, device: &str, picked: &Picked) -> bool {
+    if let Err(why) = offer_taken(answer) {
+        tracing::debug!("Shared input: a dragged window was not taken there: {why}");
+        return false;
+    }
     dragged().lock().unwrap_or_else(|e| e.into_inner()).insert(
-        h.to,
+        device.to_string(),
         Dragged {
-            window: picked.id,
+            window: picked.id.clone(),
             grab: picked.grab,
             size: (picked.rect[2], picked.rect[3]),
             at: Instant::now(),
         },
     );
+    true
 }
 
 /// The pointer came back over the edge from `from` with the window's
@@ -625,25 +674,47 @@ pub async fn bring_back(r: Return) {
 trait Here: Sync {
     /// Whether this computer takes offers at all (Windows does not yet).
     fn supported(&self) -> bool;
+    /// Whether the owner turned "Drag windows to my other computers" on
+    /// here: a computer that did not never opens a window it was sent.
+    fn allowed(&self) -> bool;
     /// Whether `device` is one of the owner's computers, paired both ways.
     fn is_mine(&self, device: &str) -> bool;
     /// The computer whose keyboard and mouse are here now.
     fn driven_by(&self) -> Option<String>;
-    /// Whether an offer came a moment ago (one is taken, then a pause).
-    fn too_soon(&self) -> bool;
+    /// Whether an offer from `device` was taken a moment ago.
+    fn too_soon(&self, device: &str) -> bool;
     /// Ask the app to open the borrowed window.
     fn open(&self, device: &str, offer: &Offer) -> std::io::Result<()>;
+    /// An offer from `device` was taken (the app is asked): its pause starts.
+    fn taken(&self, device: &str);
 }
 
-/// Why an offer is not taken, for the log.
+/// Why an offer is not taken: for the log, and, as [`Declined::word`], for
+/// the computer that offered the window.
 #[derive(Debug, PartialEq, Eq)]
 enum Declined {
     NotSupported,
+    Off,
     NotMine,
     NotDriving,
     TooSoon,
     Unreadable,
     NoApp,
+}
+
+impl Declined {
+    /// The short word the offering computer is told.
+    fn word(&self) -> &'static str {
+        match self {
+            Declined::NotSupported => "not_supported",
+            Declined::Off => "off",
+            Declined::NotMine => "not_mine",
+            Declined::NotDriving => "not_driving",
+            Declined::TooSoon => "too_soon",
+            Declined::Unreadable => "unreadable",
+            Declined::NoApp => "no_app",
+        }
+    }
 }
 
 /// Take the offer in `body` from `device`: it must be from one of this
@@ -653,6 +724,9 @@ fn accept(env: &dyn Here, device: &str, body: &Value) -> Result<Offer, Declined>
     if !env.supported() {
         return Err(Declined::NotSupported);
     }
+    if !env.allowed() {
+        return Err(Declined::Off);
+    }
     if !env.is_mine(device) {
         return Err(Declined::NotMine);
     }
@@ -660,19 +734,48 @@ fn accept(env: &dyn Here, device: &str, body: &Value) -> Result<Offer, Declined>
         return Err(Declined::NotDriving);
     }
     let offer = Offer::read(body).ok_or(Declined::Unreadable)?;
-    if env.too_soon() {
+    if env.too_soon(device) {
         return Err(Declined::TooSoon);
     }
     env.open(device, &offer).map_err(|_| Declined::NoApp)?;
+    // The pause starts only now: an offer that was not opened does not cost
+    // the next one its turn.
+    env.taken(device);
     Ok(offer)
 }
 
-/// How long after an offer is taken the next is not.
+/// How long after an offer from a computer is taken the next from it is not.
 const PAUSE: Duration = Duration::from_secs(2);
+
+/// When each computer's last offer was taken, for [`PAUSE`].
+#[derive(Default)]
+struct Pause(Mutex<HashMap<String, Instant>>);
+
+impl Pause {
+    /// Whether `device`'s offer was taken less than [`PAUSE`] before `now`.
+    fn too_soon(&self, device: &str, now: Instant) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(device)
+            .is_some_and(|at| now.saturating_duration_since(*at) < PAUSE)
+    }
+
+    /// `device`'s offer was taken at `now`.
+    fn note(&self, device: &str, now: Instant) {
+        let mut all = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        all.retain(|_, at| now.saturating_duration_since(*at) < PAUSE);
+        all.insert(device.to_string(), now);
+    }
+}
 
 impl Here for Live {
     fn supported(&self) -> bool {
         !cfg!(windows)
+    }
+
+    fn allowed(&self) -> bool {
+        crate::events::current_config().drag_windows_across
     }
 
     fn is_mine(&self, device: &str) -> bool {
@@ -683,14 +786,12 @@ impl Here for Live {
         super::receive::driven_by()
     }
 
-    fn too_soon(&self) -> bool {
-        static LAST: Mutex<Option<Instant>> = Mutex::new(None);
-        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-        let soon = last.is_some_and(|at| at.elapsed() < PAUSE);
-        if !soon {
-            *last = Some(Instant::now());
-        }
-        soon
+    fn too_soon(&self, device: &str) -> bool {
+        PAUSES.too_soon(device, Instant::now())
+    }
+
+    fn taken(&self, device: &str) {
+        PAUSES.note(device, Instant::now());
     }
 
     fn open(&self, device: &str, offer: &Offer) -> std::io::Result<()> {
@@ -713,26 +814,56 @@ impl Here for Live {
     }
 }
 
+/// What the computer that offered a window is told of it: `{id,
+/// drag_window_ack: true}` when the app is asked to open it, else
+/// `{id, drag_window_ack: false, reason}` with a short word. Answer-shaped
+/// (no `action`), so it is heard as any answer is. None when the offer
+/// carried no `id`: a computer before this waits for no answer.
+fn ack(id: Option<u64>, taken: &Result<Offer, Declined>) -> Option<Value> {
+    let mut body = match taken {
+        Ok(_) => json!({ "drag_window_ack": true }),
+        Err(why) => json!({ "drag_window_ack": false, "reason": why.word() }),
+    };
+    body["id"] = id?.into();
+    Some(body)
+}
+
 /// Whether `body` is an offer of a window, handled here: the app is asked to
 /// open it when the computer that sent it is one of this one's own and its
-/// pointer is here. Answer-shaped, so it is heard before any permission and
-/// never answered; anything that does not pass is dropped with a line in the
-/// log (the window's title is never logged).
+/// pointer is here, and the owner allowed it here. Answer-shaped, so it is
+/// heard before any permission; the computer that offered it is told with
+/// [`ack`] whether it was taken (an offer that does not pass is dropped,
+/// with a line in the log; the window's title is never logged).
 pub fn note_offer(device_id: &str, body: &Value) -> bool {
     if body.get(OFFER).is_none() {
         return false;
     }
     let (device, body) = (device_id.to_string(), body.clone());
-    let take = move || match accept(&Live, &device, &body) {
-        Ok(_) => tracing::info!("Shared input: a window dragged here is opened"),
-        Err(why) => tracing::debug!("Shared input: an offered window is not opened: {why:?}"),
+    let id = body.get("id").and_then(Value::as_u64);
+    let take = move || {
+        let taken = accept(&Live, &device, &body);
+        match &taken {
+            Ok(_) => tracing::info!("Shared input: a window dragged here is opened"),
+            Err(why) => tracing::debug!("Shared input: an offered window is not opened: {why:?}"),
+        }
+        (device, ack(id, &taken))
     };
     // The trust files are read: off the packet loop where there is one.
     match tokio::runtime::Handle::try_current() {
         Ok(runtime) => {
-            runtime.spawn_blocking(take);
+            runtime.spawn(async move {
+                let Ok((device, Some(said))) = tokio::task::spawn_blocking(take).await else {
+                    return;
+                };
+                let packet = NetworkPacket::new(crate::virtual_screen::PACKET).with_body(said);
+                if !crate::remote_devices::send_to_computer(&device, packet).await {
+                    tracing::debug!("Shared input: an offer's answer could not be sent: no link");
+                }
+            });
         }
-        Err(_) => take(),
+        Err(_) => {
+            take();
+        }
     }
     true
 }
@@ -1229,10 +1360,12 @@ mod tests {
 
     struct There {
         supported: bool,
+        allowed: bool,
         mine: bool,
         driven_by: Option<&'static str>,
         soon: bool,
         opened: Mutex<Vec<(String, Offer)>>,
+        paused: Mutex<Vec<String>>,
         fails: bool,
     }
 
@@ -1240,10 +1373,12 @@ mod tests {
         fn ready() -> There {
             There {
                 supported: true,
+                allowed: true,
                 mine: true,
                 driven_by: Some("lap"),
                 soon: false,
                 opened: Mutex::new(Vec::new()),
+                paused: Mutex::new(Vec::new()),
                 fails: false,
             }
         }
@@ -1254,6 +1389,10 @@ mod tests {
             self.supported
         }
 
+        fn allowed(&self) -> bool {
+            self.allowed
+        }
+
         fn is_mine(&self, _device: &str) -> bool {
             self.mine
         }
@@ -1262,8 +1401,12 @@ mod tests {
             self.driven_by.map(str::to_string)
         }
 
-        fn too_soon(&self) -> bool {
+        fn too_soon(&self, _device: &str) -> bool {
             self.soon
+        }
+
+        fn taken(&self, device: &str) {
+            self.paused.lock().unwrap().push(device.to_string());
         }
 
         fn open(&self, device: &str, offer: &Offer) -> std::io::Result<()> {
@@ -1307,6 +1450,14 @@ mod tests {
                 ..There::ready()
             },
             Declined::NotSupported,
+        );
+        // The owner did not turn "Drag windows to my other computers" on here.
+        case(
+            There {
+                allowed: false,
+                ..There::ready()
+            },
+            Declined::Off,
         );
         // A computer paired one way, or a stranger.
         case(
@@ -1352,6 +1503,146 @@ mod tests {
             accept(&there, "lap", &json!({ OFFER: { "window": "bad id" } })).unwrap_err(),
             Declined::Unreadable
         );
+    }
+
+    #[test]
+    fn a_pause_starts_only_when_the_window_was_opened() {
+        let there = There::ready();
+        accept(&there, "lap", &offered()).unwrap();
+        assert_eq!(*there.paused.lock().unwrap(), ["lap"]);
+        // An offer that could not be opened (no state folder, the spool full)
+        // costs the next its turn nothing.
+        let there = There {
+            fails: true,
+            ..There::ready()
+        };
+        assert_eq!(
+            accept(&there, "lap", &offered()).unwrap_err(),
+            Declined::NoApp
+        );
+        assert!(there.paused.lock().unwrap().is_empty());
+        // Nor does one that did not read, or was not allowed.
+        let there = There::ready();
+        let _ = accept(&there, "lap", &json!({ OFFER: { "window": "x y" } }));
+        let there2 = There {
+            allowed: false,
+            ..There::ready()
+        };
+        let _ = accept(&there2, "lap", &offered());
+        assert!(there.paused.lock().unwrap().is_empty());
+        assert!(there2.paused.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_pause_is_each_computers_own() {
+        let pause = Pause::default();
+        let t0 = at(0);
+        assert!(!pause.too_soon("lap", t0));
+        pause.note("lap", t0);
+        assert!(pause.too_soon("lap", at(1_999)), "the same computer waits");
+        assert!(
+            !pause.too_soon("desk", at(1_000)),
+            "another computer's pointer is no wait"
+        );
+        assert!(!pause.too_soon("lap", at(2_000)), "the pause ends");
+        // A computer's offer taken pauses it alone.
+        pause.note("desk", at(1_500));
+        assert!(pause.too_soon("desk", at(2_500)));
+        assert!(!pause.too_soon("lap", at(2_500)));
+        // Old entries do not pile up.
+        pause.note("third", at(10_000));
+        assert_eq!(pause.0.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn what_the_offering_computer_is_told_names_the_offer_and_says_why_not() {
+        let offer = Offer::read(&offered()).unwrap();
+        assert_eq!(
+            ack(Some(7), &Ok(offer)),
+            Some(json!({ "id": 7, "drag_window_ack": true }))
+        );
+        for (why, word) in [
+            (Declined::Off, "off"),
+            (Declined::NotMine, "not_mine"),
+            (Declined::NotDriving, "not_driving"),
+            (Declined::TooSoon, "too_soon"),
+            (Declined::Unreadable, "unreadable"),
+            (Declined::NoApp, "no_app"),
+            (Declined::NotSupported, "not_supported"),
+        ] {
+            assert_eq!(
+                ack(Some(7), &Err(why)),
+                Some(json!({ "id": 7, "drag_window_ack": false, "reason": word }))
+            );
+        }
+        assert_eq!(
+            ack(None, &Err(Declined::Off)),
+            None,
+            "a computer before this waits for no answer"
+        );
+        // Answer-shaped: no action, so it is heard as an answer.
+        assert!(
+            ack(Some(1), &Err(Declined::Off))
+                .unwrap()
+                .get("action")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn only_an_acknowledged_offer_is_a_window_handed_over() {
+        let picked = Picked {
+            id: "0xaa".into(),
+            title: String::new(),
+            rect: [0, 0, 800, 600],
+            grab: (3, 4),
+        };
+        let handed = |device: &str| dragged().lock().unwrap().contains_key(device);
+        let no_link: Result<Value, String> = Err("it was not asked: no link to it".into());
+        let refused = Ok(json!({ "id": 1, "drag_window_ack": false, "reason": "off" }));
+        let silent = Ok(json!({ "id": 1 }));
+        for (device, answer) in [
+            ("ack-no-link", no_link),
+            ("ack-refused", refused),
+            ("ack-silent", silent),
+        ] {
+            assert!(!note_handed(&answer, device, &picked), "{device}");
+            assert!(
+                !handed(device),
+                "{device}: an offer not taken is not recorded"
+            );
+        }
+        let yes = Ok(json!({ "id": 1, "drag_window_ack": true }));
+        assert!(note_handed(&yes, "ack-taken", &picked));
+        assert!(handed("ack-taken"));
+        take_dragged("ack-taken");
+        // The reason is a short word, flattened for the log.
+        let sly = Ok(json!({ "drag_window_ack": false, "reason": "a\nb\u{202E}c; rm -rf /" }));
+        assert_eq!(offer_taken(&sly).unwrap_err(), "abc rm -rf ");
+    }
+
+    #[test]
+    fn a_window_too_small_or_too_large_for_the_other_computer_is_not_offered() {
+        let handover = handover();
+        for (w, h) in [(63, 400), (400, 63), (20, 20), (16_385, 400), (400, 16_385)] {
+            let mut front = window("0xaa", [1900, 440, w, h]);
+            front.focused = true;
+            assert_eq!(
+                decide(&fake(Ok(()), Some(vec![front])), &handover),
+                Decided::Nothing(Why::Size),
+                "{w}x{h}"
+            );
+        }
+        // The bounds themselves are offered, and read back there.
+        for (w, h) in [(64, 64), (16_384, 64)] {
+            let mut front = window("0xaa", [1900, 440, w, h]);
+            front.focused = true;
+            let Decided::Offer(offer, _) = decide(&fake(Ok(()), Some(vec![front])), &handover)
+            else {
+                panic!("{w}x{h}: an offer");
+            };
+            assert_eq!(Offer::read(&offer.body()), Some(offer), "{w}x{h}");
+        }
     }
 
     #[test]
