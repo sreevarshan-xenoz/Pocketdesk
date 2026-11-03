@@ -2379,7 +2379,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **282. Zero-copy capture on the PipeWire path (low-latency window handoff, phase 2b: GNOME's and KDE's screen goes from the compositor to VA-API as a DMA-BUF)**
 
-- AMD (radeonsi VA-API) with GNOME or KDE: the offered list, the modifier the compositor fixes, the picture, and that PipeWire's mapping of the buffers (the stream is connected with `MAP_BUFFERS`) does not fail for a buffer the card cannot map into memory. If the stream errors in DMA-BUF mode the capture ends rather than falling back: say so. (where: other hardware)
+- AMD (radeonsi VA-API) with GNOME or KDE: the offered list, the modifier the compositor fixes, the picture, and that PipeWire's mapping of the buffers (the stream is connected with `MAP_BUFFERS`) does not fail for a buffer the card cannot map into memory. If the stream errors in DMA-BUF mode the capture connects it again on memory buffers once (the log says "the stream failed with DMA-BUF offered" and "connected again, memory buffers only") and ends only if that fails too: say which happened. (where: other hardware)
 - Other Intel generations (Gen 8 and 9 with i965 or iHD, Xe with its 4-tiled modifiers) and NVIDIA (the proprietary driver: no VA-API device, so nothing is offered and the capture is unchanged). (where: other hardware)
 - A hybrid laptop whose compositor renders on the discrete card while the encoder opens the integrated one: the card refuses the compositor's buffer, the log says once that the capture is back to copies, and the stream plays. (where: other hardware)
 

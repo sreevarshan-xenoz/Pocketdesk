@@ -15,7 +15,7 @@ use tracing::{debug, error, info, trace, warn};
 
 use super::capture::{CaptureSession, monitor_rect};
 use super::capture_cursor_pw::PwCursor;
-use super::capture_pw_dmabuf::{self as pw_dma, PwDma, Step, Take};
+use super::capture_pw_dmabuf::{self as pw_dma, OnError, PwDma, Step, Take};
 use super::cursor_feed::CursorFeed;
 use super::{StreamingConfig, VideoFrame};
 
@@ -790,8 +790,18 @@ fn run_pipewire_capture(
         })
         .state_changed(|_stream, ud, _old, new| {
             if let Some(why) = stream_failed(&new) {
+                // With DMA-BUF offered the failure may be DMA-BUF's (a
+                // `Buffers` param nobody can satisfy, a link that breaks
+                // after the DMA-BUF-only format, a buffer that cannot be
+                // mapped): the main loop connects the stream again with the
+                // memory format, once.
+                if let Some(dma) = &ud.dma
+                    && dma.stream_error(&why) == OnError::Reconnect
+                {
+                    return;
+                }
                 // A link that cannot agree a format (a portal offering none of
-                // BGRx and BGRA) or that breaks: said, and the capture ends,
+                // the formats) or that breaks: said, and the capture ends,
                 // rather than an active stream with no frame (review N2).
                 error!("{why}");
                 ud.cancel.cancel();
@@ -870,8 +880,22 @@ fn run_pipewire_capture(
                 // only live ones), queued back on the stream's own thread.
                 unsafe { stream.queue_raw_buffer(buffer) };
             }
+            if dma.reconnect_wanted()
+                && let Err(e) = reconnect_for_memory(&stream, node_id, config, &metas)
+            {
+                error!("The PipeWire stream did not connect again on memory buffers: {e:#}");
+                cancel.cancel();
+            }
             if dma.plain_wanted() {
                 ask_for_memory(&stream, config, &metas);
+            }
+            if dma.memory_ignored() {
+                // Asked for memory buffers and still sent DMA-BUF ones: a
+                // frozen picture is worse than an ended capture that says why.
+                error!(
+                    "The compositor keeps sending DMA-BUF buffers after being asked for memory ones; the capture ends"
+                );
+                cancel.cancel();
             }
         }
         if cancel.is_cancelled() {
@@ -1070,12 +1094,43 @@ fn ask_for_memory(stream: &pipewire::stream::Stream, config: &StreamingConfig, m
     update(stream, &[format, buffers], metas);
 }
 
+/// The stream failed with DMA-BUF offered: disconnect it and connect it
+/// again with the memory format only (no `Buffers` param is left over from
+/// the first connection to ask for DMA-BUFs).
+fn reconnect_for_memory(
+    stream: &pipewire::stream::Stream,
+    node_id: u32,
+    config: &StreamingConfig,
+    metas: &[Vec<u8>],
+) -> Result<()> {
+    let _ = stream.disconnect();
+    let format = video_format_pod(config)?;
+    let format =
+        libspa::pod::Pod::from_bytes(&format).context("The capture's video format is not a pod")?;
+    let meta_pods = pods_of(metas)?;
+    let mut params: Vec<&libspa::pod::Pod> = vec![format];
+    params.extend(meta_pods);
+    stream
+        .connect(
+            libspa::utils::Direction::Input,
+            Some(node_id),
+            StreamFlags::AUTOCONNECT | StreamFlags::MAP_BUFFERS,
+            &mut params,
+        )
+        .with_context(|| format!("Failed to connect stream to node {node_id} again"))?;
+    stream
+        .set_active(true)
+        .context("Failed to activate stream again")?;
+    info!("The PipeWire stream is connected again, memory buffers only");
+    Ok(())
+}
+
 /// What to say when the stream reached `state` and failed.
 fn stream_failed(state: &pipewire::stream::StreamState) -> Option<String> {
     match state {
-        pipewire::stream::StreamState::Error(why) => Some(format!(
-            "The screen's PipeWire stream failed ({why}); it offers BGRx and BGRA only"
-        )),
+        pipewire::stream::StreamState::Error(why) => {
+            Some(format!("The screen's PipeWire stream failed ({why})"))
+        }
         _ => None,
     }
 }

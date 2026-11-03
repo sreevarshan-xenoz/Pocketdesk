@@ -38,8 +38,19 @@
 //! copy: the picture is cut to the window's rectangle on the processor, and
 //! cutting on the card (`scale_vaapi`'s crop) is not built.
 //! `capture_copy` / `POCKETDESK_CAPTURE_COPY` force copies, as for wlroots.
+//!
+//! A stream that errors with DMA-BUF offered (a `Buffers` param nobody can
+//! satisfy, a link that breaks after the DMA-BUF-only format, a buffer the
+//! stream cannot map) is disconnected and connected again with the memory
+//! format only, once ([`on_stream_error`]); the capture ends only if that
+//! fails too. A compositor that goes on sending DMA-BUF buffers for
+//! [`MEMORY_GRACE`] after being asked for memory ones, with no picture
+//! delivered, ends the capture with a clear error ([`memory_ignored`])
+//! rather than freezing the picture.
 
 #![cfg_attr(not(feature = "inproc"), allow(dead_code))]
+
+use std::time::{Duration, Instant};
 
 use libspa::pod::{ChoiceValue, Value};
 use libspa::utils::ChoiceEnum;
@@ -164,6 +175,48 @@ pub(super) fn disposition(gave_up: bool, switch_on: bool, modifier: Option<u64>)
     }
 }
 
+/// What the capture does when the stream reaches the error state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum OnError {
+    /// DMA-BUF may be the cause: connect the stream again with the memory
+    /// format only (once).
+    Reconnect,
+    /// Nothing left to try: say so and end the capture.
+    End,
+}
+
+/// An error with DMA-BUF offered (an unsatisfiable `Buffers` param, a link
+/// that fails after the mandatory DMA-BUF format, a buffer the stream cannot
+/// map) is retried once on memory only; one after that, or on a stream that
+/// had already settled on memory, ends the capture.
+pub(super) fn on_stream_error(reconnected: bool, memory_settled: bool) -> OnError {
+    if reconnected || memory_settled {
+        OnError::End
+    } else {
+        OnError::Reconnect
+    }
+}
+
+/// How long after asking for memory buffers a compositor may go on sending
+/// DMA-BUF ones before the capture ends.
+pub(super) const MEMORY_GRACE: Duration = Duration::from_secs(3);
+
+/// Whether the compositor ignores the request for memory buffers: asked at
+/// `asked_at`, no picture delivered since (`fed`), and a DMA-BUF buffer
+/// still arriving (`last_drop`) `grace` or more after the ask. A still
+/// screen sends no buffer at all and is not a stall.
+pub(super) fn memory_ignored(
+    asked_at: Option<Instant>,
+    last_drop: Option<Instant>,
+    fed: bool,
+    grace: Duration,
+) -> bool {
+    let (Some(asked), Some(dropped)) = (asked_at, last_drop) else {
+        return false;
+    };
+    !fed && dropped.saturating_duration_since(asked) >= grace
+}
+
 /// How many buffers the stream asks for in DMA-BUF mode: one the compositor
 /// fills, one waiting for the encoder, one being encoded, the streamer's held
 /// and last frames, and a spare.
@@ -276,6 +329,15 @@ impl PwDma {
     pub(super) fn plain_wanted(&self) -> bool {
         match *self {}
     }
+    pub(super) fn stream_error(&self, _why: &str) -> OnError {
+        match *self {}
+    }
+    pub(super) fn reconnect_wanted(&self) -> bool {
+        match *self {}
+    }
+    pub(super) fn memory_ignored(&self) -> bool {
+        match *self {}
+    }
     pub(super) fn returned(&self) -> Vec<*mut pipewire::sys::pw_buffer> {
         match *self {}
     }
@@ -363,6 +425,33 @@ mod tests {
             Disposition::Import(X_TILED)
         );
         assert_eq!(disposition(false, false, Some(X_TILED)), Disposition::Drop);
+    }
+
+    #[test]
+    fn a_stream_error_is_retried_on_memory_once() {
+        assert_eq!(on_stream_error(false, false), OnError::Reconnect);
+        // The retry failed too, or memory was what the stream had settled on.
+        assert_eq!(on_stream_error(true, false), OnError::End);
+        assert_eq!(on_stream_error(false, true), OnError::End);
+        assert_eq!(on_stream_error(true, true), OnError::End);
+    }
+
+    #[test]
+    fn a_compositor_that_ignores_the_ask_for_memory_ends_the_capture() {
+        let t0 = Instant::now();
+        let at = |s: u64| t0 + Duration::from_secs(s);
+        let grace = Duration::from_secs(3);
+        // Never asked, or no DMA-BUF buffer seen since: nothing to end
+        // (a still screen sends no buffer).
+        assert!(!memory_ignored(None, Some(at(10)), false, grace));
+        assert!(!memory_ignored(Some(t0), None, false, grace));
+        // A buffer in flight right after the ask is not a stall ...
+        assert!(!memory_ignored(Some(t0), Some(at(1)), false, grace));
+        // ... one still arriving after the grace is, ...
+        assert!(memory_ignored(Some(t0), Some(at(3)), false, grace));
+        assert!(memory_ignored(Some(t0), Some(at(7)), false, grace));
+        // ... unless a picture came meanwhile.
+        assert!(!memory_ignored(Some(t0), Some(at(7)), true, grace));
     }
 
     #[test]

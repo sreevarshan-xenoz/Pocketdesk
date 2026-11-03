@@ -5,11 +5,15 @@ use std::collections::HashMap;
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use tracing::{debug, info, warn};
 
-use super::{Disposition, ModifierProp, Step, decide, disposition};
+use super::{
+    Disposition, MEMORY_GRACE, ModifierProp, OnError, Step, decide, disposition, memory_ignored,
+    on_stream_error,
+};
 use crate::streaming::StreamingConfig;
 use crate::streaming::dmabuf::{
     self, DRM_FORMAT_XRGB8888, DmaBuf, Gbm, GpuFrame, MOD_INVALID, MOD_LINEAR,
@@ -115,6 +119,49 @@ struct State {
     plain_due: bool,
     /// ... and has been sent.
     plain_sent: bool,
+    /// The stream settled on memory buffers (no modifier in its format): an
+    /// error then is not DMA-BUF's.
+    memory_settled: bool,
+    /// The stream was reconnected with the memory format only, after an
+    /// error with DMA-BUF offered (once).
+    reconnected: bool,
+    /// ... and the stream's thread has yet to do it.
+    reconnect_due: bool,
+    /// When the memory format was asked for (or the stream reconnected on
+    /// it), for the watchdog.
+    memory_asked_at: Option<Instant>,
+    /// A picture has been delivered since then.
+    fed: bool,
+    /// The last DMA-BUF buffer that was dropped.
+    last_drop: Option<Instant>,
+}
+
+impl State {
+    fn new(node: String) -> Self {
+        Self {
+            live: HashMap::new(),
+            next_gen: 1,
+            modifier: None,
+            importer: None,
+            node,
+            gave_up: false,
+            plain_due: false,
+            plain_sent: false,
+            memory_settled: false,
+            reconnected: false,
+            reconnect_due: false,
+            memory_asked_at: None,
+            fed: false,
+            last_drop: None,
+        }
+    }
+
+    /// The memory format was just asked for: the watchdog starts.
+    fn memory_asked(&mut self) {
+        self.memory_asked_at = Some(Instant::now());
+        self.fed = false;
+        self.last_drop = None;
+    }
 }
 
 /// The PipeWire capture's DMA-BUF state, shared between the stream's
@@ -157,16 +204,7 @@ impl PwDma {
                     switch: switch.clone(),
                     ours,
                     returns,
-                    state: Mutex::new(State {
-                        live: HashMap::new(),
-                        next_gen: 1,
-                        modifier: None,
-                        importer: None,
-                        node,
-                        gave_up: false,
-                        plain_due: false,
-                        plain_sent: false,
-                    }),
+                    state: Mutex::new(State::new(node)),
                 }))
             }
             Ok(_) => {
@@ -197,11 +235,20 @@ impl PwDma {
         let mut st = self.lock();
         let step = decide(prop, &self.ours, copies_asked || st.gave_up);
         match &step {
-            Step::Memory => st.modifier = None,
-            Step::Ready(m) => st.modifier = Some(*m),
+            Step::Memory => {
+                st.modifier = None;
+                st.memory_settled = true;
+            }
+            Step::Ready(m) => {
+                st.modifier = Some(*m);
+                st.memory_settled = false;
+            }
             // The renegotiation's old modifier must not outlive it: until
             // the fixed format comes back nothing is negotiated.
-            Step::Fixate(_) => st.modifier = None,
+            Step::Fixate(_) => {
+                st.modifier = None;
+                st.memory_settled = false;
+            }
             Step::GiveUp(why) => {
                 st.modifier = None;
                 if !st.gave_up {
@@ -270,6 +317,7 @@ impl PwDma {
             )
         };
         if kind != spa::SPA_DATA_DmaBuf {
+            self.lock().fed = true;
             return Take::Copy;
         }
         if corrupted || size == 0 {
@@ -278,10 +326,16 @@ impl PwDma {
         let mut st = self.lock();
         let modifier =
             match disposition(st.gave_up, self.switch.load(Ordering::Relaxed), st.modifier) {
-                Disposition::Drop => return Take::Drop,
+                Disposition::Drop => {
+                    st.last_drop = Some(Instant::now());
+                    return Take::Drop;
+                }
                 // A DMA-BUF on a format with no modifier: PipeWire mapped it
                 // (`MAP_BUFFERS`) and the caller copies it out.
-                Disposition::Copy => return Take::Copy,
+                Disposition::Copy => {
+                    st.fed = true;
+                    return Take::Copy;
+                }
                 Disposition::Import(modifier) => modifier,
             };
         if planes != 1 {
@@ -320,6 +374,7 @@ impl PwDma {
                 }
             }
         };
+        st.fed = true;
         let epoch = st.live[&key].epoch;
         let lease = Arc::new(PwLease {
             ptr: key,
@@ -397,6 +452,7 @@ impl PwDma {
         if st.plain_due || asked {
             st.plain_sent = true;
             st.plain_due = false;
+            st.memory_asked();
             if asked {
                 st.gave_up = true;
                 info!(
@@ -406,6 +462,47 @@ impl PwDma {
             return true;
         }
         false
+    }
+
+    /// The stream reached the error state, for `why`: whether to connect it
+    /// again with the memory format only (the first time, with DMA-BUF
+    /// offered) or to end the capture.
+    pub(in crate::streaming) fn stream_error(&self, why: &str) -> OnError {
+        let mut st = self.lock();
+        let action = on_stream_error(st.reconnected, st.memory_settled);
+        if action == OnError::Reconnect {
+            warn!(
+                "PipeWire capture back to copies through memory: the stream failed with DMA-BUF offered ({why})"
+            );
+            st.reconnected = true;
+            st.reconnect_due = true;
+            st.gave_up = true;
+            st.modifier = None;
+            // The memory format is in the new connection: nothing to ask for.
+            st.plain_sent = true;
+            st.plain_due = false;
+        }
+        action
+    }
+
+    /// Whether the stream must be connected again now (once), with the
+    /// memory format only.
+    pub(in crate::streaming) fn reconnect_wanted(&self) -> bool {
+        let mut st = self.lock();
+        if !st.reconnect_due {
+            return false;
+        }
+        st.reconnect_due = false;
+        st.memory_asked();
+        true
+    }
+
+    /// Whether the compositor has ignored the request for memory buffers for
+    /// [`MEMORY_GRACE`]: it asked, still sends DMA-BUFs and no picture has
+    /// come. The capture ends rather than freezing the picture.
+    pub(in crate::streaming) fn memory_ignored(&self) -> bool {
+        let st = self.lock();
+        memory_ignored(st.memory_asked_at, st.last_drop, st.fed, MEMORY_GRACE)
     }
 
     /// The stream buffers whose frames are done, ready to be queued back by
@@ -495,16 +592,7 @@ mod tests {
             switch: Arc::new(AtomicBool::new(true)),
             ours: modifiers,
             returns: Arc::new(Returns::new().unwrap()),
-            state: Mutex::new(State {
-                live: HashMap::new(),
-                next_gen: 1,
-                modifier: None,
-                importer: None,
-                node: String::new(),
-                gave_up: false,
-                plain_due: false,
-                plain_sent: false,
-            }),
+            state: Mutex::new(State::new(String::new())),
         })
     }
 
@@ -614,6 +702,42 @@ mod tests {
             Step::Ready(0x0100_0000_0000_0001)
         );
         assert_eq!(d.lock().modifier, Some(0x0100_0000_0000_0001));
+    }
+
+    #[test]
+    fn an_error_with_dma_buf_offered_reconnects_on_memory_once() {
+        let d = dma(vec![MOD_LINEAR]);
+        assert_eq!(d.stream_error("no more input formats"), OnError::Reconnect);
+        assert!(d.reconnect_wanted());
+        assert!(!d.reconnect_wanted(), "once");
+        assert!(
+            !d.plain_wanted(),
+            "the new connection has the memory format"
+        );
+        // The memory format is what comes back, and the next error ends it.
+        assert_eq!(d.step(None), Step::Memory);
+        assert_eq!(d.stream_error("again"), OnError::End);
+        // A stream that settled on memory on its own was not failed by DMA-BUF.
+        let d = dma(vec![MOD_LINEAR]);
+        assert_eq!(d.step(None), Step::Memory);
+        assert_eq!(d.stream_error("link"), OnError::End);
+        assert!(!d.reconnect_wanted());
+    }
+
+    #[test]
+    fn asking_for_memory_starts_the_watchdog_and_a_picture_stops_it() {
+        let d = dma(vec![MOD_LINEAR]);
+        assert!(!d.memory_ignored());
+        d.step(Some(&ModifierProp::Fixed(5)));
+        assert!(d.plain_wanted());
+        assert!(d.lock().memory_asked_at.is_some());
+        assert!(!d.memory_ignored(), "nothing arrived");
+        // A DMA-BUF buffer that keeps arriving past the grace.
+        let asked = d.lock().memory_asked_at.unwrap();
+        d.lock().last_drop = Some(asked + MEMORY_GRACE);
+        assert!(d.memory_ignored());
+        d.lock().fed = true;
+        assert!(!d.memory_ignored());
     }
 
     #[test]
