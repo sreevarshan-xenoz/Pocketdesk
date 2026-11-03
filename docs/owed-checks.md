@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1344 open items.
+1347 open items.
 
 | Where | Items |
 |---|---|
@@ -14,7 +14,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | Away from home: another network, or through a router | 43 |
 | A second computer | 196 |
 | A Linux desktop (the Azure VM serves for some) | 251 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 86 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 89 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
@@ -2247,6 +2247,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **277. Zero-copy capture (low-latency window handoff, phase 2: the screen goes from the compositor to VA-API as a DMA-BUF)**
 
+- A wlroots compositor that answers `failed` to the import of a modifier it advertises (a driver quirk; Sway on this card imports all it offers): the next modifier is used, or the capture copies with one warning, and the connection is never closed with `invalid_wl_buffer`. (where: other hardware)
+- A compositor whose `zwp_linux_dmabuf_v1` is version 3 or older (no main device): the log says once that the capture copies because the compositor's GPU is not named, and the stream plays. (where: other hardware)
+- AMD and other Intel generations: the output surface of the video processor is ready when the conversion returns (the unit test `the_buffer_is_free_when_the_conversion_returns` passes and is not skipped), and an empty desktop reaches the card as linear after a few seconds. (where: other hardware)
 - AMD (radeonsi VA-API) with Sway or Hyprland: the log's "Zero-copy capture: ... modifier=..." line names a modifier the compositor and the card agree on, the picture is the same as with "Copy the screen through memory" on (look at it, then compare the frames a second and the host's processor use), and a card whose import fails turns the capture back to copies with one warning. (where: other hardware)
 - Other Intel generations (Gen 8 and 9 with i965 or iHD, Xe with its 4-tiled modifiers): the same, and the modifiers with a second plane (compressed ones) are skipped. (where: other hardware)
 - A hybrid laptop whose compositor renders on the discrete card while the encoder opens the integrated one: the log says "the compositor renders on another GPU" once and the capture copies; with both on one card the DMA-BUF capture works. (where: other hardware)
