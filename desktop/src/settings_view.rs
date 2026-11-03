@@ -1570,11 +1570,12 @@ impl SettingsForm {
                         "copy the screen through memory instead of the graphics card",
                     )
                     .on_hover_text(
-                        "On a Linux desktop built on wlroots (Sway, Hyprland), with a graphics \
-                         card that does video, the screen is rendered into a buffer on the card \
-                         and encoded from there, with no copy through memory. Turn this on to \
-                         copy it through memory as before, if the picture ever misbehaves with \
-                         your card or driver. Read when the server starts.",
+                        "On a Linux desktop built on wlroots (Sway, Hyprland), or GNOME or KDE \
+                         through PipeWire, with a graphics card that does video, the screen is \
+                         rendered into a buffer on the card and encoded from there, with no copy \
+                         through memory. Turn this on to copy it through memory as before, if \
+                         the picture ever misbehaves with your card or driver. Read when the \
+                         server starts.",
                     );
                 });
                 row(ui, "laser_pointer", |ui| {

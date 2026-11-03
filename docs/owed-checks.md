@@ -2,19 +2,19 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1414 open items.
+1425 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 100 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 101 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 205 |
 | A phone with a SIM | 40 |
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
 | A second computer | 244 |
-| A Linux desktop (the Azure VM serves for some) | 253 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 95 |
+| A Linux desktop (the Azure VM serves for some) | 259 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 99 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
@@ -244,6 +244,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **280. A Windows computer lends one of its windows (phase 5 of the window handoff: Windows as the source)**
 
 - The Settings row "Let my computers borrow my windows" on a Windows computer: drawn, saves, takes effect without a restart, and its note says what happens on Windows (the window stays where it is, is raised and used with the real pointer and keyboard, may be resized, and is put back as it was). (where: here)
+
+**282. Zero-copy capture on the PipeWire path (low-latency window handoff, phase 2b: GNOME's and KDE's screen goes from the compositor to VA-API as a DMA-BUF)**
+
+- The Settings row "Copy the screen through memory" on this Windows box's app: its help now names GNOME and KDE. (where: here)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -2080,12 +2084,21 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The owner's Hyprland session, whole screen: the capture takes DMA-BUFs (a Hyprland screencopy that reports no damage at once: a still screen sends its heartbeat each second, as repeats only while the picture is the same, read back by the card), the picture is right, and a window crop from a phone (Hyprland's toplevel export) still works and still copies. (where: linux)
 - A window crop on a host without the toplevel export (Sway), set mid-session from a phone: the log says "Capture back to copies through memory", the stream goes on at the crop's size, and a second session starts on DMA-BUFs again. (where: linux)
 - An output whose size changes mid-session (a monitor's mode, a window's fitted screen resized): new buffers are made and checked, the encoder is rebuilt at the new size, and the stream goes on. (where: linux)
-- GNOME, KDE (the portal and PipeWire) and X11 hosts: unchanged, the capture copies as before, and the new Settings row is shown and harmless. (where: linux)
-- PipeWire's DMA-BUF negotiation (`SPA_DATA_DmaBuf` with the modifiers the card imports) for GNOME and KDE hosts: not built. (where: linux)
+- X11 hosts: unchanged, the capture copies as before, and the new Settings row is shown and harmless (GNOME and KDE are §282). (where: linux)
 
 **279. Dragging a window past the edge (phase 4 of the window handoff)**
 
 - Sway as the offering computer: it has no input-capture portal, so no edge is watched; the pick of the window in front and its return were live-tested in a headless Sway (a floating window at the edge picked, a tiled and a full-screen one left, a drag back put the container's top left where asked, 1.0 s). Whether Sway will ever drive the shared input is a separate question. (where: linux)
+
+**282. Zero-copy capture on the PipeWire path (low-latency window handoff, phase 2b: GNOME's and KDE's screen goes from the compositor to VA-API as a DMA-BUF)**
+
+- KDE Plasma 6 (KWin) through the portal, in a throwaway container (KWin as `kwin_wayland --virtual`, the rig of §100's KDE check): the log says "The PipeWire stream settled on DMA-BUF buffers", the picture is right, and the frame rate and the host's processor use against `capture_copy` on. Say which modifier KWin fixed and whether it fixed one itself or left it open. (where: linux)
+- GNOME through the portal (the dialog path, "Remote Desktop"/"Share Screen") on a real or headless session: the same as above, and the tearing check: a fast-moving window (a video, the fishbowl) over several minutes with no garbled or half-drawn frame in the viewer (the buffers' implicit fences are all the capture waits on; the rig cannot show a tear). (where: linux)
+- The local cursor with DMA-BUF buffers (a viewer that draws the pointer itself): the pointer's metadata arrives on every buffer, the picture has no pointer in it, and a buffer that only moved the pointer is queued back at once (`chunk.size` 0). (where: linux)
+- The screen's size changes mid-session (a virtual monitor's mode, a window's fitted screen): the stream renegotiates, the new buffers are imported once each, the encoder is rebuilt at the new size, and the stream goes on on the card. (where: linux)
+- A phone's window crop (the window pick), set mid-session on a GNOME or KDE host: the log says "Capture back to copies through memory", the stream asks for memory buffers and goes on at the crop's size. A lent GNOME window (`RecordWindow`) copies from the start, as before. (where: linux)
+- A session pinned to NVENC or the software encoder on a host with VA-API: no DMA-BUF format is offered (the log shows no "offers DMA-BUF buffers" line) and the capture is as before. (where: linux)
+- Cropping on the card (`scale_vaapi`'s crop, so a window pick or a lent window need not copy): not built. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
@@ -2363,6 +2376,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The window moved locally before the drag crossed: as the capture takes the pointer, Hyprland's own window drag ends cleanly (no window left half-dragged, stuck to the pointer, or the button stuck down over there). (where: other hardware)
 - A text selection dragged to the edge and over it, with the default trigger: no window is taken. With "Any left-button drag": a selection inside a floating window at the edge takes that window (said in the Settings note). (where: other hardware)
 - A tiled window, a full-screen window, a drag with the right button (Super and right drag resizes): the pointer crosses and nothing is taken or lent. (where: other hardware)
+
+**282. Zero-copy capture on the PipeWire path (low-latency window handoff, phase 2b: GNOME's and KDE's screen goes from the compositor to VA-API as a DMA-BUF)**
+
+- AMD (radeonsi VA-API) with GNOME or KDE: the offered list, the modifier the compositor fixes, the picture, and that PipeWire's mapping of the buffers (the stream is connected with `MAP_BUFFERS`) does not fail for a buffer the card cannot map into memory. If the stream errors in DMA-BUF mode the capture connects it again on memory buffers once (the log says "the stream failed with DMA-BUF offered" and "connected again, memory buffers only") and ends only if that fails too: say which happened. (where: other hardware)
+- NVIDIA or a hybrid laptop with the proprietary driver: the capture's probe runs libEGL and VA-API inside the server process, so a driver that crashes there takes the server down (no process isolation is built); start a session with the PipeWire capture and say whether the probe returned or the server died. (where: other hardware)
+- Other Intel generations (Gen 8 and 9 with i965 or iHD, Xe with its 4-tiled modifiers) and NVIDIA (the proprietary driver: no VA-API device, so nothing is offered and the capture is unchanged). (where: other hardware)
+- A hybrid laptop whose compositor renders on the discrete card while the encoder opens the integrated one: the card refuses the compositor's buffer, the log says once that the capture is back to copies, and the stream plays. (where: other hardware)
 
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 
