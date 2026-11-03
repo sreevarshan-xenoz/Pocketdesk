@@ -2833,7 +2833,7 @@ impl SettingsForm {
                     ui.checkbox(&mut e.lend_windows, name("lend_windows"));
                     note(
                         ui,
-                        "A computer of yours paired both ways, with Input allowed, can see which windows are open here (their titles too) and move one of them (Sway, Hyprland) to a hidden screen of its own size and show it there. The program keeps running here; the window leaves your screen until it is returned, the other computer goes away, the window is closed or this server stops. Turning this off puts every window lent back at once, and nothing is listed or lent.",
+                        "A computer of yours paired both ways, with Input allowed, can see which windows are open here (their titles too) and move one of them (Sway, Hyprland) to a hidden screen of its own size and show it there. The program keeps running here; the window leaves your screen until it is returned, the other computer goes away, the window is closed or this server stops. On Windows no window moves: it stays where it is on your screen, is brought to the front and used with this computer\u{2019}s own pointer and keyboard by the other computer, may be resized to the window that shows it (not if it is maximised), and is put back as it was when it is returned. Turning this off puts every window lent back at once, and nothing is listed or lent.",
                     );
                 });
                 // The window handoff's resize: a borrowed window here takes the

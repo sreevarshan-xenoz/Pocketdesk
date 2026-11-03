@@ -283,8 +283,9 @@ pub struct Config {
     pub virtual_screens: bool,
     /// Let the owner's other computers (paired both ways, with Input) borrow
     /// this computer's windows: the window moves to a hidden screen of its
-    /// own size here, is streamed there, and goes back on return (Sway and
-    /// Hyprland). Off by default: a window leaves the screen it was on.
+    /// own size here, is streamed there, and goes back on return (Sway,
+    /// Hyprland; on Windows the window stays where it is). Off by default: a
+    /// window leaves the screen it was on.
     #[serde(default)]
     pub lend_windows: bool,
     /// A window borrowed from another of the owner's computers takes the
