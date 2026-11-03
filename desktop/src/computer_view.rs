@@ -271,6 +271,16 @@ struct State {
     borrow_keeps_size: bool,
     borrow_asked: Option<FitSize>,
     borrow_seen: Option<(FitSize, Instant)>,
+    /// The ask whose answer is awaited (the size it was for, and the size the
+    /// window had), how many answers in a row gave the old size again, and
+    /// whether the window stopped asking for the rest of this view (the
+    /// other computer ignores the size): it is then only scaled.
+    borrow_pending: Option<BorrowPending>,
+    borrow_misses: u8,
+    borrow_stopped: bool,
+    /// The pointer lock and the mic held through a borrowed window's resize
+    /// (the same window, the same computer, asked again for its new size).
+    resize_hold: Option<ResizeHold>,
     /// Settings' "Smooth scrolling" off: the wheel goes in whole notches
     /// only (on, a touchpad's scroll goes in 120ths of a notch).
     notches_only: bool,
@@ -1360,6 +1370,10 @@ impl ComputerView {
         state.fit.on = false;
         state.borrow_asked = None;
         state.borrow_seen = None;
+        state.borrow_pending = None;
+        state.borrow_misses = 0;
+        state.borrow_stopped = false;
+        state.resize_hold = None;
         state.hevc_refused = false;
         state.quality = quality;
         state.view_only = view_only;
@@ -1494,6 +1508,9 @@ impl ComputerView {
         self.each(|state| {
             state.borrow_keeps_size = !on;
             state.borrow_seen = None;
+            // Turned on again: the other computer is tried afresh.
+            state.borrow_misses = 0;
+            state.borrow_stopped = false;
         });
     }
 
@@ -1758,6 +1775,20 @@ fn ask_with(
     wanted: Wanted,
     known: Option<bool>,
 ) -> Result<(), String> {
+    ask_keeping(state_dir, state, wanted, known, false)
+}
+
+/// [`ask_with`], keeping the microphone going when `keep_mic` (a borrowed
+/// window's resize: the same window of the same computer asked again at its
+/// new size, so the capture runs on, its frames dropped until the new view
+/// takes them; see [`ResizeHold`]).
+fn ask_keeping(
+    state_dir: &Path,
+    state: &mut State,
+    wanted: Wanted,
+    known: Option<bool>,
+    keep_mic: bool,
+) -> Result<(), String> {
     let could = offer_hevc(
         state.hevc_setting,
         state.hw_decode,
@@ -1786,7 +1817,7 @@ fn ask_with(
         // last asked to make the window (its picture area's), so a reconnect
         // keeps it; a fitted screen's, the picture area's now.
         let fit = if wanted.borrow.is_some() {
-            (!state.borrow_keeps_size)
+            (!state.borrow_keeps_size && !state.borrow_stopped)
                 .then_some(state.borrow_asked)
                 .flatten()
         } else {
@@ -1804,10 +1835,12 @@ fn ask_with(
     }
     // The microphone stops with the view it went to (PR #569 re-review
     // N5): never a frame named for the next computer.
-    let sending = state.mic.on();
-    state.mic.stopped();
-    if sending {
-        stop_mic(state);
+    if !keep_mic {
+        let sending = state.mic.on();
+        state.mic.stopped();
+        if sending {
+            stop_mic(state);
+        }
     }
     if let Some(stream) = state.stream.take() {
         let _ = stream.shutdown(std::net::Shutdown::Both);
@@ -1986,13 +2019,33 @@ fn carrying_ask(
     wanted: Wanted,
     to: u32,
 ) -> Result<(), String> {
-    if state.pointer.locked() || state.pointer_said == Some(true) {
-        say_pointer(state, false);
+    carrying_ask_as(state_dir, state, wanted, to, false)
+}
+
+/// [`carrying_ask`], for a borrowed window's resize when `resize`: the same
+/// window of the same computer asked again at another size, which is no
+/// switch to another screen. What a switch lets go of (the pointer lock and
+/// the mic, since the next screen may not take them) is held, as the
+/// recording goes on (in a new file: its size is new): only the connection is
+/// new, and the relay there is told the lock and the mic again as the view
+/// controls ([`ResizeHold`]).
+fn carrying_ask_as(
+    state_dir: &Path,
+    state: &mut State,
+    wanted: Wanted,
+    to: u32,
+    resize: bool,
+) -> Result<(), String> {
+    if !resize {
+        if state.pointer.locked() || state.pointer_said == Some(true) {
+            say_pointer(state, false);
+        }
+        state.pointer.free();
     }
-    state.pointer.free();
     // The mic goes on with the window (PC11): stopped here, its relay told,
-    // and started again on the new screen's view once that controls.
-    let resume = state.mic.on() || state.mic.wanted();
+    // and started again on the new screen's view once that controls. A
+    // resize keeps it going instead.
+    let resume = !resize && (state.mic.on() || state.mic.wanted());
     if resume {
         let sending = state.mic.on();
         state.mic.stopped();
@@ -2006,7 +2059,18 @@ fn carrying_ask(
     // to end, and a later end would wrongly start one (PR #570 review M2).
     state.record_carry = state.record_want && going;
     let device_id = wanted.device_id.clone();
-    ask(state_dir, state, wanted)?;
+    let keep_mic = resize && state.mic.on();
+    ask_keeping(
+        state_dir,
+        state,
+        wanted,
+        crate::video::hevc_known(),
+        keep_mic,
+    )?;
+    state.resize_hold = resize.then(|| ResizeHold {
+        asked: state.asked,
+        until: Instant::now() + RESIZE_HOLD_FOR,
+    });
     // Set after the ask, which forgets any (re-review N1): only this
     // switch carries it.
     if resume {
@@ -2102,12 +2166,19 @@ fn follow_fit(
 /// Each pass: a borrowed window's picture area `measured` in pixels. One that
 /// has held a new size for [`view_fit::BORROW_DEBOUNCE`] (and is more than
 /// [`view_fit::BORROW_TOLERANCE`] pixels off the size the other computer's
-/// window has, or was last asked) asks again at it: the other computer sizes
-/// its window and the screen it is on to the area, and the view dials the
-/// same screen at its new size, so the picture is the area's, a pixel to a
-/// pixel. Until it comes the last picture is scaled to the area. One ask is in
-/// flight at a time (a window dragged on is followed when the new picture is
-/// in). When to look again, if the area is changing.
+/// window has) asks again at it: the other computer sizes its window and the
+/// screen it is on to the area, and the view dials the same screen at its new
+/// size, so the picture is the area's, a pixel to a pixel. Until it comes the
+/// last picture is scaled to the area. One ask is in flight at a time (a
+/// window dragged on is followed when the new picture is in).
+///
+/// What the other computer says it has is the size judged ([`ViewFit::Borrowed`]),
+/// not what was asked: the area just asked for is not asked for again
+/// (a size the host bounded stays at that), a failure is tried again at the
+/// next real size only, and a host that answers [`view_fit::BORROW_MISSES`]
+/// times in a row with the size it had (one that ignores the size) is not
+/// asked again for this view: the picture is only scaled. When to look again,
+/// if the area is changing.
 fn follow_borrow(
     state_dir: &Path,
     state: &mut State,
@@ -2117,24 +2188,59 @@ fn follow_borrow(
     let area = measured?;
     let borrowed = state.wanted.as_ref().is_some_and(|w| w.borrow.is_some());
     // Not while the view has ended, or the picture of an ask is awaited.
-    if !borrowed || state.borrow_keeps_size || state.ended.is_some() || state.switching.is_some() {
+    if !borrowed
+        || state.borrow_keeps_size
+        || state.borrow_stopped
+        || state.ended.is_some()
+        || state.switching.is_some()
+    {
         state.borrow_seen = None;
         return None;
     }
-    // What the window there is: the size it was last asked, else the size it
-    // was lent at (the host's own answer).
-    let now_there = state.borrow_asked.or(match *state.status.fit {
+    // The size the other computer's window has: what it said as the view was
+    // let in, nothing before.
+    let Some(there) = (match *state.status.fit {
         ViewFit::Borrowed { width, height } => Some(FitSize { width, height }),
         _ => None,
-    });
-    match view_fit::borrow_step(now_there, &mut state.borrow_seen, area, now) {
+    }) else {
+        state.borrow_seen = None;
+        return None;
+    };
+    // The answer to the last ask is in: judged.
+    if let Some(pending) = state.borrow_pending.take() {
+        match view_fit::judge_answer(pending.was, pending.asked, there) {
+            view_fit::Answer::Kept => {
+                state.borrow_misses = state.borrow_misses.saturating_add(1);
+                if state.borrow_misses >= view_fit::BORROW_MISSES {
+                    state.borrow_stopped = true;
+                    state.borrow_seen = None;
+                    return None;
+                }
+            }
+            view_fit::Answer::Followed | view_fit::Answer::Bounded => state.borrow_misses = 0,
+        }
+    }
+    // Asked at this size already: followed, bounded or failed, it is the
+    // next size that is asked for.
+    if let Some(last) = state.borrow_asked
+        && view_fit::near(area, last, view_fit::BORROW_TOLERANCE)
+    {
+        state.borrow_seen = None;
+        return None;
+    }
+    match view_fit::borrow_step(Some(there), &mut state.borrow_seen, area, now) {
         view_fit::Step::Idle => None,
         view_fit::Step::Wait(wait) => Some(wait),
         view_fit::Step::Refit => {
             if let Some(wanted) = state.wanted.clone() {
                 state.borrow_asked = Some(area);
+                state.borrow_pending = Some(BorrowPending {
+                    asked: area,
+                    was: there,
+                });
                 let to = wanted.monitor;
-                if let Err(e) = carrying_ask(state_dir, state, wanted, to) {
+                if let Err(e) = carrying_ask_as(state_dir, state, wanted, to, true) {
+                    state.borrow_pending = None;
                     state.ended = Some(e);
                 }
             }
@@ -2358,6 +2464,37 @@ fn mic_stop_words(state: &State) -> Option<&'static str> {
     }
 }
 
+/// A borrowed window's ask for a new size, awaiting its answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BorrowPending {
+    pub asked: FitSize,
+    pub was: FitSize,
+}
+
+/// The state a borrowed window's resize keeps across the redial that follows
+/// it: the ask it was (the window's `asked` number just after it) and until
+/// when. Nothing else holds it, so a window closed, switched or ended never
+/// inherits it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResizeHold {
+    pub asked: u64,
+    pub until: Instant,
+}
+
+/// How long a resize's redial may take before the lock and the mic held for
+/// it are let go.
+pub const RESIZE_HOLD_FOR: Duration = Duration::from_secs(15);
+
+/// Whether `state` holds its pointer lock and mic through a resize at `now`:
+/// the ask it was is the window's latest, it has not run out, and the view
+/// has not ended.
+fn resize_holds(state: &State, now: Instant) -> bool {
+    state.ended.is_none()
+        && state
+            .resize_hold
+            .is_some_and(|hold| hold.asked == state.asked && now < hold.until)
+}
+
 /// A mic to start again after a switch (PC11): only for the computer it
 /// was on for, only for that switch's ask (the window's `asked` just
 /// after it), and only until a while has passed (PR #570 re-review N1): a
@@ -2478,9 +2615,21 @@ fn follow_mic(
         return;
     }
     if state.mic.on() && state.mic_said != Some(true) {
-        state.mic.stopped();
-        stop_mic(state);
-        state.mic_note = Some(view_mic::CUT_WORDS.to_string());
+        // A borrowed window's resize kept the capture going through its
+        // redial: the new connection's relay hears the mic once the view
+        // controls that computer, and nothing is cut meanwhile.
+        if resize_holds(state, Instant::now()) {
+            if !controlling {
+                ctx.request_repaint_after(Duration::from_millis(250));
+                return;
+            }
+            say_mic(state, true);
+        }
+        if state.mic_said != Some(true) {
+            state.mic.stopped();
+            stop_mic(state);
+            state.mic_note = Some(view_mic::CUT_WORDS.to_string());
+        }
     }
     match state.mic.step(controlling) {
         Some(view_mic::Change::Start) => {
@@ -2499,11 +2648,16 @@ fn follow_mic(
             let sending = shared.clone();
             let send = move |packet: InputPacket| {
                 let mut state = lock(&sending);
-                if state.mic_gen != generation
-                    || !state.mic.on()
-                    || state.mic_said != Some(true)
-                    || !mic_may_go(&state)
-                {
+                if state.mic_gen != generation || !state.mic.on() {
+                    return false;
+                }
+                // A resize's redial: the new relay is told again once the
+                // view controls; frames meanwhile are dropped, the capture
+                // kept.
+                if state.mic_said != Some(true) && resize_holds(&state, Instant::now()) {
+                    return true;
+                }
+                if state.mic_said != Some(true) || !mic_may_go(&state) {
                     return false;
                 }
                 send(&mut state, vec![packet]);
@@ -3500,6 +3654,23 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
     }
 }
 
+/// What the pointer lock judges each pass: the window `focused`, the view
+/// `controls` the other computer and there is a `picture`, all of them taken
+/// as true while the lock is `held` through a borrowed window's resize (its
+/// redial is a moment, and the lock is not the window's to lose by it).
+fn pointer_situation(
+    focused: bool,
+    controls: bool,
+    picture: bool,
+    held: bool,
+) -> view_pointer::Situation {
+    view_pointer::Situation {
+        focused,
+        controls: controls || held,
+        picture: picture || held,
+    }
+}
+
 /// The pointer lock, each pass (PC7): it locks or lets go as
 /// [`PointerLock`] decides (a focus the system said, control, a picture),
 /// the relay hears it before this pass's moves, the window's input turns
@@ -3515,14 +3686,18 @@ fn follow_pointer(
     connected: bool,
 ) {
     let now = Instant::now();
-    let situation = view_pointer::Situation {
+    // A borrowed window's resize is being redialled: the lock is held, as
+    // the window keeps its picture, and is said again to the new relay.
+    let held = state.switching.is_some() && resize_holds(state, now);
+    let situation = pointer_situation(
         // Only a focus the system said: unknown is not focused.
-        focused: ctx.input(|i| i.viewport().focused == Some(true)),
-        controls: going
+        ctx.input(|i| i.viewport().focused == Some(true)),
+        going
             && status.reconnecting == 0
             && controls(status.control, state.view_only, connected, true),
-        picture: picture.is_some(),
-    };
+        picture.is_some(),
+        held,
+    );
     let mode = view_pointer::grab_here();
     let over = picture.unwrap_or(area);
     if let Some(change) = state.pointer.step(situation, now) {
@@ -7355,6 +7530,237 @@ mod tests {
         );
         assert!(borrow_asks(&dir).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A borrowed window's state as the other computer answered a view of it:
+    /// the picture is in (no switch under way) and the window is `width`×`height`.
+    fn answered(state: &mut State, width: u32, height: u32) {
+        state.switching = None;
+        *state.status.fit = ViewFit::Borrowed { width, height };
+    }
+
+    /// The area `area` held for the debounce from `at` ms: what the server was
+    /// asked, as (borrow, fit).
+    fn resize_to(
+        dir: &Path,
+        state: &mut State,
+        area: FitSize,
+        t0: Instant,
+        at: u64,
+    ) -> Vec<(Option<String>, Option<FitSize>)> {
+        for ms in [at, at + 200] {
+            follow_borrow(dir, state, Some(area), t0 + Duration::from_millis(ms));
+        }
+        borrow_asks(dir)
+    }
+
+    /// Resize follows the viewer, review fix: a host that gives the old size
+    /// back (one that ignores the size, or whose resize failed) is asked again
+    /// only at the next real size, and after the second such answer not at
+    /// all for this view (the picture is scaled, a reconnect carries no size).
+    #[test]
+    fn a_host_that_ignores_the_size_is_asked_twice_and_then_only_scaled() {
+        let dir = fit_dir("borrow-ignored");
+        let t0 = Instant::now();
+        let mut state = State::default();
+        ask(&dir, &mut state, borrowed("0x5a", "Notes")).unwrap();
+        borrow_asks(&dir);
+        answered(&mut state, 1280, 720);
+        let key = Some("0x5a".to_string());
+        assert_eq!(
+            resize_to(&dir, &mut state, fit_size(1000, 600), t0, 0),
+            [(key.clone(), Some(fit_size(1000, 600)))]
+        );
+        // It answers the size it had: not asked again at this size, however
+        // long it is held (a failure is tried at the next real size only).
+        answered(&mut state, 1280, 720);
+        for at in [1000, 10_000] {
+            assert!(resize_to(&dir, &mut state, fit_size(1000, 600), t0, at).is_empty());
+        }
+        assert_eq!(state.borrow_misses, 1);
+        assert!(!state.borrow_stopped);
+        // The next real size is asked.
+        assert_eq!(
+            resize_to(&dir, &mut state, fit_size(900, 500), t0, 20_000),
+            [(key.clone(), Some(fit_size(900, 500)))]
+        );
+        // The same again: it ignores the size. No more asks for this view.
+        answered(&mut state, 1280, 720);
+        assert!(resize_to(&dir, &mut state, fit_size(800, 400), t0, 30_000).is_empty());
+        assert!(state.borrow_stopped);
+        assert!(resize_to(&dir, &mut state, fit_size(700, 300), t0, 40_000).is_empty());
+        // A reconnect asks no size either.
+        ask(&dir, &mut state, borrowed("0x5a", "Notes")).unwrap();
+        assert_eq!(borrow_asks(&dir), [(key, None)]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A host that follows resets the count, and one that bounds the size
+    /// (a screen is only so large) is not asked for the same area again.
+    #[test]
+    fn a_bounded_size_is_not_asked_for_again_and_a_followed_one_forgives() {
+        let dir = fit_dir("borrow-bounded");
+        let t0 = Instant::now();
+        let mut state = State::default();
+        ask(&dir, &mut state, borrowed("0x5a", "Notes")).unwrap();
+        borrow_asks(&dir);
+        answered(&mut state, 1280, 720);
+        let key = Some("0x5a".to_string());
+        // One miss, then a size that is followed: the count starts over.
+        resize_to(&dir, &mut state, fit_size(1000, 600), t0, 0);
+        answered(&mut state, 1280, 720);
+        assert!(resize_to(&dir, &mut state, fit_size(1000, 600), t0, 1000).is_empty());
+        assert_eq!(state.borrow_misses, 1);
+        resize_to(&dir, &mut state, fit_size(900, 500), t0, 2000);
+        answered(&mut state, 900, 500);
+        assert!(resize_to(&dir, &mut state, fit_size(900, 500), t0, 3000).is_empty());
+        assert_eq!(state.borrow_misses, 0);
+        // More than a screen can be: the host answers its most.
+        assert_eq!(
+            resize_to(&dir, &mut state, fit_size(3000, 1800), t0, 4000),
+            [(key.clone(), Some(fit_size(3000, 1800)))]
+        );
+        answered(&mut state, 2560, 1440);
+        for at in [5000, 30_000] {
+            assert!(
+                resize_to(&dir, &mut state, fit_size(3000, 1800), t0, at).is_empty(),
+                "the same bounded area is not asked for again"
+            );
+        }
+        assert_eq!((state.borrow_misses, state.borrow_stopped), (0, false));
+        // Another size is.
+        assert_eq!(
+            resize_to(&dir, &mut state, fit_size(2000, 1000), t0, 40_000),
+            [(key, Some(fit_size(2000, 1000)))]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Resize follows the viewer, review fix: a resize is the same window of
+    /// the same computer asked again, so the pointer lock and the mic stay as
+    /// they are (the relay hears no "let go", the capture runs on), where a
+    /// switch to another screen lets both go.
+    #[test]
+    fn a_resize_keeps_the_pointer_lock_and_the_mic() {
+        let dir = fit_dir("borrow-hold");
+        let t0 = Instant::now();
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let writer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut relay, _) = listener.accept().unwrap();
+        relay
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut state = State {
+            wanted: Some(borrowed("0x5a", "Notes")),
+            session_id: Some(9),
+            writer: Some(writer),
+            pointer_said: Some(true),
+            mic_said: Some(true),
+            ..State::default()
+        };
+        state.status.phase = Phase::Showing;
+        state.status.control = Some(true);
+        answered(&mut state, 1280, 720);
+        let able = view_pointer::Situation {
+            focused: true,
+            controls: true,
+            picture: true,
+        };
+        state.pointer.toggle();
+        assert_eq!(
+            state.pointer.step(able, t0),
+            Some(view_pointer::Change::Lock)
+        );
+        state.mic.toggle();
+        assert_eq!(state.mic.step(true), Some(view_mic::Change::Start));
+        // The window is resized.
+        resize_to(&dir, &mut state, fit_size(1000, 600), t0, 0);
+        assert!(state.switching.is_some());
+        assert!(state.pointer.locked(), "the lock is held");
+        assert!(state.mic.on(), "the mic goes on");
+        assert!(resize_holds(&state, t0));
+        assert!(state.mic_resume.is_none(), "no stop and start again");
+        // The relay was told nothing: no lock let go, no mic stopped (its
+        // connection just ends).
+        loop {
+            match Message::read(&mut relay) {
+                Ok(Message::PointerLock(false)) | Ok(Message::Mic(false)) => {
+                    panic!("the relay heard the lock or the mic let go")
+                }
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+        // The pointer stays locked through the redial however the window
+        // sees itself meanwhile (nothing shown to control yet) ...
+        let gap = pointer_situation(true, false, false, true);
+        assert_eq!(state.pointer.step(gap, t0), None);
+        assert!(state.pointer.locked());
+        // ... and is let go as any lock is, once the hold is not there.
+        let gone = pointer_situation(true, false, false, false);
+        assert_eq!(
+            state.pointer.step(gone, t0),
+            Some(view_pointer::Change::Free)
+        );
+        // The hold is for that ask, for a while, for a view that goes on.
+        assert!(!resize_holds(&state, Instant::now() + RESIZE_HOLD_FOR));
+        state.asked += 1;
+        assert!(!resize_holds(&state, t0));
+        state.asked -= 1;
+        state.ended = Some("The view ended.".into());
+        assert!(!resize_holds(&state, t0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The mic held through a resize's redial is told to the new relay once
+    /// the view controls, with nothing cut meanwhile; a mic the relay never
+    /// heard, with no resize to hold it, is cut.
+    #[test]
+    fn a_mic_held_through_a_resize_is_said_again_to_the_new_relay() {
+        let shared = Arc::new(Mutex::new(State::default()));
+        let ctx = egui::Context::default();
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let mut state = State {
+            wanted: Some(borrowed("0x5a", "Notes")),
+            asked: 4,
+            ..State::default()
+        };
+        state.mic.toggle();
+        assert_eq!(state.mic.step(true), Some(view_mic::Change::Start));
+        state.resize_hold = Some(ResizeHold {
+            asked: 4,
+            until: Instant::now() + RESIZE_HOLD_FOR,
+        });
+        // A new connection's relay knows no mic. Not controlling yet: waits.
+        follow_mic(&shared, &mut state, None, &ctx, false);
+        assert!(state.mic.on() && state.mic_note.is_none());
+        assert_eq!(state.mic_said, None);
+        // Controlling, connected: the relay is told, nothing cut.
+        let writer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut relay, _) = listener.accept().unwrap();
+        relay
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        state.writer = Some(writer);
+        state.status = ViewStatus {
+            phase: Phase::Showing,
+            control: Some(true),
+            ..ViewStatus::default()
+        };
+        follow_mic(&shared, &mut state, None, &ctx, true);
+        assert!(state.mic.on() && state.mic_note.is_none());
+        assert_eq!(state.mic_said, Some(true));
+        assert_eq!(Message::read(&mut relay).unwrap(), Message::Mic(true));
+        // Without the hold, a mic the relay never heard is cut.
+        let mut cut = State {
+            wanted: Some(borrowed("0x5a", "Notes")),
+            ..State::default()
+        };
+        cut.mic.toggle();
+        assert_eq!(cut.mic.step(true), Some(view_mic::Change::Start));
+        follow_mic(&shared, &mut cut, None, &ctx, true);
+        assert!(!cut.mic.on());
+        assert_eq!(cut.mic_note.as_deref(), Some(view_mic::CUT_WORDS));
     }
 
     /// Borrowing a window: the window's own title names the view's window,

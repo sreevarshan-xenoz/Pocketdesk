@@ -38,6 +38,40 @@ pub const BORROW_DEBOUNCE: Duration = Duration::from_millis(200);
 /// rounding): below this nothing is asked.
 pub const BORROW_TOLERANCE: u32 = 2;
 
+/// How many asks in a row at a new size the other computer may answer with
+/// the size the window already had before a borrowed window stops asking for
+/// the rest of that view and is only scaled: a host before this ignores the
+/// size, and every ask of it would be a redial for nothing. One such answer
+/// can be a resize that failed there (said: the host answers the screen as it
+/// is), so the first is forgiven, and tried again at the next real size.
+pub const BORROW_MISSES: u8 = 2;
+
+/// What the other computer's answer to a borrowed window's ask for `asked`
+/// was, given the size `was` the window had before it and the size `given`
+/// it answers with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Answer {
+    /// The window has the size asked: followed.
+    Followed,
+    /// A size that is not the one asked and not the old one (bounded, or
+    /// rounded, by the other computer): the window did follow, as far as it
+    /// could; the same area is not asked for again.
+    Bounded,
+    /// The old size again: the size was ignored or the resize failed.
+    Kept,
+}
+
+/// Judge the answer `given` to an ask for `asked` of a window that was `was`.
+pub fn judge_answer(was: FitSize, asked: FitSize, given: FitSize) -> Answer {
+    if near(given, asked, BORROW_TOLERANCE) {
+        Answer::Followed
+    } else if near(given, was, BORROW_TOLERANCE) {
+        Answer::Kept
+    } else {
+        Answer::Bounded
+    }
+}
+
 /// The switch's label, on the bar and (said in full) in Settings.
 pub const LABEL: &str = "Fit the screen to this window";
 
@@ -86,7 +120,7 @@ pub enum Step {
 }
 
 /// Whether two sizes are the same within `tolerance` pixels on each side.
-fn near(a: FitSize, b: FitSize, tolerance: u32) -> bool {
+pub fn near(a: FitSize, b: FitSize, tolerance: u32) -> bool {
     a.width.abs_diff(b.width) <= tolerance && a.height.abs_diff(b.height) <= tolerance
 }
 
@@ -298,6 +332,25 @@ mod tests {
             step(asked, &mut screen, size(1282, 720), t0),
             Step::Wait(DEBOUNCE)
         );
+    }
+
+    /// The other computer's answer to a borrowed window's ask is judged by
+    /// the size it gives: the size asked, the old size again (ignored or
+    /// failed), or another (bounded).
+    #[test]
+    fn the_answer_to_a_borrowed_windows_ask_says_whether_it_was_followed() {
+        let was = size(1280, 720);
+        let asked = size(1000, 600);
+        assert_eq!(judge_answer(was, asked, size(1000, 600)), Answer::Followed);
+        assert_eq!(judge_answer(was, asked, size(1001, 599)), Answer::Followed);
+        assert_eq!(judge_answer(was, asked, size(1280, 720)), Answer::Kept);
+        assert_eq!(judge_answer(was, asked, size(1279, 721)), Answer::Kept);
+        // Asked for more than a screen can be: the most it is.
+        assert_eq!(
+            judge_answer(was, size(3000, 1800), size(2560, 1440)),
+            Answer::Bounded
+        );
+        assert_eq!(BORROW_MISSES, 2);
     }
 
     #[test]
