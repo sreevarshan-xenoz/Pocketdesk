@@ -918,6 +918,12 @@ pub async fn respond(device: &str, body: &serde_json::Value) -> serde_json::Valu
             .unwrap_or(0)
     };
     let (width, height) = (side("width"), side("height"));
+    // Only the lend path resizes a lent window's screen
+    // ([`resize_for_lend`], under the key of the loan): from the wire it
+    // would resize the asker's own screen, past "Phones may add a screen".
+    if is_internal_only(&action) {
+        return said_with(body, serde_json::json!({ "error": "unknown action" }));
+    }
     // A computer's lending of one of its windows (phase 3a of the window
     // handoff) has its own gate and its own state.
     if matches!(action.as_str(), "lend" | "list" | "return") {
@@ -945,6 +951,11 @@ pub async fn respond(device: &str, body: &serde_json::Value) -> serde_json::Valu
         None => serde_json::json!({ "error": "not a window" }),
     };
     said_with(body, reply)
+}
+
+/// Whether `action` is one only this server's own lend path may use.
+fn is_internal_only(action: &str) -> bool {
+    action == "lend_resize"
 }
 
 /// The window a request is for: a computer's own `slot`, but always 0 for
@@ -1115,6 +1126,28 @@ fn answer_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A paired device cannot send `lend_resize` on the wire: it is the lend
+    /// path's own, and would resize the asker's own screen with "Phones may
+    /// add a screen" off.
+    #[tokio::test]
+    async fn lend_resize_is_refused_from_the_wire() {
+        assert!(is_internal_only("lend_resize"));
+        for action in ["add", "fit", "remove", "lend", "list", "return"] {
+            assert!(!is_internal_only(action), "{action}");
+        }
+        let ask = serde_json::json!({
+            "action": "lend_resize", "id": 4, "width": 1000, "height": 600
+        });
+        let said = respond("desk", &ask).await;
+        assert_eq!(said["error"], "unknown action", "{said}");
+        assert_eq!(said["id"], 4);
+        assert!(said.get("name").is_none() && said.get("index").is_none());
+        // Whatever slot it names, and whoever asks.
+        let slotted =
+            serde_json::json!({ "action": "lend_resize", "slot": 2, "width": 1000, "height": 600 });
+        assert_eq!(respond("desk", &slotted).await["error"], "unknown action");
+    }
 
     #[test]
     fn a_phone_has_one_screen_whatever_slot_it_says() {
