@@ -125,6 +125,34 @@ PD_PORTAL_PROBE_DIR="$XDG_RUNTIME_DIR/pd-grant" PD_PORTAL_PROBE_INPUT=1 \
 The file lists its other knobs: naming itself as the server does, a list of
 clicks and keys, and snapshots of the screen.
 
+### 3a-2. Lending a GNOME window, live (headless GNOME Shell)
+
+`server/tests/lend_window_gnome_live.rs` (ignored) lends a window of a throwaway
+headless GNOME Shell and records it. The rig is a throwaway container (an Arch
+bootstrap image with gnome-shell, mutter, pipewire, wireplumber, gtk4, wev and
+python-gobject, booted with `systemd-nspawn -b --private-network` and only
+`/dev/dri/renderD128` bound in, a lingering user with a user unit running
+`gnome-shell --headless --wayland --no-x11 --virtual-monitor 1280x720`; the
+user manager needs `XDG_CURRENT_DESKTOP=GNOME` and `WAYLAND_DISPLAY` for the
+portal and a local target that pulls `graphical-session.target` in, none of
+which the lend needs). The test binary is built on the host and reaches the
+container's session bus and PipeWire through `/proc/<gnome-shell pid>/root`:
+
+```bash
+P=$(pgrep -u "$(id -u)" -f '^/usr/bin/gnome-shell' | head -1)
+PD_GNOME_RIG_BUS="unix:path=/proc/$P/root/run/user/$(id -u)/bus" \
+PD_GNOME_RIG_RUNTIME="/proc/$P/root/run/user/$(id -u)" \
+PD_GNOME_RIG_SHELL=stock \
+  cargo test -p pocketdesk-server --test lend_window_gnome_live -- --ignored --nocapture
+```
+
+`stock` (the Shell as it ships) checks the refusal of the window list;
+`open` (the Shell restarted with `--unsafe-mode`, a stand-in for a Shell
+extension) needs one `wev` window in the rig and lends it, counts the frames
+and checks they are the window's size; `PD_GNOME_RIG_CLOSE_CMD` closes the
+window to try the closed-window rule and `PD_GNOME_RIG_SNAP` writes the frame
+as a PPM. The test refuses to run against this process's own session bus.
+
 ### 3b. The wake helper's packet, live (Linux)
 
 `core/src/streaming/wake_helper_net.rs` has an ignored test that starts a wake
