@@ -672,7 +672,7 @@ fn lend_sized(
                 u32::try_from(screen.rect.height).unwrap_or(0),
             );
             if let Some((w, h)) = size.filter(|s| *s != now) {
-                return follow_borrower(lends, env, &held, &key, w, h);
+                return follow_borrower(lends, env, &held, &key, now, w, h);
             }
             let mut reply = env.add_screen(
                 &key,
@@ -748,32 +748,57 @@ fn lend_sized(
 /// The borrower's window changed size: the screen `held` is on is given
 /// `width`×`height` where it is and the window is sized to it, so the picture
 /// is the borrower's window's, a pixel to a pixel. Answers as `lend` does,
-/// with the size the screen has; a window that did not follow is logged and
-/// left (the screen is resized: the borrower sees what is there).
+/// with the size the screen has.
+///
+/// A resize is cosmetic: whatever goes wrong with it (the compositor refuses
+/// the mode, the screen is slow to show it, the window does not follow) is
+/// logged and the answer is the screen as it is then, never an error, so the
+/// borrower's view carries on at the size it had. The screen is read again
+/// after the attempt, succeeded or not: a mode that took but was not seen in
+/// time, or a screen the compositor moved, is what the answer and the record
+/// (the index the lease check and a restart capture it by) say.
 fn follow_borrower(
     lends: &Lends,
     env: &dyn Env,
     held: &Lent,
     key: &str,
+    old: (u32, u32),
     width: u32,
     height: u32,
 ) -> Value {
-    let mut reply = env.resize_screen(key, width, height);
-    if reply.get("error").is_some() {
-        return reply;
+    let tried = env.resize_screen(key, width, height);
+    let resized = tried.get("error").is_none();
+    if let Some(why) = tried.get("error") {
+        tracing::warn!("A lent window's screen was not resized, the view keeps its size: {why}");
     }
     let Some(screen) = env.output(&held.output) else {
         return error("The computer resized the screen but does not show it");
     };
     let (w, h) = (
-        u32::try_from(screen.rect.width).unwrap_or(width),
-        u32::try_from(screen.rect.height).unwrap_or(height),
+        u32::try_from(screen.rect.width).unwrap_or(old.0),
+        u32::try_from(screen.rect.height).unwrap_or(old.1),
     );
-    if let Err(e) = env.follow(held, &screen, w, h) {
+    // The screen as it is now: a resize that went through said so; one that
+    // did not (or ran out of wait) is the same screen asked for again, its
+    // index read again.
+    let mut reply = if resized {
+        tried
+    } else {
+        env.add_screen(key, w, h)
+    };
+    if reply.get("error").is_some() {
+        return reply;
+    }
+    // The window follows the screen it has (one that kept its size has a
+    // window that is already there).
+    if (resized || (w, h) != old)
+        && let Err(e) = env.follow(held, &screen, w, h)
+    {
         tracing::warn!("A lent window did not take its screen's new size: {e}");
     }
     // The screen's place can move with its size (Hyprland puts it right of
-    // the others again): the index a session captures it by follows.
+    // the others again, even when the wait for the mode ran out): the index a
+    // session captures it by follows.
     let index = reply["index"].as_u64().and_then(|i| u32::try_from(i).ok());
     {
         let mut all = lends.all();
@@ -1593,6 +1618,12 @@ mod tests {
         saved: Mutex<Vec<Lent>>,
         fail_send: bool,
         fail_follow: bool,
+        /// A resize the compositor refuses: the screen keeps its mode.
+        fail_resize: bool,
+        /// A resize whose mode took but whose wait ran out (an error said),
+        /// and the screen's index the compositor then gives it.
+        resize_late: bool,
+        index: Mutex<Option<u32>>,
         /// Whether the window will not go back (set and cleared as a test
         /// likes).
         fail_back: std::sync::atomic::AtomicBool,
@@ -1610,6 +1641,10 @@ mod tests {
         }
         fn calls(&self) -> Vec<String> {
             self.calls.lock().unwrap().clone()
+        }
+        /// The index the screens answer with: 1 until a test moves it.
+        fn index_now(&self) -> u32 {
+            self.index.lock().unwrap().unwrap_or(1)
         }
         fn back_fails(&self, fails: bool) {
             self.fail_back
@@ -1636,7 +1671,7 @@ mod tests {
         fn add_screen(&self, key: &str, width: u32, height: u32) -> Value {
             let mut screens = self.screens.lock().unwrap();
             if let Some((_, name, w, h)) = screens.iter().find(|s| s.0 == key) {
-                return json!({ "name": name, "index": 1, "width": w, "height": h });
+                return json!({ "name": name, "index": self.index_now(), "width": w, "height": h });
             }
             if screens.len() >= 4 {
                 return error("The computer has as many extra screens as it takes");
@@ -1654,12 +1689,18 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(format!("resize {key} {width}x{height}"));
+            if self.fail_resize {
+                return error("Could not resize the screen: refused");
+            }
             let mut screens = self.screens.lock().unwrap();
             match screens.iter_mut().find(|s| s.0 == key) {
                 Some(screen) => {
                     screen.2 = width;
                     screen.3 = height;
-                    json!({ "name": screen.1, "index": 1, "width": width, "height": height })
+                    if self.resize_late {
+                        return error("Could not resize the screen: the compositor was slow");
+                    }
+                    json!({ "name": screen.1, "index": self.index_now(), "width": width, "height": height })
                 }
                 None => error("no screen to resize"),
             }
@@ -2114,18 +2155,61 @@ mod tests {
         assert_eq!(lends.all().len(), 1, "still lent");
     }
 
+    /// A resize is cosmetic: a screen that cannot be resized answers as it
+    /// is (its old size), no error, and the loan, the window and the borrower's
+    /// view stand.
     #[test]
-    fn a_screen_that_cannot_be_resized_says_so_and_the_loan_stands() {
-        let fake = Fake::with(vec![seen("5", 1280, 720)]);
+    fn a_screen_that_cannot_be_resized_answers_as_it_is_and_the_loan_stands() {
+        let mut fake = Fake::with(vec![seen("5", 1280, 720)]);
+        fake.fail_resize = true;
         let lends = Lends::new();
         lend_sized(&lends, &fake, DEVICE, "5", None);
-        // The record names a screen the compositor shows, but the virtual
-        // screens have none under the key.
-        fake.screens.lock().unwrap()[0].0 = "another-key".to_string();
         let reply = lend_sized(&lends, &fake, DEVICE, "5", Some((1000, 600)));
-        assert!(reply["error"].as_str().unwrap().contains("no screen"));
+        assert!(reply.get("error").is_none(), "{reply}");
+        assert_eq!(
+            (reply["width"].as_u64(), reply["height"].as_u64()),
+            (Some(1280), Some(720)),
+            "the size it has"
+        );
+        assert_eq!(reply["window"], "5");
         assert!(!fake.calls().iter().any(|c| c.starts_with("follow")));
         assert_eq!(lends.all().len(), 1);
+        assert_eq!(lends.all()[0].index, Some(1));
+        // Asked the same size again: tried again (nothing is remembered), and
+        // answered the same.
+        let again = lend_sized(&lends, &fake, DEVICE, "5", Some((1000, 600)));
+        assert_eq!(again["width"], 1280, "{again}");
+    }
+
+    /// Hyprland's rule can apply and the wait for the mode run out: the error
+    /// is not the answer, the screen is read again, its index (it may have
+    /// moved) and its new size are what the answer and the record say, and the
+    /// record that the lease check reads is saved, so the window is not
+    /// returned for a screen it is not on.
+    #[test]
+    fn a_resize_that_took_but_ran_out_of_wait_refreshes_the_index_and_the_record() {
+        let mut fake = Fake::with(vec![seen("5", 1280, 720)]);
+        fake.resize_late = true;
+        let lends = Lends::new();
+        lend_sized(&lends, &fake, DEVICE, "5", None);
+        assert_eq!(lends.all()[0].index, Some(1));
+        *fake.index.lock().unwrap() = Some(3);
+        let reply = lend_sized(&lends, &fake, DEVICE, "5", Some((1000, 600)));
+        assert!(reply.get("error").is_none(), "{reply}");
+        assert_eq!(reply["index"], 3);
+        assert_eq!(
+            (reply["width"].as_u64(), reply["height"].as_u64()),
+            (Some(1000), Some(600)),
+            "the mode did take"
+        );
+        assert_eq!(lends.all()[0].index, Some(3));
+        assert_eq!(fake.saved.lock().unwrap()[0].index, Some(3), "saved");
+        assert!(
+            fake.calls()
+                .contains(&"follow 5 on PD-0a1b2c3d-1 1000x600".to_string()),
+            "{:?}",
+            fake.calls()
+        );
     }
 
     #[test]
@@ -2146,52 +2230,15 @@ mod tests {
 
     #[test]
     fn a_follow_that_moves_the_screens_index_keeps_the_record_current() {
-        struct Moving(Fake);
-        impl Env for Moving {
-            fn cannot(&self) -> Option<&'static str> {
-                self.0.cannot()
-            }
-            fn seen(&self, window: &str) -> std::io::Result<Option<Seen>> {
-                self.0.seen(window)
-            }
-            fn windows(&self) -> std::io::Result<Vec<HyprWindow>> {
-                self.0.windows()
-            }
-            fn add_screen(&self, key: &str, w: u32, h: u32) -> Value {
-                self.0.add_screen(key, w, h)
-            }
-            fn drop_screen(&self, key: &str) {
-                self.0.drop_screen(key)
-            }
-            fn resize_screen(&self, key: &str, w: u32, h: u32) -> Value {
-                let mut reply = self.0.resize_screen(key, w, h);
-                reply["index"] = 3.into();
-                reply
-            }
-            fn output(&self, name: &str) -> Option<Output> {
-                self.0.output(name)
-            }
-            fn send(&self, l: &Lent, to: &Output, w: u32, h: u32) -> std::io::Result<()> {
-                self.0.send(l, to, w, h)
-            }
-            fn follow(&self, l: &Lent, to: &Output, w: u32, h: u32) -> std::io::Result<()> {
-                self.0.follow(l, to, w, h)
-            }
-            fn back(&self, lent: &Lent) -> std::io::Result<()> {
-                self.0.back(lent)
-            }
-            fn save(&self, lent: &[Lent]) -> std::io::Result<()> {
-                self.0.save(lent)
-            }
-        }
-        let env = Moving(Fake::with(vec![seen("5", 1280, 720)]));
+        let fake = Fake::with(vec![seen("5", 1280, 720)]);
         let lends = Lends::new();
-        lend_sized(&lends, &env, DEVICE, "5", None);
+        lend_sized(&lends, &fake, DEVICE, "5", None);
         assert_eq!(lends.all()[0].index, Some(1));
-        let reply = lend_sized(&lends, &env, DEVICE, "5", Some((1000, 600)));
+        *fake.index.lock().unwrap() = Some(3);
+        let reply = lend_sized(&lends, &fake, DEVICE, "5", Some((1000, 600)));
         assert_eq!(reply["index"], 3);
         assert_eq!(lends.all()[0].index, Some(3));
-        assert_eq!(env.0.saved.lock().unwrap()[0].index, Some(3), "saved");
+        assert_eq!(fake.saved.lock().unwrap()[0].index, Some(3), "saved");
     }
 
     #[test]
