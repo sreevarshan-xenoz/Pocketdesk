@@ -143,7 +143,8 @@ ashpd = { workspace = true, optional = true }
 # Mutter's D-Bus signals (streaming/capture_mutter.rs).
 futures-lite = { version = "2", optional = true }
 pipewire = { workspace = true, optional = true }
-libspa = { workspace = true, optional = true }
+# `v0_3_33` names `PropertyFlags::DONT_FIXATE`, which the DMA-BUF modifier choice carries.
+libspa = { workspace = true, optional = true, features = ["v0_3_33"] }
 x11rb = { version = "0.13", features = ["shm"], optional = true }
 wayland-client = { version = "0.31", optional = true }
 wayland-protocols-wlr = { version = "0.3", default-features = false, features = [

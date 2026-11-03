@@ -24,7 +24,7 @@
 //! it, and the buffer's file descriptor and any VA surface made of it close
 //! when the last holder lets go.
 
-use std::ffi::{CStr, CString, c_int, c_uint, c_void};
+use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_void};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -110,6 +110,11 @@ pub struct DmaBuf {
 }
 
 impl DmaBuf {
+    /// A new id for a buffer the encoder's cache of surfaces is keyed by.
+    pub(crate) fn next_id() -> u64 {
+        NEXT_ID.fetch_add(1, Ordering::Relaxed)
+    }
+
     /// The buffer's size in bytes: what the kernel says, else the plane's.
     pub fn size(&self) -> usize {
         // SAFETY: lseek on a valid, owned descriptor; a dma-buf answers
@@ -196,14 +201,30 @@ fn sync(fd: c_int, start: bool) {
 /// A frame still on the card: one of the capture's buffers, held for as long
 /// as this (or any clone) lives, so the capture does not give it to the
 /// compositor again.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct GpuFrame {
     buf: Arc<DmaBuf>,
-    /// The pool's count of the frames holding the buffer.
-    _lease: Arc<()>,
+    /// What the buffer's owner counts the frames holding it by: the pool's
+    /// count of holders, or (the PipeWire capture) a lease that gives the
+    /// buffer back to the stream when its last frame goes.
+    _lease: Arc<dyn Send + Sync>,
+}
+
+impl std::fmt::Debug for GpuFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GpuFrame").field("buf", &self.buf).finish()
+    }
 }
 
 impl GpuFrame {
+    /// A frame on `buf` that holds `lease` for as long as it (or any clone)
+    /// lives: dropping the last one is the owner's cue that the buffer is
+    /// free again.
+    #[cfg_attr(not(feature = "inproc"), allow(dead_code))]
+    pub(crate) fn leased(buf: Arc<DmaBuf>, lease: Arc<dyn Send + Sync>) -> Self {
+        Self { buf, _lease: lease }
+    }
+
     /// The buffer, for the encoder's import.
     pub fn dmabuf(&self) -> &Arc<DmaBuf> {
         &self.buf
@@ -524,6 +545,111 @@ impl Gbm {
         self.node.as_raw_fd()
     }
 
+    /// The modifiers the card's EGL says it can render to and sample from
+    /// for `fourcc` (`eglQueryDmaBufModifiersEXT` on a display made of this
+    /// device), the ones that need the external-only sampler left out. This
+    /// is the list a PipeWire stream offers its compositor: the card's own
+    /// answer, with no table of modifiers in this program. `libEGL` is
+    /// `dlopen`ed like libgbm, so nothing links it; an error says why the
+    /// list is not known (no libEGL, no such extension, no display).
+    pub fn egl_modifiers(&self, fourcc: u32) -> Result<Vec<u64>> {
+        // `EGL_PLATFORM_GBM_KHR`.
+        const PLATFORM_GBM: u32 = 0x31D7;
+        type GetProc = unsafe extern "C" fn(*const c_char) -> *mut c_void;
+        type GetDisplay = unsafe extern "C" fn(u32, *mut c_void, *const i32) -> *mut c_void;
+        type Initialize = unsafe extern "C" fn(*mut c_void, *mut i32, *mut i32) -> c_uint;
+        type Terminate = unsafe extern "C" fn(*mut c_void) -> c_uint;
+        type Query =
+            unsafe extern "C" fn(*mut c_void, i32, i32, *mut u64, *mut c_uint, *mut i32) -> c_uint;
+        let lib = ["libEGL.so.1", "libEGL.so"].iter().find_map(|name| {
+            let name = CString::new(*name).ok()?;
+            // SAFETY: dlopen of a library name. The handle is kept open for
+            // the life of the process (libglvnd does not like being closed
+            // while a driver it loaded is still mapped).
+            let handle = unsafe { libc::dlopen(name.as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL) };
+            (!handle.is_null()).then_some(handle)
+        });
+        let lib = lib.context("libEGL is not installed")?;
+        // SAFETY: dlsym on a live handle with NUL-terminated names; each
+        // symbol is the EGL function of that name, with the signature of
+        // EGL 1.4 and `EGL_EXT_platform_base`/`EGL_EXT_image_dma_buf_import_modifiers`.
+        let (get_display, initialize, terminate, query) = unsafe {
+            let sym = |name: &CStr| -> Result<*mut c_void> {
+                let p = libc::dlsym(lib, name.as_ptr());
+                if p.is_null() {
+                    bail!("libEGL lacks {}", name.to_string_lossy());
+                }
+                Ok(p)
+            };
+            let get_proc = std::mem::transmute::<*mut c_void, GetProc>(sym(c"eglGetProcAddress")?);
+            let ext = |name: &CStr| -> Result<*mut c_void> {
+                let p = get_proc(name.as_ptr());
+                if p.is_null() {
+                    bail!("EGL lacks {}", name.to_string_lossy());
+                }
+                Ok(p)
+            };
+            (
+                std::mem::transmute::<*mut c_void, GetDisplay>(ext(c"eglGetPlatformDisplayEXT")?),
+                std::mem::transmute::<*mut c_void, Initialize>(sym(c"eglInitialize")?),
+                std::mem::transmute::<*mut c_void, Terminate>(sym(c"eglTerminate")?),
+                std::mem::transmute::<*mut c_void, Query>(ext(c"eglQueryDmaBufModifiersEXT")?),
+            )
+        };
+        // SAFETY: the display is made of this live GBM device and terminated
+        // before returning; the arrays handed to the query are as long as
+        // the count the query itself reported.
+        unsafe {
+            let display = get_display(PLATFORM_GBM, self.device, std::ptr::null());
+            ensure!(!display.is_null(), "no EGL display on the GBM device");
+            let (mut major, mut minor) = (0i32, 0i32);
+            if initialize(display, &mut major, &mut minor) == 0 {
+                bail!("eglInitialize failed");
+            }
+            let listed = (|| -> Result<Vec<u64>> {
+                let mut count = 0i32;
+                ensure!(
+                    query(
+                        display,
+                        fourcc as i32,
+                        0,
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        &mut count
+                    ) != 0,
+                    "EGL does not know the format's modifiers"
+                );
+                if count <= 0 {
+                    return Ok(Vec::new());
+                }
+                let mut mods = vec![0u64; count as usize];
+                let mut external = vec![0 as c_uint; count as usize];
+                let mut got = 0i32;
+                ensure!(
+                    query(
+                        display,
+                        fourcc as i32,
+                        count,
+                        mods.as_mut_ptr(),
+                        external.as_mut_ptr(),
+                        &mut got
+                    ) != 0,
+                    "EGL's list of modifiers failed"
+                );
+                let got = (got.max(0) as usize).min(mods.len());
+                Ok(mods
+                    .into_iter()
+                    .zip(external)
+                    .take(got)
+                    .filter(|(_, ext)| *ext == 0)
+                    .map(|(m, _)| m)
+                    .collect())
+            })();
+            terminate(display);
+            listed
+        }
+    }
+
     /// A buffer of `width`x`height` in `fourcc`, tiled as `modifier` says
     /// (`MOD_INVALID`: the driver's choice). Single-plane buffers only.
     pub fn alloc(&self, width: u32, height: u32, fourcc: u32, modifier: u64) -> Result<DmaBuf> {
@@ -565,7 +691,7 @@ impl Gbm {
                 Err(anyhow::anyhow!("gbm_bo_get_fd failed"))
             } else {
                 Ok(DmaBuf {
-                    id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+                    id: DmaBuf::next_id(),
                     fd: OwnedFd::from_raw_fd(fd),
                     width,
                     height,

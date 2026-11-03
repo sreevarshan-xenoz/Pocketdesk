@@ -153,6 +153,34 @@ and checks they are the window's size; `PD_GNOME_RIG_CLOSE_CMD` closes the
 window to try the closed-window rule and `PD_GNOME_RIG_SNAP` writes the frame
 as a PPM. The test refuses to run against this process's own session bus.
 
+### 3a-3. The PipeWire DMA-BUF capture, live (headless GNOME Shell)
+
+`core/tests/pw_dmabuf_live.rs` (ignored) captures a throwaway headless GNOME
+Shell through mutter's ScreenCast (no dialog) into the in-process VA-API
+encoder: the keyframe from DMA-BUF buffers, what the capture costs against the
+copy (`POCKETDESK_CAPTURE_COPY=1`) and what it leaves open, the switch back to
+copies, the setting. The rig is §3a-2's (an Arch bootstrap container with
+gnome-shell, mutter, pipewire, wireplumber and gtk4-demos, booted with
+`systemd-nspawn -b --private-network` and only `/dev/dri/renderD128` bound in)
+with a user unit running `gtk4-demo --run fishbowl` as the moving window. The
+test refuses to run unless `PD_PW_RIG=1` and the bus and runtime folder are
+under `/proc/<pid>/root` (the container's), and is built in release for the
+numbers:
+
+```bash
+P=$(pgrep -u "$(id -u)" -f '^/usr/bin/gnome-shell' | head -1)
+PD_PW_RIG=1 PD_LIVE_COMPOSITOR_PID=$P POCKETDESK_VAAPI_DEVICE=/dev/dri/renderD128 \
+DBUS_SESSION_BUS_ADDRESS="unix:path=/proc/$P/root/run/user/$(id -u)/bus" \
+XDG_RUNTIME_DIR="/proc/$P/root/run/user/$(id -u)" \
+  cargo test -p pocketdesk-core --release --test pw_dmabuf_live -- --ignored --nocapture --test-threads=1
+```
+
+`PD_LIVE_LOG=1` shows the capture's log (the offered modifiers, the one fixed),
+`PD_LIVE_OUT=<file>` writes the first keyframe (decode it with `ffmpeg` to look
+at it), `POCKETDESK_CAPTURE_DMABUF_MODIFIER=linear|<hex>` offers one modifier.
+The rig's user units need no portal: the Shell, `pipewire.socket` and
+`wireplumber.service` are enough for mutter's own ScreenCast.
+
 ### 3b. The wake helper's packet, live (Linux)
 
 `core/src/streaming/wake_helper_net.rs` has an ignored test that starts a wake

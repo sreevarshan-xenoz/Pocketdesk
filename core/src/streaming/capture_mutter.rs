@@ -528,17 +528,20 @@ pub async fn start_capture(
         stop(closing.0, closing.1, closing.2).await;
     });
 
-    if let Err(e) = super::capture_linux::spawn_pipewire_capture(
+    let zero_copy = match super::capture_linux::spawn_pipewire_capture(
         node_id,
         config.clone(),
         frame_tx,
         cancel.clone(),
         cursor,
     ) {
-        abandon.cancel();
-        return Err(e);
-    }
-    let session = CaptureSession::new(config, cancel);
+        Ok(switch) => switch,
+        Err(e) => {
+            abandon.cancel();
+            return Err(e);
+        }
+    };
+    let session = CaptureSession::new(config, cancel).with_zero_copy(zero_copy);
     Ok(if remote.is_some() {
         session.with_input_refused(refused_rx)
     } else {
@@ -650,7 +653,7 @@ pub async fn start_window_capture(
     // cursor feed, so it never reports one). The stream is as big as a screen
     // with the window in a corner of it: it is asked which part is the window,
     // and each frame is cut to that.
-    if let Err(e) = super::capture_linux::spawn_pipewire_capture_with(
+    let zero_copy = match super::capture_linux::spawn_pipewire_capture_with(
         node_id,
         config.clone(),
         frame_tx,
@@ -658,10 +661,14 @@ pub async fn start_window_capture(
         None,
         true,
     ) {
-        abandon.cancel();
-        return Err(e);
-    }
-    Ok(CaptureSession::new(config, cancel))
+        Ok(switch) => switch,
+        Err(e) => {
+            abandon.cancel();
+            return Err(e);
+        }
+    };
+    // A lent window's frames are cut on the processor: always copies.
+    Ok(CaptureSession::new(config, cancel).with_zero_copy(zero_copy))
 }
 
 /// The bus name an interface of the two session kinds is served by.
