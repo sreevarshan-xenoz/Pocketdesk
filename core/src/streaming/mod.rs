@@ -69,6 +69,8 @@ mod capture_d3d;
 #[cfg(all(feature = "capture", windows))]
 pub mod capture_dxgi;
 #[cfg(all(feature = "capture", target_os = "linux"))]
+pub mod capture_kde;
+#[cfg(all(feature = "capture", target_os = "linux"))]
 pub mod capture_linux;
 #[cfg(all(feature = "capture", target_os = "linux"))]
 pub mod capture_mutter;
