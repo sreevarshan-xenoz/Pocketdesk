@@ -580,6 +580,12 @@ pub fn request_raise(seq: u64) {
         }
         waiting.push(uuid);
     }
+    poke();
+}
+
+/// Ask the script to report now, if it is loaded (the same call a raise
+/// makes). Nothing says whether a report follows; [`updates`] does.
+pub fn poke() {
     let poke = poker().clone();
     if let Some(poke) = poke {
         poke();

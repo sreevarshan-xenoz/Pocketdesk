@@ -50,10 +50,23 @@ const START_WAIT: Duration = Duration::from_secs(60);
 /// How long any other portal call may take.
 const CALL_WAIT: Duration = Duration::from_secs(10);
 
-/// The lent window, from a table that is current now.
-fn lent_window(seq: u64) -> Result<(KdeWindow, std::sync::Arc<window_kde::Snapshot>)> {
+/// How old the table may be for the match of a stream to the window: a
+/// window's size and identity change only with a report from KWin's own
+/// signals, so a quiet table is still right; the script is asked to report
+/// first, and a table with no report for this long is not believed.
+const MATCH_MAX_AGE: Duration = Duration::from_secs(90);
+
+/// The lent window, from the table after the script has been asked to report
+/// (for up to two seconds), if the table is not older than [`MATCH_MAX_AGE`].
+async fn lent_window(seq: u64) -> Result<(KdeWindow, std::sync::Arc<window_kde::Snapshot>)> {
+    let mut updates = window_kde::updates();
+    updates.mark_unchanged();
+    if !window_kde::snapshot().is_some_and(|t| t.is_fresh(Instant::now())) {
+        window_kde::poke();
+        let _ = tokio::time::timeout(Duration::from_secs(2), updates.changed()).await;
+    }
     let table = window_kde::snapshot()
-        .filter(|t| t.is_fresh(Instant::now()))
+        .filter(|t| t.at.elapsed() < MATCH_MAX_AGE)
         .ok_or_else(|| anyhow::anyhow!(window_kde::say(Refusal::TableStale)))?;
     let lent = table
         .window(seq)
@@ -98,7 +111,7 @@ pub async fn start_window_capture(
     if !window_target::lease_alive(&lease) {
         anyhow::bail!("That window is not lent to this session any more");
     }
-    let (lent, _) = lent_window(seq)?;
+    let (lent, _) = lent_window(seq).await?;
     let unavailable = || anyhow::anyhow!(window_kde::say(Refusal::NoPortal));
     let screencast = tokio::time::timeout(CALL_WAIT, Screencast::new())
         .await
@@ -153,7 +166,7 @@ pub async fn start_window_capture(
         let streams = response.response().context("No response from the capture start")?;
 
         // The table as it is now: the dialog may have been open a while.
-        let (lent, table) = lent_window(seq)?;
+        let (lent, table) = lent_window(seq).await?;
         let found = portal_streams(streams.streams());
         let node_id = match window_kde::match_stream(&found, &lent, &table) {
             Ok(node) => node,
