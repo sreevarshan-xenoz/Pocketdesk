@@ -1,0 +1,8 @@
+{
+  "uuid": "pocketdesk-windows@pocketdesk.dev",
+  "name": "Pocketdesk windows",
+  "description": "Tells Pocketdesk on this computer which windows are open, where they are, and which one is under a point or has the keyboard, so a window can be lent to your other computers and its input kept to that window. Read-only apart from raising a window. Off unless you install and enable it.",
+  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
+  "url": "https://github.com/sreevarshan-xenoz/pocketdesk",
+  "version": 1
+}
