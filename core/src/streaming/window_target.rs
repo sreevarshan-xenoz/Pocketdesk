@@ -387,12 +387,20 @@ pub fn lease_alive(lease: &Lease) -> bool {
 
 /// Whether a session on this lease may send input at all. A Windows window
 /// may (its guard places and checks every packet). A compositor's window may
-/// not: no compositor that a program can ask says whether another window
-/// covers the lent one, or which window has the keyboard, so nothing a
-/// borrower sent could be shown to land only in that window; the session is
-/// view-only, as the guard's every answer of "no" would make it anyway.
+/// only where something can answer what the guard asks of it: no compositor
+/// that a program can ask says whether another window covers the lent one,
+/// or which window has the keyboard, so on its own a compositor's window is
+/// view-only, as the guard's every answer of "no" would make it anyway. On
+/// GNOME the Pocketdesk Shell extension (`gnome_windows`) answers those
+/// questions, and a lent GNOME window takes input while it answers.
 pub fn takes_input(lease: &Lease) -> bool {
-    lease.native.is_empty()
+    takes_input_when(lease, super::gnome_windows::answers)
+}
+
+/// [`takes_input`], with the question whether the GNOME Shell extension
+/// answers asked of `extension_answers` (only asked for a GNOME window).
+pub fn takes_input_when(lease: &Lease, extension_answers: impl FnOnce() -> bool) -> bool {
+    lease.native.is_empty() || (gnome_id(&lease.native).is_some() && extension_answers())
 }
 
 /// The lease on whatever is registered under `index`, for tests.
@@ -610,20 +618,24 @@ mod live {
 #[cfg(not(windows))]
 impl Os for Machine {
     fn lease_holds(&self, lease: &Lease) -> bool {
-        // A compositor's window stands while its grant does; the rest of the
-        // guard's questions have no answer there, so every one is "no".
+        // A compositor's window stands while its grant does.
         lease_alive(lease)
     }
-    fn frame(&self, _lease: &Lease) -> Option<Rect> {
-        None
+    // The rest of the guard's questions are GNOME's extension's to answer
+    // (`gnome_windows`); where it is not there, or for any other lease, every
+    // one is "no".
+    fn frame(&self, lease: &Lease) -> Option<Rect> {
+        super::gnome_windows::frame(lease)
     }
-    fn front_is_lent(&self, _lease: &Lease) -> bool {
-        false
+    fn front_is_lent(&self, lease: &Lease) -> bool {
+        super::gnome_windows::front_is_lent(lease)
     }
-    fn hit_is_lent(&self, _lease: &Lease, _at: (i32, i32)) -> bool {
-        false
+    fn hit_is_lent(&self, lease: &Lease, at: (i32, i32)) -> bool {
+        super::gnome_windows::hit_is_lent(lease, at)
     }
-    fn raise(&self, _lease: &Lease) {}
+    fn raise(&self, lease: &Lease) {
+        super::gnome_windows::raise(lease)
+    }
 }
 
 #[cfg(test)]
@@ -945,12 +957,29 @@ mod tests {
     }
 
     #[test]
-    fn a_compositors_window_lends_no_input_and_a_windows_one_does() {
+    fn a_compositors_window_lends_input_only_where_something_answers_for_it_and_a_windows_one_does()
+    {
         let mut table = Table::default();
         let (native, _) = native_made(&mut table, 2609479515, DEVICE).unwrap();
-        assert!(!takes_input(&native), "view only: nothing to confine it by");
+        assert!(
+            !takes_input_when(&native, || false),
+            "view only: nothing to confine it by"
+        );
+        assert!(
+            takes_input_when(&native, || true),
+            "GNOME's extension answers the guard's questions"
+        );
         let handle = made(&mut table, 0x7C01);
-        assert!(takes_input(&handle));
+        assert!(
+            takes_input_when(&handle, || panic!("a Windows window asks nobody")),
+            "the guard of a Windows window is Windows' own"
+        );
+        // A native name that is no GNOME window's takes none, answered or not.
+        let odd = Lease {
+            native: "kde:1".into(),
+            ..native
+        };
+        assert!(!takes_input_when(&odd, || true));
     }
 
     #[test]

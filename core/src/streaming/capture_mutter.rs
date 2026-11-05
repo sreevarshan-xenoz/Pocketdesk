@@ -282,6 +282,13 @@ impl Input {
         }
     }
 
+    /// The pointer to `(x, y)` in the window the stream is of (window-relative
+    /// pixels; mutter clamps a position into the window's rectangle).
+    async fn move_to(&self, x: f64, y: f64) -> Result<()> {
+        self.notify("NotifyPointerMotionAbsolute", &(self.stream.as_str(), x, y))
+            .await
+    }
+
     /// `steps` wheel notches on `axis`, one call each.
     async fn turn(&self, axis: u32, steps: i32) -> Result<()> {
         for (axis, one) in axis_calls(axis, steps) {
@@ -555,35 +562,100 @@ pub async fn start_capture(
 /// no-dialog ScreenCast calls [`start_capture`] makes, so the same owner's
 /// switch and the same trust (SECURITY limit 75) apply.
 ///
-/// Screen only: no RemoteDesktop session is made, so nothing this capture
-/// does can send input, and the pointer is not in the picture. The capture
-/// ends, and its session is stopped, when the lease does not stand any more
-/// (the window was given back or closed) as well as when `cancel` is
-/// cancelled; it cancels `cancel` itself in that case, which ends the
-/// streaming session. Failing to start leaves `cancel` alone.
+/// Without `input` this is screen only: no RemoteDesktop session is made, so
+/// nothing this capture does can send input, and the pointer is not in the
+/// picture. With `input` (the Pocketdesk GNOME Shell extension answers for the
+/// window, [`super::window_target::takes_input`]) the ScreenCast session is
+/// linked to a RemoteDesktop session of its own, made for this window's
+/// stream alone, and the session's guard-vetted packets come to
+/// [`CaptureSession::window_input`]: each is placed *in the window* (a pixel
+/// the window no longer holds is dropped, never clamped to its edge) and
+/// sent to this session only, never through the shared injector, so no other
+/// session's input can reach this window's stream or the other way round.
+///
+/// The capture ends, and its session is stopped, when the lease does not
+/// stand any more (the window was given back or closed) as well as when
+/// `cancel` is cancelled; it cancels `cancel` itself in that case, which ends
+/// the streaming session. Failing to start leaves `cancel` alone.
 pub async fn start_window_capture(
     config: StreamingConfig,
     frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
     lease: Lease,
+    input: bool,
 ) -> Result<CaptureSession> {
     let id = leased_window(&lease)?;
     let conn = tokio::time::timeout(CALL_WAIT, Connection::session())
         .await
         .map_err(|_| anyhow::anyhow!("the session bus did not answer"))?
         .context("no session bus")?;
-    let reply = call(
-        &conn,
-        SCREENCAST,
-        SCREENCAST_PATH,
-        SCREENCAST,
-        "CreateSession",
-        &(session_options(None),),
-    )
-    .await?;
-    let cast = object_path(&reply)?;
-    let stop = |conn: Connection, cast: String| async move {
-        let _ = call(&conn, SCREENCAST, &cast, SCREENCAST_SESSION, "Stop", &()).await;
+    // Made in order, as `start_capture` does: the RemoteDesktop session (when
+    // input is wanted), the ScreenCast session linked to it.
+    let remote = if input {
+        let reply = call(
+            &conn,
+            REMOTE_DESKTOP,
+            REMOTE_DESKTOP_PATH,
+            REMOTE_DESKTOP,
+            "CreateSession",
+            &(),
+        )
+        .await?;
+        Some(object_path(&reply)?)
+    } else {
+        None
+    };
+    // Closed when anything after this fails, so no session outlives it.
+    let stop = |conn: Connection, remote: Option<String>, cast: String| async move {
+        let (path, iface) = match &remote {
+            Some(path) => (path.clone(), REMOTE_DESKTOP_SESSION),
+            None => (cast, SCREENCAST_SESSION),
+        };
+        let _ = call(&conn, destination_of(iface), &path, iface, "Stop", &()).await;
+    };
+    let made = async {
+        let remote_id = match &remote {
+            Some(path) => {
+                let id = property(
+                    &conn,
+                    REMOTE_DESKTOP,
+                    path,
+                    REMOTE_DESKTOP_SESSION,
+                    "SessionId",
+                )
+                .await?;
+                Some(String::try_from(id).context("the session id is not a string")?)
+            }
+            None => None,
+        };
+        let reply = call(
+            &conn,
+            SCREENCAST,
+            SCREENCAST_PATH,
+            SCREENCAST,
+            "CreateSession",
+            &(session_options(remote_id.as_deref()),),
+        )
+        .await?;
+        object_path(&reply)
+    }
+    .await;
+    let cast = match made {
+        Ok(cast) => cast,
+        Err(e) => {
+            if let Some(path) = &remote {
+                let _ = call(
+                    &conn,
+                    REMOTE_DESKTOP,
+                    path,
+                    REMOTE_DESKTOP_SESSION,
+                    "Stop",
+                    &(),
+                )
+                .await;
+            }
+            return Err(e);
+        }
     };
 
     let started = async {
@@ -606,23 +678,43 @@ pub async fn start_window_capture(
             .receive_signal("PipeWireStreamAdded")
             .await
             .context("could not listen for the stream")?;
-        call(&conn, SCREENCAST, &cast, SCREENCAST_SESSION, "Start", &()).await?;
+        match &remote {
+            Some(path) => {
+                call(
+                    &conn,
+                    REMOTE_DESKTOP,
+                    path,
+                    REMOTE_DESKTOP_SESSION,
+                    "Start",
+                    &(),
+                )
+                .await?
+            }
+            None => call(&conn, SCREENCAST, &cast, SCREENCAST_SESSION, "Start", &()).await?,
+        };
         let signal = tokio::time::timeout(CALL_WAIT, added.next())
             .await
             .map_err(|_| anyhow::anyhow!("mutter announced no stream"))?
             .context("the stream signal ended")?;
         let node_id: u32 = signal.body().deserialize().context("no node id")?;
-        Ok::<u32, anyhow::Error>(node_id)
+        Ok::<(u32, String), anyhow::Error>((node_id, stream))
     }
     .await;
-    let node_id = match started {
-        Ok(node_id) => node_id,
+    let (node_id, stream) = match started {
+        Ok(started) => started,
         Err(e) => {
-            stop(conn, cast).await;
+            stop(conn, remote, cast).await;
             return Err(e);
         }
     };
-    info!("Lent GNOME window capture through mutter: node_id={node_id}");
+    info!(
+        "Lent GNOME window capture through mutter: node_id={node_id}{}",
+        if remote.is_some() {
+            ", input through mutter into the window"
+        } else {
+            ""
+        }
+    );
 
     // The session is stopped when the capture ends, whichever way, and at
     // once if the capture below does not start. It watches the lease too:
@@ -631,6 +723,7 @@ pub async fn start_window_capture(
     let abandon = closer.clone();
     let session_end = cancel.clone();
     let watched = lease.clone();
+    let closing = (conn.clone(), remote.clone(), cast.clone());
     tokio::spawn(async move {
         let mut changes = super::window_target::changes();
         let mut tick = tokio::time::interval(Duration::from_secs(1));
@@ -646,8 +739,30 @@ pub async fn start_window_capture(
                 break;
             }
         }
-        stop(conn, cast).await;
+        stop(closing.0, closing.1, closing.2).await;
     });
+
+    // The window's own input worker: this session's packets only.
+    let mut window_input = None;
+    let mut refused = None;
+    if let Some(session) = remote.clone() {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (refused_tx, refused_rx) = tokio::sync::watch::channel(false);
+        tokio::spawn(window_input_worker(
+            Input {
+                conn: conn.clone(),
+                session,
+                stream,
+                size: (0, 0),
+            },
+            id,
+            rx,
+            refused_tx,
+            cancel.child_token(),
+        ));
+        window_input = Some(tx);
+        refused = Some(refused_rx);
+    }
 
     // The pointer is out of the picture (the capture is told there is no
     // cursor feed, so it never reports one). The stream is as big as a screen
@@ -668,7 +783,72 @@ pub async fn start_window_capture(
         }
     };
     // A lent window's frames are cut on the processor: always copies.
-    Ok(CaptureSession::new(config, cancel).with_zero_copy(zero_copy))
+    let mut session = CaptureSession::new(config, cancel).with_zero_copy(zero_copy);
+    if let (Some(tx), Some(refused)) = (window_input, refused) {
+        session = session.with_window_input(tx).with_input_refused(refused);
+    }
+    Ok(session)
+}
+
+/// What the packets a lent window's guard let through do: into the window's
+/// own RemoteDesktop session, each placed in the window by its frame as it is
+/// when the packet is applied. Ends with `closer` or when the channel closes.
+async fn window_input_worker(
+    input: Input,
+    id: u64,
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<super::input_packet::InputPacket>,
+    refused_tx: tokio::sync::watch::Sender<bool>,
+    closer: CancellationToken,
+) {
+    use super::gnome_windows::{bus, local_pointer, visible, window_events};
+    use super::input_packet::InputPacket;
+
+    let mut rest = crate::streaming::wheel::Notches::default();
+    let mut said = false;
+    loop {
+        let packet = tokio::select! {
+            _ = closer.cancelled() => break,
+            packet = rx.recv() => match packet {
+                Some(packet) => packet,
+                None => break,
+            },
+        };
+        let result = match packet {
+            // The guard said a pixel of its own space: the window holds it
+            // now, or nothing is sent.
+            InputPacket::MouseMoveAbs { x_norm, y_norm } => {
+                let frame = bus::list(&input.conn)
+                    .await
+                    .ok()
+                    .and_then(|all| all.into_iter().find(|w| w.id == id))
+                    .filter(visible)
+                    .map(|w| w.frame);
+                match frame.and_then(|frame| local_pointer((x_norm, y_norm), frame)) {
+                    Some((x, y)) => input.move_to(f64::from(x), f64::from(y)).await,
+                    None => Ok(()),
+                }
+            }
+            other => {
+                let mut result = Ok(());
+                for event in window_events(&other) {
+                    result = input.apply(&mut rest, event).await;
+                    if result.is_err() {
+                        break;
+                    }
+                }
+                result
+            }
+        };
+        if let Err(e) = result {
+            let text = format!("{e:#}");
+            if !std::mem::replace(&mut said, true) {
+                warn!(error = %text, "Mutter input not taken for the lent window");
+            }
+            if super::portal_input::input_refused_text(&text) {
+                let _ = refused_tx.send(true);
+            }
+        }
+    }
 }
 
 /// The bus name an interface of the two session kinds is served by.

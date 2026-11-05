@@ -866,8 +866,9 @@ impl StreamingServer {
         // Without input, the session is view-only whatever the phone asks:
         // the phone's own view-only switch can tighten this, never lift it.
         // A sound session gives no input at all (N5).
-        // A window of a Linux compositor is lent to look at only: nothing
-        // could be shown to land in it alone (`window_target::takes_input`).
+        // A window of a Linux compositor is lent to look at only unless
+        // something can show input to land in it alone: on GNOME, the
+        // Pocketdesk Shell extension (`window_target::takes_input`).
         let force_view_only = !permissions.allows(Capability::Input)
             || sound
             || phone_sound_only
@@ -1014,13 +1015,20 @@ impl StreamingServer {
             PointerSource::start(self.config.monitor_index)
         };
         // What a session of a lent window may send, and where (`window_guard`).
+        // A lent GNOME window's guard works in the pixel space of
+        // `gnome_windows` (its extension answers; no monitor layout is asked).
         let mut window_guard = window_lease.clone().map(|lease| {
-            super::window_guard::WindowGuard::new(
-                lease,
-                super::window_target::Machine,
-                capture::layout_rect(),
-            )
+            let layout = if lease.native.is_empty() {
+                capture::layout_rect()
+            } else {
+                Some(super::gnome_windows::GUARD_SPACE)
+            };
+            super::window_guard::WindowGuard::new(lease, super::window_target::Machine, layout)
         });
+        // A lent GNOME window's input does not go through the shared
+        // injector: its own capture has a RemoteDesktop session for that
+        // window alone (set once the capture has started).
+        let window_native = window_lease.as_ref().is_some_and(|l| !l.native.is_empty());
         // An input-only session says it was admitted, so the phone shows its
         // controls only now: taps made while the owner decided are not
         // queued and injected at once later.
@@ -1264,6 +1272,8 @@ impl StreamingServer {
         // onto the link (bytes), for the arbiter's delivery ceiling (R6f).
         let delivery_waited_us = std::sync::Arc::new(AtomicU64::new(0));
         let delivery_bytes = std::sync::Arc::new(AtomicU64::new(0));
+
+        let window_input = capture_session.as_ref().and_then(|s| s.window_input());
 
         // Clone connection for use across multiple tasks
         let conn_for_transport = connection.clone();
@@ -2299,7 +2309,16 @@ impl StreamingServer {
                                                 // as a monitor's input is.
                                                 if let Some(guard) = window_guard.as_mut() {
                                                     let out = guard.admit(packet, Instant::now());
-                                                    if let Some(tx) = &input_tx {
+                                                    if window_native {
+                                                        // Into this window's own session,
+                                                        // never the shared injector; with
+                                                        // none, nothing is sent.
+                                                        if let Some(tx) = &window_input {
+                                                            for packet in out.send {
+                                                                let _ = tx.send(packet);
+                                                            }
+                                                        }
+                                                    } else if let Some(tx) = &input_tx {
                                                         for packet in out.send {
                                                             let _ = tx.send((live_id, packet));
                                                         }
@@ -2395,7 +2414,13 @@ impl StreamingServer {
             // go as it ends, so nothing is left pressed in the owner's desktop.
             if let Some(guard) = window_guard.as_mut() {
                 let letting_go = guard.finish();
-                if let Some(tx) = &input_tx {
+                if window_native {
+                    if let Some(tx) = &window_input {
+                        for packet in letting_go {
+                            let _ = tx.send(packet);
+                        }
+                    }
+                } else if let Some(tx) = &input_tx {
                     for packet in letting_go {
                         let _ = tx.send((live_id, packet));
                     }
