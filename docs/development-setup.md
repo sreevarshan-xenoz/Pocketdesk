@@ -153,6 +153,40 @@ and checks they are the window's size; `PD_GNOME_RIG_CLOSE_CMD` closes the
 window to try the closed-window rule and `PD_GNOME_RIG_SNAP` writes the frame
 as a PPM. The test refuses to run against this process's own session bus.
 
+### 3a-2b. Lending a KDE window, live (headless KWin; written, not yet run)
+
+`server/tests/lend_window_kde_live.rs` (ignored) lends a window of a throwaway
+headless KWin, through the KWin script and the screen-sharing portal as the
+server runs them. **It has not been run yet** (the Linux laptop was off when it
+was written); checklist section 284 lists what it should settle first. The rig
+is §3a-2's kind of throwaway container (an Arch bootstrap image with `kwin`,
+`xdg-desktop-portal`, `xdg-desktop-portal-kde`, pipewire, wireplumber and a
+program to put a window up, `wev` or any Qt or GTK one), booted with
+`systemd-nspawn -b --private-network`, only `/dev/dri/renderD128` bound in, and
+a folder bound in at the same path on both sides (`--bind=/tmp/pd-kde-run`):
+the script is written there for KWin to read, as the test process's
+`XDG_RUNTIME_DIR`. A lingering user's unit runs `kwin_wayland --virtual`
+(with a socket name and a size, and `--no-lockscreen`: the flags are the ones
+the research container used, to be copied from it), the user manager needs
+`XDG_CURRENT_DESKTOP=KDE` and `WAYLAND_DISPLAY` for the portal, and one test
+window is up. The test binary is built on the host and reaches the container's
+session bus through `/proc/<kwin pid>/root`:
+
+```bash
+P=$(pgrep -u "$(id -u)" -f '^kwin_wayland' | head -1)
+PD_KDE_RIG_BUS="unix:path=/proc/$P/root/run/user/$(id -u)/bus" PD_KDE_RIG_RUN=/tmp/pd-kde-run PD_KDE_RIG_MODE=full PD_KDE_RIG_CLASS=wev   cargo test -p pocketdesk-server --test lend_window_kde_live -- --ignored --nocapture
+```
+
+`no-portal` (the container's `xdg-desktop-portal` stopped) checks the refusal
+in the owner's words; `full` loads the script, lists and lends the test window,
+checks the table (size, place, ordinary, shown), that a look makes the script
+report again (the global shortcut), the guard's Os over the table, `return`
+unloading the script, and, with `PD_KDE_RIG_CLOSE_CMD`, a window closed ending
+its lend. `PD_KDE_RIG_CAPTURE=1` also tries the portal capture, which needs the
+dialog answered by hand (`PD_KDE_RIG_CAPTURE_WAIT` seconds) or a kept restore
+token for the window in `PD_KDE_RIG_GRANTS`. The test refuses to run against
+this process's own session bus.
+
 ### 3a-3. The PipeWire DMA-BUF capture, live (headless GNOME Shell)
 
 `core/tests/pw_dmabuf_live.rs` (ignored) captures a throwaway headless GNOME
