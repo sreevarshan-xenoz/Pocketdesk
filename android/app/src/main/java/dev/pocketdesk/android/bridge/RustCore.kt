@@ -224,6 +224,14 @@ object RustCore {
     private external fun nativeVideoBytes(): Long
 
     private external fun nativeStreamQuietMs(): Long
+
+    private external fun nativeConnectStreamingRace(
+        address: String,
+        port: Int,
+        identityJson: String,
+        monitorIndex: Int,
+        codecCaps: Int,
+    ): String
     private external fun nativeListRemoteFiles(address: String, port: Int, remotePath: String): String
     private external fun nativeGetMonitors(address: String, port: Int): String
     private external fun nativeVirtualScreen(address: String, port: Int, action: String, width: Int, height: Int): String
@@ -651,6 +659,20 @@ object RustCore {
      */
     fun connectStreamingWan(address: String, identityJson: String, monitorIndex: Int = -1): Result<Unit> =
         envelope(nativeConnectStreamingWan(address, identityJson, monitorIndex, videoCodecCaps())).map { }
+
+    /**
+     * Connect to the screen with the home and the internet road dialed at once (BG6), the first
+     * to answer carrying the session: `"lan"` or `"wan"`, the road it came by. The internet road
+     * starts a moment after home, so a computer on the same network is still reached at home.
+     * For a computer with a cached endpoint identity ([identityJson]).
+     */
+    fun connectStreamingRace(
+        address: String,
+        port: Int,
+        identityJson: String,
+        monitorIndex: Int = -1,
+    ): Result<String> =
+        envelope(nativeConnectStreamingRace(address, port, identityJson, monitorIndex, videoCodecCaps()))
 
     /** Connect the phone as a remote (T10i): input only, no picture or sound. */
     fun connectRemote(address: String, port: Int): Result<Unit> = envelope(nativeConnectRemote(address, port)).map { }

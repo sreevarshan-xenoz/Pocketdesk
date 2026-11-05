@@ -2491,7 +2491,7 @@ pub async fn connect_streaming(
     // F2: Idempotent session check — the same desktop *and* monitor; a
     // switch to another monitor is a new session.
     let generation = match claim_session(&address, &[streaming_port], monitor_index, mode).await {
-        Claim::AlreadyUp => return Ok(()),
+        Claim::AlreadyUp { .. } => return Ok(()),
         Claim::New(generation) => generation,
     };
     *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Connecting;
@@ -2578,9 +2578,9 @@ fn streaming_port_for(port: u16) -> u16 {
 
 /// What a connect found when it went to take the session's place.
 enum Claim {
-    /// A live session to the same computer, screen and mode is up already:
-    /// nothing to connect.
-    AlreadyUp,
+    /// A live session to the same computer, screen and mode is up already,
+    /// by the internet road or not: nothing to connect.
+    AlreadyUp { over_internet: bool },
     /// The place is taken: connect, and install under this generation.
     New(u64),
 }
@@ -2606,7 +2606,9 @@ async fn claim_session(
             && handle.connection.close_reason().is_none()
         {
             tracing::info!("Session already active for {address}, skipping connect");
-            return Claim::AlreadyUp;
+            return Claim::AlreadyUp {
+                over_internet: handle.port == 0,
+            };
         }
         tracing::info!(
             "Stopping existing session for {} before connecting to {address}",
@@ -2700,6 +2702,102 @@ async fn dial_home(
         connecting.await
     };
     connected.map_err(DialFailed::from_error)
+}
+
+/// Connect to a computer's screen with both roads dialed at once (BG6): home
+/// at once, the internet road once home has had [`INTERNET_HEAD_START`] to
+/// answer (or has failed). The first to give a session is the one installed,
+/// and the other is dropped mid-dial. Without a usable internet identity it is
+/// [`connect_streaming`]. Returns the road it came by, `"lan"` or `"wan"`.
+///
+/// [`INTERNET_HEAD_START`]: crate::dial_race::INTERNET_HEAD_START
+pub async fn connect_streaming_race(
+    address: String,
+    port: u16,
+    identity_json: String,
+    monitor_index: Option<u32>,
+    codec_caps: u8,
+    mode: pocketdesk_core::streaming::SessionMode,
+) -> Result<&'static str, String> {
+    use crate::dial_race::{INTERNET_HEAD_START, Road, race};
+    let target = match WanTarget::parse(&identity_json) {
+        Ok(target) => target,
+        Err(e) => {
+            tracing::warn!("Unusable WAN identity: {e}");
+            return connect_streaming(address, port, monitor_index, codec_caps, mode)
+                .await
+                .map(|()| "lan");
+        }
+    };
+    let streaming_port = streaming_port_for(port);
+    let generation = match claim_session(&address, &[streaming_port, 0], monitor_index, mode).await
+    {
+        Claim::AlreadyUp { over_internet } => return Ok(road_name(over_internet)),
+        Claim::New(generation) => generation,
+    };
+    *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Connecting;
+
+    // From away (the control link is by the internet road) home is a long
+    // shot, so the road starts with it.
+    let head_start = if crate::link::home_unreachable(&address).await {
+        Duration::ZERO
+    } else {
+        INTERNET_HEAD_START
+    };
+    let home = async {
+        dial_home(&address, streaming_port, monitor_index, codec_caps, mode)
+            .await
+            .map(|dialed| (dialed, None))
+    };
+    let internet = async {
+        dial_wan(&address, target, monitor_index, codec_caps, mode)
+            .await
+            .map(|(dialed, dial)| (dialed, Some(dial)))
+    };
+    match race(home, internet, head_start).await {
+        Ok((road, ((client, packet_rx, audio_rx), dial))) => {
+            tracing::info!(?road, "The first road to answer carries the session");
+            let port = if road == Road::Home {
+                streaming_port
+            } else {
+                0
+            };
+            install_streaming(
+                generation,
+                client,
+                packet_rx,
+                audio_rx,
+                address,
+                port,
+                monitor_index,
+                dial,
+            )
+            .await
+            .map(|()| road_name(road == Road::Internet))
+        }
+        Err(failed) => {
+            let message = format!(
+                "LAN: {} · WAN: {}",
+                failed.home.message, failed.internet.message
+            );
+            let retryable = [&failed.home, &failed.internet]
+                .iter()
+                .any(|dial| dial.record.as_ref().is_some_and(|r| r.is_retryable));
+            // The home road's record when it has one, else the internet's.
+            let kept = if failed.home.record.is_some() {
+                &failed.home
+            } else {
+                &failed.internet
+            };
+            kept.set_status(&message, retryable);
+            Err(message)
+        }
+    }
+}
+
+/// `"wan"` for a session by the internet road, `"lan"` for one at home.
+fn road_name(over_internet: bool) -> &'static str {
+    if over_internet { "wan" } else { "lan" }
 }
 
 /// How long the internet road rests for a computer after a failed dial.
@@ -2856,7 +2954,7 @@ pub async fn connect_streaming_wan(
     // WAN sessions are keyed by the desktop address with a 0 port sentinel
     // (there is no TCP port on the iroh path).
     let generation = match claim_session(&address, &[0], monitor_index, mode).await {
-        Claim::AlreadyUp => return Ok(()),
+        Claim::AlreadyUp { .. } => return Ok(()),
         Claim::New(generation) => generation,
     };
     *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Connecting;

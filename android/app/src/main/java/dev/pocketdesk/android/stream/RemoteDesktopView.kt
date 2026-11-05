@@ -647,27 +647,29 @@ private class DecoderHost {
         report(StreamStatus.Connecting)
         thread = Thread({
             // The Rust bridge blocks, so connect + drain share this thread.
-            // LAN first; fall back to dialing the cached iroh WAN identity
-            // when the desktop is off-network (R1 stage 3).
-            val lan = RustCore.connectStreaming(address, port, monitorIndex)
-            var connected = lan.isSuccess
-            val status = when {
-                connected -> StreamStatus.Up(StreamTransportKind.Lan)
-                wanIdentity == null -> StreamStatus.Down(
-                    "LAN connect failed (${lan.exceptionOrNull()?.message ?: "no error"}); " +
-                        "no cached WAN identity for $address — pair/connect on LAN first.",
-                )
-                else -> {
-                    val wan = RustCore.connectStreamingWan(address, wanIdentity, monitorIndex)
-                    connected = wan.isSuccess
-                    if (wan.isSuccess) {
-                        StreamStatus.Up(StreamTransportKind.Wan)
-                    } else {
-                        StreamStatus.Down(
-                            "LAN: ${lan.exceptionOrNull()?.message ?: "?"} · " +
-                                "WAN: ${wan.exceptionOrNull()?.message ?: "?"}",
-                        )
-                    }
+            // A desktop with a cached iroh WAN identity (R1 stage 3) is dialed
+            // at home and over the internet at once, the first road to answer
+            // carrying the session (BG6); one without, at home only.
+            var connected = false
+            val status = if (wanIdentity != null) {
+                val raced = RustCore.connectStreamingRace(address, port, wanIdentity, monitorIndex)
+                connected = raced.isSuccess
+                when {
+                    raced.getOrNull() == "wan" -> StreamStatus.Up(StreamTransportKind.Wan)
+                    connected -> StreamStatus.Up(StreamTransportKind.Lan)
+                    // The bridge's reason names both roads: "LAN: ... · WAN: ...".
+                    else -> StreamStatus.Down(raced.exceptionOrNull()?.message ?: "LAN: ? · WAN: ?")
+                }
+            } else {
+                val lan = RustCore.connectStreaming(address, port, monitorIndex)
+                connected = lan.isSuccess
+                if (connected) {
+                    StreamStatus.Up(StreamTransportKind.Lan)
+                } else {
+                    StreamStatus.Down(
+                        "LAN connect failed (${lan.exceptionOrNull()?.message ?: "no error"}); " +
+                            "no cached WAN identity for $address — pair/connect on LAN first.",
+                    )
                 }
             }
             report(status)
