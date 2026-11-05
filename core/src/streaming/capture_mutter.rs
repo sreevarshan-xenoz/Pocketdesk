@@ -793,6 +793,13 @@ pub async fn start_window_capture(
 /// What the packets a lent window's guard let through do: into the window's
 /// own RemoteDesktop session, each placed in the window by its frame as it is
 /// when the packet is applied. Ends with `closer` or when the channel closes.
+///
+/// A button press or a scroll acts at the seat's pointer, so it is sent only
+/// while the move before it put the pointer in the window
+/// ([`Placement`]): a move that was dropped or failed leaves them dropped.
+/// Packets queued before the end are all applied first, and what is still
+/// queued as it ends is applied if it lets go of something, so a button or key
+/// the session held is not left down.
 async fn window_input_worker(
     input: Input,
     id: u64,
@@ -800,53 +807,97 @@ async fn window_input_worker(
     refused_tx: tokio::sync::watch::Sender<bool>,
     closer: CancellationToken,
 ) {
-    use super::gnome_windows::{bus, local_pointer, visible, window_events};
-    use super::input_packet::InputPacket;
-
     let mut rest = crate::streaming::wheel::Notches::default();
+    let mut placement = super::gnome_windows::Placement::default();
     let mut said = false;
     loop {
+        // The queue first: what the guard sent before the end (its releases
+        // included) is not overtaken by the end.
         let packet = tokio::select! {
-            _ = closer.cancelled() => break,
+            biased;
             packet = rx.recv() => match packet {
                 Some(packet) => packet,
                 None => break,
             },
+            _ = closer.cancelled() => break,
         };
-        let result = match packet {
-            // The guard said a pixel of its own space: the window holds it
-            // now, or nothing is sent.
-            InputPacket::MouseMoveAbs { x_norm, y_norm } => {
-                let frame = bus::list(&input.conn)
-                    .await
-                    .ok()
-                    .and_then(|all| all.into_iter().find(|w| w.id == id))
-                    .filter(visible)
-                    .map(|w| w.frame);
-                match frame.and_then(|frame| local_pointer((x_norm, y_norm), frame)) {
-                    Some((x, y)) => input.move_to(f64::from(x), f64::from(y)).await,
-                    None => Ok(()),
-                }
+        let result =
+            apply_window_packet(&input, id, &mut placement, &mut rest, packet, false).await;
+        note_input_failure(result, &mut said, &refused_tx);
+    }
+    // Whatever is still queued: only what lets go.
+    while let Ok(packet) = rx.try_recv() {
+        let _ = apply_window_packet(&input, id, &mut placement, &mut rest, packet, true).await;
+    }
+}
+
+/// Tell mutter one packet of a lent window. With `releases_only` (the
+/// session is ending) only what lets go of a button or key is told.
+async fn apply_window_packet(
+    input: &Input,
+    id: u64,
+    placement: &mut super::gnome_windows::Placement,
+    rest: &mut crate::streaming::wheel::Notches,
+    packet: super::input_packet::InputPacket,
+    releases_only: bool,
+) -> Result<()> {
+    use super::gnome_windows::{bus, is_release, local_pointer, visible, window_events};
+    use super::input_packet::InputPacket;
+
+    match packet {
+        // The guard said a pixel of its own space: the window holds it
+        // now, or nothing is sent and the pointer is not placed.
+        InputPacket::MouseMoveAbs { x_norm, y_norm } => {
+            if releases_only {
+                return Ok(());
             }
-            other => {
-                let mut result = Ok(());
-                for event in window_events(&other) {
-                    result = input.apply(&mut rest, event).await;
-                    if result.is_err() {
-                        break;
+            let frame = bus::list(&input.conn)
+                .await
+                .ok()
+                .and_then(|all| all.into_iter().find(|w| w.id == id))
+                .filter(visible)
+                .map(|w| w.frame);
+            match placement.moved(frame.and_then(|frame| local_pointer((x_norm, y_norm), frame))) {
+                Some((x, y)) => {
+                    let moved = input.move_to(f64::from(x), f64::from(y)).await;
+                    if moved.is_err() {
+                        placement.failed();
                     }
+                    moved
                 }
-                result
+                None => Ok(()),
             }
-        };
-        if let Err(e) = result {
-            let text = format!("{e:#}");
-            if !std::mem::replace(&mut said, true) {
-                warn!(error = %text, "Mutter input not taken for the lent window");
+        }
+        other => {
+            let mut result = Ok(());
+            for event in window_events(&other) {
+                if !placement.allows(&event) || (releases_only && !is_release(&event)) {
+                    continue;
+                }
+                result = input.apply(rest, event).await;
+                if result.is_err() {
+                    break;
+                }
             }
-            if super::portal_input::input_refused_text(&text) {
-                let _ = refused_tx.send(true);
-            }
+            result
+        }
+    }
+}
+
+/// Say, once, that mutter did not take the window's input, and tell the
+/// phone when it was refused.
+fn note_input_failure(
+    result: Result<()>,
+    said: &mut bool,
+    refused_tx: &tokio::sync::watch::Sender<bool>,
+) {
+    if let Err(e) = result {
+        let text = format!("{e:#}");
+        if !std::mem::replace(said, true) {
+            warn!(error = %text, "Mutter input not taken for the lent window");
+        }
+        if super::portal_input::input_refused_text(&text) {
+            let _ = refused_tx.send(true);
         }
     }
 }

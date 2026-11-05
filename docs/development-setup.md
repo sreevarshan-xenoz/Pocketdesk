@@ -164,10 +164,20 @@ reaches the covering one. It needs two or three `wev` windows (user units run
 under `stdbuf -oL`, the first started being the lent one, each with its output
 in a file) and `PD_GNOME_RIG_LENT_LOG` and `PD_GNOME_RIG_COVER_LOG` naming the
 lent window's and the covering window's files as the test process sees them
-(through `/proc/<shell pid>/root`):
+(through `/proc/<shell pid>/root`). The test also asserts where the click landed: the last `surface_x`/`surface_y`
+in the lent window's log must be the aimed pixel less the window frame's
+corner, within a pixel and a half (that is what shows whether mutter takes a
+window stream's coordinates relative to the window). Run it twice: with `wev`
+lent, and with the client-side decorated `scripts/rig_click_logger.py` (GTK4,
+header bar and shadows; app id `dev.pocketdesk.RigClicker`) lent and a `wev`
+over it, by setting `PD_GNOME_RIG_LENT_APP=dev.pocketdesk.RigClicker`,
+`PD_GNOME_RIG_COVER_APP=wev` and `PD_GNOME_RIG_LENT_LOG` to the logger's file.
 
 ```bash
-PD_GNOME_RIG_SHELL=extension PD_GNOME_RIG_LENT_LOG="/proc/$P/root/tmp/wev-lent.log" PD_GNOME_RIG_COVER_LOG="/proc/$P/root/tmp/wev-cover.log"   cargo test -p pocketdesk-server --test lend_window_gnome_live -- --ignored --nocapture
+PD_GNOME_RIG_SHELL=extension \
+PD_GNOME_RIG_LENT_LOG="/proc/$P/root/tmp/wev-lent.log" \
+PD_GNOME_RIG_COVER_LOG="/proc/$P/root/tmp/wev-cover.log" \
+  cargo test -p pocketdesk-server --test lend_window_gnome_live -- --ignored --nocapture
 ```
 
 ### 3a-3. The PipeWire DMA-BUF capture, live (headless GNOME Shell)

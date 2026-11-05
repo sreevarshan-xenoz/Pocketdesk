@@ -100,6 +100,99 @@ pub enum Unavailable {
     Failed(&'static str),
 }
 
+/// How long calls to the extension are not made after one that was not
+/// answered (a Shell that is stuck, a bus that hangs).
+pub const STALL_PAUSE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// A circuit breaker for the calls to the extension: the guard asks several
+/// questions for a click, on the way of the packet, so a Shell that does not
+/// answer must cost one wait, not one for each question. After
+/// [`Breaker::trip`] it is [`open`](Breaker::open) for [`STALL_PAUSE`], and
+/// the calls in that time answer "failed" at once (which every rule reads as
+/// no).
+#[derive(Debug, Default)]
+pub struct Breaker {
+    until: Option<std::time::Instant>,
+}
+
+impl Breaker {
+    pub const fn new() -> Self {
+        Self { until: None }
+    }
+
+    /// Whether calls are paused at `now`.
+    pub fn open(&self, now: std::time::Instant) -> bool {
+        self.until.is_some_and(|until| now < until)
+    }
+
+    /// An answer did not come: pause calls from `now`.
+    pub fn trip(&mut self, now: std::time::Instant) {
+        self.until = Some(now + STALL_PAUSE);
+    }
+}
+
+/// Run `f`, which blocks on the extension, off an async worker thread where
+/// the runtime has several (it runs in place in any other); the streamer's
+/// tasks call the guard and ask whether the lend takes input this way.
+pub fn blocking<R>(f: impl FnOnce() -> R) -> R {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(f)
+        }
+        _ => f(),
+    }
+}
+
+/// Which of the packets of a lent GNOME window may be told to mutter, given
+/// whether the pointer is known to be inside the window. A button press or a
+/// scroll acts at the seat's pointer, wherever that is (the owner's own
+/// cursor, in another window), so neither is sent unless the move before it
+/// placed the pointer in the window: a move that was dropped (the window moved
+/// or shrank, is hidden, the extension was slow) or failed leaves them
+/// dropped until one succeeds. Releases always pass, so nothing this session
+/// pressed stays down; keys and text do not depend on the pointer (the guard
+/// sends them only while the window has the keyboard) and pass.
+#[derive(Debug, Default)]
+pub struct Placement {
+    placed: bool,
+}
+
+impl Placement {
+    /// A move the guard sent: `local` is where the window holds it now (`None`
+    /// when it does not). Returns it, so the caller tells mutter only then;
+    /// a `None` leaves the pointer unplaced.
+    pub fn moved(&mut self, local: Option<(i32, i32)>) -> Option<(i32, i32)> {
+        self.placed = local.is_some();
+        local
+    }
+
+    /// The call that moved the pointer failed.
+    pub fn failed(&mut self) {
+        self.placed = false;
+    }
+
+    /// Whether `event` may be told to mutter now.
+    pub fn allows(&self, event: &PortalEvent) -> bool {
+        match event {
+            PortalEvent::Button { pressed: true, .. }
+            | PortalEvent::Scroll { .. }
+            | PortalEvent::FineScroll { .. } => self.placed,
+            _ => true,
+        }
+    }
+}
+
+/// Whether `event` lets go of something (a button, a key): what is still
+/// sent as a session ends.
+pub fn is_release(event: &PortalEvent) -> bool {
+    matches!(
+        event,
+        PortalEvent::Button { pressed: false, .. }
+            | PortalEvent::Key { pressed: false, .. }
+            | PortalEvent::Keysym { pressed: false, .. }
+    )
+}
+
 /// What the guard needs of the extension. [`bus::Bus`] is the real one; the
 /// tests have a fake.
 pub trait Extension {
@@ -369,7 +462,30 @@ pub mod bus {
     }
 
     /// How long the extension may take: it answers at once or not at all.
-    const CALL_WAIT: Duration = Duration::from_secs(3);
+    /// Short, because a guard's question is asked on the way of a packet.
+    const CALL_WAIT: Duration = Duration::from_millis(500);
+
+    /// Whether calls are paused after an answer that did not come
+    /// ([`super::Breaker`]), shared by every caller.
+    static BREAKER: std::sync::Mutex<super::Breaker> = std::sync::Mutex::new(super::Breaker::new());
+
+    fn paused() -> bool {
+        BREAKER
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .open(std::time::Instant::now())
+    }
+
+    fn pause() {
+        BREAKER
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .trip(std::time::Instant::now());
+    }
+
+    /// What a call says when it is not made because the last one stalled.
+    const PAUSED: Unavailable =
+        Unavailable::Failed("the GNOME Shell extension did not answer a moment ago");
 
     /// `List`'s answer as it is on the wire: `aa{sv}`.
     pub type RawList = Vec<HashMap<String, OwnedValue>>;
@@ -466,12 +582,18 @@ pub mod bus {
         B: serde::ser::Serialize + zbus::zvariant::DynamicType,
         T: serde::de::DeserializeOwned + zbus::zvariant::Type,
     {
+        if paused() {
+            return Err(PAUSED);
+        }
         let reply = tokio::time::timeout(
             CALL_WAIT,
             conn.call_method(Some(BUS_NAME), OBJECT_PATH, Some(INTERFACE), method, body),
         )
         .await
-        .map_err(|_| Unavailable::Failed("the GNOME Shell extension did not answer"))?;
+        .map_err(|_| {
+            pause();
+            Unavailable::Failed("the GNOME Shell extension did not answer")
+        })?;
         match reply {
             Ok(message) => message.body().deserialize::<T>().map_err(|_| {
                 Unavailable::Failed("the GNOME Shell extension's answer was unreadable")
@@ -549,6 +671,9 @@ pub mod bus {
     fn on_a_thread<T: Send + 'static>(
         fut: impl std::future::Future<Output = Result<T, Unavailable>> + Send + 'static,
     ) -> Result<T, Unavailable> {
+        if paused() {
+            return Err(PAUSED);
+        }
         let runtime = runtime().ok_or_else(gone)?;
         let (tx, rx) = std::sync::mpsc::channel();
         runtime.spawn(async move {
@@ -558,7 +683,19 @@ pub mod bus {
             }
             let _ = tx.send(result);
         });
-        rx.recv_timeout(CALL_WAIT * 2).map_err(|_| gone())?
+        // The connect and the call each wait at most CALL_WAIT.
+        match rx.recv_timeout(CALL_WAIT * 3) {
+            Ok(result) => {
+                if matches!(result, Err(Unavailable::Failed(_))) {
+                    pause();
+                }
+                result
+            }
+            Err(_) => {
+                pause();
+                Err(gone())
+            }
+        }
     }
 
     #[cfg(test)]
@@ -1015,6 +1152,118 @@ mod tests {
         );
         assert!(window_events(&InputPacket::MouseMove { dx: 1, dy: 1 }).is_empty());
         assert!(window_events(&InputPacket::RequestKeyframe).is_empty());
+    }
+
+    #[test]
+    fn a_press_or_a_scroll_waits_for_a_move_that_placed_the_pointer_and_a_release_never_does() {
+        let press = PortalEvent::Button {
+            code: 0x110,
+            pressed: true,
+        };
+        let release = PortalEvent::Button {
+            code: 0x110,
+            pressed: false,
+        };
+        let scroll = PortalEvent::Scroll { axis: 0, steps: 1 };
+        let fine = PortalEvent::FineScroll { axis: 0, v120: 30 };
+        let key = PortalEvent::Key {
+            code: 30,
+            pressed: true,
+        };
+        let sym = PortalEvent::Keysym {
+            sym: 97,
+            pressed: true,
+        };
+        let mut placement = Placement::default();
+        // Nothing has placed the pointer yet: it may be anywhere, in another
+        // window of the owner's. Presses and scrolls wait; releases, keys
+        // (which go where the keyboard is, and the guard sends them only
+        // while it is in the lent window) and text do not.
+        for event in [&press, &scroll, &fine] {
+            assert!(!placement.allows(event), "{event:?}");
+        }
+        for event in [&release, &key, &sym] {
+            assert!(placement.allows(event), "{event:?}");
+        }
+        // A move the window does not hold (dropped, the extension slow, the
+        // window hidden) places nothing, and the answer says not to tell mutter.
+        assert_eq!(placement.moved(None), None);
+        assert!(!placement.allows(&press));
+        // One that lands places the pointer.
+        assert_eq!(placement.moved(Some((3, 4))), Some((3, 4)));
+        for event in [&press, &scroll, &fine, &release, &key] {
+            assert!(placement.allows(event), "{event:?}");
+        }
+        // A later move that is dropped takes the placing back.
+        assert_eq!(placement.moved(None), None);
+        assert!(!placement.allows(&press));
+        assert!(!placement.allows(&scroll));
+        assert!(placement.allows(&release));
+        // A move mutter did not take takes it back too.
+        placement.moved(Some((1, 1)));
+        assert!(placement.allows(&press));
+        placement.failed();
+        assert!(!placement.allows(&press));
+    }
+
+    #[test]
+    fn only_what_lets_go_is_told_as_a_session_ends() {
+        let ev = |pressed| {
+            [
+                PortalEvent::Button { code: 1, pressed },
+                PortalEvent::Key { code: 1, pressed },
+                PortalEvent::Keysym { sym: 1, pressed },
+            ]
+        };
+        assert!(ev(false).iter().all(is_release));
+        assert!(!ev(true).iter().any(is_release));
+        assert!(!is_release(&PortalEvent::Scroll { axis: 0, steps: 1 }));
+        assert!(!is_release(&PortalEvent::Absolute {
+            x_norm: 0,
+            y_norm: 0
+        }));
+    }
+
+    #[test]
+    fn a_stalled_extension_costs_one_wait_then_nothing_for_a_while() {
+        use std::time::{Duration, Instant};
+        let mut breaker = Breaker::new();
+        let t0 = Instant::now();
+        assert!(!breaker.open(t0), "calls are made until one stalls");
+        breaker.trip(t0);
+        assert!(breaker.open(t0), "paused at once");
+        assert!(breaker.open(t0 + STALL_PAUSE - Duration::from_millis(1)));
+        assert!(
+            !breaker.open(t0 + STALL_PAUSE),
+            "asked again once the pause is over"
+        );
+        // A second stall pauses again from then.
+        let later = t0 + STALL_PAUSE + Duration::from_secs(1);
+        breaker.trip(later);
+        assert!(breaker.open(later + Duration::from_secs(1)));
+        assert!(!breaker.open(later + STALL_PAUSE));
+        // Short enough to matter: the pause is a couple of seconds.
+        assert!(STALL_PAUSE >= Duration::from_secs(1) && STALL_PAUSE <= Duration::from_secs(5));
+    }
+
+    #[test]
+    fn work_that_blocks_runs_in_place_or_off_the_worker_and_gives_its_answer() {
+        // No runtime.
+        assert_eq!(blocking(|| 5), 5);
+        // A runtime with one thread: in place.
+        let one = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        assert_eq!(one.block_on(async { blocking(|| 6) }), 6);
+        // A runtime with several: off the worker, inside a task.
+        let many = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .build()
+            .unwrap();
+        assert_eq!(
+            many.block_on(async { tokio::spawn(async { blocking(|| 7) }).await.unwrap() }),
+            7
+        );
     }
 
     #[test]

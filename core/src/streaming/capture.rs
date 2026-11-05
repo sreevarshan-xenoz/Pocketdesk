@@ -409,7 +409,7 @@ async fn start_native_window_capture(
     }
     // With input where the Shell extension answers for the window (the
     // session was told so before it started, `window_target::takes_input`).
-    let input = super::window_target::takes_input(&lease);
+    let input = super::gnome_windows::blocking(|| super::window_target::takes_input(&lease));
     let session =
         super::capture_mutter::start_window_capture(config, frame_tx, cancel, lease, input).await?;
     // The capture runs under the session's own token: one that dies once

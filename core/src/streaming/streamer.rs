@@ -872,9 +872,11 @@ impl StreamingServer {
         let force_view_only = !permissions.allows(Capability::Input)
             || sound
             || phone_sound_only
-            || window_lease
-                .as_ref()
-                .is_some_and(|lease| !super::window_target::takes_input(lease));
+            || window_lease.as_ref().is_some_and(|lease| {
+                // Asks the Shell extension over the bus, which blocks: off
+                // this task's worker thread.
+                !super::gnome_windows::blocking(|| super::window_target::takes_input(lease))
+            });
         let laser = self.laser;
         // A computer's mic needs control too (PC10 review): never in a
         // session that may not drive this one.
@@ -2308,7 +2310,17 @@ impl StreamingServer {
                                                 // (`window_guard`); nothing is remapped
                                                 // as a monitor's input is.
                                                 if let Some(guard) = window_guard.as_mut() {
-                                                    let out = guard.admit(packet, Instant::now());
+                                                    // A GNOME window's guard asks the Shell
+                                                    // extension over the bus (several calls
+                                                    // a click), which blocks: off this
+                                                    // task's worker thread.
+                                                    let out = if window_native {
+                                                        super::gnome_windows::blocking(|| {
+                                                            guard.admit(packet, Instant::now())
+                                                        })
+                                                    } else {
+                                                        guard.admit(packet, Instant::now())
+                                                    };
                                                     if window_native {
                                                         // Into this window's own session,
                                                         // never the shared injector; with

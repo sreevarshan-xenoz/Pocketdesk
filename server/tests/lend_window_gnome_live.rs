@@ -224,7 +224,7 @@ async fn a_gnome_window_is_lent_to_look_at_when_the_shell_gives_its_list() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|w| w["class"] == "wev")
+        .find(|w| w["class"] == lent_app().as_str())
         .unwrap_or_else(|| panic!("the test program's window is not listed: {listed}"))
         .clone();
     let id = mine["address"].as_str().unwrap().to_string();
@@ -392,6 +392,35 @@ async fn a_gnome_window_is_lent_to_look_at_when_the_shell_gives_its_list() {
     }
 }
 
+/// The app of the window to lend and of the one to cover it (the class the
+/// extension reports): `wev` for both unless `PD_GNOME_RIG_LENT_APP` and
+/// `PD_GNOME_RIG_COVER_APP` say otherwise. Lend a client-side decorated GTK
+/// window (`scripts/rig_click_logger.py`, `dev.pocketdesk.RigClicker`) to check
+/// that a click lands at the aimed place in one too.
+fn lent_app() -> String {
+    std::env::var("PD_GNOME_RIG_LENT_APP").unwrap_or_else(|_| "wev".to_string())
+}
+
+fn cover_app() -> String {
+    std::env::var("PD_GNOME_RIG_COVER_APP").unwrap_or_else(|_| "wev".to_string())
+}
+
+/// The last `surface_x: .., surface_y: ..` place in a `wev` log (its `enter`
+/// and `motion` lines), in the window's own coordinates.
+fn last_surface_point(path: &str) -> Option<(f64, f64)> {
+    let log = std::fs::read_to_string(path).ok()?;
+    log.lines().rev().find_map(|line| {
+        let number = |key: &str| -> Option<f64> {
+            let rest = &line[line.find(key)? + key.len()..];
+            let end = rest
+                .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+                .unwrap_or(rest.len());
+            rest[..end].parse().ok()
+        };
+        Some((number("surface_x: ")?, number("surface_y: ")?))
+    })
+}
+
 /// How many lines of a `wev` log say `device` saw a press (a pointer button or
 /// a key).
 fn presses(path: &str, device: &str) -> usize {
@@ -438,26 +467,34 @@ async fn input_through_the_extension() {
     let lent_log = std::env::var("PD_GNOME_RIG_LENT_LOG").expect("PD_GNOME_RIG_LENT_LOG");
     let cover_log = std::env::var("PD_GNOME_RIG_COVER_LOG").expect("PD_GNOME_RIG_COVER_LOG");
 
-    // The windows as the extension says them: the lent one is the first wev
-    // (the lowest id), the cover is the one overlapping it most.
+    // The windows as the extension says them: the lent one is the first of
+    // the lent app (the lowest id), the cover is the one of the cover app
+    // overlapping it most.
     let windows = tokio::task::spawn_blocking(|| gnome_windows::bus::Bus.list())
         .await
         .unwrap()
         .expect("the extension lists the windows");
-    let wevs: Vec<_> = windows.iter().filter(|w| w.app == "wev").collect();
+    let lent = windows
+        .iter()
+        .filter(|w| w.app == lent_app())
+        .min_by_key(|w| w.id)
+        .unwrap_or_else(|| panic!("no {} window: {windows:?}", lent_app()));
+    let covers: Vec<_> = windows
+        .iter()
+        .filter(|w| w.app == cover_app() && w.id != lent.id)
+        .collect();
     assert!(
-        wevs.len() >= 2,
-        "the rig needs two wev windows: {windows:?}"
+        !covers.is_empty(),
+        "the rig needs a {} window to cover the lent one: {windows:?}",
+        cover_app()
     );
-    let lent = wevs.iter().min_by_key(|w| w.id).copied().unwrap();
     let overlap = |a: Rect, b: Rect| {
         let w = (a.0 + a.2 as i32).min(b.0 + b.2 as i32) - a.0.max(b.0);
         let h = (a.1 + a.3 as i32).min(b.1 + b.3 as i32) - a.1.max(b.1);
         (w.max(0), h.max(0))
     };
-    let cover = wevs
+    let cover = covers
         .iter()
-        .filter(|w| w.id != lent.id)
         .max_by_key(|w| {
             let (w, h) = overlap(lent.frame, w.frame);
             i64::from(w) * i64::from(h)
@@ -606,6 +643,20 @@ async fn input_through_the_extension() {
         presses(&lent_log, "wl_pointer"),
         before.0 + 1,
         "exactly one press landed in the lent window"
+    );
+    // Where it landed: the place the window itself reports (its surface's
+    // own coordinates, a client-side decorated window's without its shadow)
+    // is the aimed pixel less the frame's corner. This is what shows whether
+    // mutter takes the stream's coordinates relative to the window.
+    let expected = (
+        f64::from(at.0 - lent.frame.0),
+        f64::from(at.1 - lent.frame.1),
+    );
+    let seen = last_surface_point(&lent_log).expect("the lent window reported a pointer place");
+    println!("click aimed {expected:?} in the window, the window saw {seen:?}");
+    assert!(
+        (seen.0 - expected.0).abs() <= 1.5 && (seen.1 - expected.1).abs() <= 1.5,
+        "the click landed at {seen:?}, aimed {expected:?}"
     );
     assert_eq!(
         presses(&cover_log, "wl_pointer"),
