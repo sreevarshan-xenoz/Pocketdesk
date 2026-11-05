@@ -2487,46 +2487,151 @@ pub async fn connect_streaming(
     codec_caps: u8,
     mode: pocketdesk_core::streaming::SessionMode,
 ) -> Result<(), String> {
-    // If the control port (1716) is passed, automatically switch to the default streaming port (4716).
-    // In a real KDE Connect implementation, this would be negotiated or discovery-based.
-    let streaming_port = if port == pocketdesk_core::DEFAULT_CONTROL_PORT {
+    let streaming_port = streaming_port_for(port);
+    // F2: Idempotent session check — the same desktop *and* monitor; a
+    // switch to another monitor is a new session.
+    let generation = match claim_session(&address, &[streaming_port], monitor_index, mode).await {
+        Claim::AlreadyUp => return Ok(()),
+        Claim::New(generation) => generation,
+    };
+    *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Connecting;
+    let (client, packet_rx, audio_rx) =
+        dial_home(&address, streaming_port, monitor_index, codec_caps, mode)
+            .await
+            .map_err(DialFailed::into_message)?;
+
+    install_streaming(
+        generation,
+        client,
+        packet_rx,
+        audio_rx,
+        address,
+        streaming_port,
+        monitor_index,
+        None,
+    )
+    .await
+}
+
+/// A session's streams as a dial gives them: the client, and the channels
+/// of its video and its sound.
+type Dialed = (
+    StreamingClient,
+    tokio::sync::mpsc::Receiver<pocketdesk_core::streaming::EncodedPacket>,
+    tokio::sync::mpsc::Receiver<pocketdesk_core::streaming::AudioPacket>,
+);
+
+/// Why a dial gave no session: what to tell the app, and the record the
+/// session's status keeps when the failure is one the bridge classifies.
+struct DialFailed {
+    message: String,
+    record: Option<PocketdeskErrorDto>,
+}
+
+impl DialFailed {
+    /// A failure no error record is kept for.
+    fn plain(message: String) -> Self {
+        Self {
+            message,
+            record: None,
+        }
+    }
+
+    fn from_error(error: anyhow::Error) -> Self {
+        let record = PocketdeskErrorDto::from(PocketdeskError::from(error));
+        Self {
+            message: record.message.clone(),
+            record: Some(record),
+        }
+    }
+
+    /// The session's status says it failed, with `message` as the reason
+    /// (what the app shows; the record's code and retryability stay).
+    fn set_status(&self, message: &str, retryable: bool) {
+        if let Some(record) = &self.record {
+            *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Error(PocketdeskErrorDto {
+                code: record.code,
+                message: message.to_string(),
+                is_retryable: retryable || record.is_retryable,
+            });
+        }
+    }
+
+    /// The status says it failed, and the reason goes to the caller.
+    fn into_message(self) -> String {
+        self.set_status(&self.message, false);
+        self.message
+    }
+}
+
+/// The streaming port a control port stands for: the default control port
+/// (1716) is the default streaming port (4716); any other is taken as given.
+/// In a real KDE Connect implementation this would be negotiated or
+/// discovery-based.
+fn streaming_port_for(port: u16) -> u16 {
+    if port == pocketdesk_core::DEFAULT_CONTROL_PORT {
         pocketdesk_core::DEFAULT_STREAMING_PORT
     } else {
         port
-    };
+    }
+}
 
+/// What a connect found when it went to take the session's place.
+enum Claim {
+    /// A live session to the same computer, screen and mode is up already:
+    /// nothing to connect.
+    AlreadyUp,
+    /// The place is taken: connect, and install under this generation.
+    New(u64),
+}
+
+/// Take the place of the live session for a connect to `address`: a session
+/// on one of `ports` (0 is the internet road's, which has no port) to the same
+/// computer, screen and mode is kept; any other is stopped, and the connect
+/// gets a new generation, so a stop or a newer connect overtakes it.
+async fn claim_session(
+    address: &str,
+    ports: &[u16],
+    monitor_index: Option<u32>,
+    mode: pocketdesk_core::streaming::SessionMode,
+) -> Claim {
+    let mut handle_guard = (*STREAMING_HANDLE).lock().await;
+    if let Some(handle) = &*handle_guard {
+        if handle.address == address
+            && ports.contains(&handle.port)
+            && handle.monitor_index == monitor_index
+            && handle.mode == mode
+            // One the computer closed (a refusal) is not active: a
+            // retry must dial again, not keep the dead session.
+            && handle.connection.close_reason().is_none()
+        {
+            tracing::info!("Session already active for {address}, skipping connect");
+            return Claim::AlreadyUp;
+        }
+        tracing::info!(
+            "Stopping existing session for {} before connecting to {address}",
+            handle.address
+        );
+    }
+    if let Some(handle) = handle_guard.take() {
+        teardown_streaming_handle(handle).await;
+        // V7 review: the session it replaces says nothing of this one.
+        clear_hud_window();
+    }
+    Claim::New(crate::CONNECT_GENERATION.begin())
+}
+
+/// Dial the computer's streaming port at home, and attach the session. The
+/// connection pings every second (BG6), so the phone can tell a link that
+/// went away from a still screen within seconds.
+async fn dial_home(
+    address: &str,
+    streaming_port: u16,
+    monitor_index: Option<u32>,
+    codec_caps: u8,
+    mode: pocketdesk_core::streaming::SessionMode,
+) -> Result<Dialed, DialFailed> {
     let addr = format!("{address}:{streaming_port}");
-
-    // F2: Idempotent session check — the same desktop *and* monitor; a
-    // switch to another monitor is a new session.
-    let generation = {
-        let mut handle_guard = (*STREAMING_HANDLE).lock().await;
-        if let Some(handle) = &*handle_guard {
-            if handle.address == address
-                && handle.port == streaming_port
-                && handle.monitor_index == monitor_index
-                && handle.mode == mode
-                // One the computer closed (a refusal) is not active: a
-                // retry must dial again, not keep the dead session.
-                && handle.connection.close_reason().is_none()
-            {
-                tracing::info!("Session already active for {addr}, skipping connect");
-                return Ok(());
-            }
-            tracing::info!(
-                "Stopping existing session for {} before connecting to {address}",
-                handle.address
-            );
-        }
-        if let Some(handle) = handle_guard.take() {
-            teardown_streaming_handle(handle).await;
-            // V7 review: the session it replaces says nothing of this one.
-            clear_hud_window();
-        }
-        crate::CONNECT_GENERATION.begin()
-    };
-
-    *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Connecting;
     tracing::info!("Connecting to streaming server at {addr}");
 
     // Create a CertManager with persistent TOFU peer certificate verification.
@@ -2537,13 +2642,13 @@ pub async fn connect_streaming(
         match guard.as_ref() {
             Some(dir) => std::sync::Arc::new(
                 pocketdesk_core::streaming::transport::CertManager::load_or_create(dir)
-                    .map_err(|e| e.to_string())?,
+                    .map_err(|e| DialFailed::plain(e.to_string()))?,
             ),
             None => {
                 tracing::warn!("No data dir configured — cert trust is ephemeral");
                 std::sync::Arc::new(
                     pocketdesk_core::streaming::transport::CertManager::new()
-                        .map_err(|e| e.to_string())?,
+                        .map_err(|e| DialFailed::plain(e.to_string()))?,
                 )
             }
         }
@@ -2567,7 +2672,7 @@ pub async fn connect_streaming(
     // phone, name the WAN key it dials with so the desktop can bind it.
     let iroh_id = device_wan_key().map(|key| key.public().to_string());
     let identity = client_identity();
-    let connecting = StreamingClient::connect(
+    let connecting = StreamingClient::connect_watched(
         &addr,
         cert_manager,
         monitor_index,
@@ -2581,40 +2686,20 @@ pub async fn connect_streaming(
     // not waits out its 10 s. Home gets a short try instead: a phone back on
     // its Wi-Fi with the link still on the road answers well within it (V8
     // review), and one away falls to the road seconds sooner.
-    let connected = if crate::link::home_unreachable(&address).await {
+    let connected = if crate::link::home_unreachable(address).await {
         match tokio::time::timeout(HOME_TRY_WHILE_AWAY, connecting).await {
             Ok(connected) => connected,
             Err(_) => {
-                return Err(format!(
+                return Err(DialFailed::plain(format!(
                     "{address} did not answer at home within {} s, and its control link is by the internet road",
                     HOME_TRY_WHILE_AWAY.as_secs()
-                ));
+                )));
             }
         }
     } else {
         connecting.await
     };
-    let (client, packet_rx, audio_rx) = connected.map_err(|e| {
-        let err_dto = PocketdeskErrorDto::from(pocketdesk_core::error::PocketdeskError::from(e));
-        *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Error(PocketdeskErrorDto {
-            code: err_dto.code,
-            message: err_dto.message.clone(),
-            is_retryable: err_dto.is_retryable,
-        });
-        err_dto.message
-    })?;
-
-    install_streaming(
-        generation,
-        client,
-        packet_rx,
-        audio_rx,
-        address,
-        streaming_port,
-        monitor_index,
-        None,
-    )
-    .await
+    connected.map_err(DialFailed::from_error)
 }
 
 /// How long the internet road rests for a computer after a failed dial.
@@ -2766,43 +2851,48 @@ pub async fn connect_streaming_wan(
     codec_caps: u8,
     mode: pocketdesk_core::streaming::SessionMode,
 ) -> Result<(), String> {
+    let target = WanTarget::parse(&identity_json)?;
+
+    // WAN sessions are keyed by the desktop address with a 0 port sentinel
+    // (there is no TCP port on the iroh path).
+    let generation = match claim_session(&address, &[0], monitor_index, mode).await {
+        Claim::AlreadyUp => return Ok(()),
+        Claim::New(generation) => generation,
+    };
+    *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Connecting;
+    let ((client, packet_rx, audio_rx), dial) =
+        dial_wan(&address, target, monitor_index, codec_caps, mode)
+            .await
+            .map_err(DialFailed::into_message)?;
+
+    install_streaming(
+        generation,
+        client,
+        packet_rx,
+        audio_rx,
+        address,
+        0,
+        monitor_index,
+        Some(dial),
+    )
+    .await
+}
+
+/// Dial the computer's iroh endpoint from its announced identity, and attach
+/// the session. The connection pings every second (BG6).
+async fn dial_wan(
+    address: &str,
+    target: WanTarget,
+    monitor_index: Option<u32>,
+    codec_caps: u8,
+    mode: pocketdesk_core::streaming::SessionMode,
+) -> Result<(Dialed, pocketdesk_core::streaming::IrohDial), DialFailed> {
     let WanTarget {
         endpoint_id,
         relay_urls,
         direct_addrs,
         dht,
-    } = WanTarget::parse(&identity_json)?;
-
-    // WAN sessions are keyed by the desktop address with a 0 port sentinel
-    // (there is no TCP port on the iroh path).
-    let generation = {
-        let mut handle_guard = (*STREAMING_HANDLE).lock().await;
-        if let Some(handle) = &*handle_guard {
-            if handle.address == address
-                && handle.port == 0
-                && handle.monitor_index == monitor_index
-                && handle.mode == mode
-                // One the computer closed (a refusal) is not active: a
-                // retry must dial again, not keep the dead session.
-                && handle.connection.close_reason().is_none()
-            {
-                tracing::info!("WAN session already active for {address}, skipping connect");
-                return Ok(());
-            }
-            tracing::info!(
-                "Stopping existing session for {} before connecting to {address}",
-                handle.address
-            );
-        }
-        if let Some(handle) = handle_guard.take() {
-            teardown_streaming_handle(handle).await;
-            // V7 review: the session it replaces says nothing of this one.
-            clear_hud_window();
-        }
-        crate::CONNECT_GENERATION.begin()
-    };
-
-    *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Connecting;
+    } = target;
     // Built only now that a dial will happen: it resolves the DHT's bootstrap
     // nodes and binds a socket.
     let dht = if dht {
@@ -2822,7 +2912,7 @@ pub async fn connect_streaming_wan(
         dht.is_some()
     );
 
-    let dial = pocketdesk_core::streaming::IrohDial::dial(
+    let dial = pocketdesk_core::streaming::IrohDial::dial_watched(
         &endpoint_id,
         &relay_urls,
         &direct_addrs,
@@ -2833,17 +2923,9 @@ pub async fn connect_streaming_wan(
         dht,
     )
     .await
-    .map_err(|e| {
-        let err_dto = PocketdeskErrorDto::from(pocketdesk_core::error::PocketdeskError::from(e));
-        *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Error(PocketdeskErrorDto {
-            code: err_dto.code,
-            message: err_dto.message.clone(),
-            is_retryable: err_dto.is_retryable,
-        });
-        err_dto.message
-    })?;
+    .map_err(DialFailed::from_error)?;
 
-    let (client, packet_rx, audio_rx) = StreamingClient::attach(
+    let attached = StreamingClient::attach(
         dial.connection(),
         monitor_index,
         Some(&client_identity().device_id),
@@ -2852,18 +2934,7 @@ pub async fn connect_streaming_wan(
         mode,
     )
     .await;
-
-    install_streaming(
-        generation,
-        client,
-        packet_rx,
-        audio_rx,
-        address,
-        0,
-        monitor_index,
-        Some(dial),
-    )
-    .await
+    Ok((attached, dial))
 }
 
 /// This phone's WAN (iroh) key, kept in its data directory across runs so
@@ -3322,6 +3393,14 @@ fn link_quiet_ms() -> u128 {
             0
         }
     }
+}
+
+/// [`link_quiet_ms`] for the phone's decoder watch (BG6): with the
+/// connection pinging every second, the computer's acknowledgements keep the
+/// count rising on a live link, so a link quiet for seconds is gone, a still
+/// screen or not. 0 with no session.
+pub fn stream_quiet_ms() -> u64 {
+    u64::try_from(link_quiet_ms()).unwrap_or(u64::MAX)
 }
 
 /// For a sound session (N5), what the computer said it allows, as JSON

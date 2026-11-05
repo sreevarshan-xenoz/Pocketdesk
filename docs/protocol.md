@@ -78,7 +78,7 @@ From `server/src/service.rs` (`handle_internet_control`, `serve_control`) and `a
   - Control packets on stream 0 are then gated by `is_paired_device(id)` and `permits`.
   - Sources: `core/src/protocol/v2.rs`, `server/src/v2_multiplexer.rs`.
   - The Android UI does not call v2: no caller of `RustCore.connectV2` was found in `android/app/src/main`.
-- **Connection settings.** Keepalive is 15 s and the idle timeout is 45 s. Address migration is on (quinn's default). Source: `core/src/streaming/transport.rs` (`configured_transport`).
+- **Connection settings.** Keepalive is 15 s and the idle timeout is 45 s. Address migration is on (quinn's default). Source: `core/src/streaming/transport.rs` (`configured_transport`). The phone's video session (home and internet road alike) pings every second instead (`WATCHED_KEEP_ALIVE`, BG6): the computer's acknowledgements keep the datagrams the phone receives rising on a live link whether or not a picture is coming, and the phone reads a link that heard nothing for 3 s as dead, where the 10 s without a frame or video byte stays as the backstop.
 
 ### 1.4 File and clipboard-image transfers
 
@@ -641,7 +641,7 @@ All of these are inside the app's private storage unless noted. None of it is ba
 | Introductions (ecosystem phase 4) | At A: 30 lists a minute and 5 introductions per 10 minutes per phone; at B: 5 per 10 minutes per introducing computer (refused ones included), 4 PINs waiting at once, each PIN 120 s, single use and discarded after 3 wrong PINs from its phone; A waits 10 s for B. In memory (a restart starts them again); off at B with `computer_introductions = false` | `server/src/introductions.rs`, `core/src/protocol/introductions.rs` |
 | Removals from afar (remote revoke) | 5 removals and 30 lists a minute per asking owner device, in memory (a restart starts them again); never the asker; off with `remote_revoke = false` | `server/src/remote_devices.rs` |
 | Text replies from the phone | 5 a minute; at most 2000 characters | `android/app/.../notify/SmsReplyRule.kt`, `core/src/local/sms.rs` |
-| QUIC idle and keepalive | 45 s idle, 15 s keepalive | `core/src/streaming/transport.rs` |
+| QUIC idle and keepalive | 45 s idle, 15 s keepalive (1 s on the phone's video session) | `core/src/streaming/transport.rs` |
 | PIN | 300 s; 5 wrong guesses; one new PIN per 10 s | §2.5 |
 
 Every parser above has a fuzz target (`fuzz/`, run by `scripts/fuzz.sh`): each runs 30 s on every pull request and 5 minutes a night in CI.

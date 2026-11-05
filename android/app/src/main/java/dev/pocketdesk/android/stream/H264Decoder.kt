@@ -166,7 +166,7 @@ class H264Decoder(
             // session holds the stream until its owner answers (up to 30 s).
             // Video bytes count as well as whole frames: a large keyframe on
             // a slow link takes longer than the stall limit to arrive.
-            val watch = StallWatch(STALL_MS, FIRST_FRAME_MS, SystemClock.elapsedRealtime())
+            val watch = StallWatch(STALL_MS, FIRST_FRAME_MS, SystemClock.elapsedRealtime(), QUIET_MS)
             while (gate.isOpen) {
                 // While a picture is still being decoded the bridge is polled
                 // briefly, so it is drawn within a few ms of coming out; the
@@ -182,8 +182,9 @@ class H264Decoder(
                         onClosed?.invoke(reason)
                         break
                     }
-                    if (watch.stalled(SystemClock.elapsedRealtime(), RustCore.videoBytes())) {
-                        Log.w(TAG, "no video frame or byte for ${STALL_MS / 1000} s — link dropped")
+                    val quietMs = RustCore.streamQuietMs()
+                    if (watch.stalled(SystemClock.elapsedRealtime(), RustCore.videoBytes(), quietMs)) {
+                        Log.w(TAG, "link dropped: quiet $quietMs ms, no frame or byte for up to ${STALL_MS / 1000} s")
                         onStalled?.invoke()
                         break
                     }
@@ -446,6 +447,14 @@ class H264Decoder(
 
         /** Frame gap that means the link is dead rather than the desktop idle. */
         private const val STALL_MS = 10_000L
+
+        /**
+         * How long the connection may hear nothing from the computer before the link counts as
+         * dead (BG6). It pings every second and the computer answers each ping, so a live link,
+         * a still screen included, is quiet for a moment at most. [STALL_MS] stays as the
+         * backstop.
+         */
+        private const val QUIET_MS = 3_000L
 
         /** The wait for a session's first frame: the desk's 30 s approval, and margin. */
         private const val FIRST_FRAME_MS = 45_000L

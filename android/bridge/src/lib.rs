@@ -1604,6 +1604,18 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeVideoBy
     crate::video_bytes() as jni::sys::jlong
 }
 
+/// How long the live session's link has been quiet, in ms (BG6): the time
+/// since the datagrams it received last rose (0 with no session). The
+/// connection pings every second, so on a live link this stays near zero
+/// whether or not a picture is coming.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeStreamQuietMs(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jni::sys::jlong {
+    api::stream_quiet_ms() as jni::sys::jlong
+}
+
 /// Hand a web link to the computer to open in its browser (T8a):
 /// `{"ok": null}`, or `{"error": reason}`.
 #[unsafe(no_mangle)]

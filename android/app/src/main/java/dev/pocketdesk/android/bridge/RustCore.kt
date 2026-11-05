@@ -222,6 +222,8 @@ object RustCore {
     private external fun nativeDeclineOffer(address: String, port: Int, id: String, reason: String): String
     private external fun nativeFetchFolder(address: String, port: Int, path: String): String
     private external fun nativeVideoBytes(): Long
+
+    private external fun nativeStreamQuietMs(): Long
     private external fun nativeListRemoteFiles(address: String, port: Int, remotePath: String): String
     private external fun nativeGetMonitors(address: String, port: Int): String
     private external fun nativeVirtualScreen(address: String, port: Int, action: String, width: Int, height: Int): String
@@ -1090,6 +1092,13 @@ object RustCore {
 
     /** Video bytes the live session has received, counted as frames arrive (0 with none). */
     fun videoBytes(): Long = nativeVideoBytes()
+
+    /**
+     * How long the live session's connection has heard nothing from the computer, in ms (0 with
+     * none). The connection pings every second, so on a live link this stays near zero whether
+     * or not a picture is coming (BG6).
+     */
+    fun streamQuietMs(): Long = nativeStreamQuietMs()
 
     /** Files the desktop offered since the last call, as a JSON array of `{id, name, size}`. */
     fun takeFileOffers(): String = envelope(nativeTakeFileOffers()).getOrDefault("[]")

@@ -453,6 +453,13 @@ mod tests {
 
     /// A client and server connection over quinn loopback.
     async fn loopback_pair() -> (SharedConnection, SharedConnection) {
+        loopback_pair_pinging(crate::streaming::transport::configured_keep_alive()).await
+    }
+
+    /// [`loopback_pair`] with a client that pings every `keep_alive` when idle.
+    async fn loopback_pair_pinging(
+        keep_alive: std::time::Duration,
+    ) -> (SharedConnection, SharedConnection) {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let certs = Arc::new(CertManager::new().expect("certs"));
         let alpn = vec![StreamTransportConfig::default().alpn];
@@ -468,8 +475,11 @@ mod tests {
         });
         let mut client_endpoint =
             quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).expect("client endpoint");
-        client_endpoint
-            .set_default_client_config(certs.client_config(alpn).expect("client config"));
+        client_endpoint.set_default_client_config(
+            certs
+                .client_config_with_keep_alive(alpn, keep_alive)
+                .expect("client config"),
+        );
         let raw = client_endpoint
             .connect(addr, "pocketdesk.local")
             .expect("dial")
@@ -477,6 +487,23 @@ mod tests {
             .expect("connect");
         let client: SharedConnection = Arc::new(QuinnConnection::new(raw));
         (client, accept.await.expect("accept task"))
+    }
+
+    /// BG6: a client that watches its link pings an idle computer every
+    /// second and hears its acknowledgement, so the datagrams it receives
+    /// keep rising on a live link with nothing to send (a still screen). The
+    /// phone reads a link quiet for 3 s as dead: this is what keeps a live,
+    /// idle one from being read that way.
+    #[tokio::test]
+    async fn a_watching_client_hears_an_idle_computer_every_second() {
+        let (client, _server) =
+            loopback_pair_pinging(crate::streaming::transport::WATCHED_KEEP_ALIVE).await;
+        // The handshake's last packets settle first.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let before = client.stats().datagrams_received;
+        tokio::time::sleep(std::time::Duration::from_millis(3200)).await;
+        let heard = client.stats().datagrams_received - before;
+        assert!(heard >= 2, "heard {heard} datagrams in 3.2 s of silence");
     }
 
     /// A frame that arrives slowly is counted as its bytes come, not only
