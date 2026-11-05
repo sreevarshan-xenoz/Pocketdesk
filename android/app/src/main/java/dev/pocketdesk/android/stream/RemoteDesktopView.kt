@@ -140,6 +140,8 @@ fun RemoteDesktopView(
     mapping: DesktopMapping? = null,
     monitorIndex: Int = -1,
     onStatus: (StreamStatus) -> Unit = {},
+    /** True while the link is quiet (the stream is reconnecting, the last picture kept), false when it is heard from again (BG6). */
+    onLinkQuiet: (Boolean) -> Unit = {},
     onVideoSizeChanged: (Int, Int) -> Unit = { _, _ -> },
     /** R4 C2: fires when the server's encoder-fallback ladder changes the
      * wire codec mid-session ("H.264" / "H.265"). */
@@ -216,6 +218,7 @@ fun RemoteDesktopView(
                                         monitorIndex,
                                         onStatus,
                                         onCodecChanged,
+                                        onLinkQuiet,
                                     ) { w, h ->
                                         videoSize = IntSize(w, h)
                                         onVideoSizeChanged(w, h)
@@ -625,6 +628,7 @@ private class DecoderHost {
         monitorIndex: Int = -1,
         onStatus: (StreamStatus) -> Unit = {},
         onCodec: (String) -> Unit = {},
+        onLinkQuiet: (Boolean) -> Unit = {},
         /** Last so call sites keep the size-reporting lambda trailing. */
         onVideoSize: (Int, Int) -> Unit,
     ) {
@@ -641,6 +645,7 @@ private class DecoderHost {
         active.onStalled = {
             report(StreamStatus.Down("video feed stalled — connection closed"))
         }
+        active.onLinkQuiet = { quiet -> if (decoder === active) onLinkQuiet(quiet) }
         active.onClosed = { reason ->
             report(StreamStatus.Down("stream closed by the desktop: $reason"))
         }

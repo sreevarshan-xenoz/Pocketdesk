@@ -1122,6 +1122,13 @@ object RustCore {
      */
     fun streamQuietMs(): Long = nativeStreamQuietMs()
 
+    /**
+     * Nudge the network layer (BG6): the live internet road's endpoint looks at the phone's
+     * interfaces and, on a real change, rebinds and finds its relay again. Harmless when nothing
+     * changed; asked when a session's link has been quiet for a few seconds.
+     */
+    fun networkMayHaveChanged() = nativeNetworkChanged()
+
     /** Files the desktop offered since the last call, as a JSON array of `{id, name, size}`. */
     fun takeFileOffers(): String = envelope(nativeTakeFileOffers()).getOrDefault("[]")
 

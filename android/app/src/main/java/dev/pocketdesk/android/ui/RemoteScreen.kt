@@ -345,7 +345,11 @@ fun RemoteScreen(
     // owner answers, so a connected link can show no picture for a while.
     var awaitingPicture by remember { mutableStateOf(true) }
     var showAwaitHint by remember { mutableStateOf(false) }
+    // BG6: the link has been quiet for a few seconds. The stream keeps its
+    // last picture and says it is reconnecting; heard from again, it clears.
+    var linkQuiet by remember { mutableStateOf(false) }
     LaunchedEffect(streamStatus) {
+        linkQuiet = false
         stillTrying = false
         (streamStatus as? StreamStatus.Down)?.let {
             android.util.Log.w("RemoteScreen", "stream down: ${it.reason}")
@@ -1078,6 +1082,7 @@ fun RemoteScreen(
                 mapping = cropWindow?.desktopMapping(cropScreen),
                 monitorIndex = monitorIndex,
                 onStatus = { streamStatus = it },
+                onLinkQuiet = { linkQuiet = it },
                 onCodecChanged = { label -> codecNotice = label },
                 onVideoSizeChanged = { w, h ->
                     videoSize = androidx.compose.ui.unit.IntSize(w, h)
@@ -1240,6 +1245,37 @@ fun RemoteScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center,
+                            )
+                        }
+                    }
+                }
+            }
+
+            // The link is quiet: the last picture stays, and this says why it
+            // is still (BG6). No card, no teardown: it clears by itself.
+            if (linkQuiet && status is StreamStatus.Up) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.systemBars),
+                    contentAlignment = Alignment.TopCenter,
+                ) {
+                    Surface(
+                        shape = MaterialTheme.shapes.large,
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        tonalElevation = 6.dp,
+                        modifier = Modifier.padding(top = 12.dp),
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Text(
+                                stringResource(R.string.link_quiet),
+                                style = MaterialTheme.typography.labelLarge,
                             )
                         }
                     }

@@ -63,6 +63,7 @@
     <string name="settings_direct_links">Join computers\' direct links</string>
     <string name="settings_direct_links_summary">When you scan a code from a computer\'s Make a direct link, join that computer\'s own Wi-Fi for Pocketdesk only. Your mobile data stays on for everything else</string>
     <string name="reconnecting_in">Reconnecting in %1$d s…</string>
+    <string name="link_quiet">Reconnecting…</string>
     <string name="reconnect_gave_up">Stopped trying after 10 minutes.</string>
     <string name="settings_reveal_pin">Show PIN by default</string>
     <string name="settings_reveal_pin_summary">Pairing digits visible without tapping the eye</string>

@@ -54,10 +54,18 @@ class H264Decoder(
 
     /**
      * Fired from the decode thread when the bridge goes silent for
-     * [STALL_MS] — see the decode loop in [start]. Set after construction so
-     * it can close over the generation guard in [RemoteDesktopView].
+     * [StallWatch.QUIET_DEAD_MS] or [StallWatch.STALL_MS] — see the decode
+     * loop in [start]. Set after construction so it can close over the
+     * generation guard in [RemoteDesktopView].
      */
     var onStalled: (() -> Unit)? = null
+
+    /**
+     * Fired from the decode thread as the link turns quiet (true) and as it is
+     * heard from again (false): the stream says it is reconnecting and keeps
+     * its last picture, and nothing is torn down (see [StallWatch]).
+     */
+    var onLinkQuiet: ((Boolean) -> Unit)? = null
 
     /** Fired from the decode thread when the desktop closes the stream, with its reason. */
     var onClosed: ((String) -> Unit)? = null
@@ -166,7 +174,23 @@ class H264Decoder(
             // session holds the stream until its owner answers (up to 30 s).
             // Video bytes count as well as whole frames: a large keyframe on
             // a slow link takes longer than the stall limit to arrive.
-            val watch = StallWatch(STALL_MS, FIRST_FRAME_MS, SystemClock.elapsedRealtime(), QUIET_MS)
+            val watch = StallWatch.forPhone(SystemClock.elapsedRealtime())
+            // Whether the link is quiet as far as the screen was told. A quiet
+            // link is nudged once (the network may have changed under it: iroh
+            // looks at its interfaces and rebinds on a real change), and its
+            // end is announced; heard from again, it is announced over.
+            var quiet = false
+            fun setQuiet(now: Boolean) {
+                if (now == quiet) return
+                quiet = now
+                if (now) {
+                    Log.w(TAG, "link quiet for ${StallWatch.QUIET_NOTICE_MS} ms: reconnecting, keeping the last picture")
+                    RustCore.networkMayHaveChanged()
+                } else {
+                    Log.i(TAG, "link heard from again")
+                }
+                onLinkQuiet?.invoke(now)
+            }
             while (gate.isOpen) {
                 // While a picture is still being decoded the bridge is polled
                 // briefly, so it is drawn within a few ms of coming out; the
@@ -183,10 +207,15 @@ class H264Decoder(
                         break
                     }
                     val quietMs = RustCore.streamQuietMs()
-                    if (watch.stalled(SystemClock.elapsedRealtime(), RustCore.videoBytes(), quietMs)) {
-                        Log.w(TAG, "link dropped: quiet $quietMs ms, no frame or byte for up to ${STALL_MS / 1000} s")
-                        onStalled?.invoke()
-                        break
+                    when (watch.check(SystemClock.elapsedRealtime(), RustCore.videoBytes(), quietMs)) {
+                        LinkState.Dead -> {
+                            Log.w(TAG, "link dropped: quiet $quietMs ms, no frame or byte for up to ${StallWatch.STALL_MS / 1000} s")
+                            setQuiet(false)
+                            onStalled?.invoke()
+                            break
+                        }
+                        LinkState.Quiet -> setQuiet(true)
+                        LinkState.Alive -> setQuiet(false)
                     }
                     // A picture decoded since the last batch is drawn now,
                     // not when the next frame comes (a second later on a
@@ -195,6 +224,7 @@ class H264Decoder(
                     continue
                 }
                 watch.frame(SystemClock.elapsedRealtime())
+                setQuiet(false)
                 for (frame in frames) {
                     if (!gate.isOpen) break
                     if (mediaCodec == null) {
@@ -444,20 +474,6 @@ class H264Decoder(
          * `elapsedRealtimeMicros` is not, so the conversion happens here.
          */
         private fun nowMicros(): Long = SystemClock.elapsedRealtimeNanos() / 1000
-
-        /** Frame gap that means the link is dead rather than the desktop idle. */
-        private const val STALL_MS = 10_000L
-
-        /**
-         * How long the connection may hear nothing from the computer before the link counts as
-         * dead (BG6). It pings every second and the computer answers each ping, so a live link,
-         * a still screen included, is quiet for a moment at most. [STALL_MS] stays as the
-         * backstop.
-         */
-        private const val QUIET_MS = 3_000L
-
-        /** The wait for a session's first frame: the desk's 30 s approval, and margin. */
-        private const val FIRST_FRAME_MS = 45_000L
 
         /** Pending feeds before the feed↔output pairing is considered lost. */
         private const val MAX_PENDING_FEEDS = 8

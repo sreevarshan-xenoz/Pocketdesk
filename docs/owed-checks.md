@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1432 open items.
+1434 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 105 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 107 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 205 |
 | A phone with a SIM | 40 |
@@ -252,7 +252,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **285. Faster recovery (BG6: a dead link noticed in about 3 s, and the home and internet dials raced)**
 
 - A live session on a still screen (the desk idle for a minute, on a capture backend that sends no idle repeats, such as PipeWire or X11): the session is not dropped for a quiet link, and the log never says "link dropped: quiet". Say how long it ran. (where: here)
-- Wi-Fi off on the phone mid-session: the error card (or the automatic reconnect) comes within about 3 s of the radio going, against about 10 s before (read both off `adb logcat`: the time of "link dropped: quiet" and of the radio going off). Say the notice time over five runs. (where: here)
+- Wi-Fi off on the phone mid-session: "Reconnecting…" shows within about 3 s of the radio going (the last picture stays, no card), and the session ends and reconnects by itself at about 8 s, against about 10 s before (read them off `adb logcat`: "link quiet", "link dropped: quiet" and the radio going off). Say both times over five runs. (where: here)
+- Wi-Fi off for 5 s and back on mid-session (a roam's gap): "Reconnecting…" shows and then clears, the picture never leaves, and the log shows no "link dropped" and no new session on the computer. Say how many of five runs recovered without a teardown. (where: here)
+- A remote, a sound session and a camera session open on the phone: none of them pings every second (the radio's wakes and bytes for the link's keepalives stay as before). (where: here)
 - Wi-Fi back on after the drop, the session reconnecting by itself: the time from the radio's return to the first picture; with a cached internet identity and the computer on the same network, the session comes up at home (the card says LAN), not by a relay, and the log shows no internet dial when home answered within 300 ms. Say the time to the first picture over five runs, and the road. (where: here)
 - Both roads answering at the same moment (the computer on the same network with the internet identity cached, the home dial slowed to 300 ms): one session on the computer afterwards, never two (the loser's dial is dropped, not installed). (where: here)
 
