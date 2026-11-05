@@ -196,6 +196,14 @@ struct WireWindow {
     y: i64,
     w: i64,
     h: i64,
+    /// The client area's size (without a server-side title bar and border),
+    /// in the frame's own logical pixels.
+    cw: i64,
+    ch: i64,
+    /// The scale of the output the window is on; none, or nonsense, reads as
+    /// not known.
+    #[serde(default)]
+    scale: f64,
     min: bool,
     shown: bool,
     normal: bool,
@@ -221,6 +229,8 @@ struct RawWindow {
     class: String,
     pid: u32,
     frame: Rect,
+    client: (u32, u32),
+    scale_milli: Option<u32>,
     minimized: bool,
     shown: bool,
     normal: bool,
@@ -259,6 +269,12 @@ fn clean(text: &str, most: usize) -> String {
         .to_string()
 }
 
+/// An output's scale (1.0, 1.25, 1.5...) in thousandths, if it is one an
+/// output has (a quarter to eight times); anything else is not known.
+fn scale_milli(scale: f64) -> Option<u32> {
+    (scale.is_finite() && (0.25..=8.0).contains(&scale)).then(|| (scale * 1000.0).round() as u32)
+}
+
 /// Read what the script sent. Strict: any window that is not exactly as
 /// expected makes the whole message refused (the table stays as it was and
 /// ages); the ids it names that it does not list (the active window, a
@@ -285,7 +301,9 @@ pub fn parse_message(json: &str) -> Result<Message, ParseError> {
         if !(sane(w.x)
             && sane(w.y)
             && (0..=MOST_PIXELS).contains(&w.w)
-            && (0..=MOST_PIXELS).contains(&w.h))
+            && (0..=MOST_PIXELS).contains(&w.h)
+            && (0..=MOST_PIXELS).contains(&w.cw)
+            && (0..=MOST_PIXELS).contains(&w.ch))
         {
             return Err(ParseError::BadGeometry);
         }
@@ -295,6 +313,8 @@ pub fn parse_message(json: &str) -> Result<Message, ParseError> {
             class: clean(&w.class, MOST_CLASS),
             pid: u32::try_from(w.pid).unwrap_or(0),
             frame: (w.x as i32, w.y as i32, w.w as u32, w.h as u32),
+            client: (w.cw as u32, w.ch as u32),
+            scale_milli: scale_milli(w.scale),
             minimized: w.min,
             shown: w.shown,
             normal: w.normal,
@@ -332,6 +352,12 @@ pub struct KdeWindow {
     pub class: String,
     pub pid: u32,
     pub frame: Rect,
+    /// The client area's size without a server-side title bar and border, in
+    /// the frame's logical pixels.
+    pub client: (u32, u32),
+    /// The scale of the output the window is on, in thousandths (1500 is
+    /// 1.5); `None` when the script could not say.
+    pub scale_milli: Option<u32>,
     pub minimized: bool,
     /// On the desktop in view and not minimised, as the script saw it.
     pub shown: bool,
@@ -477,6 +503,8 @@ impl Table {
                 class: w.class.clone(),
                 pid: w.pid,
                 frame: w.frame,
+                client: w.client,
+                scale_milli: w.scale_milli,
                 minimized: w.minimized,
                 shown: w.shown,
                 normal: w.normal,
@@ -686,6 +714,9 @@ pub enum Mismatch {
     NotAWindow,
     SizeUnknown,
     WrongSize,
+    /// The scale of the lent window's output is not known, so its size in
+    /// device pixels cannot be said.
+    ScaleUnknown,
     /// It names another window of the table.
     Another,
     /// Another window has the same size: the stream could be either.
@@ -698,11 +729,36 @@ fn same_size(a: (i32, i32), b: (u32, u32)) -> bool {
         && (i64::from(a.1) - bh).abs() <= i64::from(SIZE_TOLERANCE)
 }
 
+/// The scales (in thousandths) another window is tried at when its own is
+/// not known: the ones outputs have.
+const PLAUSIBLE_SCALES: [u32; 8] = [1000, 1250, 1500, 1750, 2000, 2250, 2500, 3000];
+
+/// A size in logical pixels as device pixels at `scale_milli`.
+fn device(logical: u32, scale_milli: u32) -> u32 {
+    u32::try_from((u64::from(logical) * u64::from(scale_milli) + 500) / 1000).unwrap_or(u32::MAX)
+}
+
+/// Whether a stream of `size` (device pixels) could be of the window `w` on an
+/// output of `scale_milli`: the portal's window stream is the window's client
+/// area or its whole frame (a server-side title bar and border), in device
+/// pixels. The compared sizes are device pixels on both sides, never the
+/// window's logical size.
+fn could_be(size: (i32, i32), w: &KdeWindow, scale_milli: u32) -> bool {
+    let of = |(width, height): (u32, u32)| {
+        let sized = (device(width, scale_milli), device(height, scale_milli));
+        sized.0 > 0 && sized.1 > 0 && same_size(size, sized)
+    };
+    of(w.client) || of((w.frame.2, w.frame.3))
+}
+
 /// The node of the stream that is shown to be the lent window `lent`, or why
 /// none is. One stream of a window (the owner picks one in the portal's
 /// dialog, and any window may be picked), that names the lent window, or, if
-/// it names none, has its size and no other window of the table has that size
-/// (it could be either).
+/// it names none, has the size of the lent window in device pixels (its client
+/// area or its frame times its output's scale) and no other window of the
+/// table could have that size at its own scale (it could be either). A stream
+/// that names the lent window is the only unconditional accept; a window whose
+/// output scale is not known is refused.
 pub fn match_stream(
     streams: &[PortalStream],
     lent: &KdeWindow,
@@ -730,14 +786,18 @@ pub fn match_stream(
         .size
         .filter(|(w, h)| *w > 0 && *h > 0)
         .ok_or(Mismatch::SizeUnknown)?;
-    if !same_size(size, (lent.frame.2, lent.frame.3)) {
+    let scale = lent.scale_milli.ok_or(Mismatch::ScaleUnknown)?;
+    if !could_be(size, lent, scale) {
         return Err(Mismatch::WrongSize);
     }
+    // Another window that the stream could be of, at that window's own scale
+    // (at every scale an output has, where it is not known).
     let other_like = table.windows.iter().any(|w| {
         w.seq != lent.seq
-            && w.frame.2 > 0
-            && w.frame.3 > 0
-            && same_size(size, (w.frame.2, w.frame.3))
+            && match w.scale_milli {
+                Some(own) => could_be(size, w, own),
+                None => PLAUSIBLE_SCALES.iter().any(|own| could_be(size, w, *own)),
+            }
     });
     if other_like {
         return Err(Mismatch::Ambiguous);
@@ -798,6 +858,9 @@ pub fn say_mismatch(mismatch: Mismatch) -> &'static str {
         Mismatch::SizeUnknown | Mismatch::WrongSize | Mismatch::Another => {
             "The screen-sharing dialog was answered with a window that cannot be shown to be the lent one: nothing is shown"
         }
+        Mismatch::ScaleUnknown => {
+            "The lent window's screen scale is not known, so the picture cannot be shown to be the lent window's: nothing is shown"
+        }
         Mismatch::Ambiguous => {
             "Another window has the same size as the lent one, so the picture cannot be shown to be the lent window's: nothing is shown"
         }
@@ -825,6 +888,7 @@ mod tests {
         serde_json::json!({
             "id": format!("{{{id}}}"), "caption": format!("title {id}"), "class": "app",
             "pid": pid, "x": rect.0, "y": rect.1, "w": rect.2, "h": rect.3,
+            "cw": rect.2, "ch": rect.3, "scale": 1.0,
             "min": false, "shown": true, "normal": true, "parent": ""
         })
     }
@@ -1006,7 +1070,7 @@ mod tests {
         );
         // A window with a field missing is not read as anything: not as
         // shown or hidden, nor as ordinary or not.
-        for field in ["shown", "min", "normal", "x", "w", "id"] {
+        for field in ["shown", "min", "normal", "x", "w", "cw", "ch", "id"] {
             let mut missing = win(A, 1, (0, 0, 5, 5));
             missing.as_object_mut().unwrap().remove(field);
             assert_eq!(
@@ -1622,6 +1686,220 @@ mod tests {
         assert_eq!(match_stream(&[stranger], &lent, &s), Ok(5));
     }
 
+    // ---- The portal's stream, in device pixels ----
+
+    /// A window with its client area and the scale of its output.
+    fn scaled(
+        id: &str,
+        frame: (i64, i64, i64, i64),
+        client: (i64, i64),
+        scale: f64,
+    ) -> serde_json::Value {
+        let mut w = win(id, 10, frame);
+        w["cw"] = client.0.into();
+        w["ch"] = client.1.into();
+        w["scale"] = scale.into();
+        w
+    }
+
+    fn only(w: serde_json::Value) -> (Snapshot, KdeWindow) {
+        let s = table_of(&message(vec![w], &[A], A), Instant::now());
+        let lent = s.windows[0].clone();
+        (s, lent)
+    }
+
+    fn of_size(width: i32, height: i32) -> [PortalStream; 1] {
+        [stream(7, StreamKind::Window, Some((width, height)), &[])]
+    }
+
+    #[test]
+    fn the_scale_is_read_in_thousandths_and_nonsense_is_not_known() {
+        for (scale, milli) in [
+            (1.0, Some(1000)),
+            (1.25, Some(1250)),
+            (1.5, Some(1500)),
+            (2.0, Some(2000)),
+            (0.0, None),
+            (-1.0, None),
+            (0.1, None),
+            (99.0, None),
+        ] {
+            let (s, _) = only(scaled(A, (0, 0, 100, 100), (100, 100), scale));
+            assert_eq!(s.windows[0].scale_milli, milli, "{scale}");
+        }
+        // No scale at all is not known either.
+        let mut none = scaled(A, (0, 0, 100, 100), (100, 100), 1.0);
+        none.as_object_mut().unwrap().remove("scale");
+        let (s, _) = only(none);
+        assert_eq!(s.windows[0].scale_milli, None);
+        assert_eq!(s.windows[0].client, (100, 100));
+    }
+
+    #[test]
+    fn a_stream_is_compared_in_device_pixels_not_logical_ones() {
+        // Scale 1: the frame's own size.
+        let (s, lent) = only(scaled(A, (0, 0, 800, 600), (800, 600), 1.0));
+        assert_eq!(match_stream(&of_size(800, 600), &lent, &s), Ok(7));
+        // Scale 1.25: 800x600 logical is 1000x750 device; the logical size
+        // is not the picture's size.
+        let (s, lent) = only(scaled(A, (0, 0, 800, 600), (800, 600), 1.25));
+        assert_eq!(match_stream(&of_size(1000, 750), &lent, &s), Ok(7));
+        assert_eq!(
+            match_stream(&of_size(800, 600), &lent, &s),
+            Err(Mismatch::WrongSize)
+        );
+        // Scale 1.5: a window of 533x400 is 800x600 device pixels (799.5
+        // rounds up), and its logical size is not what a stream has.
+        let (s, lent) = only(scaled(A, (0, 0, 533, 400), (533, 400), 1.5));
+        assert_eq!(match_stream(&of_size(800, 600), &lent, &s), Ok(7));
+        assert_eq!(
+            match_stream(&of_size(533, 400), &lent, &s),
+            Err(Mismatch::WrongSize)
+        );
+        // 800x600 logical at 1.5 is 1200x900 device, not 800x600.
+        let (s, lent) = only(scaled(A, (0, 0, 800, 600), (800, 600), 1.5));
+        assert_eq!(match_stream(&of_size(1200, 900), &lent, &s), Ok(7));
+        assert_eq!(
+            match_stream(&of_size(800, 600), &lent, &s),
+            Err(Mismatch::WrongSize)
+        );
+    }
+
+    #[test]
+    fn a_server_side_title_bar_makes_the_client_area_or_the_frame_the_streams_size() {
+        // Frame 800x628 (a 28 pixel title bar), client area 800x600, at 1.5.
+        let (s, lent) = only(scaled(A, (0, 0, 800, 628), (800, 600), 1.5));
+        assert_eq!(
+            match_stream(&of_size(1200, 900), &lent, &s),
+            Ok(7),
+            "client"
+        );
+        assert_eq!(match_stream(&of_size(1200, 942), &lent, &s), Ok(7), "frame");
+        assert_eq!(
+            match_stream(&of_size(1200, 920), &lent, &s),
+            Err(Mismatch::WrongSize),
+            "neither"
+        );
+        // At scale 1 as well.
+        let (s, lent) = only(scaled(A, (0, 0, 800, 628), (800, 600), 1.0));
+        assert_eq!(match_stream(&of_size(800, 600), &lent, &s), Ok(7));
+        assert_eq!(match_stream(&of_size(800, 628), &lent, &s), Ok(7));
+    }
+
+    #[test]
+    fn a_window_whose_device_size_is_the_lent_windows_logical_size_is_a_twin_not_a_match() {
+        let now = Instant::now();
+        // Lent: 800x600 at scale 1. Another: 533x400 at 1.5, which is also
+        // 800x600 device pixels. A stream of 800x600 could be either.
+        let both = table_of(
+            &message(
+                vec![
+                    scaled(A, (0, 0, 800, 600), (800, 600), 1.0),
+                    scaled(B, (900, 0, 533, 400), (533, 400), 1.5),
+                ],
+                &[A, B],
+                A,
+            ),
+            now,
+        );
+        assert_eq!(
+            match_stream(&of_size(800, 600), &lent_of(&both), &both),
+            Err(Mismatch::Ambiguous)
+        );
+        // And the other way round: lent is the 533x400 window at 1.5.
+        let lent_b = both.window(seq(&both, B)).unwrap().clone();
+        assert_eq!(
+            match_stream(&of_size(800, 600), &lent_b, &both),
+            Err(Mismatch::Ambiguous)
+        );
+        // Without the twin the same stream is the lent window's.
+        let (alone, lent) = only(scaled(A, (0, 0, 533, 400), (533, 400), 1.5));
+        assert_eq!(match_stream(&of_size(800, 600), &lent, &alone), Ok(7));
+        // A window that is a twin only in logical pixels is not one: 800x600
+        // at 1.5 is 1200x900 device, so a stream of 800x600 of the lent
+        // 800x600@1 window is not mistaken for it.
+        let apart = table_of(
+            &message(
+                vec![
+                    scaled(A, (0, 0, 800, 600), (800, 600), 1.0),
+                    scaled(B, (900, 0, 800, 600), (800, 600), 1.5),
+                ],
+                &[A, B],
+                A,
+            ),
+            now,
+        );
+        assert_eq!(
+            match_stream(&of_size(800, 600), &lent_of(&apart), &apart),
+            Ok(7)
+        );
+        // Another window's title bar can make it a twin too.
+        let barred = table_of(
+            &message(
+                vec![
+                    scaled(A, (0, 0, 800, 600), (800, 600), 1.0),
+                    scaled(B, (900, 0, 800, 628), (800, 600), 1.0),
+                ],
+                &[A, B],
+                A,
+            ),
+            now,
+        );
+        assert_eq!(
+            match_stream(&of_size(800, 600), &lent_of(&barred), &barred),
+            Err(Mismatch::Ambiguous)
+        );
+    }
+
+    #[test]
+    fn a_scale_that_is_not_known_refuses_unless_the_stream_names_the_window() {
+        let now = Instant::now();
+        let (s, lent) = only(scaled(A, (0, 0, 800, 600), (800, 600), 0.0));
+        assert_eq!(
+            match_stream(&of_size(800, 600), &lent, &s),
+            Err(Mismatch::ScaleUnknown)
+        );
+        let named = [stream(
+            3,
+            StreamKind::Window,
+            Some((1, 1)),
+            &[&format!("{{{A}}}")],
+        )];
+        assert_eq!(match_stream(&named, &lent, &s), Ok(3));
+        // Another window with no known scale is a twin if it could be one at
+        // any scale an output has: 640x480 at 1.25 is 800x600.
+        let unknown_twin = table_of(
+            &message(
+                vec![
+                    scaled(A, (0, 0, 800, 600), (800, 600), 1.0),
+                    scaled(B, (900, 0, 640, 480), (640, 480), 0.0),
+                ],
+                &[A, B],
+                A,
+            ),
+            now,
+        );
+        assert_eq!(
+            match_stream(&of_size(800, 600), &lent_of(&unknown_twin), &unknown_twin),
+            Err(Mismatch::Ambiguous)
+        );
+        let unknown_far = table_of(
+            &message(
+                vec![
+                    scaled(A, (0, 0, 800, 600), (800, 600), 1.0),
+                    scaled(B, (900, 0, 100, 100), (100, 100), 0.0),
+                ],
+                &[A, B],
+                A,
+            ),
+            now,
+        );
+        assert_eq!(
+            match_stream(&of_size(800, 600), &lent_of(&unknown_far), &unknown_far),
+            Ok(7)
+        );
+    }
+
     // ---- What the owner is told ----
 
     #[test]
@@ -1638,6 +1916,7 @@ mod tests {
             Mismatch::NotAWindow,
             Mismatch::SizeUnknown,
             Mismatch::WrongSize,
+            Mismatch::ScaleUnknown,
             Mismatch::Another,
             Mismatch::Ambiguous,
         ] {

@@ -564,6 +564,10 @@ trait Env: Sync {
     fn back(&self, lent: &Lent) -> std::io::Result<()>;
     /// Write what is lent to the state file (or remove it when nothing is).
     fn save(&self, lent: &[Lent]) -> std::io::Result<()>;
+    /// The server is stopping, after everything lent is put back: let go of
+    /// whatever the compositor was given for lending (KDE's script), lent or
+    /// not. Returns within a moment.
+    fn stop(&self) {}
 }
 
 /// The windows lent, and the lock one ask at a time holds.
@@ -1048,6 +1052,8 @@ pub async fn return_all_on_stop() {
         for (_, e) in &released.failed {
             tracing::warn!("Could not put a lent window back at stop: {e}");
         }
+        // Whatever was loaded for a list that nobody lent from goes too.
+        here().stop();
     };
     if tokio::time::timeout(Duration::from_secs(5), tokio::task::spawn_blocking(work))
         .await

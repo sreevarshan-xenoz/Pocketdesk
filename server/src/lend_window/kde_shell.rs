@@ -297,6 +297,20 @@ async fn unload(state: &mut State) {
         )
         .await;
     }
+    // KDE's global-shortcut service may keep the shortcut the script
+    // registered (it shows in System Settings, Shortcuts, KWin) after the
+    // script is gone: it is asked to forget it, best effort.
+    if let Some(conn) = &state.conn {
+        let _ = call(
+            conn,
+            "org.kde.kglobalaccel",
+            "/kglobalaccel",
+            "org.kde.KGlobalAccel",
+            "unregister",
+            &("kwin", POKE_SHORTCUT),
+        )
+        .await;
+    }
     state.loaded = false;
     state.poke_works = false;
     window_kde::set_poker(None);
@@ -538,6 +552,26 @@ impl Kwin for Bus {
 
     fn table(&self) -> io::Result<Arc<Snapshot>> {
         on_a_thread(table_now())?.map_err(|failure| io::Error::other(failure.said()))
+    }
+
+    fn stop(&self) {
+        // The server is stopping: the script goes whether or not a window is
+        // lent (a list alone loads it), if this server ever reached KWin. The
+        // wait is a moment, never the server's stop held up.
+        LENT.store(0, Ordering::Relaxed);
+        let Ok(runtime) = runtime() else {
+            return;
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        runtime.spawn(async move {
+            if let Ok(mut state) =
+                tokio::time::timeout(Duration::from_millis(1500), STATE.lock()).await
+            {
+                unload(&mut state).await;
+            }
+            let _ = tx.send(());
+        });
+        let _ = rx.recv_timeout(Duration::from_secs(2));
     }
 
     fn lent(&self, count: usize) {

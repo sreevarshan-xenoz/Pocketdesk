@@ -99,6 +99,9 @@ pub trait Kwin: Sync {
     fn table(&self) -> io::Result<Arc<Snapshot>>;
     /// How many windows are lent now (returns at once).
     fn lent(&self, count: usize);
+    /// The server is stopping: unload the script whether or not a window is
+    /// lent (a list alone loads it), without waiting more than a moment.
+    fn stop(&self);
 }
 
 /// The table's windows as the lend reads them: an ordinary window of a
@@ -149,6 +152,10 @@ impl<B: Kwin> Shell for Kde<B> {
 
     fn lent(&self, count: usize) {
         self.0.lent(count);
+    }
+
+    fn stop(&self) {
+        self.0.stop();
     }
 }
 
@@ -208,8 +215,20 @@ pub mod script {
         }
     }
 
+    // The scale of the output the window is on (0 when it cannot be told, which
+    // the server reads as not known and refuses a picture for).
+    function scaleOf(w) {
+        try {
+            var s = w.output ? Number(w.output.scale) : 0;
+            return s > 0 ? s : 0;
+        } catch (e) {
+            return 0;
+        }
+    }
+
     function row(w) {
         var g = w.frameGeometry;
+        var c = w.clientGeometry || g;
         var parent = "";
         try {
             if (w.transientFor) {
@@ -227,6 +246,9 @@ pub mod script {
             y: Math.round(g.y),
             w: Math.round(g.width),
             h: Math.round(g.height),
+            cw: Math.round(c.width),
+            ch: Math.round(c.height),
+            scale: scaleOf(w),
             min: !!w.minimized,
             shown: shown(w),
             normal: !!w.normalWindow && !w.skipTaskbar,
@@ -386,7 +408,8 @@ pub mod script {
             // server's reply to name windows to raise.
             assert!(text.contains("callDBus(DEST, PATH, IFACE, \"Update\", text"));
             for field in [
-                "v: 1", "windows:", "stack:", "active:", "normal:", "shown:", "parent:",
+                "v: 1", "windows:", "stack:", "active:", "normal:", "shown:", "parent:", "cw:",
+                "scale:",
             ] {
                 assert!(text.contains(field), "{field}");
             }
@@ -443,6 +466,8 @@ mod tests {
         /// The count told last, and how many times it said none.
         last_lent: AtomicUsize,
         unloaded: AtomicUsize,
+        /// How many times the server's stop was told.
+        stopped: AtomicUsize,
     }
 
     impl Fake {
@@ -457,6 +482,7 @@ mod tests {
                 silent: Mutex::new(None),
                 last_lent: AtomicUsize::new(99),
                 unloaded: AtomicUsize::new(0),
+                stopped: AtomicUsize::new(0),
             }
         }
     }
@@ -484,6 +510,9 @@ mod tests {
                 self.unloaded.fetch_add(1, Ordering::Relaxed);
             }
         }
+        fn stop(&self) {
+            self.stopped.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     fn kde_window(seq: u64, class: &str, size: (u32, u32)) -> KdeWindow {
@@ -494,6 +523,8 @@ mod tests {
             class: class.to_string(),
             pid: 100 + seq as u32,
             frame: (10, 10, size.0, size.1),
+            client: size,
+            scale_milli: Some(1000),
             minimized: false,
             shown: true,
             normal: true,
@@ -736,6 +767,24 @@ mod tests {
                 .unwrap()
                 .contains("screen-sharing portal")
         );
+    }
+
+    #[test]
+    fn the_server_stopping_is_told_to_the_shell_even_with_nothing_lent() {
+        let fake = Fake::new(vec![kde_window(951, "x", (800, 600))]);
+        let (_lends, env) = setup(&fake);
+        // A list alone loads the script and lends nothing.
+        assert!(
+            crate::lend_window::Env::windows(&env).is_ok(),
+            "the list is had"
+        );
+        assert_eq!(
+            fake.last_lent.load(Ordering::Relaxed),
+            99,
+            "nothing was lent"
+        );
+        crate::lend_window::Env::stop(&env);
+        assert_eq!(fake.stopped.load(Ordering::Relaxed), 1);
     }
 
     #[test]

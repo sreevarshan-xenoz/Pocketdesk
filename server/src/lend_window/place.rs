@@ -93,6 +93,9 @@ pub trait Shell: Sync {
     /// stop it at none. Called with the lend's record held, so it returns at
     /// once.
     fn lent(&self, _count: usize) {}
+    /// The server is stopping: let go of anything kept running for lends,
+    /// whether or not one is lent. Returns within a moment.
+    fn stop(&self) {}
 }
 
 // ---- The rules ----
@@ -404,6 +407,10 @@ impl<S: Shell> Env for PlaceEnv<S> {
             window_target::unregister(lease);
         }
         Ok(())
+    }
+
+    fn stop(&self) {
+        self.shell.stop();
     }
 
     fn save(&self, lent: &[Lent]) -> io::Result<()> {
