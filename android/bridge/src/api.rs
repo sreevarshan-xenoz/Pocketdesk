@@ -2576,6 +2576,15 @@ fn streaming_port_for(port: u16) -> u16 {
     }
 }
 
+/// Whether a session of `mode` has its link watched by the phone's decoder
+/// (BG6), so its connection pings every second. Only the screen's does: it is
+/// the one the watch reads, and the others (a remote, the sound, the camera,
+/// a window, a cast) keep the connection's own 15 s, as iroh's 5 s, with no
+/// radio wake every second for nothing.
+fn watches_link(mode: pocketdesk_core::streaming::SessionMode) -> bool {
+    mode == pocketdesk_core::streaming::SessionMode::Screen
+}
+
 /// What a connect found when it went to take the session's place.
 enum Claim {
     /// A live session to the same computer, screen and mode is up already,
@@ -2674,15 +2683,31 @@ async fn dial_home(
     // phone, name the WAN key it dials with so the desktop can bind it.
     let iroh_id = device_wan_key().map(|key| key.public().to_string());
     let identity = client_identity();
-    let connecting = StreamingClient::connect_watched(
-        &addr,
-        cert_manager,
-        monitor_index,
-        Some(&identity.device_id),
-        iroh_id.as_deref(),
-        Some(codec_caps),
-        mode,
-    );
+    let connecting = async {
+        if watches_link(mode) {
+            StreamingClient::connect_watched(
+                &addr,
+                cert_manager,
+                monitor_index,
+                Some(&identity.device_id),
+                iroh_id.as_deref(),
+                Some(codec_caps),
+                mode,
+            )
+            .await
+        } else {
+            StreamingClient::connect(
+                &addr,
+                cert_manager,
+                monitor_index,
+                Some(&identity.device_id),
+                iroh_id.as_deref(),
+                Some(codec_caps),
+                mode,
+            )
+            .await
+        }
+    };
     // V8: with the control link to this computer by the internet road, home
     // most likely does not answer, and a QUIC dial to an address that does
     // not waits out its 10 s. Home gets a short try instead: a phone back on
@@ -3010,18 +3035,31 @@ async fn dial_wan(
         dht.is_some()
     );
 
-    let dial = pocketdesk_core::streaming::IrohDial::dial_watched(
-        &endpoint_id,
-        &relay_urls,
-        &direct_addrs,
-        true,
-        Duration::from_secs(20),
-        // Device keys: dial as this phone's own key, the one it named on LAN.
-        device_wan_key(),
-        dht,
-    )
-    .await
-    .map_err(DialFailed::from_error)?;
+    // Device keys: dial as this phone's own key, the one it named on LAN.
+    let dialed = if watches_link(mode) {
+        pocketdesk_core::streaming::IrohDial::dial_watched(
+            &endpoint_id,
+            &relay_urls,
+            &direct_addrs,
+            true,
+            Duration::from_secs(20),
+            device_wan_key(),
+            dht,
+        )
+        .await
+    } else {
+        pocketdesk_core::streaming::IrohDial::dial(
+            &endpoint_id,
+            &relay_urls,
+            &direct_addrs,
+            true,
+            Duration::from_secs(20),
+            device_wan_key(),
+            dht,
+        )
+        .await
+    };
+    let dial = dialed.map_err(DialFailed::from_error)?;
 
     let attached = StreamingClient::attach(
         dial.connection(),
@@ -3627,6 +3665,30 @@ mod hud_window_tests {
         assert_eq!(super::rtt_samples(), 0);
         assert_eq!(super::get_streaming_rtt(), 0);
         assert!(crate::RATE_SNAPSHOTS.lock().unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod watched_link_tests {
+    use pocketdesk_core::streaming::SessionMode;
+
+    /// BG6: only the screen session pings every second. The decoder's watch
+    /// reads that session alone, so each other mode (the remote, the sound,
+    /// the camera, a window, a cast, the phone's sound) must keep the
+    /// connection's slow keepalive.
+    #[test]
+    fn only_a_screen_session_has_its_link_watched() {
+        assert!(super::watches_link(SessionMode::Screen));
+        for mode in [
+            SessionMode::InputOnly,
+            SessionMode::Sound,
+            SessionMode::PhoneSound,
+            SessionMode::Webcam,
+            SessionMode::Windows,
+            SessionMode::Cast,
+        ] {
+            assert!(!super::watches_link(mode), "{mode:?}");
+        }
     }
 }
 
