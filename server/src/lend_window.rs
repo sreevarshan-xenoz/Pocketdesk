@@ -102,6 +102,11 @@ mod win32;
 // only. The rules and flow over a fake or the real Shell.
 #[cfg(target_os = "linux")]
 mod gnome_shell;
+// What lending a window is on KDE Plasma (phase 6 follow-up): the same capture
+// in place, through the screen-sharing portal, over a KWin script's table.
+mod kde;
+#[cfg(target_os = "linux")]
+mod kde_shell;
 mod place;
 
 /// The file what is lent is kept in.
@@ -1525,7 +1530,8 @@ fn here() -> &'static dyn Env {
 }
 
 /// What lending runs against: this computer's compositor (Sway or Hyprland),
-/// its GNOME Shell ([`place`]), or, on Windows, its desktop ([`desktop`]).
+/// its GNOME Shell or KDE Plasma ([`place`], [`kde`]), or, on Windows, its
+/// desktop ([`desktop`]).
 #[cfg(not(windows))]
 fn here() -> &'static dyn Env {
     #[cfg(target_os = "linux")]
@@ -1539,6 +1545,16 @@ fn here() -> &'static dyn Env {
             static GNOME: std::sync::OnceLock<place::PlaceEnv<gnome_shell::Gnome>> =
                 std::sync::OnceLock::new();
             return GNOME.get_or_init(|| place::PlaceEnv::new(gnome_shell::Gnome));
+        }
+        // KDE Plasma, likewise only after Sway and Hyprland.
+        if crate::virtual_screen::desk().is_none()
+            && pocketdesk_core::streaming::window_kde::is_kde(
+                std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+            )
+        {
+            static KDE: std::sync::OnceLock<place::PlaceEnv<kde::Kde<kde_shell::Bus>>> =
+                std::sync::OnceLock::new();
+            return KDE.get_or_init(|| place::PlaceEnv::new(kde::Kde(kde_shell::Bus)));
         }
     }
     &Live

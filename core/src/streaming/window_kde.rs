@@ -198,6 +198,7 @@ struct WireWindow {
     h: i64,
     min: bool,
     shown: bool,
+    normal: bool,
     #[serde(default)]
     parent: String,
 }
@@ -222,6 +223,7 @@ struct RawWindow {
     frame: Rect,
     minimized: bool,
     shown: bool,
+    normal: bool,
     parent: Option<String>,
 }
 
@@ -295,6 +297,7 @@ pub fn parse_message(json: &str) -> Result<Message, ParseError> {
             frame: (w.x as i32, w.y as i32, w.w as u32, w.h as u32),
             minimized: w.min,
             shown: w.shown,
+            normal: w.normal,
             // A parent that is no uuid, or that no window of the message
             // has (looked up when the table is made), is no parent: the
             // window then belongs to nothing.
@@ -332,6 +335,9 @@ pub struct KdeWindow {
     pub minimized: bool,
     /// On the desktop in view and not minimised, as the script saw it.
     pub shown: bool,
+    /// An ordinary window of a program (not a panel, the desktop, a menu, a
+    /// notification or a dialog): the only kind that may be offered to lend.
+    pub normal: bool,
     /// The window this one is transient for (a dialog's parent), by number.
     pub parent: Option<u64>,
     /// Its place in the stacking order, from the bottom; `None` when the
@@ -473,6 +479,7 @@ impl Table {
                 frame: w.frame,
                 minimized: w.minimized,
                 shown: w.shown,
+                normal: w.normal,
                 parent: w.parent.as_ref().and_then(|p| seqs.get(p).copied()),
                 z: z.get(w.uuid.as_str()).copied(),
             })
@@ -812,7 +819,7 @@ mod tests {
         serde_json::json!({
             "id": format!("{{{id}}}"), "caption": format!("title {id}"), "class": "app",
             "pid": pid, "x": rect.0, "y": rect.1, "w": rect.2, "h": rect.3,
-            "min": false, "shown": true, "parent": ""
+            "min": false, "shown": true, "normal": true, "parent": ""
         })
     }
 
@@ -991,13 +998,17 @@ mod tests {
             parse_message(&ok.replace("\"v\":1", "\"v\":2")),
             Err(ParseError::Version)
         );
-        // A window with no `shown` is not read as shown or hidden.
-        let mut missing = win(A, 1, (0, 0, 5, 5));
-        missing.as_object_mut().unwrap().remove("shown");
-        assert_eq!(
-            parse_message(&message(vec![missing], &[A], "")),
-            Err(ParseError::NotJson)
-        );
+        // A window with a field missing is not read as anything: not as
+        // shown or hidden, nor as ordinary or not.
+        for field in ["shown", "min", "normal", "x", "w", "id"] {
+            let mut missing = win(A, 1, (0, 0, 5, 5));
+            missing.as_object_mut().unwrap().remove(field);
+            assert_eq!(
+                parse_message(&message(vec![missing], &[A], "")),
+                Err(ParseError::NotJson),
+                "{field}"
+            );
+        }
         // An id that is no uuid is refused, whatever it holds.
         let mut bad = win(A, 1, (0, 0, 5, 5));
         bad["id"] = "{x\"); //}".into();

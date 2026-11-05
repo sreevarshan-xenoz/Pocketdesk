@@ -75,6 +75,24 @@ pub trait Shell: Sync {
     fn cannot(&self) -> Option<&'static str>;
     /// Every window the compositor shows, or why it cannot say.
     fn windows(&self) -> io::Result<Vec<ShellWindow>>;
+    /// What the window `id` is called to the table of lent windows (its
+    /// lease's `native`): GNOME's by default.
+    fn native_of(&self, id: u64) -> String {
+        window_target::gnome_native(id)
+    }
+    /// The window a lease's `native` names, if it is one of this shell's.
+    fn id_of(&self, native: &str) -> Option<u64> {
+        window_target::gnome_id(native)
+    }
+    /// What the screen of a lent window, at `index`, is called.
+    fn screen_name(&self, index: u32) -> String {
+        output_name(index)
+    }
+    /// How many windows are lent now, told whenever the record of what is
+    /// lent is written: a shell that keeps something running for them can
+    /// stop it at none. Called with the lend's record held, so it returns at
+    /// once.
+    fn lent(&self, _count: usize) {}
 }
 
 // ---- The rules ----
@@ -190,9 +208,9 @@ impl<S: Shell> PlaceEnv<S> {
 
     /// The answer for a window lent: its screen's name and index and the size
     /// its picture has now.
-    fn reply(lease: &Lease, window: &ShellWindow) -> Value {
+    fn reply(&self, lease: &Lease, window: &ShellWindow) -> Value {
         json!({
-            "name": output_name(lease.index),
+            "name": self.shell.screen_name(lease.index),
             "index": lease.index,
             "width": window.width,
             "height": window.height,
@@ -283,7 +301,7 @@ impl<S: Shell> Env for PlaceEnv<S> {
                 return error("The window closed");
             };
             if window_target::lease_holds(&lease) {
-                return Self::reply(&lease, &window);
+                return self.reply(&lease, &window);
             }
             return match window_target::register_native(
                 &lease.native,
@@ -292,7 +310,7 @@ impl<S: Shell> Env for PlaceEnv<S> {
             ) {
                 Ok((lease, _)) => {
                     state.screens.insert(key.to_string(), lease.clone());
-                    Self::reply(&lease, &window)
+                    self.reply(&lease, &window)
                 }
                 Err(RegisterError::Full) => error("Too many windows are lent at once"),
                 Err(_) => error("Another computer has borrowed that window"),
@@ -302,17 +320,16 @@ impl<S: Shell> Env for PlaceEnv<S> {
         let Some(window) = now.filter(keep_listed) else {
             return error(NOT_THERE);
         };
-        let lease =
-            match window_target::register_native(&window_target::gnome_native(id), device, None) {
-                Ok((lease, _)) => lease,
-                Err(RegisterError::Full) => return error("Too many windows are lent at once"),
-                Err(RegisterError::Held) => {
-                    return error("Another computer has borrowed that window");
-                }
-                Err(RegisterError::Nothing) => return error("not a window"),
-            };
+        let lease = match window_target::register_native(&self.shell.native_of(id), device, None) {
+            Ok((lease, _)) => lease,
+            Err(RegisterError::Full) => return error("Too many windows are lent at once"),
+            Err(RegisterError::Held) => {
+                return error("Another computer has borrowed that window");
+            }
+            Err(RegisterError::Nothing) => return error("not a window"),
+        };
         state.screens.insert(key.to_string(), lease.clone());
-        Self::reply(&lease, &window)
+        self.reply(&lease, &window)
     }
 
     fn drop_screen(&self, key: &str) {
@@ -331,12 +348,12 @@ impl<S: Shell> Env for PlaceEnv<S> {
         if !window_target::lease_holds(&lease) {
             return error("That window is not lent");
         }
-        let Some(id) = window_target::gnome_id(&lease.native) else {
+        let Some(id) = self.shell.id_of(&lease.native) else {
             return error("not a window");
         };
         match self.shell.windows() {
             Ok(all) => match all.into_iter().find(|w| w.id == id) {
-                Some(window) => Self::reply(&lease, &window),
+                Some(window) => self.reply(&lease, &window),
                 None => error("The window closed"),
             },
             Err(e) => error(format!("Could not read this computer's windows: {e}")),
@@ -348,9 +365,9 @@ impl<S: Shell> Env for PlaceEnv<S> {
             .state()
             .screens
             .values()
-            .find(|l| output_name(l.index) == name)
+            .find(|l| self.shell.screen_name(l.index) == name)
             .cloned()?;
-        let id = window_target::gnome_id(&lease.native)?;
+        let id = self.shell.id_of(&lease.native)?;
         let window = self
             .shell
             .windows()
@@ -379,7 +396,7 @@ impl<S: Shell> Env for PlaceEnv<S> {
 
     fn back(&self, lent: &Lent) -> io::Result<()> {
         let id = parse_window(&lent.window).ok_or_else(super::no_place)?;
-        let native = window_target::gnome_native(id);
+        let native = self.shell.native_of(id);
         // The grant ends: the sessions bound to it stop at once. Nothing was
         // moved, so there is nothing else to put back.
         let state = self.state();
@@ -389,8 +406,10 @@ impl<S: Shell> Env for PlaceEnv<S> {
         Ok(())
     }
 
-    fn save(&self, _lent: &[Lent]) -> io::Result<()> {
-        // Nothing to put back after a restart (see the module's notes).
+    fn save(&self, lent: &[Lent]) -> io::Result<()> {
+        // Nothing to put back after a restart (see the module's notes); the
+        // shell is told how many are lent.
+        self.shell.lent(lent.len());
         Ok(())
     }
 }
