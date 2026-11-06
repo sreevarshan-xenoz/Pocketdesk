@@ -224,6 +224,10 @@ video_quality = "balanced"
 # where it is, is shown on the other computer, and is clicked and typed into
 # there. On GNOME (with gnome_unattended on, and a Shell that gives its window
 # list) the window stays where it is and the other computer only looks at it.
+# On KDE Plasma (Wayland) it stays where it is too and is only looked at: it is
+# shown through the screen-sharing portal, which asks at this computer the
+# first time for each window, and a small KWin script is loaded while one is
+# lent to read the windows.
 # On by default, for my computers paired both ways with Input only; false
 # turns it off.
 # lend_windows = true

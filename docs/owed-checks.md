@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1449 open items.
+1460 open items.
 
 | Where | Items |
 |---|---|
@@ -12,8 +12,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 41 |
 | A second phone | 20 |
 | Away from home: another network, or through a router | 45 |
-| A second computer | 244 |
-| A Linux desktop (the Azure VM serves for some) | 259 |
+| A second computer | 249 |
+| A Linux desktop (the Azure VM serves for some) | 265 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 99 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 400 |
 
@@ -1508,6 +1508,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A third paired computer dialling the lent index (1000 to 1007, found by trying them) is refused at once with the words of a window not lent; the window is not shown to it. (where: second computer)
 - The phone's apps and the computer's other captures run beside a lent window with no change (a screen session of the host's monitor while a window is lent; the index range does not collide). (where: second computer)
 
+**284. A KDE Plasma computer lends a window to look at (phase 6 follow-up of the window handoff: KDE as the source)**
+
+- The first lend of a window shows the portal's dialog at the host and the viewer waits for it (up to a minute, then the session says no one answered). Choosing the lent window shows its picture alone (not the screen) within about two seconds, with no pointer of the host in it; say how it looks and how long the first picture took. (where: second computer)
+- The kept grant: lend the same window again (return, then borrow): no dialog, the picture within about two seconds; the server's state folder has one owner-only file for that window and nothing else new. Restart the server with the window still open and lend again: no dialog. Close the window: its file is forgotten at the next lend or list. (where: second computer)
+- The picture follows the window: the lent window resized, maximised, moved to another monitor and put on another virtual desktop while lent: say what the stream does (follows the size, stops, shows black) and whether a window covering it shows in the picture. (where: second computer)
+- View only: clicking, scrolling and typing in the viewer's window do nothing on the host (no pointer movement, no focus change, no key typed into any window); the viewer's window says view-only. (where: second computer)
+- A lent window minimised stays lent; one closed ends the viewer's view within about two seconds with the borrower told it closed; return, the other computer going away, the switch turned off and the server stopped each end the capture within a second or two, and the script is unloaded when nothing is lent (and a minute after a list nobody lent from): `org.kde.KWin /Scripting isScriptLoaded pocketdesk-windows` says false; a server killed with a window lent, or after only a list, leaves a script that the next first list or lend replaces, not doubles; a server stopped cleanly after only a list unloads it within two seconds. System Settings, Shortcuts, KWin lists "Pocketdesk: report the windows" while the script is loaded; after the unload say whether the entry stays. (where: second computer)
+
 ## A Linux desktop (the Azure VM serves for some)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -2131,6 +2139,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A phone's window crop (the window pick), set mid-session on a GNOME or KDE host: the log says "Capture back to copies through memory", the stream asks for memory buffers and goes on at the crop's size. A lent GNOME window (`RecordWindow`) copies from the start, as before. (where: linux)
 - A session pinned to NVENC or the software encoder on a host with VA-API: no DMA-BUF format is offered (the log shows no "offers DMA-BUF buffers" line) and the capture is as before. (where: linux)
 - Cropping on the card (`scale_vaapi`'s crop, so a window pick or a lent window need not copy): not built. (where: linux)
+
+**284. A KDE Plasma computer lends a window to look at (phase 6 follow-up of the window handoff: KDE as the source)**
+
+- The script loads: `list` on a KDE host loads the script (`org.kde.KWin /Scripting loadScript` then `run` on `/Scripting/Script<id>`; if that object path is not right on this KWin, the fallback `start`), the first report arrives within three seconds, and `list` names the ordinary windows of programs by title and app, none of Pocketdesk's own, no panel, desktop, menu, notification or dialog. Say which KWin version and whether the script's object path or the fallback worked. (where: linux) Partly checked 2026-11-06 (a GitHub runner's throwaway Arch container, KWin 6.8.2 as `kwin_wayland --virtual`, kglobalacceld 6.8.2, `.github/workflows/rig-kde.yml` on a `rig/` branch): the script loaded, the first report came at once (`LIST_SECS 0.0`) and `list` named the one `wev` window by title and class with its size; the rig has no panel, desktop, menu, notification or dialog, so leaving those out is not shown.
+- The report's facts are right: a window's frame, minimised flag, "shown" (a window on another virtual desktop is not shown), transient-for parent (a dialog), the stacking order (a window raised or lowered), the active window, and `normalWindow` (a panel, the desktop, a menu and a notification are not ordinary). Say which of `normalWindow`, `skipTaskbar`, `desktops`, `transientFor`, `stackingOrder` and `activeWindow` did not behave as the script assumes. (where: linux)
+- Only KWin's report is taken: a second program on the session bus calling `dev.pocketdesk.Windows.Update` with a table that names a made-up window changes nothing (no new window listed, the table's age unchanged). (where: linux)
+- Refusals in words: a KDE session on X11 says it needs Wayland; the KWin scripting interface unavailable (or scripts disabled in `kwinrc`) says KWin did not take the script; xdg-desktop-portal stopped says the portal is missing; a portal whose `AvailableSourceTypes` lacks windows says it cannot share a single window; a non-KDE desktop never picks this path. (where: linux)
+- The match: choosing another window in the dialog (of a different size) ends the session saying the window cannot be shown to be the lent one, shows nothing, and keeps no grant; choosing a monitor says it was a screen; two windows of the same size lent or chosen: the session refuses (cannot tell which), and say whether the portal names the window (its stream id or mapping id) so that twins can be told apart. Say what size KWin reports for a window's stream against its frame and client geometry at scale 1, 1.25 and 1.5 (the match compares device pixels, the client area or the frame times the output's scale, within 2 pixels): which of the two it is, whether it includes a shadow, and whether a window with a server-side title bar differs; and that the script's `output.scale` and `clientGeometry` read right. A window on a fractional-scale output is lent without being refused, and a 533x400 window at 1.5 and an 800x600 one at 1 are refused as twins. (where: linux)
+- Input, once it is wired (not built): a click, scroll and key through the portal's RemoteDesktop on a window source land in the lent window only, with another window over it and with another window active; the guard's questions over the table (`window_kde::KdeOs`) agree with what KWin does. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

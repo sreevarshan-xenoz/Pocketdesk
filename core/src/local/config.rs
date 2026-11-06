@@ -293,7 +293,7 @@ pub struct Config {
     /// this computer's windows: the window moves to a hidden screen of its
     /// own size here, is streamed there, and goes back on return (Sway,
     /// Hyprland; on Windows the window stays where it is and is driven; on
-    /// GNOME it stays where it is and is only looked at). On by default, and
+    /// GNOME and KDE Plasma it stays where it is and is only looked at). On by default, and
     /// only for the owner's own computers (paired both ways, with Input); off,
     /// no window leaves the screen it is on.
     #[serde(default = "default_true")]
