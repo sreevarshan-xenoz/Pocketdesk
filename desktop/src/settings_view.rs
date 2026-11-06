@@ -832,9 +832,11 @@ fn section_of(key: &str) -> Option<Section> {
 pub const BLUETOOTH_SWITCH: &str = "let a phone bonded to this computer reach it over Bluetooth";
 
 /// What the Bluetooth fallback's row says of the road now: the running
-/// server's last check, or nothing while no server says.
+/// server's last check, or nothing while no server says. Nothing either
+/// off Windows, where the row's note already says it is Windows only.
 pub fn bluetooth_line(road: Option<RoadState>) -> Option<String> {
-    road.map(|road| format!("Bluetooth: {}", road.words()))
+    road.filter(|road| *road != RoadState::Unsupported)
+        .map(|road| format!("Bluetooth: {}", road.words()))
 }
 
 /// Whether the running server reads `key` again on its own: the event log
@@ -900,7 +902,7 @@ pub fn applies_live(key: &str) -> bool {
             | "mqtt_user"
             | "mqtt_password"
             | "internet_files"
-            // Read by the server's Bluetooth listener every 10 s.
+            // Read by the server's Bluetooth listener every second.
             | "bluetooth_fallback"
             | "keep_file_dates"
             | "toast_answers"
@@ -1384,6 +1386,9 @@ impl SettingsForm {
             .save_keys_to(path, &changed)
             .map_err(|e: ConfigError| e.to_string())?;
         self.saved = self.edited.clone();
+        // The Bluetooth road may change now: read it again at the next
+        // frame, not up to 2 s on.
+        self.bluetooth = None;
         Ok(())
     }
 
@@ -1548,7 +1553,7 @@ impl SettingsForm {
                     note(
                         ui,
                         if cfg!(windows) {
-                            "When neither this network nor the internet reaches this computer, a phone bonded to it in Windows' Bluetooth settings still can, for the light features (not the screen). Pairing and each phone's permissions still apply. The server follows the switch within seconds."
+                            "When neither this network nor the internet reaches this computer, a phone bonded to it in Windows' Bluetooth settings still can, for the light features (not the screen). Pairing and each phone's permissions still apply. The server follows the switch within about a second."
                         } else {
                             "When neither this network nor the internet reaches this computer, a phone bonded to it can still reach it over Bluetooth, for the light features (not the screen). Windows only for now: this computer does not listen yet."
                         },
@@ -3880,7 +3885,7 @@ mod tests {
     }
 
     /// The Bluetooth fallback is beside "Files over the internet", applies
-    /// at once (the server's listener checks it every 10 s), is drawn
+    /// at once (the server's listener reads it every second), is drawn
     /// everywhere, and says how the road stands while a server says.
     #[test]
     fn the_bluetooth_fallback_applies_at_once_and_says_how_it_stands() {
@@ -3905,10 +3910,25 @@ mod tests {
             Some("Bluetooth: off")
         );
         assert_eq!(
-            bluetooth_line(Some(RoadState::Unsupported)).as_deref(),
-            Some("Bluetooth: Windows only for now")
+            bluetooth_line(Some(RoadState::Unsupported)),
+            None,
+            "the note says it is Windows only"
         );
         assert_eq!(bluetooth_line(None), None, "no server, nothing said");
+    }
+
+    /// A save reads the Bluetooth road again at once, not up to 2 s on.
+    #[test]
+    fn a_save_reads_the_bluetooth_road_again() {
+        let dir = std::env::temp_dir().join(format!("pd-settings-bt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut form = SettingsForm::from_config(Config::default());
+        form.bluetooth = Some((std::time::Instant::now(), Some(RoadState::Listening)));
+        form.edited.bluetooth_fallback = false;
+        form.save_to(&dir.join("config.toml")).unwrap();
+        assert!(form.bluetooth.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Item 4: the version hints are with the phones, apply at once and
