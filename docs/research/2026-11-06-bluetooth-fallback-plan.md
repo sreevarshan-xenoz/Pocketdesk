@@ -1,7 +1,5 @@
 # Bluetooth fallback, phase 1: implementation plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** When neither the home road nor the internet road reaches the computer, the phone's control link (and with it clipboard, notifications, the remote, deck, ring, quiet, questions, links and small files) comes back over a Bluetooth Classic RFCOMM link to a bonded Windows computer in range.
 
 **Architecture:** A third control road. The Windows server listens on an RFCOMM service; the phone's Kotlin side dials it, pumps the bytes through a Unix socket pair, and hands the other end to the Rust bridge. Over that stream run the same pinned TLS and control handshake as at home, served as `Road::Bluetooth` with the stricter rules the design fixes. File transfers open a second RFCOMM connection each, asked for over the control link.
