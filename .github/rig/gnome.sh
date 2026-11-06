@@ -10,7 +10,7 @@ LENT=${1:-wev}
 
 pacman -Syu --noconfirm --needed base-devel rust clang pkgconf pipewire libpipewire \
   wireplumber wayland mesa ffmpeg dbus gnome-shell mutter wev python-gobject gtk4 \
-  procps-ng coreutils glib2
+  procps-ng coreutils glib2 python-dbusmock
 
 useradd -m rig
 OWNER=$(stat -c %u:%g /src)
@@ -34,6 +34,13 @@ chown -R rig /home/rig/.local
 install -d -m 755 /run/dbus
 dbus-uuidgen --ensure
 dbus-daemon --system --fork
+# No systemd here, so no logind: the Shell's start asks it for the session and
+# threw on the activation error. A mock, as GNOME's own CI runs.
+nohup python3 -m dbusmock --system --template logind > /tmp/logind-mock.log 2>&1 &
+for i in $(seq 20); do
+  gdbus introspect --system --dest org.freedesktop.login1 --object-path /org/freedesktop/login1 >/dev/null 2>&1 && break
+  sleep 0.5
+done
 as_rig dbus-daemon --session --address="unix:path=$RUN/bus" --fork
 as_rig gsettings set org.gnome.shell disable-user-extensions false
 as_rig gsettings set org.gnome.shell enabled-extensions "['pocketdesk-windows@pocketdesk.dev']"
