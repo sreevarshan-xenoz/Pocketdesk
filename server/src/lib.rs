@@ -8,6 +8,7 @@ pub mod asks;
 pub mod audio_control;
 pub(crate) mod away_lock;
 pub mod bench;
+pub(crate) mod bluetooth;
 pub mod borrow_window;
 pub mod browser_host;
 pub mod cast_relay;

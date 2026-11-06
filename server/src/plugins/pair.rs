@@ -506,6 +506,17 @@ pub(crate) fn may_act(
     standing(device_id, key).may_act(pairing_required)
 }
 
+/// Whether a connection over the Bluetooth road that goes by `device_id`
+/// and proved the TLS `key` may act on this computer: as the internet road,
+/// only a paired device, with pairing required whatever the setting, and
+/// one with the wrong key never (it is not held for a PIN re-pair).
+pub(crate) fn bluetooth_may_act(
+    device_id: &str,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
+) -> bool {
+    standing(device_id, key).may_act(true)
+}
+
 /// The standing of a connection that goes by `device_id` and proved `key`.
 pub(crate) fn standing(
     device_id: &str,

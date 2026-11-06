@@ -1333,13 +1333,18 @@ async fn seed_desktop_state(
     }
     // Files offered while its app was gone, offered again (S2).
     crate::offers::offer_again(&**sender).await;
+    // Where to dial this computer by Bluetooth when no other road reaches
+    // it, told over whichever road this is, once the peer is admitted.
+    if let Some(info) = crate::bluetooth::info() {
+        let _ = sender.send_packet(&crate::bluetooth::packet(&info)).await;
+    }
     // How to wake this computer, for one of the owner's computers linked
     // here that this one lists (PC6: paired both ways): the adapter its
     // link leaves by, or that it reached.
     let device_id = sender.device_id().to_string();
     let reached = match road {
         Road::Local { local, .. } => local,
-        Road::Internet => None,
+        Road::Internet | Road::Bluetooth => None,
     };
     let (is_computer, for_computer) = tokio::task::spawn_blocking(move || {
         let is_computer = crate::plugins::pair::is_computer_device(&device_id);
@@ -1355,8 +1360,8 @@ async fn seed_desktop_state(
     }
     // How to wake this computer, for the adapter the phone reached (N6). A
     // connection over the internet reached none: the phone keeps the one it
-    // learned at home. A computer gets only the packet above, under its
-    // rules (PC6 review M-2).
+    // learned at home; nor did one over Bluetooth. A computer gets only the
+    // packet above, under its rules (PC6 review M-2).
     let Road::Local { local, .. } = road else {
         return;
     };
@@ -1529,6 +1534,11 @@ enum Road {
     /// iroh, from anywhere (T10a): only a paired phone with its registered
     /// iroh key, no pairing, and no address to dial back.
     Internet,
+    /// TLS over an RFCOMM stream (the Bluetooth fallback), under the
+    /// internet road's rules: only a paired phone with its TLS key, no
+    /// pairing, the computer named only after admission, and no address to
+    /// dial back. The link proves the phone is near (the away lock).
+    Bluetooth,
 }
 
 /// Streams for transfers on an internet control connection (2c): each a
@@ -1599,6 +1609,137 @@ pub(crate) async fn handle_internet_control(
         let _ = timeout(Duration::from_secs(2), conn.closed()).await;
         conn.close(0u32.into(), b"control closed");
         served
+    }
+    .instrument(conn_span)
+    .await
+}
+
+/// A stream with the one byte already read from it put back in front: the
+/// Bluetooth road reads it to tell TLS from anything else, as the TCP road
+/// peeks, and a Bluetooth stream cannot peek.
+struct Prefixed<S> {
+    first: Option<u8>,
+    inner: S,
+}
+
+impl<S: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for Prefixed<S> {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        if buf.remaining() > 0
+            && let Some(byte) = self.first.take()
+        {
+            buf.put_slice(&[byte]);
+            return std::task::Poll::Ready(Ok(()));
+        }
+        std::pin::Pin::new(&mut self.inner).poll_read(cx, buf)
+    }
+}
+
+impl<S: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for Prefixed<S> {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        std::pin::Pin::new(&mut self.inner).poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
+/// A control connection over the Bluetooth road (the fallback when neither
+/// the home nor the internet road reaches this computer): an RFCOMM stream
+/// from a bonded phone, carrying TLS with the pinned certificates as at
+/// home, then the handshake and packets under the internet road's rules
+/// (`Road::Bluetooth`). No KDE Connect device and no plain client is served
+/// here. `link` opens a transfer's stream; it is handed the connection's
+/// sender once the phone is admitted. `pairing_required` does not loosen
+/// this road: pairing is required here whatever the setting.
+// Called by the Bluetooth listener, which comes next.
+#[cfg_attr(not(test), allow(dead_code))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn handle_bluetooth_control<S>(
+    mut stream: S,
+    tls: tokio_rustls::TlsAcceptor,
+    link: Arc<dyn pocketdesk_core::protocol::kdeconnect::OpenLinkStream>,
+    identity_packet: Option<NetworkPacket>,
+    registry: &Arc<PluginRegistry>,
+    hypr_ipc: Option<&HyprlandIpc>,
+    wan_endpoint: Option<&iroh::Endpoint>,
+    pairing_required: bool,
+) -> Result<()>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tracing::Instrument;
+    let conn_span = tracing::info_span!(
+        "conn",
+        id = %uuid::Uuid::new_v4(),
+        peer = tracing::field::Empty,
+        transport = "bluetooth",
+        proto = %pocketdesk_core::protocol::PROTOCOL_VERSION
+    );
+    async move {
+        tracing::info!("Handling a control connection over Bluetooth");
+        let mut first = [0u8; 1];
+        let read = timeout(Duration::from_secs(8), stream.read(&mut first))
+            .await
+            .context("connection handshake timeout")?
+            .context("failed to read incoming handshake")?;
+        if read == 0 {
+            tracing::info!("Connection closed by peer before handshake");
+            return Ok(());
+        }
+        if first[0] != pocketdesk_core::protocol::TLS_HANDSHAKE_RECORD {
+            tracing::warn!("Refused a Bluetooth control connection without TLS");
+            let refusal = format!("{}\n", pocketdesk_core::protocol::HANDSHAKE_TLS_REQUIRED);
+            let _ = stream.write_all(refusal.as_bytes()).await;
+            let _ = stream.flush().await;
+            let _ = stream.shutdown().await;
+            return Ok(());
+        }
+        let stream = Prefixed {
+            first: Some(first[0]),
+            inner: stream,
+        };
+        let stream = timeout(Duration::from_secs(8), tls.accept(stream))
+            .await
+            .context("TLS handshake timeout")?
+            .context("TLS handshake failed")?;
+        let peer_key = stream
+            .get_ref()
+            .1
+            .peer_certificates()
+            .and_then(pocketdesk_core::streaming::PeerKey::from_tls_certs);
+        serve_control(
+            stream,
+            Road::Bluetooth,
+            Some(link),
+            None,
+            peer_key,
+            identity_packet,
+            registry,
+            hypr_ipc,
+            wan_endpoint,
+            pairing_required,
+        )
+        .await
     }
     .instrument(conn_span)
     .await
@@ -1753,13 +1894,7 @@ where
                         "Refused {device_id}'s control connection over the internet: {}",
                         refusal.reason()
                     );
-                    // Said, so the phone counts this as a failed link and
-                    // backs off, instead of redialing a link that just ends.
-                    let mut w = writer.lock().await;
-                    let refused = format!("{}\n", pocketdesk_core::protocol::HANDSHAKE_REFUSED);
-                    let _ = w.write_all(refused.as_bytes()).await;
-                    let _ = w.flush().await;
-                    let _ = w.shutdown().await;
+                    say_refused(&writer).await;
                     return Ok(());
                 }
                 // One of the owner's computers sends shared input on this
@@ -1778,6 +1913,32 @@ where
                 }
                 None
             }
+            Road::Bluetooth => {
+                // As the internet road (Bluetooth fallback, calls after
+                // review 1): only the paired phone with the TLS key bound
+                // to it; one with the wrong key ends here, never held for
+                // a PIN re-pair (pairing happens at home), and so does one
+                // of the owner's computers being recorded as paired both
+                // ways. The radio's own bond is not the phone's key.
+                let admitted = !crate::peer_computers::being_recorded(&device_id)
+                    && crate::plugins::pair::bluetooth_may_act(&device_id, peer_key.as_ref());
+                if !admitted {
+                    tracing::warn!(
+                        "Refused {device_id}'s control connection over Bluetooth: not paired, \
+                         or not with this key"
+                    );
+                    say_refused(&writer).await;
+                    return Ok(());
+                }
+                // Admitted: the desktop's identity is the phone's answer.
+                // No shared input here: it rides an iroh connection.
+                if let Some(identity) = &identity_packet {
+                    let mut w = writer.lock().await;
+                    w.write_all(&identity.to_wire()?).await?;
+                    w.flush().await?;
+                }
+                None
+            }
         };
 
         // Remote revoke: a device removed from afar is closed at once,
@@ -1787,8 +1948,15 @@ where
             TcpDeviceSender::from_arc(writer, device_id.clone())
                 .with_peer(peer)
                 .with_peer_key(peer_key.clone())
-                .with_link_streams(link),
+                .with_link_streams(link.clone())
+                .by_radio(matches!(road, Road::Bluetooth)),
         );
+        // A link that asks the device over this connection to open each
+        // stream (the Bluetooth road) gets its sender; every road's device
+        // is admitted by here.
+        if let Some(link) = &link {
+            link.admitted(Arc::downgrade(&sender));
+        }
         let sender_ref = &*sender;
 
         tracing::Span::current().record("peer", &device_id);
@@ -1883,13 +2051,18 @@ where
                                     peer_key.as_ref(),
                                 )
                                 .is_ok(),
+                                Road::Bluetooth => crate::plugins::pair::bluetooth_may_act(
+                                    &device_id,
+                                    peer_key.as_ref(),
+                                ),
                             };
-                            // Pairing stays at home: on the internet road
-                            // nothing pairs, or pairs again (T10a).
-                            if pairing_packet && matches!(road, Road::Internet) {
+                            // Pairing stays at home: on the internet and
+                            // Bluetooth roads nothing pairs, or pairs again
+                            // (T10a; the Bluetooth fallback).
+                            if pairing_packet && matches!(road, Road::Internet | Road::Bluetooth) {
                                 tracing::info!(
-                                    "Ignored {packet_type} from {device_id}: no pairing over \
-                                     the internet"
+                                    "Ignored {packet_type} from {device_id}: no pairing away \
+                                     from home"
                                 );
                                 continue;
                             }
@@ -2015,6 +2188,21 @@ where
 
         Ok(())
     }
+}
+
+/// Say a refused admission (the internet and Bluetooth roads) and close:
+/// the phone counts it as a failed link and backs off, instead of redialing
+/// a link that just ends.
+async fn say_refused<W>(writer: &Mutex<W>)
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    use tokio::io::AsyncWriteExt;
+    let mut w = writer.lock().await;
+    let refused = format!("{}\n", pocketdesk_core::protocol::HANDSHAKE_REFUSED);
+    let _ = w.write_all(refused.as_bytes()).await;
+    let _ = w.flush().await;
+    let _ = w.shutdown().await;
 }
 
 /// Tell the device behind `sender` it is not paired with this computer
@@ -3073,6 +3261,342 @@ mod internet_control_tests {
         let outcome =
             send_over_iroh(&stranger, iroh::SecretKey::generate(), "kdeconnect.ping").await;
         assert!(refused(&outcome), "a stranger: {outcome:?}");
+    }
+}
+
+#[cfg(test)]
+mod bluetooth_control_tests {
+    use super::*;
+    use pocketdesk_core::protocol::kdeconnect::{DeviceSender, OpenLinkStream, TransferIo};
+    use tokio::io::AsyncWriteExt;
+
+    /// Records every packet type the handler dispatches to it.
+    struct Seen(Arc<std::sync::Mutex<Vec<String>>>);
+
+    #[async_trait::async_trait]
+    impl pocketdesk_core::protocol::kdeconnect::Plugin for Seen {
+        fn name(&self) -> &'static str {
+            "seen"
+        }
+        fn incoming_capabilities(&self) -> &'static [&'static str] {
+            &[
+                "kdeconnect.identity",
+                "kdeconnect.ping",
+                "kdeconnect.pair",
+                "kdeconnect.pocketdesk.pair",
+            ]
+        }
+        fn outgoing_capabilities(&self) -> &'static [&'static str] {
+            &[]
+        }
+        async fn handle_packet(
+            &self,
+            packet: &NetworkPacket,
+            _sender: &dyn DeviceSender,
+        ) -> pocketdesk_core::error::Result<()> {
+            self.0.lock().unwrap().push(packet.packet_type.clone());
+            Ok(())
+        }
+    }
+
+    /// A stand-in for the Bluetooth listener's link: opens nothing, and
+    /// keeps the control connection's sender it is handed on admission.
+    #[derive(Default)]
+    struct TestLink(std::sync::Mutex<Option<std::sync::Weak<dyn DeviceSender>>>);
+
+    #[async_trait::async_trait]
+    impl OpenLinkStream for TestLink {
+        async fn open(&self) -> std::io::Result<Box<dyn TransferIo>> {
+            Err(std::io::Error::other("a test link opens nothing"))
+        }
+        fn admitted(&self, control: std::sync::Weak<dyn DeviceSender>) {
+            *self.0.lock().unwrap() = Some(control);
+        }
+    }
+
+    impl TestLink {
+        fn control(&self) -> Option<Arc<dyn DeviceSender>> {
+            self.0
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(|weak| weak.upgrade())
+        }
+        fn was_admitted(&self) -> bool {
+            self.0.lock().unwrap().is_some()
+        }
+    }
+
+    /// `device_id` paired here, with `key` bound as its TLS key.
+    fn paired_with_tls_key(device_id: &str, key: [u8; 32]) {
+        use pocketdesk_core::local::device_keys::{self, Slot};
+        crate::state::assert_test_turn();
+        let dir = state::state_dir().unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        TrustStore::update(state::trust_store_path().unwrap(), |store| {
+            store.trust_device(device_id)
+        })
+        .unwrap();
+        let hex: String = key.iter().map(|b| format!("{b:02x}")).collect();
+        device_keys::register(&dir, device_id, Slot::Tls, &hex).unwrap();
+    }
+
+    /// What one dial over the Bluetooth road came to.
+    struct Dialed {
+        /// Lines the desktop sent between its OK and the phone's identity.
+        before_identity: Vec<String>,
+        /// The desktop's line after the phone's identity.
+        answer: Option<String>,
+        /// Packet types the desktop's plugins saw.
+        seen: Vec<String>,
+        /// Whether the connection's sender reached the link, and said it is
+        /// near by radio, while the connection was up.
+        admitted_by_radio: Option<bool>,
+        link: Arc<TestLink>,
+    }
+
+    /// A phone holding `phone`'s certificate dials the Bluetooth road (over
+    /// an in-memory stream), says it is `device_id`, and, if admitted,
+    /// sends one `packet_type`.
+    async fn dial(
+        device_id: &str,
+        phone: &CertManager,
+        packet_type: &str,
+        pairing_required: bool,
+    ) -> Dialed {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let desktop = CertManager::new().unwrap();
+        let tls = tokio_rustls::TlsAcceptor::from(desktop.control_server_config().unwrap());
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut registry = PluginRegistry::default();
+        registry.register(Seen(seen.clone()));
+        let registry = Arc::new(registry);
+        let link = Arc::new(TestLink::default());
+        let (client, server) = tokio::io::duplex(64 * 1024);
+        let served = {
+            let link: Arc<dyn OpenLinkStream> = link.clone();
+            tokio::spawn(async move {
+                let desktop_identity = Some(
+                    pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(
+                        "bt-desktop",
+                        "Bluetooth Desktop",
+                    )
+                    .as_identity_packet(),
+                );
+                handle_bluetooth_control(
+                    server,
+                    tls,
+                    link,
+                    desktop_identity,
+                    &registry,
+                    None,
+                    None,
+                    pairing_required,
+                )
+                .await
+            })
+        };
+        let name = rustls::pki_types::ServerName::try_from("192.0.2.1").unwrap();
+        let stream = tokio_rustls::TlsConnector::from(phone.control_client_config_unpinned())
+            .connect(name, client)
+            .await
+            .expect("TLS over the Bluetooth stream");
+        let (read, mut write) = tokio::io::split(stream);
+        let mut lines = BufReader::new(read).lines();
+        write
+            .write_all(format!("{HANDSHAKE_HELLO}\n").as_bytes())
+            .await
+            .unwrap();
+        write.flush().await.unwrap();
+        assert_eq!(
+            timeout(Duration::from_secs(5), lines.next_line())
+                .await
+                .unwrap()
+                .unwrap()
+                .as_deref(),
+            Some(HANDSHAKE_OK)
+        );
+        let mut before_identity = Vec::new();
+        while let Ok(Ok(Some(line))) = timeout(Duration::from_millis(500), lines.next_line()).await
+        {
+            before_identity.push(line);
+        }
+        let identity =
+            pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(device_id, "Radio Phone")
+                .as_identity_packet();
+        write.write_all(&identity.to_wire().unwrap()).await.unwrap();
+        write.flush().await.unwrap();
+        let answer = timeout(Duration::from_secs(5), lines.next_line())
+            .await
+            .ok()
+            .and_then(|line| line.ok().flatten());
+        let admitted = answer
+            .as_deref()
+            .is_some_and(|line| line.contains("kdeconnect.identity"));
+        let mut admitted_by_radio = None;
+        if admitted {
+            let line = NetworkPacket::new(packet_type)
+                .with_body(serde_json::json!({ "pair": true }))
+                .to_wire()
+                .unwrap();
+            write.write_all(&line).await.unwrap();
+            write.flush().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            admitted_by_radio = link.control().map(|sender| sender.nearby_by_radio());
+        }
+        let _ = write.shutdown().await;
+        drop(write);
+        drop(lines);
+        let _ = timeout(Duration::from_secs(5), served).await;
+        let seen = seen.lock().unwrap().clone();
+        Dialed {
+            before_identity,
+            answer,
+            seen,
+            admitted_by_radio,
+            link,
+        }
+    }
+
+    /// Rule 1 (pairing as the internet road): a phone paired with key A
+    /// that dials with key B is refused outright, never held for a PIN;
+    /// nothing reaches the plugins or registers. A stranger is refused too,
+    /// with pairing on or off.
+    #[tokio::test]
+    async fn bluetooth_refuses_a_wrong_key() {
+        let _state = crate::state::use_test_dirs();
+        let id = format!("bluetooth-{}", uuid::Uuid::new_v4().simple());
+        let key_a = CertManager::new().unwrap();
+        let key_b = CertManager::new().unwrap();
+        paired_with_tls_key(&id, key_a.cert_fingerprint());
+        let dialed = dial(&id, &key_b, "kdeconnect.ping", true).await;
+        assert_eq!(
+            dialed.answer.as_deref(),
+            Some(pocketdesk_core::protocol::HANDSHAKE_REFUSED)
+        );
+        assert!(
+            dialed.seen.is_empty(),
+            "nothing dispatched: {:?}",
+            dialed.seen
+        );
+        assert!(!dialed.link.was_admitted(), "nothing registered");
+        for pairing_required in [true, false] {
+            let stranger = format!("bluetooth-{}", uuid::Uuid::new_v4().simple());
+            let dialed = dial(&stranger, &key_b, "kdeconnect.ping", pairing_required).await;
+            assert_eq!(
+                dialed.answer.as_deref(),
+                Some(pocketdesk_core::protocol::HANDSHAKE_REFUSED),
+                "a stranger, pairing_required = {pairing_required}"
+            );
+            assert!(dialed.seen.is_empty());
+            assert!(!dialed.link.was_admitted());
+        }
+    }
+
+    /// Rule 1 again: pairing packets on the road are ignored, and the
+    /// phone's standing is what it was.
+    #[tokio::test]
+    async fn bluetooth_ignores_pairing() {
+        let _state = crate::state::use_test_dirs();
+        let id = format!("bluetooth-{}", uuid::Uuid::new_v4().simple());
+        let phone = CertManager::new().unwrap();
+        paired_with_tls_key(&id, phone.cert_fingerprint());
+        let key = pocketdesk_core::streaming::PeerKey::Tls(phone.cert_fingerprint());
+        for pairing in ["kdeconnect.pair", "kdeconnect.pocketdesk.pair"] {
+            let dialed = dial(&id, &phone, pairing, true).await;
+            assert_eq!(dialed.admitted_by_radio, Some(true), "admitted");
+            assert_eq!(
+                dialed.seen,
+                vec!["kdeconnect.identity".to_string()],
+                "{pairing} ignored"
+            );
+            assert!(matches!(
+                crate::plugins::pair::standing(&id, Some(&key)),
+                crate::plugins::pair::Standing::Paired
+            ));
+        }
+    }
+
+    /// Rule 2 (naming as the internet road): the desktop sends nothing
+    /// between its OK and the phone's identity, then names itself once the
+    /// phone is admitted; the phone's packets then reach the plugins, and
+    /// the link gets the connection's sender, near by radio.
+    #[tokio::test]
+    async fn bluetooth_names_after_admission() {
+        let _state = crate::state::use_test_dirs();
+        let id = format!("bluetooth-{}", uuid::Uuid::new_v4().simple());
+        let phone = CertManager::new().unwrap();
+        paired_with_tls_key(&id, phone.cert_fingerprint());
+        let dialed = dial(&id, &phone, "kdeconnect.ping", true).await;
+        assert!(
+            dialed.before_identity.is_empty(),
+            "named before the phone's identity: {:?}",
+            dialed.before_identity
+        );
+        let answer = dialed.answer.expect("the desktop's identity");
+        let named = NetworkPacket::from_wire(&answer).unwrap();
+        assert_eq!(named.packet_type, "kdeconnect.identity");
+        assert_eq!(named.body["deviceId"], "bt-desktop");
+        assert_eq!(
+            dialed.seen,
+            vec![
+                "kdeconnect.identity".to_string(),
+                "kdeconnect.ping".to_string()
+            ]
+        );
+        assert_eq!(dialed.admitted_by_radio, Some(true));
+        // Someone else's key never hears the name: refused instead.
+        let other = CertManager::new().unwrap();
+        let dialed = dial(&id, &other, "kdeconnect.ping", true).await;
+        assert!(dialed.before_identity.is_empty());
+        assert_eq!(
+            dialed.answer.as_deref(),
+            Some(pocketdesk_core::protocol::HANDSHAKE_REFUSED)
+        );
+    }
+
+    /// No KDE Connect and no plain text on this road: a client that does
+    /// not open TLS is told so and dropped.
+    #[tokio::test]
+    async fn bluetooth_refuses_without_tls() {
+        let desktop = CertManager::new().unwrap();
+        let tls = tokio_rustls::TlsAcceptor::from(desktop.control_server_config().unwrap());
+        let registry = Arc::new(PluginRegistry::default());
+        let (mut client, server) = tokio::io::duplex(64 * 1024);
+        let served = tokio::spawn(async move {
+            let link: Arc<dyn OpenLinkStream> = Arc::new(TestLink::default());
+            handle_bluetooth_control(server, tls, link, None, &registry, None, None, true).await
+        });
+        client
+            .write_all(format!("{HANDSHAKE_HELLO}\n").as_bytes())
+            .await
+            .unwrap();
+        let mut reader = BufReader::new(client);
+        let mut reply = String::new();
+        timeout(Duration::from_secs(5), reader.read_line(&mut reply))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            reply.trim(),
+            pocketdesk_core::protocol::HANDSHAKE_TLS_REQUIRED
+        );
+        assert!(timeout(Duration::from_secs(5), served).await.is_ok());
+    }
+
+    /// The packet the desktop sends after admission says where to dial it
+    /// by Bluetooth, as documented.
+    #[test]
+    fn bluetooth_info_packet_body() {
+        use pocketdesk_core::protocol::bluetooth::{BluetoothInfo, PACKET, SERVICE_UUID};
+        let info = BluetoothInfo {
+            address: "00:00:5E:00:53:01".to_string(),
+            service: SERVICE_UUID.to_string(),
+        };
+        let packet = crate::bluetooth::packet(&info);
+        assert_eq!(packet.packet_type, PACKET);
+        assert_eq!(packet.body["address"], "00:00:5E:00:53:01");
+        assert_eq!(packet.body["service"], SERVICE_UUID);
     }
 }
 

@@ -219,6 +219,13 @@ pub trait DeviceSender: Send + Sync {
         None
     }
 
+    /// Whether the link itself proves the device is within a few metres
+    /// (the Bluetooth road): the away lock counts it present though it has
+    /// no address on this computer's network.
+    fn nearby_by_radio(&self) -> bool {
+        false
+    }
+
     async fn send_packet(&self, packet: &NetworkPacket) -> Result<()>;
 }
 
@@ -232,6 +239,12 @@ impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> TransferIo 
 #[async_trait::async_trait]
 pub trait OpenLinkStream: Send + Sync {
     async fn open(&self) -> std::io::Result<Box<dyn TransferIo>>;
+
+    /// Called once the connection's device is admitted, with the sender of
+    /// its control connection, for a link that asks the device over it to
+    /// open each stream (the Bluetooth road). Weak: the sender holds this
+    /// link. Nothing by default.
+    fn admitted(&self, _control: std::sync::Weak<dyn DeviceSender>) {}
 }
 
 /// Concrete sender that wraps the per-connection TCP write half.
@@ -242,6 +255,7 @@ pub struct TcpDeviceSender<W> {
     peer: Option<std::net::SocketAddr>,
     peer_key: Option<crate::streaming::PeerKey>,
     link: Option<Arc<dyn OpenLinkStream>>,
+    by_radio: bool,
 }
 
 impl<W> Clone for TcpDeviceSender<W> {
@@ -253,6 +267,7 @@ impl<W> Clone for TcpDeviceSender<W> {
             peer: self.peer,
             peer_key: self.peer_key.clone(),
             link: self.link.clone(),
+            by_radio: self.by_radio,
         }
     }
 }
@@ -269,6 +284,7 @@ where
             peer: None,
             peer_key: None,
             link: None,
+            by_radio: false,
         }
     }
 
@@ -280,6 +296,7 @@ where
             peer: None,
             peer_key: None,
             link: None,
+            by_radio: false,
         }
     }
 
@@ -305,6 +322,13 @@ where
         self.link = link;
         self
     }
+
+    /// The connection came over Bluetooth: its device is within a few
+    /// metres ([`DeviceSender::nearby_by_radio`]).
+    pub fn by_radio(mut self, by_radio: bool) -> Self {
+        self.by_radio = by_radio;
+        self
+    }
 }
 
 #[async_trait::async_trait]
@@ -326,6 +350,10 @@ where
 
     fn link_streams(&self) -> Option<Arc<dyn OpenLinkStream>> {
         self.link.clone()
+    }
+
+    fn nearby_by_radio(&self) -> bool {
+        self.by_radio
     }
 
     fn peer_key(&self) -> Option<crate::streaming::PeerKey> {
