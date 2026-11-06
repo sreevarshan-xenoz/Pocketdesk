@@ -13,7 +13,7 @@ too. It writes, to stdout, lines in the words of `wev` that the test reads:
 
 The places are in the window's own coordinates (its visible frame, without the
 shadow). Its application id, which is the class the Shell extension reports, is
-`dev.pocketdesk.RigClicker`. Run it under a user unit with the output going to
+`org.example.RigClicker`. Run it under a user unit with the output going to
 a file (it flushes each line).
 """
 import gi
@@ -28,7 +28,7 @@ def out(line):
 
 class Clicker(Gtk.Application):
     def __init__(self):
-        super().__init__(application_id="dev.pocketdesk.RigClicker")
+        super().__init__(application_id="org.example.RigClicker")
 
     def do_activate(self):
         win = Gtk.ApplicationWindow(application=self, title="rig clicker")

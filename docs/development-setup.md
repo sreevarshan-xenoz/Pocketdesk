@@ -169,8 +169,8 @@ in the lent window's log must be the aimed pixel less the window frame's
 corner, within a pixel and a half (that is what shows whether mutter takes a
 window stream's coordinates relative to the window). Run it twice: with `wev`
 lent, and with the client-side decorated `scripts/rig_click_logger.py` (GTK4,
-header bar and shadows; app id `dev.pocketdesk.RigClicker`) lent and a `wev`
-over it, by setting `PD_GNOME_RIG_LENT_APP=dev.pocketdesk.RigClicker`,
+header bar and shadows; app id `org.example.RigClicker`) lent and a `wev`
+over it, by setting `PD_GNOME_RIG_LENT_APP=org.example.RigClicker`,
 `PD_GNOME_RIG_COVER_APP=wev` and `PD_GNOME_RIG_LENT_LOG` to the logger's file.
 
 ```bash
