@@ -102,6 +102,9 @@ function text(value) {
 
 function describe(win, stack) {
     const frame = win.get_frame_rect();
+    // What mutter's window stream shows: the frame and, for a client-side
+    // decorated window, its shadow round it.
+    const buffer = win.get_buffer_rect();
     const minimized = !!win.minimized;
     const hidden = minimized || (typeof win.is_hidden === 'function' && win.is_hidden());
     return {
@@ -113,6 +116,10 @@ function describe(win, stack) {
         'y': GLib.Variant.new_int32(frame.y),
         'width': GLib.Variant.new_uint32(Math.max(0, frame.width)),
         'height': GLib.Variant.new_uint32(Math.max(0, frame.height)),
+        'buffer-x': GLib.Variant.new_int32(buffer.x),
+        'buffer-y': GLib.Variant.new_int32(buffer.y),
+        'buffer-width': GLib.Variant.new_uint32(Math.max(0, buffer.width)),
+        'buffer-height': GLib.Variant.new_uint32(Math.max(0, buffer.height)),
         'minimized': GLib.Variant.new_boolean(minimized),
         'hidden': GLib.Variant.new_boolean(hidden),
         'focus': GLib.Variant.new_boolean(holdsFocus(win)),
