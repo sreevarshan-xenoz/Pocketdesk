@@ -5,7 +5,7 @@
 //! `tokio::io::duplex`.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 use windows::Win32::Devices::Bluetooth::{
     AF_BTH, BLUETOOTH_FIND_RADIO_PARAMS, BLUETOOTH_RADIO_INFO, BTHPROTO_RFCOMM,
@@ -14,10 +14,10 @@ use windows::Win32::Devices::Bluetooth::{
 };
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Networking::WinSock::{
-    CSADDR_INFO, RNRSERVICE_DELETE, RNRSERVICE_REGISTER, SD_SEND, SEND_RECV_FLAGS, SOCK_STREAM,
-    SOCKADDR, SOCKET, SOCKET_ADDRESS, SOCKET_ERROR, WSADATA, WSAGetLastError, WSAQUERYSETW,
-    WSASetServiceW, WSAStartup, accept, bind, closesocket, getsockname, recv, send, setsockopt,
-    shutdown, socket,
+    CSADDR_INFO, RNRSERVICE_DELETE, RNRSERVICE_REGISTER, SD_SEND, SEND_RECV_FLAGS, SO_RCVTIMEO,
+    SOCK_STREAM, SOCKADDR, SOCKET, SOCKET_ADDRESS, SOCKET_ERROR, SOL_SOCKET, WSADATA, WSAETIMEDOUT,
+    WSAGetLastError, WSAQUERYSETW, WSASetServiceW, WSAStartup, accept, bind, closesocket,
+    getsockname, recv, send, setsockopt, shutdown, socket,
 };
 use windows::core::{GUID, PWSTR};
 
@@ -232,13 +232,25 @@ impl Drop for Listener {
     }
 }
 
+/// The most Bluetooth connections open at once, both services together:
+/// this road has no address for the server's per-address budget, so it
+/// keeps its own.
+const MAX_OPEN: usize = 8;
+
+/// How many accepted Bluetooth connections are open, shared by both
+/// services' accept threads.
+#[derive(Clone, Default)]
+pub(crate) struct Open(Arc<AtomicUsize>);
+
 /// Accept connections on `listener` on a thread of its own, each pumped into
 /// a stream sent to `accepted` as `kind`, until the listener is closed (or
-/// fails, which closes it) or `accepted` is gone.
+/// fails, which closes it) or `accepted` is gone. Past [`MAX_OPEN`] open
+/// connections, a new one is closed at once.
 pub(crate) fn spawn_accepting(
     listener: Arc<Listener>,
     kind: super::Kind,
     accepted: tokio::sync::mpsc::Sender<(super::Kind, DuplexStream)>,
+    open: Open,
     runtime: tokio::runtime::Handle,
 ) -> std::io::Result<()> {
     std::thread::Builder::new()
@@ -247,7 +259,14 @@ pub(crate) fn spawn_accepting(
             loop {
                 match listener.accept() {
                     Ok(socket) => {
-                        let stream = pump(Arc::new(Accepted(socket)), runtime.clone());
+                        let socket = Arc::new(Accepted::new(socket, &open));
+                        if open.0.load(Ordering::SeqCst) > MAX_OPEN {
+                            tracing::warn!(
+                                "Refused a Bluetooth connection: {MAX_OPEN} are open already"
+                            );
+                            continue;
+                        }
+                        let stream = pump(socket, runtime.clone());
                         if accepted.blocking_send((kind, stream)).is_err() {
                             break;
                         }
@@ -265,18 +284,49 @@ pub(crate) fn spawn_accepting(
         .map(|_| ())
 }
 
-/// An accepted socket, closed when both of its pumps are done.
-struct Accepted(SOCKET);
+/// How long the in-pump waits on the phone before it looks whether the
+/// server is done with the connection.
+const RECV_TIMEOUT_MS: u32 = 1000;
+
+/// An accepted socket, counted in [`Open`] and closed once, when both of
+/// its pumps are done (so neither can ever use its handle after it is
+/// closed and given to another socket).
+struct Accepted {
+    socket: SOCKET,
+    open: Open,
+    /// The server has ended its side: the in-pump stops at its next wait.
+    server_done: AtomicBool,
+}
+
+impl Accepted {
+    fn new(socket: SOCKET, open: &Open) -> Self {
+        open.0.fetch_add(1, Ordering::SeqCst);
+        // The in-pump wakes each second to see whether the server is done.
+        let timeout = RECV_TIMEOUT_MS.to_ne_bytes();
+        // SAFETY: the socket is this connection's own; `timeout` outlives
+        // the call.
+        unsafe { setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, Some(&timeout)) };
+        Self {
+            socket,
+            open: open.clone(),
+            server_done: AtomicBool::new(false),
+        }
+    }
+}
 
 impl Drop for Accepted {
     fn drop(&mut self) {
-        // SAFETY: the socket is this connection's own.
-        unsafe { closesocket(self.0) };
+        // SAFETY: the socket is this connection's own, and no pump holds it
+        // any more.
+        unsafe { closesocket(self.socket) };
+        self.open.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
 /// The server's end of a stream joined to `socket` by two blocking threads:
 /// one copies what the phone sends in, the other what the server writes out.
+/// When the server ends its side, the phone is sent the end of the stream,
+/// and the in-pump stops within a second, after what was still in flight.
 fn pump(socket: Arc<Accepted>, runtime: tokio::runtime::Handle) -> DuplexStream {
     let (ours, theirs) = tokio::io::duplex(PUMP_BUFFER);
     let (mut from_server, mut to_server) = tokio::io::split(theirs);
@@ -288,8 +338,16 @@ fn pump(socket: Arc<Accepted>, runtime: tokio::runtime::Handle) -> DuplexStream 
             let mut buf = vec![0u8; 16 * 1024];
             loop {
                 // SAFETY: the socket stays open while this thread holds it.
-                let read = unsafe { recv(inbound.0, &mut buf, SEND_RECV_FLAGS(0)) };
-                if read <= 0 {
+                let read = unsafe { recv(inbound.socket, &mut buf, SEND_RECV_FLAGS(0)) };
+                if read < 0 {
+                    // SAFETY: reads this thread's last Winsock error.
+                    let timed_out = unsafe { WSAGetLastError() } == WSAETIMEDOUT;
+                    if timed_out && !inbound.server_done.load(Ordering::SeqCst) {
+                        continue;
+                    }
+                    break;
+                }
+                if read == 0 {
                     break;
                 }
                 let chunk = &buf[..read as usize];
@@ -306,7 +364,7 @@ fn pump(socket: Arc<Accepted>, runtime: tokio::runtime::Handle) -> DuplexStream 
         .name("bluetooth-out".into())
         .spawn(move || {
             let mut buf = vec![0u8; 16 * 1024];
-            loop {
+            'out: loop {
                 let read = match runtime.block_on(from_server.read(&mut buf)) {
                     Ok(0) | Err(_) => break,
                     Ok(read) => read,
@@ -314,15 +372,16 @@ fn pump(socket: Arc<Accepted>, runtime: tokio::runtime::Handle) -> DuplexStream 
                 let mut chunk = &buf[..read];
                 while !chunk.is_empty() {
                     // SAFETY: as above.
-                    let sent = unsafe { send(socket.0, chunk, SEND_RECV_FLAGS(0)) };
+                    let sent = unsafe { send(socket.socket, chunk, SEND_RECV_FLAGS(0)) };
                     if sent <= 0 {
-                        return;
+                        break 'out;
                     }
                     chunk = &chunk[sent as usize..];
                 }
             }
             // SAFETY: as above; the phone reads the end of the stream.
-            unsafe { shutdown(socket.0, SD_SEND) };
+            unsafe { shutdown(socket.socket, SD_SEND) };
+            socket.server_done.store(true, Ordering::SeqCst);
         });
     ours
 }

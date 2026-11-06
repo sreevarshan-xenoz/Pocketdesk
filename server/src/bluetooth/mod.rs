@@ -430,8 +430,15 @@ impl Radio for Winsock {
             Arc::new(windows::listen(control, SERVICE_NAME)?),
             Arc::new(windows::listen(link, LINK_SERVICE_NAME)?),
         ]);
+        let open = windows::Open::default();
         for (listener, kind) in both.0.iter().zip([Kind::Control, Kind::Link]) {
-            windows::spawn_accepting(listener.clone(), kind, accepted.clone(), runtime.clone())?;
+            windows::spawn_accepting(
+                listener.clone(),
+                kind,
+                accepted.clone(),
+                open.clone(),
+                runtime.clone(),
+            )?;
         }
         Ok(Box::new(both))
     }
