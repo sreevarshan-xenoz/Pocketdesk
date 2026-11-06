@@ -63,12 +63,29 @@ impl Listening {
         self.info.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    /// Listening at `info`: connections from now on live until [`stop`].
+    /// About to listen: connections from now on live until [`stop`]. Made
+    /// before the sockets are, so the first connection is not born ended.
     ///
     /// [`stop`]: Self::stop
-    fn start(&self, info: BluetoothInfo) {
+    fn begin(&self) {
         *self.period.lock().unwrap_or_else(|e| e.into_inner()) = CancellationToken::new();
+    }
+
+    /// Listening at `info` (after [`begin`]): it is told from now on.
+    ///
+    /// [`begin`]: Self::begin
+    fn listening_at(&self, info: BluetoothInfo) {
         *self.info.write().unwrap_or_else(|e| e.into_inner()) = Some(info);
+    }
+
+    /// [`begin`] and [`listening_at`] at once (the tests').
+    ///
+    /// [`begin`]: Self::begin
+    /// [`listening_at`]: Self::listening_at
+    #[cfg(test)]
+    fn start(&self, info: BluetoothInfo) {
+        self.begin();
+        self.listening_at(info);
     }
 
     /// Not listening: nothing is told, and every connection taken while it
@@ -133,7 +150,10 @@ pub(crate) type Stream = Endable<DuplexStream>;
 pub(crate) struct Endable<S> {
     inner: S,
     token: CancellationToken,
-    ended: std::pin::Pin<Box<tokio_util::sync::WaitForCancellationFutureOwned>>,
+    /// One per side, each with its own waker: a control link split into a
+    /// reader and a writer has both woken when the road goes.
+    read_ended: std::pin::Pin<Box<tokio_util::sync::WaitForCancellationFutureOwned>>,
+    write_ended: std::pin::Pin<Box<tokio_util::sync::WaitForCancellationFutureOwned>>,
     closed: Option<tokio::sync::oneshot::Receiver<()>>,
 }
 
@@ -141,7 +161,8 @@ impl<S> Endable<S> {
     pub(crate) fn new(inner: S, token: CancellationToken) -> Self {
         Self {
             inner,
-            ended: Box::pin(token.clone().cancelled_owned()),
+            read_ended: Box::pin(token.clone().cancelled_owned()),
+            write_ended: Box::pin(token.clone().cancelled_owned()),
             token,
             closed: None,
         }
@@ -159,10 +180,16 @@ impl<S> Endable<S> {
         self.closed.take()
     }
 
-    /// `Err` once the token is cancelled, and wakes the task then.
-    fn check(&mut self, cx: &mut std::task::Context<'_>) -> std::io::Result<()> {
+    /// `Err` once the token is cancelled; the reading (or writing) task is
+    /// woken then.
+    fn check(&mut self, cx: &mut std::task::Context<'_>, read: bool) -> std::io::Result<()> {
         use std::future::Future;
-        if self.token.is_cancelled() || self.ended.as_mut().poll(cx).is_ready() {
+        let ended = if read {
+            self.read_ended.as_mut()
+        } else {
+            self.write_ended.as_mut()
+        };
+        if self.token.is_cancelled() || ended.poll(cx).is_ready() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::ConnectionAborted,
                 "the Bluetooth road was turned off",
@@ -178,7 +205,7 @@ impl<S: AsyncRead + Unpin> AsyncRead for Endable<S> {
         cx: &mut std::task::Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        if let Err(e) = self.check(cx) {
+        if let Err(e) = self.check(cx, true) {
             return std::task::Poll::Ready(Err(e));
         }
         std::pin::Pin::new(&mut self.inner).poll_read(cx, buf)
@@ -191,7 +218,7 @@ impl<S: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for Endable<S> {
         cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> std::task::Poll<std::io::Result<usize>> {
-        if let Err(e) = self.check(cx) {
+        if let Err(e) = self.check(cx, false) {
             return std::task::Poll::Ready(Err(e));
         }
         std::pin::Pin::new(&mut self.inner).poll_write(cx, buf)
@@ -201,7 +228,7 @@ impl<S: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for Endable<S> {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        if let Err(e) = self.check(cx) {
+        if let Err(e) = self.check(cx, false) {
             return std::task::Poll::Ready(Err(e));
         }
         std::pin::Pin::new(&mut self.inner).poll_flush(cx)
@@ -544,6 +571,7 @@ async fn keep_listening(
             && let Some(at) = address
         {
             let service = pocketdesk_core::protocol::bluetooth::service_uuid();
+            state.begin();
             let started = match uuid::Uuid::parse_str(&service) {
                 Ok(uuid) => {
                     let link = pocketdesk_core::protocol::bluetooth::link_uuid(uuid);
@@ -558,7 +586,7 @@ async fn keep_listening(
             match started {
                 Ok(listener) => {
                     tracing::info!("Listening over Bluetooth for service {service}");
-                    state.start(BluetoothInfo {
+                    state.listening_at(BluetoothInfo {
                         address: format_address(at),
                         service,
                     });
@@ -566,6 +594,7 @@ async fn keep_listening(
                     failure_said = false;
                 }
                 Err(e) => {
+                    state.stop();
                     if !failure_said {
                         tracing::warn!("Could not listen over Bluetooth: {e}");
                         failure_said = true;
@@ -906,11 +935,16 @@ mod tests {
         .await;
         let mut transfer = arrived.await.unwrap();
 
-        // Waiting on the phone when the road goes off: the read fails.
+        // Split as the server splits it: a reader waiting on the phone
+        // while another task writes. The road off: the read fails at once.
+        let (mut reader, mut writer) = tokio::io::split(link.stream);
         let reading = tokio::spawn(async move {
             let mut buf = [0u8; 8];
-            link.stream.read(&mut buf).await
+            reader.read(&mut buf).await
         });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        writer.write_all(b"to the phone").await.unwrap();
+        writer.flush().await.unwrap();
         on.store(false, Ordering::SeqCst);
         let read = tokio::time::timeout(Duration::from_secs(5), reading)
             .await
@@ -924,6 +958,7 @@ mod tests {
             transfer.write_all(b"x").await.is_err(),
             "the transfer link ended"
         );
+        assert!(writer.write_all(b"x").await.is_err(), "and its writes");
 
         // On again: a new link lives.
         on.store(true, Ordering::SeqCst);
