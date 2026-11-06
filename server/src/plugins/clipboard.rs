@@ -282,6 +282,7 @@ async fn receive_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
         if size == 0 || size > MAX_CLIPBOARD_IMAGE {
             return Err(format!("an image of {size} bytes is not taken"));
         }
+        share::fits_the_road(sender, size)?;
         let route = transfer_route(packet, sender)?;
         let slot = share::transfer_slots().take(sender.device_id())?;
         Ok((route, slot))
@@ -408,6 +409,7 @@ async fn send_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
             let cached = cache().lock().unwrap_or_else(|e| e.into_inner());
             image_for_fetch(cached.as_ref(), id)?
         };
+        share::fits_the_road(sender, image.png.len() as u64)?;
         let route = transfer_route(packet, sender)?;
         let slot = share::transfer_slots().take(sender.device_id())?;
         Ok((image, route, slot))

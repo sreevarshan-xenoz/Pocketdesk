@@ -193,7 +193,8 @@ video_quality = "balanced"
 
 # Move files with a phone linked by the internet road, on a stream of its own
 # control connection (nothing dials the phone back). Relays see sizes and
-# timing, never content. Each phone's Files permission still applies.
+# timing, never content. Each phone's Files permission still applies. It does
+# not hold the Bluetooth road, where a file over 8 MiB waits for Wi-Fi.
 # internet_files = true
 
 # Keep working over Bluetooth when neither the home nor the internet road
