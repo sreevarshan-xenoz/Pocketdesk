@@ -21,8 +21,12 @@ object BluetoothRoadRule {
     /** The longest rest between dials: a computer away or off is not dialed every few seconds all day. */
     const val MAX_REST_MS = 480_000L
 
-    /** How long a link request is answered for: the last link's channel may still be closing. */
-    const val LINK_TRY_MS = 8_000L
+    /**
+     * How long a link request is answered for: the last link's channel may
+     * still be closing. With the poll before it, well within the 10 s the
+     * computer waits for the link.
+     */
+    const val LINK_TRY_MS = 6_000L
 
     /** The wait between tries to open a transfer link. */
     const val LINK_STEP_MS = 500L
@@ -120,11 +124,13 @@ object BluetoothRoadRule {
 
     /**
      * Whether what a Bluetooth dial got ([state], the bridge's connection
-     * state) is a refusal no retry changes, such as a computer this phone
-     * has not verified at home: its reason is the one to show.
+     * state) is the refusal no retry changes: a computer this phone has not
+     * verified at home. Its reason is the one to show; any other failure,
+     * retryable or not, is not.
      */
     fun finalRefusal(state: String?): Boolean =
-        state != null && state.startsWith("Error(") && state.contains("is_retryable: false")
+        state != null && state.startsWith("Error(") && state.contains("is_retryable: false") &&
+            state.contains("has not verified the computer at") && state.contains("connect at home first")
 
     /** Whether to take the next link request: the computer serves one transfer link at a time, so none while one is up. */
     fun takeLinkRequest(linkLive: Boolean): Boolean = !linkLive

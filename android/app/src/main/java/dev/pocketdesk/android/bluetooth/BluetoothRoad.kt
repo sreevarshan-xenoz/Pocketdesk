@@ -308,6 +308,9 @@ object BluetoothRoad {
             if (now - lastHomeCheck >= HOME_CHECK_MS) {
                 lastHomeCheck = now
                 moveOffIfBack(app, road, networkChanged = false)
+                // The probe took a few seconds: a link request that came
+                // meanwhile is taken at once, not after another poll.
+                continue
             }
             Thread.sleep(POLL_MS)
         }

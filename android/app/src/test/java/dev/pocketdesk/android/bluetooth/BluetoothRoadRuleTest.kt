@@ -95,6 +95,12 @@ class BluetoothRoadRuleTest {
             ),
         )
         assertFalse(BluetoothRoadRule.finalRefusal("Error(PocketdeskErrorDto { code: 1, message: \"timed out\", is_retryable: true })"))
+        // Another failure no retry changes is not this refusal.
+        assertFalse(
+            BluetoothRoadRule.finalRefusal(
+                "Error(PocketdeskErrorDto { code: 3, message: \"connection to 192.0.2.10:1716 failed: TLS handshake: certificate changed\", is_retryable: false })",
+            ),
+        )
         assertFalse(BluetoothRoadRule.finalRefusal("Connected"))
         assertFalse(BluetoothRoadRule.finalRefusal(null))
     }
@@ -120,9 +126,11 @@ class BluetoothRoadRuleTest {
         // One transfer link at a time: none taken while one is up.
         assertFalse(BluetoothRoadRule.takeLinkRequest(linkLive = true))
         assertTrue(BluetoothRoadRule.takeLinkRequest(linkLive = false))
-        // The last link's channel may still be closing: tried again for about 8 s.
-        assertTrue(BluetoothRoadRule.tryLinkAgain(startedAt = 0L, now = 7_499L))
-        assertFalse(BluetoothRoadRule.tryLinkAgain(startedAt = 0L, now = 7_500L))
+        // The last link's channel may still be closing: tried again for about 6 s,
+        // so the poll, the probe and the tries stay within the computer's 10 s.
+        assertTrue(BluetoothRoadRule.tryLinkAgain(startedAt = 0L, now = 5_499L))
+        assertFalse(BluetoothRoadRule.tryLinkAgain(startedAt = 0L, now = 5_500L))
+        assertTrue(BluetoothRoadRule.LINK_TRY_MS <= 6_000L)
     }
 }
 
