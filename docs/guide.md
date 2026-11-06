@@ -675,7 +675,7 @@ When the phone reaches the computer neither on the home network nor over the int
 - **On by default.** Desktop Settings, **Keep working over Bluetooth when Wi-Fi drops** (`bluetooth_fallback`) turns it off; the computer then stops listening within seconds.
 - **Bond the phone once, by hand,** in the system's Bluetooth settings (Windows: Settings, Bluetooth & devices, Add device). Pocketdesk never pairs, scans or bonds anything over Bluetooth: it listens only for a phone bonded there, on an encrypted link, and the phone must also be paired with Pocketdesk at home, with its key, as for the internet path. Pairing never happens over Bluetooth.
 - **What goes over it** follows the internet path's rules (SECURITY.md, limit 90). The phone learns where to dial (the computer's Bluetooth address) over a working road first, so connect once at home after bonding.
-- **Files over 8 MB wait for Wi-Fi:** the phone is told so and can send them later. Smaller files go, each on a link of its own inside the same pinned encryption as at home. "Files over the internet" does not apply here.
+- **Files over 8 MiB wait for Wi-Fi:** the phone is told so and can send them later. Smaller files go, one at a time, each on a link of its own inside the same pinned encryption as at home. "Files over the internet" does not apply here.
 - **Windows only for now.** The computer listens while its Bluetooth radio is on; Linux comes later.
 
 ### Away From Home: Your Own Relay

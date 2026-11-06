@@ -78,11 +78,9 @@ fn started() -> std::io::Result<()> {
     }
 }
 
-/// The SDP record that names the service: its UUID, [`SERVICE_NAME`] and
-/// the RFCOMM channel the socket is bound to. The query points into the
-/// record's own buffers, which do not move while it lives.
-///
-/// [`SERVICE_NAME`]: pocketdesk_core::protocol::bluetooth::SERVICE_NAME
+/// The SDP record that names a service: its UUID, its name and the RFCOMM
+/// channel the socket is bound to. The query points into the record's own
+/// buffers, which do not move while it lives.
 pub(crate) struct ServiceRecord {
     _name: Vec<u16>,
     _class: Box<GUID>,
@@ -102,12 +100,14 @@ impl ServiceRecord {
     }
 }
 
-/// The SDP record for `service` on the socket bound at `bound`.
-pub(crate) fn service_record(service: uuid::Uuid, bound: SOCKADDR_BTH) -> ServiceRecord {
-    let mut name: Vec<u16> = pocketdesk_core::protocol::bluetooth::SERVICE_NAME
-        .encode_utf16()
-        .chain(Some(0))
-        .collect();
+/// The SDP record for `service`, called `name`, on the socket bound at
+/// `bound`.
+pub(crate) fn service_record(
+    service: uuid::Uuid,
+    name: &str,
+    bound: SOCKADDR_BTH,
+) -> ServiceRecord {
+    let mut name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
     let mut class = Box::new(GUID::from_u128(service.as_u128()));
     let mut address = Box::new(bound);
     let mut csaddr = Box::new(CSADDR_INFO {
@@ -145,9 +145,9 @@ pub(crate) struct Listener {
     closed: AtomicBool,
 }
 
-/// Listen on `service`: a secure (authenticated, encrypted, so bonded)
-/// RFCOMM socket on any free channel, and an SDP record naming it.
-pub(crate) fn listen(service: uuid::Uuid) -> std::io::Result<Listener> {
+/// Listen on `service`: a secure (authenticated, encrypted) RFCOMM socket on
+/// any free channel, and an SDP record naming it `name`.
+pub(crate) fn listen(service: uuid::Uuid, name: &str) -> std::io::Result<Listener> {
     started()?;
     // SAFETY: plain Winsock calls on a socket this function owns; each
     // pointer passed outlives its call, and the socket is closed on every
@@ -190,7 +190,7 @@ pub(crate) fn listen(service: uuid::Uuid) -> std::io::Result<Listener> {
     {
         return Err(close_on_error(last_error()));
     }
-    let record = service_record(service, bound);
+    let record = service_record(service, name, bound);
     if unsafe { WSASetServiceW(record.query(), RNRSERVICE_REGISTER, 0) } == SOCKET_ERROR {
         return Err(close_on_error(last_error()));
     }
@@ -233,11 +233,12 @@ impl Drop for Listener {
 }
 
 /// Accept connections on `listener` on a thread of its own, each pumped into
-/// a stream sent to `accepted`, until the listener is closed (or fails, which
-/// closes it) or `accepted` is gone.
+/// a stream sent to `accepted` as `kind`, until the listener is closed (or
+/// fails, which closes it) or `accepted` is gone.
 pub(crate) fn spawn_accepting(
     listener: Arc<Listener>,
-    accepted: tokio::sync::mpsc::Sender<DuplexStream>,
+    kind: super::Kind,
+    accepted: tokio::sync::mpsc::Sender<(super::Kind, DuplexStream)>,
     runtime: tokio::runtime::Handle,
 ) -> std::io::Result<()> {
     std::thread::Builder::new()
@@ -247,7 +248,7 @@ pub(crate) fn spawn_accepting(
                 match listener.accept() {
                     Ok(socket) => {
                         let stream = pump(Arc::new(Accepted(socket)), runtime.clone());
-                        if accepted.blocking_send(stream).is_err() {
+                        if accepted.blocking_send((kind, stream)).is_err() {
                             break;
                         }
                     }
@@ -330,6 +331,8 @@ fn pump(socket: Arc<Accepted>, runtime: tokio::runtime::Handle) -> DuplexStream 
 mod tests {
     use super::*;
 
+    use pocketdesk_core::protocol::bluetooth::SERVICE_NAME;
+
     #[test]
     fn service_record_names_the_uuid() {
         let service =
@@ -339,14 +342,14 @@ mod tests {
             port: 5,
             ..Default::default()
         };
-        let record = service_record(service, bound);
+        let record = service_record(service, SERVICE_NAME, bound);
         let query = record.query();
         // SAFETY: the pointers are into `record`, alive here.
         unsafe {
             assert_eq!(*query.lpServiceClassId, GUID::from_u128(service.as_u128()));
             assert_eq!(
                 query.lpszServiceInstanceName.to_string().unwrap(),
-                pocketdesk_core::protocol::bluetooth::SERVICE_NAME
+                SERVICE_NAME
             );
             assert_eq!(query.dwNameSpace, NS_BTH);
             assert_eq!(query.dwNumberOfCsAddrs, 1);
@@ -358,6 +361,30 @@ mod tests {
             assert_eq!(port, 5, "the channel bound");
         }
         assert_eq!(query.dwSize as usize, std::mem::size_of::<WSAQUERYSETW>());
+    }
+
+    #[test]
+    fn the_transfer_record_names_its_own_service() {
+        use pocketdesk_core::protocol::bluetooth::{LINK_SERVICE_NAME, SERVICE_UUID, link_uuid};
+        let control = uuid::Uuid::parse_str(SERVICE_UUID).unwrap();
+        let record = service_record(
+            link_uuid(control),
+            LINK_SERVICE_NAME,
+            SOCKADDR_BTH::default(),
+        );
+        let query = record.query();
+        // SAFETY: the pointers are into `record`, alive here.
+        unsafe {
+            assert_eq!(
+                *query.lpServiceClassId,
+                GUID::from_u128(link_uuid(control).as_u128())
+            );
+            assert_ne!(*query.lpServiceClassId, GUID::from_u128(control.as_u128()));
+            assert_eq!(
+                query.lpszServiceInstanceName.to_string().unwrap(),
+                LINK_SERVICE_NAME
+            );
+        }
     }
 
     #[test]

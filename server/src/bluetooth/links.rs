@@ -1,11 +1,13 @@
 //! Transfer links on the Bluetooth road: a control link over RFCOMM has no
 //! address to dial back and no streams of its own, so for each transfer the
 //! computer asks the phone over it ([`LINK_PACKET`]) to open a second
-//! RFCOMM connection to the same service. That connection's first line is
-//! the link hello with the id asked for; the listener hands it here
-//! ([`LinkTable::offer`]), and the computer runs the home road's transfer
-//! TLS on it as the client, holding the phone to the key its control link
-//! proved.
+//! RFCOMM connection, to the transfer service (RFCOMM carries one
+//! connection per channel between two devices, so not to the control
+//! link's own). That connection's first line is the link hello with the id
+//! asked for; the listener hands it here ([`LinkTable::offer`]), and the
+//! computer runs the home road's transfer TLS on it as the client, holding
+//! the phone to the key its control link proved. For the same reason a
+//! phone has one transfer link at a time: the next waits its turn.
 
 use pocketdesk_core::protocol::bluetooth::LINK_PACKET;
 use pocketdesk_core::protocol::kdeconnect::{
@@ -20,6 +22,10 @@ use tokio::sync::oneshot;
 /// How long the computer waits for the phone's transfer link once it has
 /// asked for it.
 pub(crate) const LINK_WAIT: Duration = Duration::from_secs(10);
+
+/// How long a transfer waits for the phone's previous transfer link to
+/// close before it gives up.
+pub(crate) const TURN_WAIT: Duration = Duration::from_secs(60);
 
 /// The transfer links asked for and not yet arrived, by link id, for every
 /// control link on the Bluetooth road.
@@ -88,6 +94,8 @@ impl Drop for Waiting {
 pub(crate) struct BluetoothLinks {
     table: Arc<LinkTable>,
     control: Mutex<Option<Weak<dyn DeviceSender>>>,
+    /// One transfer link at a time: its permit lives as long as the link.
+    turn: Arc<tokio::sync::Semaphore>,
 }
 
 impl BluetoothLinks {
@@ -95,13 +103,48 @@ impl BluetoothLinks {
         Self {
             table,
             control: Mutex::new(None),
+            turn: Arc::new(tokio::sync::Semaphore::new(1)),
         }
     }
+}
 
-    /// [`LinkTable::offer`].
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn offer(&self, id: u64, stream: DuplexStream) -> bool {
-        self.table.offer(id, stream)
+/// A transfer link holding its phone's turn until it is dropped.
+struct Turned<S> {
+    stream: S,
+    _turn: tokio::sync::OwnedSemaphorePermit,
+}
+
+impl<S: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for Turned<S> {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.stream).poll_read(cx, buf)
+    }
+}
+
+impl<S: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for Turned<S> {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        std::pin::Pin::new(&mut self.stream).poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.stream).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.stream).poll_shutdown(cx)
     }
 }
 
@@ -131,6 +174,19 @@ impl OpenLinkStream for BluetoothLinks {
         // Checked before the phone is asked: the key the control link
         // proved, held to the bound one.
         let tls = crate::plugins::share::transfer_tls(&*control).map_err(std::io::Error::other)?;
+        // The phone's previous transfer link must close first: one RFCOMM
+        // connection per channel.
+        let turn = match tokio::time::timeout(TURN_WAIT, self.turn.clone().acquire_owned()).await {
+            Ok(Ok(turn)) => turn,
+            Ok(Err(_)) => return Err(std::io::Error::other("the Bluetooth link is closed")),
+            Err(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "another file is still crossing over Bluetooth; this one waited its turn \
+                     too long",
+                ));
+            }
+        };
         let (waiting, arrived) = self.table.wait();
         let ask =
             NetworkPacket::new(LINK_PACKET).with_body(serde_json::json!({ "id": waiting.id }));
@@ -153,7 +209,10 @@ impl OpenLinkStream for BluetoothLinks {
         let stream = crate::plugins::share::transfer_tls_on(stream, link_name(), tls)
             .await
             .map_err(std::io::Error::other)?;
-        Ok(Box::new(stream))
+        Ok(Box::new(Turned {
+            stream,
+            _turn: turn,
+        }))
     }
 
     fn admitted(&self, control: Weak<dyn DeviceSender>) {
@@ -254,7 +313,7 @@ mod tests {
         });
         let id = asked_id(&asked.recv().await.unwrap());
         let (computer_end, phone_end) = tokio::io::duplex(64 * 1024);
-        assert!(links.offer(id, computer_end));
+        assert!(links.table.offer(id, computer_end));
         let mut phone_side = phone_answers(phone, phone_end).await.unwrap();
         let mut opened = opening.await.unwrap().expect("the link, inside TLS");
         phone_side.write_all(b"from the phone").await.unwrap();
@@ -263,7 +322,65 @@ mod tests {
         opened.read_exact(&mut got).await.unwrap();
         assert_eq!(&got, b"from the phone");
         let (again, _) = tokio::io::duplex(1024);
-        assert!(!links.offer(id, again), "an id is taken once");
+        assert!(!links.table.offer(id, again), "an id is taken once");
+    }
+
+    /// Open one link, the phone answering as it should.
+    async fn open_one(
+        links: &Arc<BluetoothLinks>,
+        asked: &mut tokio::sync::mpsc::UnboundedReceiver<NetworkPacket>,
+    ) -> (
+        Box<dyn TransferIo>,
+        tokio_rustls::server::TlsStream<DuplexStream>,
+    ) {
+        let opening = tokio::spawn({
+            let links = links.clone();
+            async move { links.open().await }
+        });
+        let id = asked_id(&asked.recv().await.unwrap());
+        let (computer_end, phone_end) = tokio::io::duplex(64 * 1024);
+        assert!(links.table.offer(id, computer_end));
+        let phone_side = phone_answers(&phone_certs().0, phone_end).await.unwrap();
+        (opening.await.unwrap().unwrap(), phone_side)
+    }
+
+    /// RFCOMM takes one connection per channel: the next link is asked for
+    /// only once the last one is closed.
+    #[tokio::test]
+    async fn one_link_at_a_time() {
+        let _state = crate::state::use_test_dirs();
+        let (links, mut asked, _control) = admitted(phone_certs().0.cert_fingerprint());
+        let (first, _phone_side) = open_one(&links, &mut asked).await;
+        let second = tokio::spawn({
+            let links = links.clone();
+            async move { links.open().await }
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            asked.try_recv().is_err(),
+            "not asked while the first is open"
+        );
+        drop(first);
+        let id = tokio::time::timeout(Duration::from_secs(5), asked.recv())
+            .await
+            .expect("asked once the first closed")
+            .map(|p| asked_id(&p))
+            .unwrap();
+        let (computer_end, phone_end) = tokio::io::duplex(64 * 1024);
+        assert!(links.table.offer(id, computer_end));
+        let _phone_side = phone_answers(&phone_certs().0, phone_end).await.unwrap();
+        assert!(second.await.unwrap().is_ok());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_link_waiting_too_long_for_its_turn_says_why() {
+        let _state = crate::state::use_test_dirs();
+        let (links, mut asked, _control) = admitted(phone_certs().0.cert_fingerprint());
+        let (_first, _phone_side) = open_one(&links, &mut asked).await;
+        let error = links.open().await.err().expect("no turn came");
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert!(error.to_string().contains("another file"), "{error}");
+        assert!(asked.try_recv().is_err(), "the phone was never asked");
     }
 
     #[tokio::test]
@@ -277,7 +394,7 @@ mod tests {
         });
         let id = asked_id(&asked.recv().await.unwrap());
         let (computer_end, phone_end) = tokio::io::duplex(64 * 1024);
-        assert!(links.offer(id, computer_end));
+        assert!(links.table.offer(id, computer_end));
         let _ = phone_answers(stranger, phone_end).await;
         assert!(opening.await.unwrap().is_err());
     }
@@ -291,14 +408,14 @@ mod tests {
         assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
         let id = asked_id(&asked.recv().await.unwrap());
         let (late, _) = tokio::io::duplex(1024);
-        assert!(!links.offer(id, late), "the id waits no longer");
+        assert!(!links.table.offer(id, late), "the id waits no longer");
     }
 
     #[tokio::test]
     async fn offer_unknown_id_is_refused() {
-        let links = BluetoothLinks::new(Arc::default());
+        let table = LinkTable::default();
         let (computer_end, mut phone_end) = tokio::io::duplex(1024);
-        assert!(!links.offer(7, computer_end));
+        assert!(!table.offer(7, computer_end));
         let mut rest = Vec::new();
         phone_end.read_to_end(&mut rest).await.unwrap();
         assert!(rest.is_empty(), "the stream was dropped");

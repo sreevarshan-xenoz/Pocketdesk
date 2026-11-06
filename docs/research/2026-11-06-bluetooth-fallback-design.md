@@ -240,6 +240,9 @@ the designer's calls, made so nothing stays open; the owner can overturn any.
    link already open), so the control wire is not changed and needs no new
    version. Phase 2's video follows the same pattern (its own RFCOMM
    connection) unless measuring shows one link is better.
+   *Corrected 2026-11-06:* RFCOMM allows one connection per channel per
+   device pair, so transfers use a second service, its UUID derived from the
+   control service's (`link_uuid`), one at a time per phone.
 4. **"About 10 s" is a target, not a hard limit.** Plain tries in order (home,
    internet, Bluetooth), with one change: when the phone knows it has no usable
    network at all, it skips straight to Bluetooth. The device checks report the

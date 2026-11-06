@@ -1063,10 +1063,12 @@ pub(crate) enum Route {
         tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
     },
     /// A stream on the phone's own control connection, by the internet road
-    /// (2c): iroh proved both keys, and nothing dials back across a NAT. By
-    /// the Bluetooth road, a transfer link the phone opens, inside the
-    /// transfer's TLS (`bluetooth::BluetoothLinks`).
+    /// (2c): iroh proved both keys, and nothing dials back across a NAT.
     Link(std::sync::Arc<dyn OpenLinkStream>),
+    /// By the Bluetooth road: a transfer link the phone opens when asked,
+    /// inside the transfer's TLS (`bluetooth::BluetoothLinks`), which keeps
+    /// its own deadlines (its turn, the phone's link, the TLS).
+    Bluetooth(std::sync::Arc<dyn OpenLinkStream>),
     /// A stream another of the owner's computers opened on this one's link
     /// to it (2h), its key line already read: that end presented the key.
     Arrived(std::sync::Mutex<Option<Box<dyn TransferIo>>>),
@@ -1076,7 +1078,8 @@ impl std::fmt::Display for Route {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Dial { to, .. } => write!(f, "{to}"),
-            Self::Link(_) => f.write_str("the phone's own link"),
+            Self::Link(_) => f.write_str("the phone's link by the internet road"),
+            Self::Bluetooth(_) => f.write_str("the phone's Bluetooth link"),
             Self::Arrived(_) => f.write_str("the link to the other computer"),
         }
     }
@@ -1110,11 +1113,11 @@ impl Route {
                 .take()
                 .ok_or_else(|| io_error("open", "the stream was used")),
             Self::Dial { to, tls } => Ok(Box::new(dial_transfer(*to, tls.clone()).await?)),
-            // The Bluetooth road waits for the phone's link, then its TLS.
-            Self::Link(link) => tokio::time::timeout(2 * CONNECT_TIMEOUT, link.open())
+            Self::Link(link) => tokio::time::timeout(CONNECT_TIMEOUT, link.open())
                 .await
                 .map_err(|_| io_error("open", "timed out"))?
                 .map_err(|e| io_error("open", e)),
+            Self::Bluetooth(link) => link.open().await.map_err(|e| io_error("open", e)),
         }
     }
 }
@@ -1175,7 +1178,7 @@ fn files_reach_with(sender: &dyn DeviceSender, internet_files: bool) -> bool {
 /// phone shows it.
 ///
 /// [`TRANSFER_MAX`]: pocketdesk_core::protocol::bluetooth::TRANSFER_MAX
-pub(crate) const WAITS_FOR_WIFI: &str = "over 8 MB over Bluetooth: the file waits for Wi-Fi";
+pub(crate) const WAITS_FOR_WIFI: &str = "over 8 MiB over Bluetooth: the file waits for Wi-Fi";
 
 /// Whether a transfer of `size` bytes may go on `sender`'s road: at most
 /// [`TRANSFER_MAX`] on the Bluetooth road (the link that proves the phone
@@ -1216,6 +1219,9 @@ pub(crate) fn route(reach: Reach, sender: &dyn DeviceSender) -> std::result::Res
                 return Err("the phone's connection proved no key".to_string());
             };
             crate::plugins::pair::may_transfer(sender.device_id(), &key)?;
+            if sender.nearby_by_radio() {
+                return Ok(Route::Bluetooth(link));
+            }
             Ok(Route::Link(link))
         }
     }

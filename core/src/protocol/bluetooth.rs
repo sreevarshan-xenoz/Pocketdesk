@@ -4,8 +4,9 @@
 //! The computer listens on an RFCOMM service with Pocketdesk's own UUID; a
 //! bonded phone dials it. Over that stream the control link is the one at
 //! home: TLS with the pinned certificate, then the usual handshake. A file
-//! transfer opens a second RFCOMM connection to the same service whose
-//! first line is the link hello ([`format_link_hello`]).
+//! transfer opens a second RFCOMM connection, to the transfer service
+//! ([`link_uuid`]: RFCOMM carries one connection per channel between two
+//! devices), whose first line is the link hello ([`format_link_hello`]).
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -62,6 +63,21 @@ pub fn parse_address(text: &str) -> Option<[u8; 6]> {
     parts.next().is_none().then_some(bytes)
 }
 
+/// The transfer service's name in its SDP record.
+pub const LINK_SERVICE_NAME: &str = "Pocketdesk transfers";
+
+/// The UUID of the transfer service that goes with the control service
+/// `service`: the same UUID with the lowest bit of its last byte flipped.
+/// RFCOMM carries one connection per channel between two devices, so a
+/// transfer cannot open on the control link's own channel; it opens on this
+/// second service. Both ends work it out from the control service, so a
+/// throwaway's override separates its transfers too. Never `service` itself.
+pub fn link_uuid(service: Uuid) -> Uuid {
+    let mut bytes = *service.as_bytes();
+    bytes[15] ^= 0x01;
+    Uuid::from_bytes(bytes)
+}
+
 /// The first word of a transfer connection's first line: it says this
 /// RFCOMM connection carries a transfer for a control link already open.
 pub const LINK_HELLO: &str = "POCKETDESK-BT-LINK";
@@ -85,7 +101,8 @@ pub fn parse_link_hello(line: &str) -> Option<u64> {
 
 /// Computer → phone, over a Bluetooth control link: open a transfer
 /// connection for link `{id}` (a `u64`). The phone opens a second RFCOMM
-/// connection to the service, sends the link hello with that id, and then
+/// connection to the transfer service ([`link_uuid`]), sends the link hello
+/// with that id, and then
 /// answers the computer's TLS as its transfer listener does at home.
 pub const LINK_PACKET: &str = "kdeconnect.pocketdesk.bluetooth.link";
 
@@ -110,6 +127,25 @@ mod tests {
         assert_eq!(service_uuid_from(Some("")), SERVICE_UUID);
         assert_eq!(service_uuid_from(None), SERVICE_UUID);
         assert!(Uuid::parse_str(SERVICE_UUID).is_ok(), "the default parses");
+    }
+
+    #[test]
+    fn the_transfer_service_is_derived_and_never_the_control_one() {
+        let control = Uuid::parse_str(SERVICE_UUID).unwrap();
+        assert_eq!(
+            link_uuid(control),
+            Uuid::parse_str("b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b12").unwrap()
+        );
+        for service in [control, Uuid::nil(), Uuid::max(), Uuid::new_v4()] {
+            assert_ne!(link_uuid(service), service);
+            assert_eq!(link_uuid(link_uuid(service)), service, "one bit, both ways");
+        }
+        let other = Uuid::parse_str("0f1e2d3c-4b5a-4968-8776-655443322110").unwrap();
+        assert_ne!(
+            link_uuid(other),
+            link_uuid(control),
+            "an override separates them"
+        );
     }
 
     #[test]
