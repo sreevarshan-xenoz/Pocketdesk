@@ -297,16 +297,29 @@ pub fn frame_in_picture(window: &Window, picture: (u32, u32)) -> Option<(u32, u3
     if (pw * bh).abs_diff(ph * bw) > bw.max(bh) * 2 {
         return None;
     }
-    let along = |at: i32, size: u32, picture: u32| {
-        let at = u64::from(at.max(0) as u32) * u64::from(picture) / u64::from(size);
-        u32::try_from(at).ok()
+    // A picture within a pixel or two of the buffer is the buffer at scale
+    // 1 (mutter rounds its rectangles apart by a pixel): the frame's own
+    // pixels, unscaled. Otherwise each side is scaled by the picture's.
+    let one = |picture: u32, size: u32| picture.abs_diff(size) <= 2;
+    let scale = |at: u64, size: u32, picture: u32| {
+        if one(picture, size) {
+            u32::try_from(at).ok()
+        } else {
+            u32::try_from(at * u64::from(picture) / u64::from(size)).ok()
+        }
     };
-    let x = along(window.frame.0 - buffer.0, buffer.2, picture.0)?;
-    let y = along(window.frame.1 - buffer.1, buffer.3, picture.1)?;
-    let w = u32::try_from(u64::from(window.frame.2) * u64::from(picture.0) / u64::from(buffer.2))
-        .ok()?;
-    let h = u32::try_from(u64::from(window.frame.3) * u64::from(picture.1) / u64::from(buffer.3))
-        .ok()?;
+    let x = scale(
+        u64::from((window.frame.0 - buffer.0).max(0) as u32),
+        buffer.2,
+        picture.0,
+    )?;
+    let y = scale(
+        u64::from((window.frame.1 - buffer.1).max(0) as u32),
+        buffer.3,
+        picture.1,
+    )?;
+    let w = scale(u64::from(window.frame.2), buffer.2, picture.0)?.min(picture.0.saturating_sub(x));
+    let h = scale(u64::from(window.frame.3), buffer.3, picture.1)?.min(picture.1.saturating_sub(y));
     (w > 0 && h > 0 && x + w <= picture.0 && y + h <= picture.1).then_some((x, y, w, h))
 }
 
@@ -918,6 +931,16 @@ mod tests {
         let w = shadowed();
         assert_eq!(frame_offset(&w), (14, 14));
         assert_eq!(frame_in_picture(&w, (668, 508)), Some((14, 14, 640, 480)));
+        // Mutter's buffer a pixel off the picture (509 tall, 508 drawn): the
+        // frame's own size, not scaled down to an odd one.
+        let rounded = Window {
+            buffer: Some((305, 89, 668, 509)),
+            ..win(1, 7, (319, 101, 640, 480), true)
+        };
+        assert_eq!(
+            frame_in_picture(&rounded, (668, 508)),
+            Some((14, 12, 640, 480))
+        );
         // At twice the scale the cut is twice as far in and as big.
         assert_eq!(
             frame_in_picture(&w, (1336, 1016)),

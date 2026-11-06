@@ -17,7 +17,7 @@ with every click and key kept to that window.
 
 | Call | Answer |
 |---|---|
-| `List() -> aa{sv}` | each ordinary top-level window: `id` (t, mutter's id, the one ScreenCast `RecordWindow` takes), `title`, `app`, `pid`, `x`, `y`, `width`, `height`, `minimized`, `hidden`, `focus` (it, or a dialog of it of the same program, has the keyboard), `stack` (0 is the bottom) |
+| `List() -> aa{sv}` | each ordinary top-level window: `id` (t, mutter's id, the one ScreenCast `RecordWindow` takes), `title`, `app`, `pid`, `x`, `y`, `width`, `height` (its frame), `buffer-x`, `buffer-y`, `buffer-width`, `buffer-height` (its buffer: the frame and, for a client-side decorated window, the shadow round it, which is what a window's stream shows), `minimized`, `hidden`, `focus` (it, or a dialog of it of the same program, has the keyboard), `stack` (0 is the bottom) |
 | `HitTest(x: i, y: i) -> a(tu)` | the window the stage gives a click at that pixel, then the windows it is a dialog or popup of, as `(id, pid)`; empty when what is there is not a window (top bar, overview, a Shell menu, the lock screen) |
 | `Activate(id: t) -> b` | raise and focus that listed window (bringing it back if minimised); the only call that changes anything |
 | `Layout() -> (iiuu)` | the box round every monitor |
