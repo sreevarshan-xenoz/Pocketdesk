@@ -1276,10 +1276,10 @@ static RECORDING: LazyLock<Mutex<std::collections::HashSet<String>>> =
     LazyLock::new(Default::default);
 
 /// A computer being recorded, while held.
-struct Recording(String);
+pub(crate) struct Recording(String);
 
 impl Recording {
-    fn begin(device_id: &str) -> Self {
+    pub(crate) fn begin(device_id: &str) -> Self {
         RECORDING
             .lock()
             .unwrap_or_else(|e| e.into_inner())

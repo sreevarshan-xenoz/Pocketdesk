@@ -1921,7 +1921,10 @@ where
                 // a PIN re-pair (pairing happens at home), and so does one
                 // of the owner's computers being recorded as paired both
                 // ways. The radio's own bond is not the phone's key.
+                // Phones only: one of the owner's computers is refused here
+                // (also in `bluetooth_may_act`), as one being recorded is.
                 let admitted = !crate::peer_computers::being_recorded(&device_id)
+                    && !crate::plugins::pair::is_computer_device(&device_id)
                     && crate::plugins::pair::bluetooth_may_act(&device_id, peer_key.as_ref());
                 if !admitted {
                     tracing::warn!(
@@ -3348,6 +3351,8 @@ mod bluetooth_control_tests {
         before_identity: Vec<String>,
         /// The desktop's line after the phone's identity.
         answer: Option<String>,
+        /// Lines the desktop sent after its identity, once admitted.
+        after: Vec<String>,
         /// Packet types the desktop's plugins saw.
         seen: Vec<String>,
         /// Whether the connection's sender reached the link, and said it is
@@ -3435,6 +3440,7 @@ mod bluetooth_control_tests {
             .as_deref()
             .is_some_and(|line| line.contains("kdeconnect.identity"));
         let mut admitted_by_radio = None;
+        let mut after = Vec::new();
         if admitted {
             let line = NetworkPacket::new(packet_type)
                 .with_body(serde_json::json!({ "pair": true }))
@@ -3444,6 +3450,11 @@ mod bluetooth_control_tests {
             write.flush().await.unwrap();
             tokio::time::sleep(Duration::from_millis(500)).await;
             admitted_by_radio = link.control().map(|sender| sender.nearby_by_radio());
+            while let Ok(Ok(Some(line))) =
+                timeout(Duration::from_millis(500), lines.next_line()).await
+            {
+                after.push(line);
+            }
         }
         let _ = write.shutdown().await;
         drop(write);
@@ -3453,6 +3464,7 @@ mod bluetooth_control_tests {
         Dialed {
             before_identity,
             answer,
+            after,
             seen,
             admitted_by_radio,
             link,
@@ -3524,6 +3536,120 @@ mod bluetooth_control_tests {
             again.answer.as_deref(),
             Some(pocketdesk_core::protocol::HANDSHAKE_REFUSED)
         );
+    }
+
+    /// The road is for phones only: one of the owner's computers, paired
+    /// with its TLS key bound and matching, is refused as a wrong key is
+    /// (on it, it could register an iroh key, as only the home network may).
+    #[tokio::test]
+    async fn bluetooth_refuses_a_computer() {
+        let _state = crate::state::use_test_dirs();
+        let id = format!("bluetooth-{}", uuid::Uuid::new_v4().simple());
+        let computer = CertManager::new().unwrap();
+        paired_with_tls_key(&id, computer.cert_fingerprint());
+        TrustStore::update(state::trust_store_path().unwrap(), |store| {
+            store.trust_computer(id.as_str())
+        })
+        .unwrap();
+        assert!(crate::plugins::pair::is_computer_device(&id));
+        let dialed = dial(&id, &computer, "kdeconnect.ping", true).await;
+        assert_eq!(
+            dialed.answer.as_deref(),
+            Some(pocketdesk_core::protocol::HANDSHAKE_REFUSED)
+        );
+        assert!(
+            dialed.seen.is_empty(),
+            "nothing dispatched: {:?}",
+            dialed.seen
+        );
+        assert!(!dialed.link.was_admitted(), "nothing registered");
+    }
+
+    /// Rule 4 (the computer-to-computer rules as the internet road): a
+    /// device this computer is recording as paired both ways is refused
+    /// meanwhile, though paired with its key bound and matching.
+    #[tokio::test]
+    async fn bluetooth_refuses_one_being_recorded() {
+        let _state = crate::state::use_test_dirs();
+        let id = format!("bluetooth-{}", uuid::Uuid::new_v4().simple());
+        let phone = CertManager::new().unwrap();
+        paired_with_tls_key(&id, phone.cert_fingerprint());
+        let recording = crate::peer_computers::Recording::begin(&id);
+        let dialed = dial(&id, &phone, "kdeconnect.ping", true).await;
+        assert_eq!(
+            dialed.answer.as_deref(),
+            Some(pocketdesk_core::protocol::HANDSHAKE_REFUSED)
+        );
+        assert!(dialed.seen.is_empty());
+        assert!(!dialed.link.was_admitted());
+        drop(recording);
+        let dialed = dial(&id, &phone, "kdeconnect.ping", true).await;
+        assert_eq!(dialed.admitted_by_radio, Some(true), "let in once recorded");
+    }
+
+    /// Rule 4 (wake info as the internet road): an admitted phone is sent
+    /// no `wake_info` over Bluetooth, where the home road sends it one.
+    #[tokio::test]
+    async fn bluetooth_sends_no_wake_info() {
+        use tokio::io::AsyncBufReadExt;
+        let _state = crate::state::use_test_dirs();
+        let id = format!("bluetooth-{}", uuid::Uuid::new_v4().simple());
+        let phone = CertManager::new().unwrap();
+        paired_with_tls_key(&id, phone.cert_fingerprint());
+        let dialed = dial(&id, &phone, "kdeconnect.ping", true).await;
+        assert_eq!(dialed.admitted_by_radio, Some(true), "admitted");
+        let wake = |lines: &[String]| {
+            lines.iter().any(|line| {
+                NetworkPacket::from_wire(line)
+                    .is_ok_and(|packet| packet.packet_type == crate::wake_info::WAKE_INFO)
+            })
+        };
+        assert!(!wake(&dialed.after), "over Bluetooth: {:?}", dialed.after);
+
+        // The same phone on the home road is told: the check above can see it.
+        let (client, server) = tokio::io::duplex(64 * 1024);
+        let registry = Arc::new(PluginRegistry::default());
+        let served = tokio::spawn(async move {
+            serve_control(
+                server,
+                Road::Local {
+                    peer: Some("192.0.2.7:50000".parse().unwrap()),
+                    local: Some("192.0.2.1".parse().unwrap()),
+                },
+                None,
+                None,
+                Some(pocketdesk_core::streaming::PeerKey::Tls(
+                    phone.cert_fingerprint(),
+                )),
+                None,
+                &registry,
+                None,
+                None,
+                true,
+            )
+            .await
+        });
+        let (read, mut write) = tokio::io::split(client);
+        let mut lines = BufReader::new(read).lines();
+        write
+            .write_all(format!("{HANDSHAKE_HELLO}\n").as_bytes())
+            .await
+            .unwrap();
+        let identity =
+            pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(&id, "Radio Phone")
+                .as_identity_packet();
+        write.write_all(&identity.to_wire().unwrap()).await.unwrap();
+        let mut home = Vec::new();
+        while let Ok(Ok(Some(line))) = timeout(Duration::from_secs(2), lines.next_line()).await {
+            home.push(line);
+            if wake(&home) {
+                break;
+            }
+        }
+        assert!(wake(&home), "on the home road: {home:?}");
+        drop(write);
+        drop(lines);
+        let _ = timeout(Duration::from_secs(5), served).await;
     }
 
     /// Rule 1 again: pairing packets on the road are ignored, and the
