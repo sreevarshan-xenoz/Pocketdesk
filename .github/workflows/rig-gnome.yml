@@ -102,16 +102,16 @@ jobs:
           export PD_GNOME_RIG_LENT_LOG=/tmp/lent.log PD_GNOME_RIG_COVER_LOG=/tmp/cover.log
           export PD_GNOME_RIG_SNAP=/tmp/lent.ppm
           if [ "${{ matrix.lent }}" = clicker ]; then
-            export PD_GNOME_RIG_LENT_APP=dev.pocketdesk.RigClicker PD_GNOME_RIG_COVER_APP=wev
+            export PD_GNOME_RIG_LENT_APP=org.example.RigClicker PD_GNOME_RIG_COVER_APP=wev
           fi
-          export RUST_LOG=info
+          export RUST_LOG=info,pocketdesk_core::streaming=debug
           cargo test -p pocketdesk-server --test lend_window_gnome_live -- --ignored --nocapture --test-threads=1
 
       - name: Logs
         if: always()
         run: |
           for f in /tmp/gnome-shell.log /tmp/pipewire.log /tmp/wireplumber.log /tmp/lent.log /tmp/cover.log; do
-            echo "=== $f"; tail -n 80 "$f" || true
+            echo "=== $f"; if [ "${f#/tmp/gnome}" = "$f" ]; then cat "$f"; else tail -n 80 "$f"; fi || true
           done
 
       - name: Upload the rig's files

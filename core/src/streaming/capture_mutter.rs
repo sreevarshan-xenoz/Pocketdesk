@@ -857,9 +857,12 @@ async fn apply_window_packet(
                 .and_then(|all| all.into_iter().find(|w| w.id == id))
                 .filter(visible)
                 .map(|w| w.frame);
-            match placement.moved(frame.and_then(|frame| local_pointer((x_norm, y_norm), frame))) {
+            let local = frame.and_then(|frame| local_pointer((x_norm, y_norm), frame));
+            eprintln!("RIGDBG move norm=({x_norm},{y_norm}) frame={frame:?} local={local:?}");
+            match placement.moved(local) {
                 Some((x, y)) => {
                     let moved = input.move_to(f64::from(x), f64::from(y)).await;
+                    eprintln!("RIGDBG move_to({x},{y}) on {:?} -> {:?}", input.stream, moved.as_ref().err());
                     if moved.is_err() {
                         placement.failed();
                     }
@@ -871,10 +874,13 @@ async fn apply_window_packet(
         other => {
             let mut result = Ok(());
             for event in window_events(&other) {
-                if !placement.allows(&event) || (releases_only && !is_release(&event)) {
+                let allowed = placement.allows(&event);
+                eprintln!("RIGDBG event {event:?} allowed={allowed}");
+                if !allowed || (releases_only && !is_release(&event)) {
                     continue;
                 }
                 result = input.apply(rest, event).await;
+                eprintln!("RIGDBG applied -> {:?}", result.as_ref().err());
                 if result.is_err() {
                     break;
                 }
