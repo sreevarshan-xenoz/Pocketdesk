@@ -6,9 +6,10 @@ adb, against a throwaway server that is already paired with that phone:
 `--server-root` is a folder holding `state/` and `config/` (made once by
 pairing by hand). The server runs with the clipboard seam, the phone's input
 off in its trust store, and `adb reverse` from the phone's saved port to the
-throwaway's. Every wait has a deadline. Pocketdesk is never force-stopped
-(on ColorOS that turns its Accessibility service off): a check whose switch
-is off on the phone is SKIPped, saying what to turn on.
+throwaway's (the Bluetooth checks, §286, take it away for their part).
+Every wait has a deadline. Pocketdesk is never force-stopped (on ColorOS
+that turns its Accessibility service off): a check whose switch is off on
+the phone is SKIPped, saying what to turn on.
 
     python scripts/device_checks.py --server-root DIR --server-exe PATH [--only ID ...]
     python scripts/device_checks.py --list
@@ -20,6 +21,7 @@ when no check FAILed or TIMEd OUT.
 from __future__ import annotations
 
 import argparse
+import calendar
 import hashlib
 import html
 import http.client
@@ -45,6 +47,12 @@ FIXTURE = "dev.pocketdesk.fixture"
 DUMP = "/data/local/tmp/device_checks.xml"
 # A moment more once the control service says it is back.
 SETTLE = 0.5
+# §286: every throwaway's Bluetooth service (POCKETDESK_BT_SERVICE_UUID), so
+# it listens beside the owner's own server and never on its service. Not the
+# default service, nor the default's transfer service (`…4b12`), which the
+# server refuses (test_device_checks.py holds it to that).
+BT_TEST_SERVICE = "6c0f7a52-3e19-4d8b-a2c4-5f81d9e03b70"
+BT_DEFAULT_SERVICE = "b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b13"
 
 
 # ---- pure parts (tested in scripts/test_device_checks.py) ----
@@ -473,6 +481,9 @@ class Server:
             # BF2: a peek is this picture, never this computer's screen (with
             # no file there, it is refused, not taken from the screen).
             "POCKETDESK_PEEK_FILE": str(self.root / "peek.png"),
+            # §286: the Bluetooth road on a service of its own, never the
+            # owner's server's, whatever the check.
+            "POCKETDESK_BT_SERVICE_UUID": BT_TEST_SERVICE,
         }
 
     def cli(self, *args: str) -> tuple[int, str]:
@@ -6533,6 +6544,422 @@ def az1_shortcut_paired_id(ctx: Ctx) -> tuple[str, str]:
         return "PASS", ("one made for another paired id opened nothing; one made for the throwaway's opened "
                         "its session; the app's own names it by its paired id")
     return session_check(ctx, body)
+
+
+# ---- Bluetooth when Wi-Fi drops (§286) ----
+#
+# The phone keeps its link to the throwaway over Bluetooth once Wi-Fi is
+# gone. They need the OPPO bonded with this Windows computer in the system's
+# Bluetooth settings, and run only when named (LONG): each restarts adb's
+# server and turns the phone's Wi-Fi off. What they may do here (the design's
+# call 5): never turn this computer's Bluetooth radio off and never unpair
+# anything (it would drop the owner's own devices). The throwaway listens on
+# BT_TEST_SERVICE, never the owner's server's service; "nothing pretends to
+# be connected" is checked by the throwaway's own switch. The phone's Wi-Fi
+# goes off with `svc wifi disable` and every check turns it back on.
+#
+# In this rig the home road is `adb reverse`, and it rides USB, so Wi-Fi off
+# alone does not end it: the reverse is removed and adb's server restarted,
+# which closes the link made through it (as AG1 does). With Wi-Fi off and no
+# reverse the phone has no road but Bluetooth (the throwaway's internet road
+# is turned off for these checks, in case the phone has mobile data). Home
+# coming back is the reverse put back with Wi-Fi on: home over the real
+# Wi-Fi is a check by hand (§286).
+
+
+def unansi(log: str) -> str:
+    """The server's log without its colour codes."""
+    return re.sub(chr(27) + r"\[[0-9;]*m", "", log)
+
+
+def stamp_unix(line: str) -> Optional[float]:
+    """A server log line's time (its RFC 3339 UTC stamp), in Unix seconds."""
+    found = re.match(r"\s*(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)(\.\d+)?Z", line)
+    if not found:
+        return None
+    year, month, day, hours, minutes, seconds = (int(g) for g in found.groups()[:6])
+    whole = calendar.timegm((year, month, day, hours, minutes, seconds, 0, 0, 0))
+    return whole + float(found.group(7) or 0)
+
+
+def loop_stamps(log: str, transport: str) -> list[Optional[float]]:
+    """When each control link by `transport` (`tcp` home, `iroh`, `bluetooth`)
+    entered its packet loop, as the server's log says, oldest first."""
+    return [stamp_unix(line) for line in unansi(log).splitlines()
+            if "Entering main packet loop" in line and f'transport="{transport}"' in line]
+
+
+def line_stamps(log: str, words: str) -> list[Optional[float]]:
+    """When the server's log said `words`, oldest first."""
+    return [stamp_unix(line) for line in unansi(log).splitlines() if words in line]
+
+
+def bluetooth_state(out: str) -> Optional[str]:
+    """How `pocketdesk status --json` says the Bluetooth road stands
+    (`listening`, `no_radio`, `off`, `unsupported`); None when it says
+    nothing (a server that is not running)."""
+    for line in out.splitlines():
+        if line.startswith('{"api"'):
+            try:
+                return json.loads(line).get("bluetooth")
+            except ValueError:
+                return None
+    return None
+
+
+def bt_service(raw: Optional[object]) -> Optional[str]:
+    """The service a saved computer's Bluetooth info names (HostStore's
+    `bluetooth:<address>`, `{address, service, link}`), lower case."""
+    if not isinstance(raw, str):
+        return None
+    try:
+        service = json.loads(raw).get("service")
+    except (ValueError, AttributeError):
+        return None
+    return service.lower() if isinstance(service, str) else None
+
+
+def link_uuid(service: str) -> str:
+    """The transfer service that goes with `service`: the lowest bit of its
+    last byte flipped (core::protocol::bluetooth::link_uuid)."""
+    return service[:-1] + format(int(service[-1], 16) ^ 1, "x")
+
+
+def phone_seconds() -> float:
+    """The phone's time of day, in seconds (as logcat's lines say it)."""
+    now = adb("shell", "date", "+%H:%M:%S.%N").strip()
+    hours, minutes, seconds = now.split(":")
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds[:6])
+
+
+def first_line(tag: str, words: str, after: float) -> Optional[tuple[float, str]]:
+    """The first line of `tag` since the last logcat clear that says `words`,
+    at or after `after` (seconds of the day), with its time."""
+    for line in adb("logcat", "-d", "-s", f"{tag}:*").splitlines():
+        at = log_seconds(line)
+        if at is not None and (at - after) % 86400 < 43200 and words in line:
+            return at, line
+    return None
+
+
+def phone_log_of(tag: str) -> str:
+    """The last line `tag` logged since the last clear, its words only."""
+    lines = [line for line in adb("logcat", "-d", "-s", f"{tag}:*").splitlines() if tag in line and ": " in line]
+    return lines[-1].split(": ", 1)[-1].strip() if lines else ""
+
+
+def wifi(on: bool) -> None:
+    adb("shell", "svc", "wifi", "enable" if on else "disable")
+
+
+BT_TARGET = 10
+BT_LIMIT = 20
+BT_HOME_LIMIT = 30
+
+
+def bt_phone_ready(ctx: Ctx) -> Optional[str]:
+    """Why the phone cannot take the Bluetooth road now, if it cannot."""
+    if os.environ.get("ANDROID_SERIAL", "").count(":"):
+        return "the phone is on wireless adb: Wi-Fi off and adb's restart would lose it"
+    if ctx.phone.prefs("pocketdesk-ui").get("bluetooth_fallback") is False:
+        return "turn on Keep working over Bluetooth when Wi-Fi drops in the phone's Settings"
+    if ctx.phone.sdk() >= 31 and not ctx.phone.granted("android.permission.BLUETOOTH_CONNECT"):
+        return "allow Pocketdesk Nearby devices on the phone (its Bluetooth switch asks)"
+    if adb("shell", "settings", "get", "global", "bluetooth_on").strip() != "1":
+        return "turn the phone's Bluetooth on (and bond it with this computer once)"
+    return None
+
+
+def bt_listening(ctx: Ctx) -> Optional[str]:
+    return bluetooth_state(ctx.server.cli("status", "--json")[1])
+
+
+def knows_bt(ctx: Ctx) -> bool:
+    """The phone has the throwaway's Bluetooth service with its card."""
+    raw = ctx.phone.prefs("pocketdesk-host").get("bluetooth:127.0.0.1")
+    return bt_service(raw) == BT_TEST_SERVICE
+
+
+def bt_check(ctx: Ctx, body: Callable[[Ctx], tuple[str, str]]) -> tuple[str, str]:
+    """Run `body` from a home link to a throwaway that listens over
+    Bluetooth on BT_TEST_SERVICE, with its internet road off and the phone
+    told where to dial it; then Wi-Fi on, the reverse back, the throwaway's
+    config as it was, and the phone at home again, whatever `body` did."""
+    why = bt_phone_ready(ctx)
+    if why:
+        return "SKIP", why
+    before = None
+    try:
+        ctx.server.stop()
+        before = ctx.server.configure({"internet_path": "false"})
+        why = by_home(ctx)
+        if why:
+            return "TIMEOUT", why
+        state = wait_for(lambda: bt_listening(ctx) == "listening" and "listening", 20, 1)
+        if not state:
+            return "SKIP", (f"the throwaway does not listen over Bluetooth (status says {bt_listening(ctx)!r}):"
+                            " it needs Windows with its radio on")
+        if not wait_for(lambda: knows_bt(ctx), 15, 1):
+            # Linked before the listener started: told on the next link.
+            why = by_home(ctx)
+            if why:
+                return "TIMEOUT", why
+            if not wait_for(lambda: knows_bt(ctx), 30, 2):
+                return "FAIL", f"the phone was not told the throwaway's Bluetooth service {BT_TEST_SERVICE} at home"
+        return body(ctx)
+    finally:
+        # Each step whatever the one before did; Wi-Fi first.
+        steps = [
+            lambda: wifi(True),
+            lambda: before is not None and ctx.server.restore_config(before),
+        ]
+        for step in steps:
+            try:
+                step()
+            except (OSError, ValueError) as error:
+                print(f"note: a §286 cleanup step failed: {error}", file=sys.stderr)
+        why = by_home(ctx)
+        if why:
+            print(f"note: after a §286 check, {why}", file=sys.stderr)
+
+
+def onto_bluetooth(ctx: Ctx) -> tuple[Optional[float], str]:
+    """From the home link: Wi-Fi off, the reverse removed, adb's server
+    restarted (which ends the link made through the reverse): the seconds
+    from that cut to the throwaway's log saying a control link over
+    Bluetooth entered its loop, or None within 60 s, and what was seen."""
+    log = ctx.server.log
+    links = len(loop_stamps(log(), "bluetooth"))
+    adb("logcat", "-c")
+    off_phone = phone_seconds()
+    wifi(False)
+    adb("reverse", "--remove", f"tcp:{ctx.phone_port}")
+    cut = time.time()
+    run(["adb", "kill-server"])
+    run(["adb", "start-server"], timeout=60)
+    run(["adb", "wait-for-device"], timeout=60)
+    if not wait_for(lambda: len(loop_stamps(log(), "bluetooth")) > links, 60, 0.5):
+        road = phone_log_of("BluetoothRoad")
+        return None, f"no control link over Bluetooth within 60 s of the cut; the phone's road last said: {road or 'nothing'}"
+    at = loop_stamps(log(), "bluetooth")[links]
+    took = (at - cut) if at is not None else None
+    phone = first_line("BluetoothRoad", "the control link runs over Bluetooth", off_phone)
+    said = (f"over Bluetooth {took:.1f} s after the cut" if took is not None else "over Bluetooth (no time in the log)")
+    if phone:
+        said += f" (the phone said so {(phone[0] - off_phone) % 86400:.1f} s after its Wi-Fi went)"
+    if not wait_for(lambda: ctx.device in ctx.server.linked(), 15, 1):
+        return None, said + ", but the phone is not linked by the server's mirror"
+    return took, said
+
+
+def only_bluetooth(ctx: Ctx, homes: int, roads: int) -> bool:
+    """No home or internet link came since the counts were taken."""
+    log = ctx.server.log()
+    return len(loop_stamps(log, "tcp")) == homes and len(loop_stamps(log, "iroh")) == roads
+
+
+def takeover_verdict(took: Optional[float]) -> str:
+    """bt1's verdict: within BT_LIMIT s passes (BT_TARGET s is the aim)."""
+    if took is None:
+        return "TIMEOUT"
+    return "PASS" if took <= BT_LIMIT else "FAIL"
+
+
+@check("bt1-takeover", "§286")
+def bt1_takeover(ctx: Ctx) -> tuple[str, str]:
+    """Wi-Fi off on the phone, its home link cut: the link comes back over
+    Bluetooth, the time said (the target 10 s; over 20 s fails)."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        took, said = onto_bluetooth(ctx)
+        aim = "" if took is None else (" (within the 10 s target)" if took <= BT_TARGET else " (over the 10 s target)")
+        return takeover_verdict(took), said + aim
+    return bt_check(ctx, body)
+
+
+@check("bt2-clipboard", "§286")
+def bt2_clipboard(ctx: Ctx) -> tuple[str, str]:
+    """Over Bluetooth alone, a copy each way: the phone's copy reaches the
+    computer, and the computer's is sent to the phone."""
+    why = copies_ready(ctx)
+    if why:
+        return "SKIP", why
+
+    def body(ctx: Ctx) -> tuple[str, str]:
+        log = ctx.server.log()
+        homes, roads = len(loop_stamps(log, "tcp")), len(loop_stamps(log, "iroh"))
+        took, said = onto_bluetooth(ctx)
+        if took is None:
+            return "TIMEOUT", said
+        token, arrived = copied(ctx)
+        back = "bt2-" + secrets.token_hex(6)
+        before = pushes(ctx.server.log(), ctx.device, len(back))
+        adb("logcat", "-c")
+        clip = ctx.server.root / "clip.txt"
+        tmp = clip.with_suffix(".tmp")
+        tmp.write_text(back, encoding="utf-8")
+        os.replace(tmp, clip)
+        sent = wait_for(lambda: pushes(ctx.server.log(), ctx.device, len(back)) > before, 20, 1)
+        took_it = wait_for(lambda: f"text put on the clipboard ({len(back)} chars)" in ctx.phone.logcat("PocketdeskClip"), 10, 1)
+        alone = only_bluetooth(ctx, homes, roads)
+        said += (f"; the phone's copy {'reached' if arrived else 'did not reach'} the computer;"
+                 f" the computer's {'was sent' if sent else 'was not sent'} to the phone"
+                 f"{' and taken' if took_it else ' (the phone did not say it took it)'}"
+                 f"{'' if alone else '; but a home or internet link came meanwhile'}")
+        return ("PASS" if arrived and sent and alone else "FAIL"), said
+    return bt_check(ctx, body)
+
+
+@check("bt3-notification", "§286")
+def bt3_notification(ctx: Ctx) -> tuple[str, str]:
+    """Over Bluetooth alone, the fixture's notification reaches the computer."""
+    why = forwarding(ctx)
+    if why:
+        return "SKIP", why
+
+    def body(ctx: Ctx) -> tuple[str, str]:
+        log = ctx.server.log()
+        homes, roads = len(loop_stamps(log, "tcp")), len(loop_stamps(log, "iroh"))
+        took, said = onto_bluetooth(ctx)
+        if took is None:
+            return "TIMEOUT", said
+        ctx.phone.wake()
+        started = time.monotonic()
+        event = fixture_note(ctx, 2863, "Bluetooth " + secrets.token_hex(2), 30)
+        if not event:
+            return "TIMEOUT", said + "; no notification reached the computer within 30 s"
+        alone = only_bluetooth(ctx, homes, roads)
+        said += f"; the notification reached the computer in {time.monotonic() - started:.1f} s"
+        return ("PASS" if alone else "FAIL"), said + ("" if alone else "; but a home or internet link came meanwhile")
+    return bt_check(ctx, body)
+
+
+@check("bt4-off-switch", "§286")
+def bt4_off_switch(ctx: Ctx) -> tuple[str, str]:
+    """Linked over Bluetooth, the throwaway's `bluetooth_fallback` turned off
+    in its config (never this computer's radio): it stops listening within
+    about a second and the link ends; for 45 s nothing links again and the
+    phone's card does not say "Over Bluetooth". Turned back on, it listens
+    again."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        took, said = onto_bluetooth(ctx)
+        if took is None:
+            return "TIMEOUT", said
+        log = ctx.server.log
+        stops = len(line_stamps(log(), "Stopped listening over Bluetooth"))
+        starts = len(line_stamps(log(), "Listening over Bluetooth for service"))
+        links = len(loop_stamps(log(), "bluetooth"))
+        off = time.time()
+        before = ctx.server.configure({"bluetooth_fallback": "false"})
+        try:
+            if not wait_for(lambda: len(line_stamps(log(), "Stopped listening over Bluetooth")) > stops, 15, 0.5):
+                return "FAIL", said + "; the throwaway did not stop listening within 15 s of its switch going off"
+            at = line_stamps(log(), "Stopped listening over Bluetooth")[stops]
+            stopped = (at - off) if at is not None else None
+            gone = wait_for(lambda: ctx.device not in ctx.server.linked(), 15, 0.5)
+            time.sleep(45)
+            again = len(loop_stamps(log(), "bluetooth")) > links or ctx.device in ctx.server.linked()
+            state = bt_listening(ctx)
+            road = phone_log_of("BluetoothRoad")
+            adb("shell", "monkey", "-p", APP, "-c", "android.intent.category.LAUNCHER", "1")
+            time.sleep(2)
+            card = "Over Bluetooth" in ctx.phone.dump()
+        finally:
+            ctx.server.restore_config(before)
+        back = wait_for(lambda: len(line_stamps(log(), "Listening over Bluetooth for service")) > starts, 15, 0.5)
+        said += ("; stopped listening " + (f"{stopped:.1f} s" if stopped is not None else "(no time)")
+                 + " after the switch went off"
+                 + (", the link ended" if gone else ", the link still listed after 15 s")
+                 + f"; status says {state!r}"
+                 + ("; linked again within 45 s" if again else "; nothing linked for 45 s")
+                 + ("; the card says Over Bluetooth" if card else "; the card does not say Over Bluetooth")
+                 + (f"; the phone's road last said: {road}" if road else "")
+                 + ("; back on, it listens again" if back else "; back on, it did not listen again within 15 s"))
+        quick = stopped is not None and stopped <= 3
+        return ("PASS" if quick and gone and not again and not card and state == "off" and back else "FAIL"), said
+    return bt_check(ctx, body)
+
+
+@check("bt5-back-to-wifi", "§286")
+def bt5_back_to_wifi(ctx: Ctx) -> tuple[str, str]:
+    """Linked over Bluetooth, Wi-Fi back on with home reachable again (the
+    reverse put back): the link is back at home within 30 s, the time said,
+    and the Bluetooth link ends."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        took, said = onto_bluetooth(ctx)
+        if took is None:
+            return "TIMEOUT", said
+        time.sleep(5)
+        log = ctx.server.log
+        homes = len(loop_stamps(log(), "tcp"))
+        adb("logcat", "-c")
+        on_phone = phone_seconds()
+        adb("reverse", f"tcp:{ctx.phone_port}", f"tcp:{ctx.port}")
+        on = time.time()
+        wifi(True)
+        if not wait_for(lambda: len(loop_stamps(log(), "tcp")) > homes, 90, 0.5):
+            road = phone_log_of("BluetoothRoad")
+            return "TIMEOUT", said + "; not back at home within 90 s of Wi-Fi coming back" + (
+                f" (the phone's road last said: {road})" if road else "")
+        at = loop_stamps(log(), "tcp")[homes]
+        back = (at - on) if at is not None else None
+        moved = first_line("BluetoothRoad", "off Bluetooth", on_phone)
+        time.sleep(10)
+        linked = ctx.device in ctx.server.linked()
+        said += ("; back at home " + (f"{back:.1f} s" if back is not None else "(no time)") + " after Wi-Fi came back"
+                 + ("" if moved else "; the phone did not say it left Bluetooth")
+                 + ("" if linked else "; but not linked 10 s later"))
+        ok = back is not None and back <= BT_HOME_LIMIT and linked
+        return ("PASS" if ok else "FAIL"), said
+    return bt_check(ctx, body)
+
+
+# A share over 8 MiB, which waits for Wi-Fi on the Bluetooth road.
+BT6_SIZE = 9 << 20
+
+
+def waits_for_wifi(dump: str) -> bool:
+    """Pocketdesk's transfer notification says the file waits for Wi-Fi."""
+    return any(f"pkg={APP}" in block and "Waits for Wi-Fi" in block
+               for block in re.split(r"\n\s*NotificationRecord\(", dump))
+
+
+@check("bt6-big-file-waits", "§286")
+def bt6_big_file_waits(ctx: Ctx) -> tuple[str, str]:
+    """Over Bluetooth, a 9 MB share from the phone waits for Wi-Fi ("Waits
+    for Wi-Fi" in its notification) and does not cross."""
+    why = needs_choosing(ctx)
+    if why:
+        return "SKIP", why
+
+    def body(ctx: Ctx) -> tuple[str, str]:
+        local = ctx.server.root / f"bt6-{secrets.token_hex(3)}.bin"
+        local.write_bytes(os.urandom(BT6_SIZE))
+        landed = ctx.server.root / "downloads" / local.name
+        try:
+            stage_in_fixture(local)
+            took, said = onto_bluetooth(ctx)
+            if took is None:
+                return "TIMEOUT", said
+            share_to_throwaway(local.name)
+            waited = wait_for(lambda: waits_for_wifi(adb("shell", "dumpsys", "notification", "--noredact")), 30, 2)
+            time.sleep(10)
+            crossed = landed.exists()
+            said += (f"; the {BT6_SIZE >> 20} MiB share {'said' if waited else 'did not say'} Waits for Wi-Fi within 30 s"
+                     f" and {'crossed' if crossed else 'did not cross'}")
+            return ("PASS" if waited and not crossed else "FAIL"), said
+        finally:
+            # The phone's copy goes first: the waiting job then has nothing
+            # to send once home is back.
+            unstage(local.name)
+            local.unlink(missing_ok=True)
+            landed.unlink(missing_ok=True)
+    return bt_check(ctx, body)
+
+
+# Run only when named: they need the phone bonded with this computer, turn
+# its Wi-Fi off, and restart adb's server.
+LONG.update({"bt1-takeover", "bt2-clipboard", "bt3-notification", "bt4-off-switch",
+             "bt5-back-to-wifi", "bt6-big-file-waits"})
 
 
 # ---- the phone's log, kept long enough (AC6) ----
