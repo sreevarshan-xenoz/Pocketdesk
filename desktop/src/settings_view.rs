@@ -1503,7 +1503,7 @@ impl SettingsForm {
                     );
                     note(
                         ui,
-                        "A phone bonded to this computer in the system's Bluetooth settings can still reach it. Pairing and each phone's permissions still apply. Read at the server's start.",
+                        "A phone bonded to this computer in the system's Bluetooth settings can still reach it. Pairing and each phone's permissions still apply. Windows only for now; followed within seconds.",
                     );
                 });
                 row(ui, "keep_file_dates", |ui| {

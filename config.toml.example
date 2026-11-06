@@ -199,8 +199,9 @@ video_quality = "balanced"
 
 # Keep working over Bluetooth when neither the home nor the internet road
 # reaches this computer: it listens for a phone bonded to it in the system's
-# Bluetooth settings while the radio is on. Pairing and each phone's
-# permissions still apply. Files over Bluetooth stop at 8 MiB.
+# Bluetooth settings while the radio is on (Windows only for now). Pairing and
+# each phone's permissions still apply. Files over Bluetooth stop at 8 MiB.
+# Followed within seconds: turned off, the computer stops listening.
 # bluetooth_fallback = true
 
 # Received files keep the date they were last changed where they came from,

@@ -31,7 +31,7 @@ pub(crate) struct LinkTable {
 impl LinkTable {
     /// A new link id, random and not waiting already, and where its
     /// connection arrives. The id waits until the [`Waiting`] is dropped.
-    fn wait(self: &Arc<Self>) -> (Waiting, oneshot::Receiver<DuplexStream>) {
+    pub(super) fn wait(self: &Arc<Self>) -> (Waiting, oneshot::Receiver<DuplexStream>) {
         let (tx, rx) = oneshot::channel();
         let mut waiting = self.waiting.lock().unwrap_or_else(|e| e.into_inner());
         let id = loop {
@@ -68,9 +68,9 @@ impl LinkTable {
 
 /// A link id waiting in its table, taken out when the wait ends, however
 /// it ends.
-struct Waiting {
+pub(super) struct Waiting {
     table: Arc<LinkTable>,
-    id: u64,
+    pub(super) id: u64,
 }
 
 impl Drop for Waiting {

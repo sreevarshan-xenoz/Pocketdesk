@@ -70,9 +70,10 @@ From `server/src/service.rs` (`handle_internet_control`, `serve_control`) and `a
 
 ### 1.2b The control channel over Bluetooth (the fallback)
 
-From `server/src/service.rs` (`handle_bluetooth_control`, `serve_control`, `Road::Bluetooth`):
+From `server/src/bluetooth/` (the listener) and `server/src/service.rs` (`handle_bluetooth_control`, `serve_control`, `Road::Bluetooth`):
 
-1. A bonded phone opens an RFCOMM stream to the service of §3.1's `kdeconnect.pocketdesk.bluetooth`. Its first byte must open a TLS handshake: anything else gets `POCKETDESK_ERR 1 tls-required` and the stream closes (no KDE Connect device is served here). TLS is the home road's (§1.2), with the pinned certificates, within 8 s.
+0. The computer listens (Windows only for now, Winsock `AF_BTH`) while `bluetooth_fallback` is on and it has a Bluetooth radio, checked every 10 s: a secure RFCOMM socket (authenticated and encrypted, so only a device bonded in the system's settings gets through) on any free channel, with an SDP record naming the service UUID and `Pocketdesk`. It stops, and takes the record down, when the setting goes off or the radio goes.
+1. A bonded phone opens an RFCOMM stream to the service of §3.1's `kdeconnect.pocketdesk.bluetooth`. Its first byte must open a TLS handshake (or start a link hello, §1.4a): anything else, or nothing within 5 s, closes the stream (no KDE Connect device is served here). TLS is the home road's (§1.2), with the pinned certificates, within 8 s.
 2. The handshake and admission are the internet road's (§1.2a steps 3 to 5), held to the TLS key instead of an iroh key (`pair::bluetooth_may_act`): the device must be a paired phone (a paired computer is refused: no computer-to-computer link runs here) and prove the TLS key bound to it (a paired device with no TLS key bound yet is refused; nothing binds by first use), with `pairing_required` on or off. The desktop names itself only once the phone is admitted; anything else gets `POCKETDESK_ERR 1 refused`. Pairing packets are dropped, and standing is re-read per packet against the same rule.
 3. Seeded as the internet road (§1.2a step 6): no `wake_info`, and no computer-to-computer extras (shared input rides iroh). The connection counts its phone as near for the away lock.
 

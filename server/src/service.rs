@@ -728,6 +728,12 @@ pub async fn run(config: Config) -> Result<()> {
         tracing::info!("Input injection task ended");
     });
 
+    // The Bluetooth road (the fallback): it listens while
+    // `bluetooth_fallback` is on and a radio is present (Windows only for
+    // now), and its control links come to the loop below.
+    let (bluetooth_control_tx, mut bluetooth_control) = tokio::sync::mpsc::channel(4);
+    tokio::spawn(crate::bluetooth::run(bluetooth_control_tx));
+
     tracing::info!("Press Ctrl+C to stop");
 
     // At most a few connections per address and so many in all (R3): every
@@ -803,6 +809,31 @@ pub async fn run(config: Config) -> Result<()> {
                     .await
                     {
                         tracing::warn!("internet control connection failed: {error:#}");
+                    }
+                });
+            }
+            Some(control) = bluetooth_control.recv() => {
+                let crate::bluetooth::Control { stream, links } = control;
+                let identity_packet = kde_service.identity_packet().clone();
+                let registry_clone = Arc::clone(&registry);
+                let hypr = hypr_ipc.clone();
+                let wan = wan_endpoint.clone();
+                let pairing_required = config.pairing_required;
+                let tls = control_tls.clone();
+                tokio::spawn(async move {
+                    if let Err(error) = handle_bluetooth_control(
+                        stream,
+                        tls,
+                        links,
+                        identity_packet,
+                        &registry_clone,
+                        hypr.as_deref(),
+                        wan.as_ref(),
+                        pairing_required,
+                    )
+                    .await
+                    {
+                        tracing::warn!("Bluetooth control connection failed: {error:#}");
                     }
                 });
             }
@@ -1616,54 +1647,6 @@ pub(crate) async fn handle_internet_control(
     .await
 }
 
-/// A stream with the one byte already read from it put back in front: the
-/// Bluetooth road reads it to tell TLS from anything else, as the TCP road
-/// peeks, and a Bluetooth stream cannot peek.
-struct Prefixed<S> {
-    first: Option<u8>,
-    inner: S,
-}
-
-impl<S: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for Prefixed<S> {
-    fn poll_read(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        if buf.remaining() > 0
-            && let Some(byte) = self.first.take()
-        {
-            buf.put_slice(&[byte]);
-            return std::task::Poll::Ready(Ok(()));
-        }
-        std::pin::Pin::new(&mut self.inner).poll_read(cx, buf)
-    }
-}
-
-impl<S: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for Prefixed<S> {
-    fn poll_write(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &[u8],
-    ) -> std::task::Poll<std::io::Result<usize>> {
-        std::pin::Pin::new(&mut self.inner).poll_write(cx, buf)
-    }
-
-    fn poll_flush(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        std::pin::Pin::new(&mut self.inner).poll_flush(cx)
-    }
-
-    fn poll_shutdown(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        std::pin::Pin::new(&mut self.inner).poll_shutdown(cx)
-    }
-}
-
 /// A control connection over the Bluetooth road (the fallback when neither
 /// the home nor the internet road reaches this computer): an RFCOMM stream
 /// from a bonded phone, carrying TLS with the pinned certificates as at
@@ -1672,8 +1655,6 @@ impl<S: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for Prefixed<S> {
 /// here. `link` opens a transfer's stream; it is handed the connection's
 /// sender once the phone is admitted. `pairing_required` does not loosen
 /// this road: pairing is required here whatever the setting.
-// Called by the Bluetooth listener, which comes next.
-#[cfg_attr(not(test), allow(dead_code))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_bluetooth_control<S>(
     mut stream: S,
@@ -1716,10 +1697,7 @@ where
             let _ = stream.shutdown().await;
             return Ok(());
         }
-        let stream = Prefixed {
-            first: Some(first[0]),
-            inner: stream,
-        };
+        let stream = crate::bluetooth::Prefixed::new(first[0], stream);
         let stream = timeout(Duration::from_secs(8), tls.accept(stream))
             .await
             .context("TLS handshake timeout")?

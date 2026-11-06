@@ -17,6 +17,7 @@ Three things worth knowing before you pair a phone. [SECURITY.md](../SECURITY.md
 | The same network | nothing | no |
 | No shared network at all (a train, a café with client isolation, a guest Wi-Fi) | Linux and Windows: Pair page, [Make a direct link](#a-direct-link-no-shared-network); the phone joins this computer's own Wi-Fi for Pocketdesk only | no |
 | Anywhere, through Tailscale | both on one tailnet | no |
+| Nearby, with no Wi-Fi (the light features) | Windows: the phone bonded to the computer once in the system's Bluetooth settings; [Bluetooth when Wi-Fi drops](#bluetooth-when-wi-fi-drops) | no |
 | Anywhere, over the internet | one session at home first (same network or Tailscale), where the phone learns the computer and registers its key. After that, iroh punches a direct path, or falls back to a relay (n0's free ones, or [your own](#away-from-home-your-own-relay)). On by default; "Reachable from the internet" in the desktop's Settings turns it off (`internet_path = false`) | no |
 | Your own relay | a machine the internet can reach | on the relay's machine: one port (plain, 3340), or 80 and 443 (HTTPS) |
 | Waking a sleeping computer from outside | Wake-on-LAN set up on the computer | yes, one UDP port to the computer; or none, waking through another always-on computer the phone can reach ([Wake from the phone](#kde-connect-integration)) |
@@ -666,6 +667,16 @@ On Linux, what it needs: NetworkManager (it makes the hotspot over D-Bus, as a v
 Settings (Connection): **Offer a direct link** (`direct_link`, on), **Direct link's band** (`direct_link_band`: `auto`, which is 2.4 GHz and joined by every phone, `2.4` or `5`; a card that keeps one channel for both connections follows its connection's band) and **Turn the direct link off after** (`direct_link_idle_minutes`, 1 to 120, default 10).
 
 The phone binds Pocketdesk's own sockets to that network by binding its process (`ConnectivityManager.bindProcessToNetwork`), and lets it go when the session ends or the pairing is left. Other apps on the phone are untouched. The QR is the usual pairing link with the network's name and passphrase on the end ([protocol §2.6](protocol.md)). It is as private as the PIN it carries: anyone who sees it while the link is on can join the network and pair, so show it only to the phone you mean. **What joining reaches:** NetworkManager's sharing mode turns on forwarding and NATs a joiner onto this computer's other connections (internet through it, and its LAN, as this computer), and Pocketdesk's control, QUIC and iroh sockets and KDE Connect's listeners on `0.0.0.0` (and anything else listening) are open to the network unless your firewall closes it. There is no sharing mode without this that a phone can join. [SECURITY.md](../SECURITY.md) limit 77 has the whole picture.
+
+### Bluetooth When Wi-Fi Drops
+
+When the phone reaches the computer neither on the home network nor over the internet, and the two are within Bluetooth range, the phone's link to the computer comes back over Bluetooth: the clipboard, notifications, the remote, the deck, ringing the phone, quiet hours, questions, links and small files. The screen does not go over Bluetooth yet. Once Wi-Fi or the internet path works again, the phone moves back to it.
+
+- **On by default.** Desktop Settings, **Keep working over Bluetooth when Wi-Fi drops** (`bluetooth_fallback`) turns it off; the computer then stops listening within seconds.
+- **Bond the phone once, by hand,** in the system's Bluetooth settings (Windows: Settings, Bluetooth & devices, Add device). Pocketdesk never pairs, scans or bonds anything over Bluetooth: it listens only for a phone bonded there, on an encrypted link, and the phone must also be paired with Pocketdesk at home, with its key, as for the internet path. Pairing never happens over Bluetooth.
+- **What goes over it** follows the internet path's rules (SECURITY.md, limit 90). The phone learns where to dial (the computer's Bluetooth address) over a working road first, so connect once at home after bonding.
+- **Files over 8 MB wait for Wi-Fi:** the phone is told so and can send them later. Smaller files go, each on a link of its own inside the same pinned encryption as at home. "Files over the internet" does not apply here.
+- **Windows only for now.** The computer listens while its Bluetooth radio is on; Linux comes later.
 
 ### Away From Home: Your Own Relay
 
