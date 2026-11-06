@@ -102,6 +102,11 @@ mod win32;
 // only. The rules and flow over a fake or the real Shell.
 #[cfg(target_os = "linux")]
 mod gnome_shell;
+// What lending a window is on KDE Plasma (phase 6 follow-up): the same capture
+// in place, through the screen-sharing portal, over a KWin script's table.
+mod kde;
+#[cfg(target_os = "linux")]
+mod kde_shell;
 mod place;
 
 /// The file what is lent is kept in.
@@ -559,6 +564,10 @@ trait Env: Sync {
     fn back(&self, lent: &Lent) -> std::io::Result<()>;
     /// Write what is lent to the state file (or remove it when nothing is).
     fn save(&self, lent: &[Lent]) -> std::io::Result<()>;
+    /// The server is stopping, after everything lent is put back: let go of
+    /// whatever the compositor was given for lending (KDE's script), lent or
+    /// not. Returns within a moment.
+    fn stop(&self) {}
 }
 
 /// The windows lent, and the lock one ask at a time holds.
@@ -1043,6 +1052,8 @@ pub async fn return_all_on_stop() {
         for (_, e) in &released.failed {
             tracing::warn!("Could not put a lent window back at stop: {e}");
         }
+        // Whatever was loaded for a list that nobody lent from goes too.
+        here().stop();
     };
     if tokio::time::timeout(Duration::from_secs(5), tokio::task::spawn_blocking(work))
         .await
@@ -1525,7 +1536,8 @@ fn here() -> &'static dyn Env {
 }
 
 /// What lending runs against: this computer's compositor (Sway or Hyprland),
-/// its GNOME Shell ([`place`]), or, on Windows, its desktop ([`desktop`]).
+/// its GNOME Shell or KDE Plasma ([`place`], [`kde`]), or, on Windows, its
+/// desktop ([`desktop`]).
 #[cfg(not(windows))]
 fn here() -> &'static dyn Env {
     #[cfg(target_os = "linux")]
@@ -1539,6 +1551,16 @@ fn here() -> &'static dyn Env {
             static GNOME: std::sync::OnceLock<place::PlaceEnv<gnome_shell::Gnome>> =
                 std::sync::OnceLock::new();
             return GNOME.get_or_init(|| place::PlaceEnv::new(gnome_shell::Gnome));
+        }
+        // KDE Plasma, likewise only after Sway and Hyprland.
+        if crate::virtual_screen::desk().is_none()
+            && pocketdesk_core::streaming::window_kde::is_kde(
+                std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+            )
+        {
+            static KDE: std::sync::OnceLock<place::PlaceEnv<kde::Kde<kde_shell::Bus>>> =
+                std::sync::OnceLock::new();
+            return KDE.get_or_init(|| place::PlaceEnv::new(kde::Kde(kde_shell::Bus)));
         }
     }
     &Live

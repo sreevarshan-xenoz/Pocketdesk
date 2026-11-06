@@ -369,9 +369,10 @@ pub async fn start_capture_auto(
 /// Capture the window of a Linux compositor a session holds `lease` on (see
 /// `window_target::Lease::native`): GNOME's, through mutter's own
 /// `RecordWindow`, which is the "Unattended on GNOME" path and so needs its
-/// switch on and a GNOME session. Nothing falls back to a monitor or to the
-/// portal, whose picker would show the owner a dialog and let anything be
-/// chosen.
+/// switch on and a GNOME session; or KDE's, through the screen-sharing portal
+/// with the stream matched to the lent window (`capture_kde`). Nothing falls
+/// back to a monitor, and GNOME's never goes to the portal, whose picker would
+/// show the owner a dialog and let anything be chosen.
 #[cfg(target_os = "linux")]
 async fn start_native_window_capture(
     config: StreamingConfig,
@@ -379,6 +380,14 @@ async fn start_native_window_capture(
     cancel: CancellationToken,
     lease: super::window_target::Lease,
 ) -> Result<CaptureSession> {
+    // A window of KDE (`kde:<n>`) is shown through the screen-sharing
+    // portal, one window, matched to the lent one (`capture_kde`).
+    if super::window_kde::kde_seq(&lease.native).is_some() {
+        let session =
+            super::capture_kde::start_window_capture(config, frame_tx, cancel, lease).await?;
+        info!("Capture started for a lent KDE window");
+        return Ok(session);
+    }
     if super::gnome_unattended::session_route() != super::gnome_unattended::Route::Mutter {
         bail!(
             "A lent window is captured through GNOME's own screen cast, which needs \"Unattended on GNOME\" on and a GNOME session"
