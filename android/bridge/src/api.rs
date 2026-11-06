@@ -676,7 +676,24 @@ pub async fn connect_over_bluetooth(
     if live_to(&address, port).await {
         return Ok(ConnectionState::Connected);
     }
-    let conn_mgr = control_manager(BLUETOOTH_HANDSHAKE_WAIT)?;
+    // Nothing pairs on this road, so nothing is pinned on it by first use:
+    // the computer must have been verified at home (its pin for `address`).
+    let conn_mgr = match pinned_control_manager(&address, BLUETOOTH_HANDSHAKE_WAIT)? {
+        Some(conn_mgr) => conn_mgr,
+        None => {
+            tracing::warn!(peer = %address, "Bluetooth: no pin for this computer");
+            return Ok(ConnectionState::Error(PocketdeskErrorDto {
+                code: PocketdeskError::TlsError {
+                    detail: String::new(),
+                }
+                .code() as u32,
+                message: format!(
+                    "This phone has not verified the computer at {address} yet: connect at home first"
+                ),
+                is_retryable: false,
+            }));
+        }
+    };
     let mut state_guard = (*CONNECTION_STATE).lock().await;
     *state_guard = ConnectionState::Connecting;
     let identity = client_identity();
@@ -702,6 +719,27 @@ pub async fn connect_over_bluetooth(
         *state_guard = state.clone();
     }
     result
+}
+
+/// [`control_manager`] for a road where nothing pairs: the computer's
+/// certificate must already be pinned for `address`, and a computer with no
+/// pin is refused rather than pinned by first use. `None` when this phone
+/// has no pin for `address`.
+#[cfg(unix)]
+fn pinned_control_manager(
+    address: &str,
+    timeout: Duration,
+) -> Result<Option<ConnectionManager>, String> {
+    let dir = crate::CERT_DIR
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "no data directory configured".to_string())?;
+    let certs = pocketdesk_core::streaming::transport::CertManager::load_or_create(&dir)
+        .map_err(|e| format!("This phone's certificate: {e}"))?;
+    let pinned = pocketdesk_core::streaming::transport::peer_label_for_address(address)
+        .is_some_and(|label| certs.is_peer_trusted(&label));
+    Ok(pinned.then(|| ConnectionManager::new(timeout, certs.control_client_config_pinned_only())))
 }
 
 /// How long the control link's TLS and handshake may take on a Bluetooth
@@ -6049,6 +6087,8 @@ mod bluetooth_road_tests {
         crate::bluetooth::forget_link_requests();
         let computer = CertManager::new().unwrap();
         let fingerprint = computer.cert_fingerprint();
+        // Verified at home before: the Bluetooth link pins nothing itself.
+        pin(&certs, "192.0.2.61", fingerprint);
         let (phone_end, computer_stream) = std::os::unix::net::UnixStream::pair().unwrap();
         computer_stream.set_nonblocking(true).unwrap();
         let computer_stream = tokio::net::UnixStream::from_std(computer_stream).unwrap();
@@ -6123,7 +6163,13 @@ mod bluetooth_road_tests {
     async fn a_failed_bluetooth_link_closes_its_stream() {
         let _globals = super::TRANSFER_TEST_LOCK.lock().await;
         let certs = std::env::temp_dir().join(format!("bridge-bt-failed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&certs);
         let had = crate::CERT_DIR.lock().unwrap().replace(certs.clone());
+        pin(
+            &certs,
+            "192.0.2.62",
+            CertManager::new().unwrap().cert_fingerprint(),
+        );
         let (phone_end, computer_stream) = std::os::unix::net::UnixStream::pair().unwrap();
         computer_stream.set_nonblocking(true).unwrap();
         let mut computer_stream = tokio::net::UnixStream::from_std(computer_stream).unwrap();
@@ -6152,6 +6198,89 @@ mod bluetooth_road_tests {
         assert!(matches!(state, Ok(ConnectionState::Error(_))), "{state:?}");
         assert!(matches!(closed, Ok(Ok(_))), "the stream closed");
         assert_eq!(road, 0);
+    }
+
+    /// This phone's pin of `fingerprint` for `address`, in `certs`.
+    fn pin(certs: &std::path::Path, address: &str, fingerprint: [u8; 32]) {
+        let label = pocketdesk_core::streaming::transport::peer_label_for_address(address).unwrap();
+        CertManager::load_or_create(certs)
+            .unwrap()
+            .pin_peer(&label, fingerprint)
+            .unwrap();
+    }
+
+    /// A computer this phone never verified at home is not dialed over
+    /// Bluetooth: no TLS, no pin by first use, the stream closed, and an
+    /// error the app does not retry.
+    #[tokio::test]
+    async fn an_unverified_computer_gets_no_bluetooth_link() {
+        let _globals = super::TRANSFER_TEST_LOCK.lock().await;
+        let certs = std::env::temp_dir().join(format!("bridge-bt-unpinned-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&certs);
+        let had = crate::CERT_DIR.lock().unwrap().replace(certs.clone());
+        let (phone_end, computer_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        computer_stream.set_nonblocking(true).unwrap();
+        let mut computer_stream = tokio::net::UnixStream::from_std(computer_stream).unwrap();
+        let state = connect_over_bluetooth(
+            "192.0.2.63".to_string(),
+            1716,
+            std::os::fd::OwnedFd::from(phone_end),
+        )
+        .await;
+        let mut said = Vec::new();
+        let closed = tokio::time::timeout(
+            Duration::from_secs(5),
+            computer_stream.read_to_end(&mut said),
+        )
+        .await;
+        let road = control_road();
+        let pinned = CertManager::load_or_create(&certs).unwrap().known_peers();
+        *crate::CERT_DIR.lock().unwrap() = had;
+        let _ = std::fs::remove_dir_all(&certs);
+        match state {
+            Ok(ConnectionState::Error(e)) => {
+                assert_eq!(
+                    e.message,
+                    "This phone has not verified the computer at 192.0.2.63 yet: connect at home first"
+                );
+                assert!(!e.is_retryable);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(closed, Ok(Ok(0))), "EOF at once: {closed:?}");
+        assert!(said.is_empty(), "not even a TLS hello");
+        assert!(pinned.is_empty(), "nothing pinned");
+        assert_eq!(road, 0);
+    }
+
+    /// The pinned-only client refuses a computer with no pin even past the
+    /// up-front check (one forgotten meanwhile): the TLS fails, nothing is
+    /// pinned.
+    #[tokio::test]
+    async fn the_bluetooth_link_never_pins_by_first_use() {
+        let dir = std::env::temp_dir().join(format!("bridge-bt-tofu-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let phone = CertManager::load_or_create(&dir).unwrap();
+        let computer = CertManager::new().unwrap();
+        let (phone_end, computer_end) = tokio::io::duplex(64 * 1024);
+        let server = tokio::spawn(async move {
+            let _ = tokio_rustls::TlsAcceptor::from(computer.control_server_config().unwrap())
+                .accept(computer_end)
+                .await;
+        });
+        let manager = ConnectionManager::new(
+            Duration::from_secs(5),
+            phone.control_client_config_pinned_only(),
+        );
+        let identity = client_identity();
+        let secured = manager
+            .secure_named(phone_end, "192.0.2.64", &identity)
+            .await;
+        let _ = server.await;
+        let pinned = CertManager::load_or_create(&dir).unwrap().known_peers();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(secured.is_err());
+        assert!(pinned.is_empty());
     }
 
     /// A refusal over Bluetooth reaches the app in words: the file too big
