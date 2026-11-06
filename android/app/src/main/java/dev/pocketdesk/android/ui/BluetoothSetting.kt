@@ -1,5 +1,8 @@
 package dev.pocketdesk.android.ui
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
@@ -9,6 +12,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.core.app.ActivityCompat
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bluetooth.BluetoothRoad
@@ -31,7 +35,20 @@ fun BluetoothFallbackSetting() {
     val says = BluetoothRoadRule.switchSays(on, permitted)
 
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-        if (ok) Prefs.setBluetoothFallback(context, true)
+        if (ok) {
+            Prefs.setBluetoothFallback(context, true)
+        } else if (BluetoothSettingRule.deniedForGood(ok, context.findActivity()?.let {
+                ActivityCompat.shouldShowRequestPermissionRationale(it, android.Manifest.permission.BLUETOOTH_CONNECT)
+            } ?: true)
+        ) {
+            // Android no longer asks: the permission is given in the app's own page.
+            runCatching {
+                context.startActivity(
+                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+        }
         version++
     }
 
@@ -56,4 +73,14 @@ fun BluetoothFallbackSetting() {
         },
         warning = says == BluetoothRoadRule.SwitchSays.NEEDS_PERMISSION,
     )
+}
+
+/** The switch's pure rules. */
+object BluetoothSettingRule {
+    /**
+     * Whether the permission was refused for good: not [granted], and
+     * Android would not explain it again ([rationale] false), so it asks no
+     * more and only the app's own settings page can give it.
+     */
+    fun deniedForGood(granted: Boolean, rationale: Boolean): Boolean = !granted && !rationale
 }

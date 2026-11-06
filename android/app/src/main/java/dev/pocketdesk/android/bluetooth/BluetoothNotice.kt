@@ -77,6 +77,11 @@ object BluetoothNotice {
         if (BluetoothRoad.carries(address)) maybeTell(ctx, address)
     }
 
+    /** Take the notice's notification away (its "Turn this off" was used). */
+    fun cancel(ctx: Context) {
+        runCatching { ctx.getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID) }
+    }
+
     private fun canNotify(manager: NotificationManager?): Boolean {
         if (manager == null || !manager.areNotificationsEnabled()) return false
         val channel = manager.getNotificationChannel(CHANNEL) ?: return true

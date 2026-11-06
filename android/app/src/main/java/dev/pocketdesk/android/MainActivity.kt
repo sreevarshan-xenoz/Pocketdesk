@@ -183,6 +183,7 @@ class MainActivity : ComponentActivity() {
         if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
         if (!intent.getBooleanExtra(BluetoothNotice.EXTRA_OPEN_SETTING, false)) return
         setIntent(Intent(intent).apply { removeExtra(BluetoothNotice.EXTRA_OPEN_SETTING) })
+        BluetoothNotice.cancel(this)
         bluetoothSettingSignal.intValue += 1
     }
 
