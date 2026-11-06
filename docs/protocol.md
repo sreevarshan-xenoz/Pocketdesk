@@ -102,6 +102,10 @@ The flow is the same for a phone-to-desktop share, a desktop-to-phone download o
 
 Text clipboard does not use this path. It rides the control channel (`core/src/protocol/clipboard.rs`).
 
+### 1.4a File transfers over Bluetooth (the fallback)
+
+Over the Bluetooth road the control link is the home road's (TLS with the pinned certificate, then the usual handshake) on an RFCOMM stream to the service of §3.1's `kdeconnect.pocketdesk.bluetooth`. There is no port to dial back, so a transfer takes a second RFCOMM connection to the same service, opened by the phone. Its first line, before anything else (TLS included), is the **link hello**: `POCKETDESK-BT-LINK <link id>` and a newline, the id a decimal `u64` naming the control link the transfer belongs to (`core::protocol::bluetooth::format_link_hello`, `parse_link_hello`: exactly one space, digits only, no other line is accepted). The transfer then runs as §1.4 step 4 does. A file over 8 MiB (`TRANSFER_MAX`, 8,388,608 bytes) does not go this way and waits for another road.
+
 ### 1.5 Windows firewall rules made by `pocketdesk install`
 
 | Rule | Scope | Source |
@@ -339,6 +343,7 @@ Defaults: every permission is on except Exec, AwayLock, PhoneSound, Peek, Ask, N
 | Wake helper | `kdeconnect.pocketdesk.wake_helper_info` | computer → owner phone | `{computer, helper: {iroh, relays, name}}` or `{computer, helper: null}` (§2.9). Pushed to owner phones only | — | same |
 | Wake info | `kdeconnect.pocketdesk.wake_info` | desktop → phone | `{mac, broadcast, wired, port}` for the adapter the phone reached, or `{}` when `wake_announce = false`; never sent to a computer, which gets `computer_wake` only (PC6) | — | `server/src/wake_info.rs` |
 | WAN identity | `kdeconnect.pocketdesk.endpoint` | desktop → phone | `{endpointId, relayUrls, directAddrs, dht}`. Pushed at registration and every 30 s | — | `server/src/iroh_endpoint.rs`, `server/src/service.rs` |
+| Bluetooth address | `kdeconnect.pocketdesk.bluetooth` | desktop → phone | `{address, service}` (the Bluetooth fallback): this computer's radio address (`AA:BB:CC:DD:EE:FF`, either case read; `core::protocol::bluetooth::parse_address`) and the RFCOMM service UUID it listens on (`b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b13`, service name `Pocketdesk`; a test throwaway uses another through `POCKETDESK_BT_SERVICE_UUID`, honoured only when it is a UUID). Sent over a working road so the phone can dial the computer by Bluetooth when the home and internet roads fail; the phone keeps it with that computer's record. | — | `core/src/protocol/bluetooth.rs` |
 | Input control | `kdeconnect.pocketdesk.control` | desktop → phone | Which phone is driving | — | `server/src/driving.rs` |
 
 Every `kdeconnect.pocketdesk.*` packet carries `"llVersion": 1` (`kdeconnect.rs`, `LL_EXT_VERSION`).
@@ -631,6 +636,7 @@ All of these are inside the app's private storage unless noted. None of it is ba
 | Owner answers (introductions, remote revoke) | a request id of 1 to 64 printable ASCII characters; at most 64 computers offered or 512 devices listed, counted before any is read, each id and name at most 256 bytes; a pairing link at most 8 KiB. An answer over them is dropped whole | `core/src/protocol/introductions.rs`, `core/src/protocol/remote_devices.rs` |
 | File transfers | 4 at once on the desktop, 2 per phone; refused, not queued | `server/src/plugins/share.rs` |
 | File size, name | 8 GiB; names cut to 200 bytes | same, `server/src/offers.rs` |
+| File size over Bluetooth | 8 MiB (`TRANSFER_MAX`) | `core/src/protocol/bluetooth.rs` |
 | Transfer pace | 10 s to connect, 30 s idle, at least 32 KiB/s | `share.rs` |
 | A cast (T10k) | 2 MiB per stream from the phone, 4 MiB per relay message; a keyframe asked for at most every 250 ms; 32 messages queued for the viewer, then frames are dropped | `core/src/streaming/cast.rs`, `core/src/local/cast.rs`, `server/src/cast_relay.rs` |
 | Clipboard image | 32 MiB PNG, 40 megapixels | `core/src/protocol/clipboard.rs`, `server/src/platform/clip_image.rs` |

@@ -128,6 +128,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "Files over the internet",
         Section::Connection,
     ),
+    (
+        "bluetooth_fallback",
+        "Bluetooth fallback",
+        Section::Connection,
+    ),
     ("keep_file_dates", "Keep files' dates", Section::Connection),
     (
         "transfer_keep_hours",
@@ -1489,6 +1494,16 @@ impl SettingsForm {
                     note(
                         ui,
                         "On the phone's own link, so nothing dials it back. Relays see sizes and timing, never content.",
+                    );
+                });
+                row(ui, "bluetooth_fallback", |ui| {
+                    ui.checkbox(
+                        &mut e.bluetooth_fallback,
+                        "keep working over Bluetooth when Wi-Fi drops",
+                    );
+                    note(
+                        ui,
+                        "A phone bonded to this computer in the system's Bluetooth settings can still reach it. Pairing and each phone's permissions still apply. Read at the server's start.",
                     );
                 });
                 row(ui, "keep_file_dates", |ui| {
