@@ -5,13 +5,16 @@ import dev.pocketdesk.android.HostStore
 /**
  * What a saved computer's card says under its name (U4), instead of its
  * ports: its address when the name is not the address, whether it is on
- * this network, whether this phone is paired with it, whether it opens at
+ * this network or reached over Bluetooth, whether this phone is paired with it, whether it opens at
  * launch, and its ports only when they are not the usual ones.
  */
 object HostStatus {
     sealed interface Part {
         data class Address(val address: String) : Part
         data object OnThisNetwork : Part
+
+        /** Its link runs over Bluetooth now (the fallback road). */
+        data object OverBluetooth : Part
         data object Paired : Part
         data object NotPaired : Part
 
@@ -32,9 +35,10 @@ object HostStatus {
         auto: Boolean,
         unpairedByIt: Boolean = false,
         lastUsed: Long? = null,
+        bluetooth: Boolean = false,
     ): List<Part> = buildList {
         if (named) add(Part.Address(host.address))
-        if (online) add(Part.OnThisNetwork)
+        if (bluetooth) add(Part.OverBluetooth) else if (online) add(Part.OnThisNetwork)
         add(
             when {
                 !paired -> Part.NotPaired

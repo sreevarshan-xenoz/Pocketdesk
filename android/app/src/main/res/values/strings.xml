@@ -60,6 +60,15 @@
     <string name="settings_retry_transfers_summary">A file that stops part way is sent again up to 3 times, continuing where it stopped; with no network it first waits up to 3 minutes for one</string>
     <string name="settings_internet_files">Files over the internet</string>
     <string name="settings_internet_files_summary">Send and receive files with a computer reached from away, on the same link. The computer may turn this off too</string>
+    <string name="settings_bluetooth_fallback">Keep working over Bluetooth when Wi-Fi drops</string>
+    <string name="settings_bluetooth_fallback_summary">When neither this network nor the internet reaches your computer, the link goes over Bluetooth to a computer paired with this phone in Android\'s Bluetooth settings: clipboard, notifications, the remote and small files. Files over 8 MB wait for Wi-Fi, and none go while a call or music uses Bluetooth</string>
+    <string name="settings_bluetooth_fallback_needs_permission">Does nothing until Pocketdesk may use nearby devices. Turn it on to allow it</string>
+    <string name="channel_bluetooth">Bluetooth link</string>
+    <string name="channel_bluetooth_desc">Says once when Wi-Fi dropped and the link to your computer went over Bluetooth.</string>
+    <string name="bluetooth_notice_title">Using Bluetooth</string>
+    <string name="bluetooth_notice_text">Wi-Fi dropped, so Pocketdesk is using Bluetooth to reach %1$s.</string>
+    <string name="bluetooth_notice_turn_off">Turn this off</string>
+    <string name="bluetooth_notice_ok">OK</string>
     <string name="settings_direct_links">Join computers\' direct links</string>
     <string name="settings_direct_links_summary">When you scan a code from a computer\'s Make a direct link, join that computer\'s own Wi-Fi for Pocketdesk only. Your mobile data stays on for everything else</string>
     <string name="reconnecting_in">Reconnecting in %1$d s…</string>
@@ -251,6 +260,10 @@
     <string name="transfer_retrying">Trying again (%1$d of 3)</string>
     <string name="transfer_waiting_network">Waiting for the network</string>
     <string name="transfer_no_network">No network for 3 minutes</string>
+    <string name="transfer_waits_for_wifi">Waits for Wi-Fi: over 8 MB does not go by Bluetooth</string>
+    <string name="transfer_waits_for_audio">Waits until the call or music stops</string>
+    <string name="transfer_waited_wifi">Not sent: over Bluetooth, files over 8 MB wait for Wi-Fi. Send it again on Wi-Fi</string>
+    <string name="transfer_waited_audio">Not sent: a call or music held Bluetooth too long. Send it again once it stops</string>
     <string name="transfer_sending_folder">Sending folder %1$s: %2$d of %3$d</string>
     <string name="transfer_folder_empty">Nothing in %1$s could be sent: it is empty, or its files could not be read</string>
     <string name="transfer_folder_stopped">Stopped sending %1$s: the computer stopped answering. Not sent: %2$d</string>
@@ -348,6 +361,8 @@
     <string name="err_pairing_declined">The computer declined pairing: the PIN was wrong or expired.</string>
     <string name="err_link_dropped">The connection to the computer dropped. It may have slept or left the network.</string>
     <string name="err_generic">Something went wrong reaching the computer.</string>
+    <string name="err_waits_for_wifi">Over Bluetooth, files over 8 MB wait for Wi-Fi. Send it again on Wi-Fi.</string>
+    <string name="err_bluetooth_one_at_a_time">Over Bluetooth one file crosses at a time. Try again once the other has crossed.</string>
     <string name="connecting_still">Still trying… check that the computer is awake and running Pocketdesk.</string>
     <string name="waiting_for_picture">Connected — waiting for the picture…</string>
     <string name="waiting_for_approval">If this computer asks before each session, allow it there.</string>
@@ -835,6 +850,7 @@
     <string name="status_not_paired">Not paired</string>
     <string name="status_unpaired_by_it">No longer paired with this phone</string>
     <string name="status_auto">Connects at launch</string>
+    <string name="status_bluetooth">Over Bluetooth</string>
     <string name="status_used_just_now">Used just now</string>
     <plurals name="status_used_minutes">
         <item quantity="one">Used %1$d min ago</item>

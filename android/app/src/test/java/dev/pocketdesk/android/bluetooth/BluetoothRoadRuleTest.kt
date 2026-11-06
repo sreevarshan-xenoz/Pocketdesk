@@ -125,3 +125,51 @@ class BluetoothRoadRuleTest {
         assertFalse(BluetoothRoadRule.tryLinkAgain(startedAt = 0L, now = 7_500L))
     }
 }
+
+class BluetoothTransferRuleTest {
+    @Test
+    fun big_files_wait_for_wifi() {
+        assertEquals(TransferVerdict.WaitForWifi, BluetoothRoadRule.transferMayStart(road = 2, bytes = 8_388_609L, audioBusy = false))
+        // Exactly 8 MiB goes.
+        assertEquals(TransferVerdict.Go, BluetoothRoadRule.transferMayStart(road = 2, bytes = 8_388_608L, audioBusy = false))
+        assertEquals(TransferVerdict.Go, BluetoothRoadRule.transferMayStart(road = 2, bytes = 1L, audioBusy = false))
+        // Home and the internet: any size.
+        assertEquals(TransferVerdict.Go, BluetoothRoadRule.transferMayStart(road = 0, bytes = 8_388_609L, audioBusy = false))
+        assertEquals(TransferVerdict.Go, BluetoothRoadRule.transferMayStart(road = 0, bytes = Long.MAX_VALUE, audioBusy = false))
+        assertEquals(TransferVerdict.Go, BluetoothRoadRule.transferMayStart(road = 1, bytes = 8_388_609L, audioBusy = false))
+        // Too big waits for Wi-Fi whatever the audio does: the call ending does not let it go.
+        assertEquals(TransferVerdict.WaitForWifi, BluetoothRoadRule.transferMayStart(road = 2, bytes = 8_388_609L, audioBusy = true))
+    }
+
+    @Test
+    fun transfers_wait_for_audio() {
+        assertEquals(TransferVerdict.WaitForAudio, BluetoothRoadRule.transferMayStart(road = 2, bytes = 1_000L, audioBusy = true))
+        assertEquals(TransferVerdict.WaitForAudio, BluetoothRoadRule.transferMayStart(road = 2, bytes = 8_388_608L, audioBusy = true))
+        // Off Bluetooth the radio is the headset's alone: transfers go.
+        assertEquals(TransferVerdict.Go, BluetoothRoadRule.transferMayStart(road = 0, bytes = 1_000L, audioBusy = true))
+        assertEquals(TransferVerdict.Go, BluetoothRoadRule.transferMayStart(road = 1, bytes = 1_000L, audioBusy = true))
+    }
+
+    @Test
+    fun off_without_permission() {
+        // The switch says why it does nothing...
+        assertEquals(BluetoothRoadRule.SwitchSays.NEEDS_PERMISSION, BluetoothRoadRule.switchSays(on = true, permitted = false))
+        assertEquals(BluetoothRoadRule.SwitchSays.WORKS, BluetoothRoadRule.switchSays(on = true, permitted = true))
+        assertEquals(BluetoothRoadRule.SwitchSays.OFF, BluetoothRoadRule.switchSays(on = false, permitted = false))
+        assertEquals(BluetoothRoadRule.SwitchSays.OFF, BluetoothRoadRule.switchSays(on = false, permitted = true))
+        // ...and the road is never dialed without the permission.
+        assertFalse(
+            BluetoothRoadRule.shouldDial(
+                enabled = true,
+                permitted = false,
+                radioOn = true,
+                knownAddress = "00:00:5E:00:53:01",
+                bonded = setOf("00:00:5E:00:53:01"),
+                hasUsableNetwork = false,
+                otherRoadsFailed = true,
+                now = 100_000L,
+                restUntil = 0L,
+            ),
+        )
+    }
+}

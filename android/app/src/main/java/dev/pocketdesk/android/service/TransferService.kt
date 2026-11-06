@@ -29,6 +29,10 @@ import android.util.Log
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
+import dev.pocketdesk.android.bluetooth.BluetoothAudio
+import dev.pocketdesk.android.bluetooth.BluetoothRoad
+import dev.pocketdesk.android.bluetooth.BluetoothRoadRule
+import dev.pocketdesk.android.bluetooth.TransferVerdict
 import dev.pocketdesk.android.bridge.RustCore
 import java.io.File
 import java.util.concurrent.Executors
@@ -342,7 +346,8 @@ class TransferService : Service() {
                 sendCount += plan.files.size - index - 1
                 return
             }
-            if (!streak.record(result.isSuccess, result.exceptionOrNull()?.message)) {
+            // A file that waited for Wi-Fi is no sign the computer stopped answering.
+            if (result.exceptionOrNull() !is TransferRetry.Waited && !streak.record(result.isSuccess, result.exceptionOrNull()?.message)) {
                 // The computer stopped answering: the rest are not sent.
                 val left = plan.files.size - index - 1
                 sendCount += left
@@ -480,6 +485,8 @@ class TransferService : Service() {
                 KeptRule.isFull(error) -> note = getString(R.string.kept_full)
                 KeptRule.isNotKept(error) -> note = getString(R.string.kept_refused)
                 TransferRetry.isCancel(error) -> cancelledAny = true
+                // Waited for Wi-Fi: the next run sends it.
+                result.exceptionOrNull() is TransferRetry.Waited -> continue
                 !streak.record(false, error) -> note = getString(R.string.transfer_folder_stopped, folder.label, left)
                 else -> continue
             }
@@ -821,6 +828,10 @@ class TransferService : Service() {
                 Result.failure(IllegalStateException("$name is empty"))
             }
             size > 0L -> {
+                waitForRoad(address, size, name)?.let {
+                    descriptor.close()
+                    return Result.failure(it)
+                }
                 val modified = lastModified(uri)
                 // The original and the place-less copy differ in their bytes:
                 // never resumed one from the other (M5 review).
@@ -843,6 +854,43 @@ class TransferService : Service() {
         Result.failure(t)
     }
 
+    /**
+     * The last wait for the Bluetooth road's rules that ran out, and when,
+     * so a file held for the same reason soon after (the next of a folder)
+     * fails at once, not after another wait. Only [worker] touches it.
+     */
+    private var roadGaveUp: Pair<TransferVerdict, Long>? = null
+
+    /**
+     * Whether a file of [bytes] may cross with the computer at [address]
+     * now ([BluetoothRoadRule.transferMayStart]): over Bluetooth, one over
+     * 8 MiB waits for Wi-Fi, and any waits while a call or music to a
+     * Bluetooth headset holds the radio. While it waits the progress says
+     * why, up to [ROAD_WAIT_MS]. Null once it may go; else why not.
+     */
+    private fun waitForRoad(address: String, bytes: Long, name: String): Throwable? {
+        val started = SystemClock.elapsedRealtime()
+        while (true) {
+            val road = if (BluetoothRoad.carries(address)) BluetoothRoadRule.ROAD_BLUETOOTH else 0
+            val verdict = BluetoothRoadRule.transferMayStart(road, bytes, BluetoothAudio.busyNow(this))
+            if (verdict == TransferVerdict.Go) {
+                roadGaveUp = null
+                return null
+            }
+            if (stopped()) return cancelledHere().exceptionOrNull()
+            val wifi = verdict == TransferVerdict.WaitForWifi
+            val now = SystemClock.elapsedRealtime()
+            val gaveUpJustNow = roadGaveUp?.let { (was, at) -> was == verdict && now - at < ROAD_WAIT_MS } == true
+            if (gaveUpJustNow || now - started >= ROAD_WAIT_MS) {
+                roadGaveUp = verdict to now
+                Log.i(TAG, "a file waited for ${if (wifi) "Wi-Fi" else "the audio"} and was not sent")
+                return TransferRetry.Waited(getString(if (wifi) R.string.transfer_waited_wifi else R.string.transfer_waited_audio))
+            }
+            show(progressNotification(getString(if (wifi) R.string.transfer_waits_for_wifi else R.string.transfer_waits_for_audio), name, 0))
+            pauseFor(ROAD_POLL_MS)
+        }
+    }
+
     /** Download one file into Downloads/Pocketdesk; the uri to open it, if any. */
     /**
      * A control link to the computer at [address] before an attempt (2d):
@@ -863,6 +911,8 @@ class TransferService : Service() {
             val why = if (job.into != null) dev.pocketdesk.android.files.AddRule.NO_ROOM else getString(R.string.transfer_no_space, job.name)
             return refuse(job, why)
         }
+        // Over Bluetooth a big file waits for Wi-Fi, any file for a call or music to end.
+        if (job.size > 0L) waitForRoad(job.address, job.size, job.name)?.let { return Result.failure(it) }
         // N6: into a shared folder its owner marked, never anywhere else.
         job.into?.let { (root, path) ->
             val folder = dev.pocketdesk.android.files.PhoneFolders.all(this).firstOrNull { it.id == root && it.add }
@@ -974,8 +1024,10 @@ class TransferService : Service() {
                 copy.outputStream().use { output -> input.copyTo(output) }
             }
             val size = copy.length()
+            val held = if (size > 0L) waitForRoad(address, size, name) else null
             when {
                 size == 0L -> Result.failure(IllegalStateException("$name is empty"))
+                held != null -> Result.failure(held)
                 // Sent from the copy as any file is, with its date (K1
                 // review: the plain send carried none) and, for one the
                 // computer's drive asked for, saying so (D8 review).
@@ -1130,6 +1182,12 @@ class TransferService : Service() {
         private const val CHANNEL_ID = "transfers"
         private const val NOTIFICATION_ID = 7
         private const val PROGRESS_MS = 500L
+
+        /** How long a file waits for the Bluetooth road's rules (Wi-Fi back, a call or music over) before it gives up. */
+        private const val ROAD_WAIT_MS = 10 * 60_000L
+
+        /** How often a waiting file looks again. */
+        private const val ROAD_POLL_MS = 2_000L
         private const val ACTION_CANCEL = "dev.pocketdesk.android.action.CANCEL_TRANSFER"
         /** What the computer's Sent list says of an offer cancelled here (C1). */
         private const val CANCELLED_HERE = TransferRetry.CANCELLED_ON_PHONE

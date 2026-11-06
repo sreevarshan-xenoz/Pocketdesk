@@ -239,6 +239,8 @@ object BluetoothRoad {
             return result
         }
         Log.i(TAG, "the control link runs over Bluetooth")
+        // The first time only, the owner hears of it.
+        runCatching { BluetoothNotice.maybeTell(app, address) }
         thread(name = "bt-road-links", isDaemon = true) { tend(app, road) }
         return result
     }

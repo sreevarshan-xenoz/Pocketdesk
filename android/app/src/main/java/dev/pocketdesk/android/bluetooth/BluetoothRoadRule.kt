@@ -12,6 +12,9 @@ object BluetoothRoadRule {
     /** The road the bridge says a control link came by over Bluetooth (`nativeControlRoad`). */
     const val ROAD_BLUETOOTH = 2
 
+    /** The largest file that crosses by Bluetooth, 8 MiB; a bigger one waits for Wi-Fi (the computer's `TRANSFER_MAX`). */
+    const val TRANSFER_MAX = 8_388_608L
+
     /** The rest after the first failed dial; it doubles with each one after. */
     const val FIRST_REST_MS = 30_000L
 
@@ -52,6 +55,39 @@ object BluetoothRoadRule {
         if (bonded.none { it.uppercase() == known }) return false
         if (hasUsableNetwork && !otherRoadsFailed) return false
         return now >= restUntil
+    }
+
+    /**
+     * Whether a transfer of [bytes] may start now on [road] (the control
+     * link's, `nativeControlRoad`): on Bluetooth, a file over
+     * [TRANSFER_MAX] waits for Wi-Fi, and any file waits while the phone
+     * plays to a Bluetooth headset or is in a call ([audioBusy]), so the
+     * radio stays the audio's. Home and the internet: always.
+     */
+    fun transferMayStart(road: Int, bytes: Long, audioBusy: Boolean): TransferVerdict = when {
+        road != ROAD_BLUETOOTH -> TransferVerdict.Go
+        bytes > TRANSFER_MAX -> TransferVerdict.WaitForWifi
+        audioBusy -> TransferVerdict.WaitForAudio
+        else -> TransferVerdict.Go
+    }
+
+    /** What the switch says under it. */
+    enum class SwitchSays {
+        /** On, and the phone may use Bluetooth. */
+        WORKS,
+
+        /** Off. */
+        OFF,
+
+        /** On, but without the nearby devices permission it does nothing: Settings says why. */
+        NEEDS_PERMISSION,
+    }
+
+    /** What the switch says when it is [on] and the phone may ([permitted]) use Bluetooth. */
+    fun switchSays(on: Boolean, permitted: Boolean): SwitchSays = when {
+        !on -> SwitchSays.OFF
+        !permitted -> SwitchSays.NEEDS_PERMISSION
+        else -> SwitchSays.WORKS
     }
 
     /** The rest after [fails] failed dials in a row: 30 s, doubling, at most 8 minutes. */
@@ -109,4 +145,15 @@ object BluetoothRoadRule {
     }
 
     private val ADDRESS = Regex("^[0-9A-F]{2}(:[0-9A-F]{2}){5}$")
+}
+
+/** Whether a transfer goes now ([BluetoothRoadRule.transferMayStart]). */
+enum class TransferVerdict {
+    Go,
+
+    /** Over 8 MiB on the Bluetooth road: it goes once Wi-Fi is back. */
+    WaitForWifi,
+
+    /** On the Bluetooth road while a call or music to a headset uses the radio. */
+    WaitForAudio,
 }

@@ -23,7 +23,10 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -33,6 +36,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import dev.pocketdesk.android.bluetooth.BluetoothNotice
 import dev.pocketdesk.android.pair.SessionPins
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.ui.ConnectScreen
@@ -62,6 +67,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private val disconnectSignal = mutableIntStateOf(0)
+
+    /** Bumped by the Bluetooth notice's "Turn this off": Settings opens at its switch. */
+    private val bluetoothSettingSignal = mutableIntStateOf(0)
 
     /** Bumped by the notification's Lock: the session asks first (U2). */
     private val lockAskSignal = mutableIntStateOf(0)
@@ -146,6 +154,10 @@ class MainActivity : ComponentActivity() {
         val app = applicationContext
         Thread { runCatching { dev.pocketdesk.android.service.LinkKeeperService.sync(app) } }.start()
         Thread { runCatching { dev.pocketdesk.android.service.WakeHelperService.sync(app) } }.start()
+        // A link that went over Bluetooth while the app was away, and was
+        // never told: the app says it now.
+        BluetoothNotice.inFront = true
+        Thread { runCatching { BluetoothNotice.onFront(app) } }.start()
         // A run of the kept folders that was due while Android would not start it.
         Thread {
             runCatching {
@@ -155,10 +167,23 @@ class MainActivity : ComponentActivity() {
         }.start()
     }
 
+    override fun onPause() {
+        super.onPause()
+        BluetoothNotice.inFront = false
+    }
+
     override fun onStop() {
         super.onStop()
         // The saved computers may have changed; shortcuts follow them.
         dev.pocketdesk.android.shortcuts.Shortcuts.refresh(this)
+    }
+
+    /** The Bluetooth notice's "Turn this off" (a notification's): Settings at the switch, once. */
+    private fun takeBluetoothSetting(intent: Intent) {
+        if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
+        if (!intent.getBooleanExtra(BluetoothNotice.EXTRA_OPEN_SETTING, false)) return
+        setIntent(Intent(intent).apply { removeExtra(BluetoothNotice.EXTRA_OPEN_SETTING) })
+        bluetoothSettingSignal.intValue += 1
     }
 
     private fun pairUriFrom(intent: Intent?): String? =
@@ -328,6 +353,7 @@ class MainActivity : ComponentActivity() {
             pairLink.value = takePairUri(intent)
             pairLinkScanned.value = false
             takeShortcut(intent)
+            takeBluetoothSetting(intent)
             dev.pocketdesk.android.shortcuts.Shortcuts.refresh(this)
         } else {
             pairLink.value = savedInstanceState.getString(STATE_PAIR_LINK)
@@ -379,6 +405,43 @@ class MainActivity : ComponentActivity() {
                         if (disconnectSignal.intValue > 0) {
                             sessionKey = null
                         }
+                    }
+
+                    // The Bluetooth notice's "Turn this off": Settings,
+                    // found down to its switch; the search goes once
+                    // Settings is left.
+                    var settingsQuery by rememberSaveable { mutableStateOf("") }
+                    val bluetoothSetting = stringResource(R.string.settings_bluetooth_fallback)
+                    LaunchedEffect(bluetoothSettingSignal.intValue) {
+                        if (bluetoothSettingSignal.intValue > 0) {
+                            sessionKey = null
+                            settingsQuery = bluetoothSetting
+                            route = Route.SETTINGS
+                        }
+                    }
+                    LaunchedEffect(route) {
+                        if (route != Route.SETTINGS) settingsQuery = ""
+                    }
+                    // The one-time notice, with the app in front.
+                    BluetoothNotice.pending.value?.let { computer ->
+                        AlertDialog(
+                            onDismissRequest = { BluetoothNotice.pending.value = null },
+                            title = { Text(stringResource(R.string.bluetooth_notice_title)) },
+                            text = { Text(stringResource(R.string.bluetooth_notice_text, computer)) },
+                            confirmButton = {
+                                TextButton(onClick = { BluetoothNotice.pending.value = null }) {
+                                    Text(stringResource(R.string.bluetooth_notice_ok))
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = {
+                                    BluetoothNotice.pending.value = null
+                                    bluetoothSettingSignal.intValue += 1
+                                }) {
+                                    Text(stringResource(R.string.bluetooth_notice_turn_off))
+                                }
+                            },
+                        )
                     }
 
                     // A direct link's network (a computer's own Wi-Fi, joined
@@ -458,6 +521,7 @@ class MainActivity : ComponentActivity() {
 
                                     Route.SETTINGS -> SettingsScreen(
                                         onBack = { route = Route.HOME },
+                                        initialQuery = settingsQuery,
                                     )
 
                                     Route.SCAN -> QrScanScreen(
@@ -611,6 +675,7 @@ class MainActivity : ComponentActivity() {
             pairLink.value = it
         }
         takeShortcut(intent)
+        takeBluetoothSetting(intent)
         if (intent.getBooleanExtra(EXTRA_DISCONNECT, false)) {
             Thread { runCatching { RustCore.stopStreaming() } }.start()
             disconnectSignal.intValue += 1

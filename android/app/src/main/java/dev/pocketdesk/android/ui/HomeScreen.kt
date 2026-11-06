@@ -243,10 +243,15 @@ fun HomeScreen(
     // BB3: the computers that said the phone is not paired, read again every
     // few seconds, as that word comes and goes with no change here.
     var refusers by remember { mutableStateOf(emptySet<String>()) }
+    // The computer whose link runs over Bluetooth now, read with them.
+    var overBluetooth by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(hosts) {
         while (true) {
             refusers = withContext(Dispatchers.IO) {
                 hosts.filter { RustCore.unpairedBy(it.address) }.map { it.address }.toSet()
+            }
+            overBluetooth = withContext(Dispatchers.IO) {
+                hosts.firstOrNull { dev.pocketdesk.android.bluetooth.BluetoothRoad.carries(it.address) }?.address
             }
             delay(3_000)
         }
@@ -596,6 +601,7 @@ fun HomeScreen(
                         },
                         checking = checkingAddress == host.address,
                         online = host.address in network.savedOnline,
+                        bluetooth = host.address == overBluetooth,
                         isAuto = autoConnect && host == hosts.first(),
                         paired = HostStore.pairedDesktopId(context, host.address) != null,
                         unpairedByIt = host.address in refusers,
@@ -1034,6 +1040,7 @@ private fun HostCard(
     version: PeerVersion.Line?,
     checking: Boolean,
     online: Boolean,
+    bluetooth: Boolean,
     isAuto: Boolean,
     paired: Boolean,
     unpairedByIt: Boolean,
@@ -1077,7 +1084,7 @@ private fun HostCard(
                 Column(modifier = Modifier.weight(1f).padding(top = 4.dp)) {
                     Text(title, style = MaterialTheme.typography.titleMedium)
                     Text(
-                        statusLine(HostStatus.parts(host, name != null, online, paired, isAuto, unpairedByIt, lastUsed), now),
+                        statusLine(HostStatus.parts(host, name != null, online, paired, isAuto, unpairedByIt, lastUsed, bluetooth), now),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -1295,7 +1302,7 @@ private fun cardMenuLabel(action: CardMenu.Action): Int = when (action) {
     CardMenu.Action.REMOVE -> R.string.remove_host
 }
 
-/** The card's status line: [HostStatus]'s parts in words, "On this network" in the accent colour. */
+/** The card's status line: [HostStatus]'s parts in words, "On this network" or "Over Bluetooth" in the accent colour. */
 @Composable
 private fun statusLine(parts: List<HostStatus.Part>, now: Long): AnnotatedString {
     val accent = MaterialTheme.colorScheme.primary
@@ -1304,6 +1311,7 @@ private fun statusLine(parts: List<HostStatus.Part>, now: Long): AnnotatedString
         when (part) {
             is HostStatus.Part.Address -> part.address
             HostStatus.Part.OnThisNetwork -> stringResource(R.string.found_on_network)
+            HostStatus.Part.OverBluetooth -> stringResource(R.string.status_bluetooth)
             HostStatus.Part.Paired -> stringResource(R.string.status_paired)
             HostStatus.Part.NotPaired -> stringResource(R.string.status_not_paired)
             HostStatus.Part.UnpairedByIt -> stringResource(R.string.status_unpaired_by_it)
@@ -1321,7 +1329,7 @@ private fun statusLine(parts: List<HostStatus.Part>, now: Long): AnnotatedString
     return buildAnnotatedString {
         parts.forEachIndexed { i, part ->
             if (i > 0) append(" · ")
-            if (part == HostStatus.Part.OnThisNetwork) {
+            if (part == HostStatus.Part.OnThisNetwork || part == HostStatus.Part.OverBluetooth) {
                 withStyle(SpanStyle(color = accent)) { append(words[i]) }
             } else if (part == HostStatus.Part.UnpairedByIt) {
                 withStyle(SpanStyle(color = error)) { append(words[i]) }

@@ -262,4 +262,15 @@ class TransferRetryTest {
         assertNotEquals(id, SourceId.of("content://media/external/video/1", 300, 1_700_000_000_001))
         assertNotEquals(id, SourceId.of("content://media/external/video/2", 300, 1_700_000_000_000))
     }
+
+    /** A file that waited out the Bluetooth road's rules is not tried again now, even with no network. */
+    @Test
+    fun aFileThatWaitedForWifiIsNotTriedAgainNow() {
+        val waited = TransferRetry.Waited("Not sent: files over 8 MB wait for Wi-Fi")
+        assertNull(TransferRetry.delayAfter(1, waited, enabled = true))
+        assertEquals(
+            TransferRetry.Next.Stop(noNetwork = false),
+            TransferRetry.next(1, waited, enabled = true, hasNetwork = false, waitedOfflineSeconds = 0),
+        )
+    }
 }

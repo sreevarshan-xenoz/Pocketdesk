@@ -115,4 +115,25 @@ class PlainErrorTest {
         assertEquals(Plain.Res(R.string.err_generic), plainError(null))
         assertEquals(Plain.Res(R.string.err_generic), plainError("  "))
     }
+
+    /**
+     * The computer's refusals on the Bluetooth road say what waits, in the
+     * app's own words and language.
+     */
+    @Test
+    fun aBluetoothRefusalIsSaidInTheAppsWords() {
+        assertEquals(
+            Plain.Res(R.string.err_waits_for_wifi),
+            plainError("The computer refused the file: over 8 MiB over Bluetooth: the file waits for Wi-Fi"),
+        )
+        assertEquals(
+            Plain.Res(R.string.err_waits_for_wifi),
+            plainError("The computer refused the download: over 8 MiB over Bluetooth: the file waits for Wi-Fi"),
+        )
+        assertEquals(
+            Plain.Res(R.string.err_bluetooth_one_at_a_time),
+            plainError("The computer refused the file: one file at a time over Bluetooth: try again once the other has crossed"),
+        )
+    }
 }
+

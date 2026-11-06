@@ -33,6 +33,21 @@ private val TECHNICAL = listOf(
     "iroh", "failed to ", "not available after", "no active streaming session",
 )
 
+/**
+ * The computer's refusals on the Bluetooth road (its `WAITS_FOR_WIFI` and
+ * its one-at-a-time rule), said in the app's own words and language.
+ */
+@StringRes
+private fun bluetoothRefusal(text: String): Int? {
+    val l = text.lowercase()
+    if ("bluetooth" !in l) return null
+    return when {
+        "waits for wi-fi" in l -> R.string.err_waits_for_wifi
+        "one file at a time" in l -> R.string.err_bluetooth_one_at_a_time
+        else -> null
+    }
+}
+
 /** Whether `text` reads as a developer's message rather than a person's. */
 fun looksTechnical(text: String): Boolean {
     val l = text.lowercase()
@@ -43,6 +58,7 @@ fun looksTechnical(text: String): Boolean {
 fun plainError(raw: String?): Plain {
     val text = raw?.trim().orEmpty()
     if (text.isEmpty()) return Plain.Res(R.string.err_generic)
+    bluetoothRefusal(text)?.let { return Plain.Res(it) }
     return if (looksTechnical(text)) {
         Plain.Res(humanizeError(text))
     } else {

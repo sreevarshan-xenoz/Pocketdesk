@@ -51,6 +51,15 @@
     <string name="settings_retry_transfers_summary">பாதியில் நின்ற கோப்பு நின்ற இடத்திலிருந்து 3 முறை வரை மீண்டும் அனுப்பப்படும்; நெட்வொர்க் இல்லையெனில் முதலில் 3 நிமிடம் வரை காத்திருக்கும்</string>
     <string name="settings_internet_files">இணையம் வழியே கோப்புகள்</string>
     <string name="settings_internet_files_summary">வெளியிலிருந்து அணுகும் கணினியுடன் அதே இணைப்பில் கோப்புகளை அனுப்பி பெறுக. கணினியும் இதை அணைக்கலாம்</string>
+    <string name="settings_bluetooth_fallback">Wi-Fi துண்டிக்கப்படும்போது புளூடூத் வழியாகத் தொடர்ந்து இயங்கு</string>
+    <string name="settings_bluetooth_fallback_summary">இந்த நெட்வொர்க்கும் இணையமும் உங்கள் கணினியை அடையாதபோது, Android-இன் புளூடூத் அமைப்புகளில் இந்தத் தொலைபேசியுடன் இணைக்கப்பட்ட கணினிக்கு இணைப்பு புளூடூத் வழியாகச் செல்லும்: கிளிப்போர்டு, அறிவிப்புகள், ரிமோட், சிறிய கோப்புகள். 8 MB-க்கு மேற்பட்ட கோப்புகள் Wi-Fi-க்காகக் காத்திருக்கும்; அழைப்பு அல்லது இசை புளூடூத்தைப் பயன்படுத்தும்போது எதுவும் அனுப்பப்படாது</string>
+    <string name="settings_bluetooth_fallback_needs_permission">அருகிலுள்ள சாதனங்களைப் பயன்படுத்த Pocketdesk-க்கு அனுமதி கிடைக்கும் வரை இது எதுவும் செய்யாது. அனுமதிக்க இதை இயக்குங்கள்</string>
+    <string name="channel_bluetooth">புளூடூத் இணைப்பு</string>
+    <string name="channel_bluetooth_desc">Wi-Fi துண்டிக்கப்பட்டு உங்கள் கணினிக்கான இணைப்பு புளூடூத்துக்கு மாறியபோது ஒருமுறை சொல்லும்.</string>
+    <string name="bluetooth_notice_title">புளூடூத் பயன்படுத்தப்படுகிறது</string>
+    <string name="bluetooth_notice_text">Wi-Fi துண்டிக்கப்பட்டதால், %1$s-ஐ அடைய Pocketdesk புளூடூத்தைப் பயன்படுத்துகிறது.</string>
+    <string name="bluetooth_notice_turn_off">இதை அணை</string>
+    <string name="bluetooth_notice_ok">சரி</string>
     <string name="settings_direct_links">கணினிகளின் நேரடி இணைப்புகளில் சேர்</string>
     <string name="settings_direct_links_summary">கணினியின் “நேரடி இணைப்பை உருவாக்கு” குறியீட்டை ஸ்கேன் செய்யும்போது, அந்தக் கணினியின் சொந்த Wi-Fi-இல் Pocketdesk-க்காக மட்டும் சேரும். மற்ற அனைத்திற்கும் மொபைல் தரவு தொடரும்</string>
     <string name="reconnecting_in">%1$d வினாடிகளில் மீண்டும் இணைகிறது…</string>
@@ -242,6 +251,10 @@
     <string name="transfer_retrying">மீண்டும் முயல்கிறது (3 இல் %1$d)</string>
     <string name="transfer_waiting_network">நெட்வொர்க்குக்காகக் காத்திருக்கிறது</string>
     <string name="transfer_no_network">3 நிமிடங்களாக நெட்வொர்க் இல்லை</string>
+    <string name="transfer_waits_for_wifi">Wi-Fi-க்காகக் காத்திருக்கிறது: 8 MB-க்கு மேல் புளூடூத்தில் செல்லாது</string>
+    <string name="transfer_waits_for_audio">அழைப்பு அல்லது இசை நிற்கும் வரை காத்திருக்கிறது</string>
+    <string name="transfer_waited_wifi">அனுப்பப்படவில்லை: புளூடூத்தில் 8 MB-க்கு மேற்பட்ட கோப்புகள் Wi-Fi-க்காகக் காத்திருக்கும். Wi-Fi-இல் மீண்டும் அனுப்புங்கள்</string>
+    <string name="transfer_waited_audio">அனுப்பப்படவில்லை: அழைப்பு அல்லது இசை புளூடூத்தை நீண்ட நேரம் பயன்படுத்தியது. அது நின்றதும் மீண்டும் அனுப்புங்கள்</string>
     <string name="transfer_sending_folder">%1$s கோப்புறை அனுப்பப்படுகிறது: %3$d இல் %2$d</string>
     <string name="transfer_folder_empty">%1$s இலிருந்து எதையும் அனுப்ப முடியவில்லை: அது காலியாக உள்ளது, அல்லது அதன் கோப்புகளைப் படிக்க முடியவில்லை</string>
     <string name="transfer_folder_stopped">%1$s அனுப்புவது நிறுத்தப்பட்டது: கணினி பதிலளிப்பதை நிறுத்தியது. அனுப்பப்படாதவை: %2$d</string>
@@ -339,6 +352,8 @@
     <string name="err_pairing_declined">கணினி இணைவை மறுத்தது: PIN தவறு அல்லது காலாவதியானது.</string>
     <string name="err_link_dropped">கணினியுடனான இணைப்பு அறுந்தது. அது உறங்கியிருக்கலாம் அல்லது வலையத்தை விட்டு வெளியேறியிருக்கலாம்.</string>
     <string name="err_generic">கணினியை அணுகும்போது ஏதோ தவறு நடந்தது.</string>
+    <string name="err_waits_for_wifi">புளூடூத்தில் 8 MB-க்கு மேற்பட்ட கோப்புகள் Wi-Fi-க்காகக் காத்திருக்கும். Wi-Fi-இல் மீண்டும் அனுப்புங்கள்.</string>
+    <string name="err_bluetooth_one_at_a_time">புளூடூத்தில் ஒரே நேரத்தில் ஒரு கோப்பு மட்டுமே செல்லும். மற்றது சென்ற பிறகு மீண்டும் முயலுங்கள்.</string>
     <string name="connecting_still">முயற்சி தொடர்கிறது… கணினி விழிப்புடன் Pocketdesk-உடன் உள்ளதா பார்க்கவும்.</string>
     <string name="waiting_for_picture">இணைந்தது — திரைக்காகக் காத்திருக்கிறது…</string>
     <string name="waiting_for_approval">இந்தக் கணினி ஒவ்வொரு அமர்வுக்கும் முன் அனுமதி கேட்டால், அங்கே அனுமதிக்கவும்.</string>
@@ -824,6 +839,7 @@
     <string name="status_not_paired">இணைக்கப்படவில்லை</string>
     <string name="status_unpaired_by_it">இந்தக் கணினியில் இந்தத் தொலைபேசி இனி இணைக்கப்படவில்லை</string>
     <string name="status_auto">திறக்கும்போது இணையும்</string>
+    <string name="status_bluetooth">புளூடூத் வழியாக</string>
     <string name="status_used_just_now">இப்போது பயன்படுத்தியது</string>
     <plurals name="status_used_minutes">
         <item quantity="one">%1$d நிமிடம் முன்பு பயன்படுத்தியது</item>
