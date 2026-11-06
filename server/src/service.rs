@@ -1333,11 +1333,6 @@ async fn seed_desktop_state(
     }
     // Files offered while its app was gone, offered again (S2).
     crate::offers::offer_again(&**sender).await;
-    // Where to dial this computer by Bluetooth when no other road reaches
-    // it, told over whichever road this is, once the peer is admitted.
-    if let Some(info) = crate::bluetooth::info() {
-        let _ = sender.send_packet(&crate::bluetooth::packet(&info)).await;
-    }
     // How to wake this computer, for one of the owner's computers linked
     // here that this one lists (PC6: paired both ways): the adapter its
     // link leaves by, or that it reached.
@@ -1346,17 +1341,24 @@ async fn seed_desktop_state(
         Road::Local { local, .. } => local,
         Road::Internet | Road::Bluetooth => None,
     };
-    let (is_computer, for_computer) = tokio::task::spawn_blocking(move || {
+    let (is_computer, for_computer, paired) = tokio::task::spawn_blocking(move || {
         let is_computer = crate::plugins::pair::is_computer_device(&device_id);
         let packet = crate::state::state_dir().ok().and_then(|dir| {
             crate::computer_wake::seed_packet(&dir, &device_id, is_computer, reached)
         });
-        (is_computer, packet)
+        let paired = crate::plugins::pair::is_paired_device(&device_id);
+        (is_computer, packet, paired)
     })
     .await
-    .unwrap_or((false, None));
+    .unwrap_or((false, None, false));
     if let Some(packet) = for_computer {
         let _ = sender.send_packet(&packet).await;
+    }
+    // Where to dial this computer by Bluetooth when no other road reaches
+    // it: told only to a paired device (never an unpaired one let in with
+    // pairing off), over whichever road this is.
+    if paired && let Some(info) = crate::bluetooth::info() {
+        let _ = sender.send_packet(&crate::bluetooth::packet(&info)).await;
     }
     // How to wake this computer, for the adapter the phone reached (N6). A
     // connection over the internet reached none: the phone keeps the one it
