@@ -41,13 +41,26 @@ for i in $(seq 20); do
   gdbus introspect --system --dest org.freedesktop.login1 --object-path /org/freedesktop/login1 >/dev/null 2>&1 && break
   sleep 0.5
 done
+# An active session for `rig` on seat0, which the Shell looks up at start (a
+# Shell without one logged "this._loginUser is null" and "Failed to start
+# state machine"). The template's GetUser adds a string to a number; replace it.
+RIG_UID=$(id -u rig)
+mock_call() { gdbus call --system --dest org.freedesktop.login1 --object-path /org/freedesktop/login1 "$@" || echo "logind mock: $* failed"; }
+mock_call --method org.freedesktop.DBus.Mock.AddSession c1 seat0 "$RIG_UID" rig true
+mock_call --method org.freedesktop.DBus.Mock.AddMethod org.freedesktop.login1.Manager \
+  GetUser u o "ret = dbus.ObjectPath('/org/freedesktop/login1/user/%d' % args[0])"
+mock_call --method org.freedesktop.DBus.Mock.AddMethod org.freedesktop.login1.Manager \
+  GetSessionByPID u o "ret = dbus.ObjectPath('/org/freedesktop/login1/session/c1')"
+gdbus call --system --dest org.freedesktop.login1 --object-path "/org/freedesktop/login1/user/$RIG_UID" \
+  --method org.freedesktop.DBus.Mock.UpdateProperties org.freedesktop.login1.User \
+  "{'Display': <('c1', objectpath '/org/freedesktop/login1/session/c1')>}" || echo "logind mock: Display failed"
 as_rig dbus-daemon --session --address="unix:path=$RUN/bus" --fork
 as_rig gsettings set org.gnome.shell disable-user-extensions false
 as_rig gsettings set org.gnome.shell enabled-extensions "['pocketdesk-windows@pocketdesk.dev']"
 as_rig bash -c 'nohup pipewire > /tmp/pipewire.log 2>&1 &'
 sleep 1
 as_rig bash -c 'nohup wireplumber > /tmp/wireplumber.log 2>&1 &'
-as_rig bash -c 'LIBGL_ALWAYS_SOFTWARE=1 XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=GNOME \
+as_rig bash -c 'LIBGL_ALWAYS_SOFTWARE=1 XDG_SESSION_ID=c1 XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=GNOME \
   nohup gnome-shell --headless --wayland --no-x11 --virtual-monitor 1280x720 > /tmp/gnome-shell.log 2>&1 &'
 for i in $(seq 60); do [ -S "$RUN/wayland-0" ] && break; sleep 1; done
 for i in $(seq 30); do
