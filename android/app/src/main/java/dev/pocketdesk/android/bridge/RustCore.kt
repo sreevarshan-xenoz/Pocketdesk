@@ -370,12 +370,11 @@ object RustCore {
                     // Any later new network is a change, one back after a
                     // loss included (BB5 review: the loss alone cleared the
                     // internet road's rest while nothing could be reached).
-                    if (seen && was != network) {
-                        nativeNetworkChanged()
-                        // Wi-Fi back: Bluetooth may be dialed again at once, and
-                        // the road moves home once home answers.
-                        dev.pocketdesk.android.bluetooth.BluetoothRoad.networkBack(context)
-                    }
+                    if (seen && was != network) nativeNetworkChanged()
+                    // A network back, or the first one after a start with
+                    // none: Bluetooth may be dialed again at once, and a live
+                    // Bluetooth road checks once whether to move off it.
+                    if (was != network) dev.pocketdesk.android.bluetooth.BluetoothRoad.networkBack(context)
                     seen = true
                 }
 
@@ -413,8 +412,9 @@ object RustCore {
         val ctx = appContext ?: return envelope(nativeConnectToPeer(address, port, wanIdentity ?: ""))
         val linked = controlPeer() == (address to port)
         val network = linked || dev.pocketdesk.android.service.NetworkWait.usable(ctx, address)
+        var bluetooth: Result<String>? = null
         if (!network) {
-            val bluetooth = runCatching {
+            bluetooth = runCatching {
                 dev.pocketdesk.android.bluetooth.BluetoothRoad.dial(ctx, address, port, hasUsableNetwork = false, otherRoadsFailed = false)
             }.getOrNull()
             if (bluetooth != null && controlPeer() == (address to port)) return bluetooth
@@ -425,11 +425,14 @@ object RustCore {
             return result
         }
         if (network) {
-            val bluetooth = runCatching {
+            bluetooth = runCatching {
                 dev.pocketdesk.android.bluetooth.BluetoothRoad.dial(ctx, address, port, hasUsableNetwork = true, otherRoadsFailed = true)
             }.getOrNull()
             if (bluetooth != null && controlPeer() == (address to port)) return bluetooth
         }
+        // A Bluetooth refusal no retry changes (a computer not verified at
+        // home yet) says more than the other roads' failure.
+        if (bluetooth != null && dev.pocketdesk.android.bluetooth.BluetoothRoadRule.finalRefusal(bluetooth.getOrNull())) return bluetooth
         return result
     }
 

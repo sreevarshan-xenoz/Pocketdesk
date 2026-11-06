@@ -50,7 +50,7 @@ object BluetoothRoad {
     /** How often, while the road lives, a link request is looked for. */
     private const val POLL_MS = 500L
 
-    /** How often, while the road lives, the phone looks whether home answers again. */
+    /** How often, while the road lives with a local network up, the phone looks whether home answers again. */
     private const val HOME_CHECK_MS = 15_000L
 
     /** Once a network is back, a moment for its address and routes before home is tried. */
@@ -173,7 +173,11 @@ object BluetoothRoad {
         }
     }
 
-    /** A network came back: the rest after failed dials is let go, and the road moves home once home answers. */
+    /**
+     * The phone's network changed (one came back, or the first since a
+     * start with none): the rest after failed dials is let go, and a live
+     * road is checked once for leaving ([moveOffIfBack]).
+     */
     fun networkBack(ctx: Context) {
         synchronized(rests) { rests.clear() }
         val road = live ?: return
@@ -181,8 +185,8 @@ object BluetoothRoad {
         thread(name = "bt-road-home", isDaemon = true) {
             runCatching {
                 Thread.sleep(SETTLE_MS)
-                moveHomeIfBack(app, road)
-            }.onFailure { Log.w(TAG, "the move home failed: ${it.javaClass.simpleName}") }
+                moveOffIfBack(app, road, networkChanged = true)
+            }.onFailure { Log.w(TAG, "the move off Bluetooth failed: ${it.javaClass.simpleName}") }
         }
     }
 
@@ -212,18 +216,26 @@ object BluetoothRoad {
             return Result.failure(e)
         }
         val road = Road(address, port, device, info.link, pipe)
-        live = road
         pipe.onEnd = {
             if (live === road) live = null
             road.transfer?.close()
         }
+        // Given up before the pumps run, so no close can race the detach.
+        val theirs = pipe.detachTheirs()
         pipe.start("bt-road")
-        val result = RustCore.connectOverBluetooth(address, port, pipe.detachTheirs())
+        val result = RustCore.connectOverBluetooth(address, port, theirs)
         val up = RustCore.controlPeer() == (address to port) &&
             RustCore.controlRoad() == BluetoothRoadRule.ROAD_BLUETOOTH
         if (!up) {
             // Refused, or another road came up meanwhile: this one closes.
-            if (live === road) stop() else pipe.close()
+            pipe.close()
+            return result
+        }
+        // Live only once the bridge has the link up (after its TLS), so
+        // nothing counts on the road before it carries anything.
+        live = road
+        if (!pipe.alive) {
+            live = null
             return result
         }
         Log.i(TAG, "the control link runs over Bluetooth")
@@ -270,6 +282,16 @@ object BluetoothRoad {
      * move home once home answers again.
      */
     private fun tend(app: Context, road: Road) {
+        try {
+            tendLoop(app, road)
+        } catch (e: Exception) {
+            // A stray failure ends the road, never the app.
+            Log.w(TAG, "the Bluetooth road failed: ${e.javaClass.simpleName}")
+            if (live === road) stop() else road.pipe.close()
+        }
+    }
+
+    private fun tendLoop(app: Context, road: Road) {
         var lastHomeCheck = SystemClock.elapsedRealtime()
         while (live === road && road.pipe.alive) {
             if (!usable(app)) {
@@ -283,7 +305,7 @@ object BluetoothRoad {
             val now = SystemClock.elapsedRealtime()
             if (now - lastHomeCheck >= HOME_CHECK_MS) {
                 lastHomeCheck = now
-                moveHomeIfBack(app, road)
+                moveOffIfBack(app, road, networkChanged = false)
             }
             Thread.sleep(POLL_MS)
         }
@@ -318,32 +340,45 @@ object BluetoothRoad {
             return
         }
         road.transfer = pipe
+        val theirs = pipe.detachTheirs()
         pipe.start("bt-road-link")
-        if (!RustCore.offerBluetoothLink(id, pipe.detachTheirs())) {
+        if (!RustCore.offerBluetoothLink(id, theirs)) {
             pipe.close()
             Log.i(TAG, "a transfer link was not taken")
         }
     }
 
     /**
-     * Home answers again (Wi-Fi is back): the Bluetooth link is closed and
-     * the computer dialed as usual. Home is checked first, so the link is
-     * not given up for a network that does not reach the computer.
+     * Whether to leave Bluetooth for the computer's usual roads
+     * ([BluetoothRoadRule.leaveBluetooth]): on the 15 s tick only home is
+     * checked, and only with a local network up (Wi-Fi, Ethernet or the
+     * phone's hotspot), so mobile data alone costs no probe
+     * every 15 s; on a network change ([networkChanged]) home is checked
+     * once, and a computer with an internet road is dialed over it too. The
+     * Bluetooth link is closed first (the bridge would otherwise take it as
+     * the live one), then the computer dialed as usual: home, the internet,
+     * then Bluetooth again if neither answers.
      */
-    private fun moveHomeIfBack(app: Context, road: Road) {
-        synchronized(road) { moveHomeIfBackLocked(app, road) }
+    private fun moveOffIfBack(app: Context, road: Road, networkChanged: Boolean) {
+        synchronized(road) { moveOffIfBackLocked(app, road, networkChanged) }
     }
 
-    private fun moveHomeIfBackLocked(app: Context, road: Road) {
+    private fun moveOffIfBackLocked(app: Context, road: Road, networkChanged: Boolean) {
         if (live !== road || !road.pipe.alive) return
         // Another road's link replaced this one: its pipe ends by itself.
         if (RustCore.controlRoad() != BluetoothRoadRule.ROAD_BLUETOOTH) return
-        if (!dev.pocketdesk.android.service.NetworkWait.usable(app, road.address)) return
+        val probe = BluetoothRoadRule.probeHome(
+            networkChanged = networkChanged,
+            usableNetwork = dev.pocketdesk.android.service.NetworkWait.usable(app, road.address),
+            localNetwork = dev.pocketdesk.android.service.NetworkWait.local(app),
+        )
+        if (!probe) return
         val homeUp = RustCore.checkIdentity(road.address, road.port).getOrNull() == "matches"
-        if (BluetoothRoadRule.keepBluetooth(BluetoothRoadRule.ROAD_BLUETOOTH, homeUp) || live !== road) return
-        Log.i(TAG, "home answers again: off Bluetooth")
-        stop()
+        val internetRoad = HostStore.wanIdentity(app, road.address) != null
+        if (!BluetoothRoadRule.leaveBluetooth(homeUp, networkChanged, internetRoad) || live !== road) return
+        Log.i(TAG, if (homeUp) "home answers again: off Bluetooth" else "a network is back: trying the internet road")
         RustCore.closeControlLinkTo(road.address)
+        stop()
         RustCore.connectToPeer(road.address, road.port, HostStore.wanIdentity(app, road.address))
     }
 
@@ -367,7 +402,10 @@ object BluetoothRoad {
         private val pumps = java.util.concurrent.atomic.AtomicInteger(0)
 
         fun start(name: String) {
-            pumps.set(2)
+            synchronized(this) {
+                if (!alive) return
+                pumps.set(2)
+            }
             thread(name = "$name-in", isDaemon = true) {
                 pump({ socket.inputStream.read(it) }, FileOutputStream(mine.fileDescriptor))
             }
@@ -377,8 +415,10 @@ object BluetoothRoad {
             }
         }
 
-        /** The bridge's end, given up: the bridge owns and closes it. */
+        /** The bridge's end, given up: the bridge owns and closes it. -1 once closed. */
+        @Synchronized
         fun detachTheirs(): Int {
+            if (!alive) return -1
             val fd = theirs?.detachFd() ?: -1
             theirs = null
             return fd
@@ -394,7 +434,7 @@ object BluetoothRoad {
                     to.write(buffer, 0, n)
                     to.flush()
                 }
-            } catch (_: IOException) {
+            } catch (_: Exception) {
                 // The radio went, or the bridge closed its end.
             } finally {
                 close()
@@ -404,16 +444,16 @@ object BluetoothRoad {
 
         /** Close both sides: a blocked read on either wakes and ends. */
         fun close() {
-            val first = synchronized(this) {
-                val was = alive
+            synchronized(this) {
+                if (!alive) return
                 alive = false
-                was
+                runCatching { socket.close() }
+                runCatching { Os.shutdown(mine.fileDescriptor, OsConstants.SHUT_RDWR) }
+                // Not started: no pump will close it.
+                if (pumps.get() == 0) runCatching { mine.close() }
+                runCatching { theirs?.close() }
+                theirs = null
             }
-            if (!first) return
-            runCatching { socket.close() }
-            runCatching { Os.shutdown(mine.fileDescriptor, OsConstants.SHUT_RDWR) }
-            if (pumps.get() == 0) runCatching { mine.close() }
-            runCatching { theirs?.close() }
             onEnd?.invoke()
         }
 

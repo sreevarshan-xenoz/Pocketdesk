@@ -22,8 +22,14 @@ internal object NetworkWait {
     /** Whether the phone has a network a transfer with the computer at [address] may use. */
     fun usable(context: Context, address: String): Boolean {
         val cm = context.getSystemService(ConnectivityManager::class.java) ?: return true
+        val fromAway = TransferRetry.reachedFromAway(address, HostStore.wanIdentity(context, address) != null)
+        return TransferRetry.hasNetwork(seen(cm), sharing(), fromAway)
+    }
+
+    /** The phone's networks, as [TransferRetry.hasNetwork] reads them. */
+    private fun seen(cm: ConnectivityManager): List<TransferRetry.SeenNetwork> {
         @Suppress("DEPRECATION") // allNetworks: the Wi-Fi under a VPN has no other public lookup.
-        val seen = cm.allNetworks.mapNotNull { network ->
+        return cm.allNetworks.mapNotNull { network ->
             val caps = cm.getNetworkCapabilities(network) ?: return@mapNotNull null
             TransferRetry.SeenNetwork(
                 vpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
@@ -35,8 +41,16 @@ internal object NetworkWait {
                 internet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),
             )
         }
-        val fromAway = TransferRetry.reachedFromAway(address, HostStore.wanIdentity(context, address) != null)
-        return TransferRetry.hasNetwork(seen, sharing(), fromAway)
+    }
+
+    /**
+     * Whether the phone is on a local network a computer at home may be on:
+     * Wi-Fi or Ethernet that is not suspended, or its own hotspot or
+     * tethering. Mobile data alone is not one.
+     */
+    fun local(context: Context): Boolean {
+        val cm = context.getSystemService(ConnectivityManager::class.java) ?: return false
+        return TransferRetry.hasNetwork(seen(cm), sharing(), fromAway = false)
     }
 
     /** Whether this phone shares its connection (its hotspot or USB tethering), which a computer may be on. */

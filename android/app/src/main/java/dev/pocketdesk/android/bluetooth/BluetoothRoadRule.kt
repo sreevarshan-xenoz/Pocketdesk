@@ -64,6 +64,32 @@ object BluetoothRoadRule {
     fun keepBluetooth(road: Int, homeOrInternetUp: Boolean): Boolean =
         road == ROAD_BLUETOOTH && !homeOrInternetUp
 
+    /**
+     * Whether a live Bluetooth road checks home now: once on each network
+     * change to a usable one ([networkChanged]), and on the periodic tick
+     * only with a local network up ([localNetwork]: Wi-Fi, Ethernet or the
+     * phone's hotspot), never every few seconds over mobile data alone.
+     */
+    fun probeHome(networkChanged: Boolean, usableNetwork: Boolean, localNetwork: Boolean): Boolean =
+        usableNetwork && (networkChanged || localNetwork)
+
+    /**
+     * Whether to leave Bluetooth for the usual roads: home answers again
+     * ([homeUp]), or, once on a network change, the computer has an
+     * internet road ([internetRoad]) to try (the usual connect falls back
+     * to Bluetooth if that fails too).
+     */
+    fun leaveBluetooth(homeUp: Boolean, networkChanged: Boolean, internetRoad: Boolean): Boolean =
+        !keepBluetooth(ROAD_BLUETOOTH, homeOrInternetUp = homeUp || (networkChanged && internetRoad))
+
+    /**
+     * Whether what a Bluetooth dial got ([state], the bridge's connection
+     * state) is a refusal no retry changes, such as a computer this phone
+     * has not verified at home: its reason is the one to show.
+     */
+    fun finalRefusal(state: String?): Boolean =
+        state != null && state.startsWith("Error(") && state.contains("is_retryable: false")
+
     /** Whether to take the next link request: the computer serves one transfer link at a time, so none while one is up. */
     fun takeLinkRequest(linkLive: Boolean): Boolean = !linkLive
 

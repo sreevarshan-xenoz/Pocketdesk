@@ -69,6 +69,37 @@ class BluetoothRoadRuleTest {
     }
 
     @Test
+    fun probes_home_on_a_tick_only_with_a_local_network() {
+        // The periodic tick: only with Wi-Fi, Ethernet or the hotspot up.
+        assertTrue(BluetoothRoadRule.probeHome(networkChanged = false, usableNetwork = true, localNetwork = true))
+        assertFalse(BluetoothRoadRule.probeHome(networkChanged = false, usableNetwork = true, localNetwork = false))
+        // Once on each change to a usable network, mobile data included.
+        assertTrue(BluetoothRoadRule.probeHome(networkChanged = true, usableNetwork = true, localNetwork = false))
+        assertFalse(BluetoothRoadRule.probeHome(networkChanged = true, usableNetwork = false, localNetwork = false))
+    }
+
+    @Test
+    fun leaves_for_home_or_once_for_the_internet_road() {
+        assertTrue(BluetoothRoadRule.leaveBluetooth(homeUp = true, networkChanged = false, internetRoad = false))
+        assertTrue(BluetoothRoadRule.leaveBluetooth(homeUp = false, networkChanged = true, internetRoad = true))
+        // Not on the tick, and not for a computer with no internet road.
+        assertFalse(BluetoothRoadRule.leaveBluetooth(homeUp = false, networkChanged = false, internetRoad = true))
+        assertFalse(BluetoothRoadRule.leaveBluetooth(homeUp = false, networkChanged = true, internetRoad = false))
+    }
+
+    @Test
+    fun a_refusal_no_retry_changes_is_told() {
+        assertTrue(
+            BluetoothRoadRule.finalRefusal(
+                "Error(PocketdeskErrorDto { code: 3, message: \"This phone has not verified the computer at 192.0.2.10 yet: connect at home first\", is_retryable: false })",
+            ),
+        )
+        assertFalse(BluetoothRoadRule.finalRefusal("Error(PocketdeskErrorDto { code: 1, message: \"timed out\", is_retryable: true })"))
+        assertFalse(BluetoothRoadRule.finalRefusal("Connected"))
+        assertFalse(BluetoothRoadRule.finalRefusal(null))
+    }
+
+    @Test
     fun what_the_computer_said_reads_or_is_nothing() {
         val said = BluetoothRoadRule.info(
             """{"address":"00:00:5E:00:53:01","service":"b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b13","link":"b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b12"}""",
