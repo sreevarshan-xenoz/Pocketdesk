@@ -1916,7 +1916,8 @@ where
             Road::Bluetooth => {
                 // As the internet road (Bluetooth fallback, calls after
                 // review 1): only the paired phone with the TLS key bound
-                // to it; one with the wrong key ends here, never held for
+                // to it; one with the wrong key or no key bound ends here
+                // (nothing binds by first use), never held for
                 // a PIN re-pair (pairing happens at home), and so does one
                 // of the owner's computers being recorded as paired both
                 // ways. The radio's own bond is not the phone's key.
@@ -3491,6 +3492,38 @@ mod bluetooth_control_tests {
             assert!(dialed.seen.is_empty());
             assert!(!dialed.link.was_admitted());
         }
+    }
+
+    /// Rule 1, a bound key: a phone paired here with no TLS key bound yet
+    /// is refused as a wrong key is (the internet road refuses its unbound
+    /// case too), and nothing binds by first use on this road.
+    #[tokio::test]
+    async fn bluetooth_refuses_an_unbound_key() {
+        let _state = crate::state::use_test_dirs();
+        let id = format!("bluetooth-{}", uuid::Uuid::new_v4().simple());
+        std::fs::create_dir_all(state::state_dir().unwrap()).unwrap();
+        TrustStore::update(state::trust_store_path().unwrap(), |store| {
+            store.trust_device(&id)
+        })
+        .unwrap();
+        let phone = CertManager::new().unwrap();
+        let dialed = dial(&id, &phone, "kdeconnect.ping", true).await;
+        assert_eq!(
+            dialed.answer.as_deref(),
+            Some(pocketdesk_core::protocol::HANDSHAKE_REFUSED)
+        );
+        assert!(
+            dialed.seen.is_empty(),
+            "nothing dispatched: {:?}",
+            dialed.seen
+        );
+        assert!(!dialed.link.was_admitted(), "nothing registered");
+        // Still refused on a second try: the first bound nothing.
+        let again = dial(&id, &phone, "kdeconnect.ping", true).await;
+        assert_eq!(
+            again.answer.as_deref(),
+            Some(pocketdesk_core::protocol::HANDSHAKE_REFUSED)
+        );
     }
 
     /// Rule 1 again: pairing packets on the road are ignored, and the

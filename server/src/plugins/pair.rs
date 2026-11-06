@@ -508,13 +508,35 @@ pub(crate) fn may_act(
 
 /// Whether a connection over the Bluetooth road that goes by `device_id`
 /// and proved the TLS `key` may act on this computer: as the internet road,
-/// only a paired device, with pairing required whatever the setting, and
-/// one with the wrong key never (it is not held for a PIN re-pair).
+/// only a paired device whose TLS key is bound here and is that key, with
+/// pairing required whatever the setting. One with the wrong key, or with
+/// no key bound yet, never (it is not held for a PIN re-pair, and nothing
+/// binds by first use on this road).
 pub(crate) fn bluetooth_may_act(
     device_id: &str,
     key: Option<&pocketdesk_core::streaming::PeerKey>,
 ) -> bool {
-    standing(device_id, key).may_act(true)
+    match state::state_dir() {
+        Ok(dir) => bluetooth_may_act_in(&dir, device_id, key, is_paired_device(device_id)),
+        Err(_) => false,
+    }
+}
+
+fn bluetooth_may_act_in(
+    dir: &std::path::Path,
+    device_id: &str,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
+    paired: bool,
+) -> bool {
+    use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
+    let Some(pocketdesk_core::streaming::PeerKey::Tls(hash)) = key else {
+        return false;
+    };
+    paired
+        && matches!(
+            device_keys::check(dir, device_id, Slot::Tls, Some(&hex(hash))),
+            Verdict::Matches
+        )
 }
 
 /// The standing of a connection that goes by `device_id` and proved `key`.
