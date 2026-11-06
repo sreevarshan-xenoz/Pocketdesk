@@ -153,6 +153,33 @@ and checks they are the window's size; `PD_GNOME_RIG_CLOSE_CMD` closes the
 window to try the closed-window rule and `PD_GNOME_RIG_SNAP` writes the frame
 as a PPM. The test refuses to run against this process's own session bus.
 
+`extension` (the stock Shell with the Pocketdesk GNOME Shell extension, §283,
+copied to the container user's `~/.local/share/gnome-shell/extensions/` and
+enabled with `gnome-extensions enable` before the Shell starts) lists and lends
+as `open` does, and then drives the lent window through the real guard against
+overlapping `wev` windows: a click aimed where another window is on top is
+dropped while the lent window cannot be raised, is sent and lands in the lent
+window once it may be raised, a key reaches only that window, and nothing
+reaches the covering one. It needs two or three `wev` windows (user units run
+under `stdbuf -oL`, the first started being the lent one, each with its output
+in a file) and `PD_GNOME_RIG_LENT_LOG` and `PD_GNOME_RIG_COVER_LOG` naming the
+lent window's and the covering window's files as the test process sees them
+(through `/proc/<shell pid>/root`). The test also asserts where the click landed: the last `surface_x`/`surface_y`
+in the lent window's log must be the aimed pixel less the window frame's
+corner, within a pixel and a half (that is what shows whether mutter takes a
+window stream's coordinates relative to the window). Run it twice: with `wev`
+lent, and with the client-side decorated `scripts/rig_click_logger.py` (GTK4,
+header bar and shadows; app id `org.example.RigClicker`) lent and a `wev`
+over it, by setting `PD_GNOME_RIG_LENT_APP=org.example.RigClicker`,
+`PD_GNOME_RIG_COVER_APP=wev` and `PD_GNOME_RIG_LENT_LOG` to the logger's file.
+
+```bash
+PD_GNOME_RIG_SHELL=extension \
+PD_GNOME_RIG_LENT_LOG="/proc/$P/root/tmp/wev-lent.log" \
+PD_GNOME_RIG_COVER_LOG="/proc/$P/root/tmp/wev-cover.log" \
+  cargo test -p pocketdesk-server --test lend_window_gnome_live -- --ignored --nocapture
+```
+
 ### 3a-3. The PipeWire DMA-BUF capture, live (headless GNOME Shell)
 
 `core/tests/pw_dmabuf_live.rs` (ignored) captures a throwaway headless GNOME

@@ -2,19 +2,19 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1425 open items.
+1436 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 101 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 205 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 209 |
 | A phone with a SIM | 40 |
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
-| A second computer | 244 |
+| A second computer | 250 |
 | A Linux desktop (the Azure VM serves for some) | 259 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 99 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 100 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
@@ -753,8 +753,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **281. A GNOME computer lends a window to look at (phase 6 of the window handoff: GNOME as the source)**
 
 - GNOME's screen-sharing indicator shows in the top bar while a window is lent and goes when it ends; the host's own pointer and keyboard are not affected at any moment. (where: owner)
-- A Shell extension, once one exists (not built), that answers the list with places, stacking and focus: whether input can then be confined as it is on Windows; the window guard's questions it would answer. (where: owner)
+- A Shell extension that answers the list with places, stacking and focus: built in section 283 (the Pocketdesk GNOME Shell extension), its checks are there. (where: owner)
 - KDE Plasma (not built): the measured facts to confirm on a real Plasma 6 desk: an ordinary program can load a KWin script and read the windows, stacking and active window; whether `zkde_screencast_unstable_v1` and `org_kde_kwin_fake_input` are offered to a program with no desktop-file entry. (where: owner)
+
+**283. A GNOME computer lends a window to use, through the Pocketdesk GNOME Shell extension (phase 6b of the window handoff)**
+
+- A real GNOME desk (stock Shell, GNOME 45 or later), the extension copied into `~/.local/share/gnome-shell/extensions/` and enabled after logging out and in, "Let my computers borrow my windows" and "Unattended on GNOME" on: `gdbus call --session --dest dev.pocketdesk.Windows --object-path /dev/pocketdesk/Windows --method dev.pocketdesk.Windows.List` lists the open windows with titles, places and the focus flag; the other computer's "Borrow a window..." lists them (none of Pocketdesk's own, no hidden one) where before it said to install the extension. Say the GNOME version and whether the extension loaded without a Shell restart error (`journalctl --user -b | grep pocketdesk`). (where: owner)
+- The lent window on another workspace or minimised: input is dropped (there is no frame to place a click in); `Activate` brings it back to the owner's current workspace and says so: say whether the owner is warned, and how disturbing the workspace switch is. (where: owner)
+- A monitor left of or above the primary (negative desktop coordinates), a fractional scale (125 percent, 150 percent) and two monitors of different scales: the click lands where it is aimed. The extension's frame is in logical pixels; the place sent to mutter is window-relative, so check that a scaled window is hit at the aimed place. (where: owner)
+- The extension while Wayland's Shell restarts or the session ends: the lent window's session ends within a moment (the extension's answers go), no click is sent. (where: owner)
 
 ## A phone with a SIM
 
@@ -1475,6 +1482,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Return by closing the viewer's window, the other computer going away (cable out, app killed), the switch turned off, the server stopped: each ends the capture within a second or two (the host's screen-sharing indicator goes), and a restart of the server lends nothing (no file is written). (where: second computer)
 - A third paired computer dialling the lent index (1000 to 1007, found by trying them) is refused at once with the words of a window not lent; the window is not shown to it. (where: second computer)
 - The phone's apps and the computer's other captures run beside a lent window with no change (a screen session of the host's monitor while a window is lent; the index range does not collide). (where: second computer)
+
+**283. A GNOME computer lends a window to use, through the Pocketdesk GNOME Shell extension (phase 6b of the window handoff)**
+
+- Clicking into the lent window from the other computer: the click lands in that window at the place pointed (within a pixel), the pointer does not move on the owner's own screen elsewhere, and the owner's own pointer and keyboard are not otherwise affected. Say where a click lands that is aimed at the window's edge and at its title bar. (where: second computer)
+- A window covering the lent one (open a browser over it, and the lent window's own dialog over it): the lent window is brought forward before the click is sent (the first click may be dropped; say how long it takes and whether the other computer's picture shows it), a click aimed at a spot another window covers is never sent when the lent window cannot be raised (an always-on-top window over it), and the lent window's own dialogs and popup menus take clicks as the window's own. (where: second computer)
+- The overview, a top-bar menu or the lock screen over the lent window: clicks and keys are dropped, none reaches the Shell. Typing into the lent window while another window has the keyboard: the lent window is brought forward and typed into once, and no key reaches the other window; a key held down when the window loses the keyboard is let go. (where: second computer)
+- The lent window moved or resized by its owner while the other computer is clicking: no click lands outside it (the place is dropped when the window no longer holds it); say how long the picture and the click take to follow. (where: second computer)
+- The latency of an answer: a click costs a `List` and a `HitTest` call (plus a `List` in the RemoteDesktop worker); say the delay between a tap on the other computer and the click on the window, and the owner's Shell load while the other computer moves the pointer across the window (a move asks both). (where: second computer)
+- A second computer's session on a monitor of this one, running beside a lent window with input: the monitor session's input does not reach the lent window's stream and the window's does not reach the monitor (the lent window has its own RemoteDesktop session). (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
@@ -2383,6 +2399,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - NVIDIA or a hybrid laptop with the proprietary driver: the capture's probe runs libEGL and VA-API inside the server process, so a driver that crashes there takes the server down (no process isolation is built); start a session with the PipeWire capture and say whether the probe returned or the server died. (where: other hardware)
 - Other Intel generations (Gen 8 and 9 with i965 or iHD, Xe with its 4-tiled modifiers) and NVIDIA (the proprietary driver: no VA-API device, so nothing is offered and the capture is unchanged). (where: other hardware)
 - A hybrid laptop whose compositor renders on the discrete card while the encoder opens the integrated one: the card refuses the compositor's buffer, the log says once that the capture is back to copies, and the stream plays. (where: other hardware)
+
+**283. A GNOME computer lends a window to use, through the Pocketdesk GNOME Shell extension (phase 6b of the window handoff)**
+
+- The extension on GNOME 45, 46, 47, 48, 49 and 50 as well as 51: does it load and answer (`Version` is 1), is `Meta.WindowActor`, `global.stage.get_actor_at_pos` and `Main.activateWindow` still what it uses. Disable it: the bus name goes and the other computer's picker is back to the install words. (where: other hardware)
 
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 

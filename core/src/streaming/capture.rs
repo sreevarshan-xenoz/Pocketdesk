@@ -31,6 +31,10 @@ pub struct CaptureSession {
     /// good when its encoder or a crop needs the pixels. Only the wlroots
     /// capture has one.
     zero_copy: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// Where a session of a lent GNOME window sends the packets its guard let
+    /// through: the capture's own RemoteDesktop session for that window, in
+    /// place of the shared injector (`capture_mutter::start_window_capture`).
+    window_input: Option<tokio::sync::mpsc::UnboundedSender<super::input_packet::InputPacket>>,
 }
 
 impl CaptureSession {
@@ -42,7 +46,26 @@ impl CaptureSession {
             cancel,
             input_refused: None,
             zero_copy: None,
+            window_input: None,
         }
+    }
+
+    /// Carry the channel a lent window's input goes into.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub(crate) fn with_window_input(
+        mut self,
+        input: tokio::sync::mpsc::UnboundedSender<super::input_packet::InputPacket>,
+    ) -> Self {
+        self.window_input = Some(input);
+        self
+    }
+
+    /// Where a lent GNOME window's guard-vetted input goes, for a capture
+    /// that has a RemoteDesktop session of its own for the window.
+    pub fn window_input(
+        &self,
+    ) -> Option<tokio::sync::mpsc::UnboundedSender<super::input_packet::InputPacket>> {
+        self.window_input.clone()
     }
 
     /// Carry the switch that lets the capture send DMA-BUFs.
@@ -384,8 +407,11 @@ async fn start_native_window_capture(
             "A lent window is captured through GNOME's own screen cast, which needs \"Unattended on GNOME\" on and a GNOME session"
         );
     }
+    // With input where the Shell extension answers for the window (the
+    // session was told so before it started, `window_target::takes_input`).
+    let input = super::gnome_windows::blocking(|| super::window_target::takes_input(&lease));
     let session =
-        super::capture_mutter::start_window_capture(config, frame_tx, cancel, lease).await?;
+        super::capture_mutter::start_window_capture(config, frame_tx, cancel, lease, input).await?;
     // The capture runs under the session's own token: one that dies once
     // started cancels it, which ends the session.
     info!("Capture started for a lent GNOME window");

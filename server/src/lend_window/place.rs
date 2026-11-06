@@ -15,16 +15,20 @@
 //! at the size it has: the viewer scales the picture, and "resize follows the
 //! viewer" has nothing to size.
 //!
-//! **It is to look at only.** The lend is a grant of one window to one device
-//! and nothing a borrower sends may reach past that window; mutter's
-//! RemoteDesktop would put the borrower's pointer in the window's rectangle
-//! (a position outside it is clamped to its edge) but sends the click to
-//! whichever window is topmost at that spot, and a key goes to the window that
-//! has the keyboard, and no program can ask GNOME which window covers a spot
-//! or which one has the keyboard (`org.gnome.Shell.Introspect` is refused to
-//! anyone but GNOME's own apps). So a session on such a lend is view-only
-//! (core's `window_target::takes_input`), by the rule the Windows guard
-//! follows: when in doubt, nothing is sent.
+//! **It is to look at only, unless the Shell extension answers.** The lend is
+//! a grant of one window to one device and nothing a borrower sends may reach
+//! past that window; mutter's RemoteDesktop would put the borrower's pointer
+//! in the window's rectangle (a position outside it is clamped to its edge)
+//! but sends the click to whichever window is topmost at that spot, and a key
+//! goes to the window that has the keyboard, and no ordinary program can ask
+//! GNOME which window covers a spot or which one has the keyboard
+//! (`org.gnome.Shell.Introspect` is refused to anyone but GNOME's own apps).
+//! So a session on such a lend is view-only (core's
+//! `window_target::takes_input`), by the rule the Windows guard follows: when
+//! in doubt, nothing is sent. Where the owner has installed the Pocketdesk
+//! GNOME Shell extension and it answers (core's `gnome_windows`), it gives
+//! the guard those answers and the session takes input exactly as a Windows
+//! window's does, into that window alone.
 //!
 //! **What is lent, and to whom.** (1) Only a window the list shows (shown, not
 //! this program's own) may be lent, whatever id is named; any other is "not
@@ -573,9 +577,9 @@ mod tests {
         assert_eq!(reply["name"], output_name(index).as_str());
         // The session that dials that index finds the window by its name.
         assert_eq!(lent_native(index).as_deref(), Some("gnome:2609479513"));
-        // The session is view-only: this lease takes no input.
+        // The session is view-only unless the Shell extension answers for it.
         let lease = window_target::lease_for(index, Some(DEVICE)).unwrap();
-        assert!(!window_target::takes_input(&lease));
+        assert!(!window_target::takes_input_when(&lease, || false));
         // Back: the index is free again.
         let back = return_with(&lends, &env, DEVICE, Some("2609479513"));
         assert_eq!(back["returned"], 1, "{back}");

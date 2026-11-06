@@ -1509,7 +1509,7 @@ pub fn windows_words(why: &str, computer: &str) -> String {
         )
     } else if why.contains("Shell extension") {
         format!(
-            "{computer} runs GNOME, which does not let a program list its windows, so it has none to offer: that would take a GNOME Shell extension."
+            "{computer} runs GNOME, which does not let a program list its windows, so it has none to offer: install the Pocketdesk GNOME Shell extension on {computer} to lend one."
         )
     } else {
         format!("{computer}: {why}")
@@ -2485,10 +2485,10 @@ mod tests {
         );
         assert!(
             windows_words(
-                "Could not read this computer's windows: GNOME Shell does not give a program its list of windows (only GNOME's own apps may ask), so this computer cannot offer one to lend without a Shell extension",
+                "Could not read this computer's windows: GNOME Shell does not give a program its list of windows (only GNOME's own apps may ask): install the Pocketdesk GNOME Shell extension and turn it on to lend a window",
                 "Tower"
             )
-            .contains("would take a GNOME Shell extension")
+            .contains("install the Pocketdesk GNOME Shell extension on Tower")
         );
         let mut window = lendable("5", "Notes", "app.notes");
         assert_eq!(

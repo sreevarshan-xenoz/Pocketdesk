@@ -1,5 +1,7 @@
 //! GNOME as the source of windows to lend (phase 6 of the window handoff):
-//! the windows GNOME Shell lists, through `org.gnome.Shell.Introspect`.
+//! the windows GNOME Shell lists, through the Pocketdesk GNOME Shell
+//! extension where the owner has installed it, else through
+//! `org.gnome.Shell.Introspect`.
 //!
 //! **The window list is the one thing GNOME keeps from a program.** Shell's
 //! `Introspect.GetWindows` answers each window's id (the one mutter's
@@ -9,20 +11,23 @@
 //! program of the same user), and mutter's own interfaces give no list at all;
 //! window ids are large numbers (a new base each time the Shell starts, then
 //! the next one for each window made; none from 0 to 100000 was a window), so
-//! they cannot be found by trying. So on stock GNOME this asks, is refused, and
-//! says so in the words of
-//! [`denial`]; a window can be lent only where the list is given: a Shell
-//! started in its "unsafe mode" (development), or a Shell extension that
-//! answers the same question (not built). Nothing here tries to get round the
-//! refusal.
+//! they cannot be found by trying. Where the owner has installed the
+//! Pocketdesk GNOME Shell extension (`contrib/gnome-shell-extension`, core's
+//! `streaming::gnome_windows`) it gives the list, and the places, stacking and
+//! focus a window's input is kept to it by; it is asked first. Without it this
+//! asks `GetWindows`, which a Shell started in its "unsafe mode"
+//! (development) answers and a stock Shell refuses, and says so in the words
+//! of [`denial`]. Nothing here tries to get round a refusal.
 //!
 //! The decisions are plain functions over what the Shell said ([`parse_windows`],
-//! [`denial`], [`cannot_because`]), tested on fixtures; the call is thin.
+//! [`from_extension`], [`denial`], [`cannot_because`]), tested on fixtures; the
+//! call is thin.
 
 use std::collections::HashMap;
 use std::io;
 use std::time::Duration;
 
+use pocketdesk_core::streaming::gnome_windows::{self, Extension, Unavailable};
 use zbus::zvariant::{OwnedValue, Value};
 
 use super::place::{Shell, ShellWindow};
@@ -48,9 +53,17 @@ impl Shell for Gnome {
     }
 
     fn windows(&self) -> io::Result<Vec<ShellWindow>> {
+        // The extension first: it is the owner's own gift of the list. Not
+        // being there is the usual case and no error; anything else it does
+        // wrong is said if the Shell's own list is refused too.
+        let extension = match gnome_windows::bus::Bus.list() {
+            Ok(windows) => return Ok(from_extension(windows)),
+            Err(Unavailable::NotInstalled) => None,
+            Err(Unavailable::Failed(why)) => Some(why),
+        };
         match on_a_thread(get_windows())? {
             Ok(raw) => Ok(parse_windows(raw)),
-            Err(Failure::Named(name)) => Err(io::Error::other(denial(&name))),
+            Err(Failure::Named(name)) => Err(io::Error::other(denial_with(extension, &name))),
             Err(Failure::Other(why)) => Err(io::Error::other(why)),
         }
     }
@@ -71,12 +84,42 @@ pub fn cannot_because(unattended: bool) -> Option<&'static str> {
     }
 }
 
+/// The windows the extension lists, as the lend reads them (a window put away
+/// counts as hidden, as the Shell's own list says it), in id order.
+pub fn from_extension(windows: Vec<gnome_windows::Window>) -> Vec<ShellWindow> {
+    let mut windows: Vec<ShellWindow> = windows
+        .into_iter()
+        .map(|w| ShellWindow {
+            id: w.id,
+            title: w.title,
+            app: w.app,
+            width: w.frame.2,
+            height: w.frame.3,
+            hidden: w.hidden || w.minimized,
+        })
+        .collect();
+    windows.sort_by_key(|w| w.id);
+    windows
+}
+
+/// [`denial`], knowing what the extension did: if it was there and failed
+/// (`extension` says how), that is what the owner hears, not that it is not
+/// installed.
+pub fn denial_with(extension: Option<&'static str>, error_name: &str) -> String {
+    match extension {
+        Some(why) => format!(
+            "The Pocketdesk GNOME Shell extension did not give the list of windows ({why}), and GNOME Shell itself does not give it to a program: turn the extension off and on again, or log out and in"
+        ),
+        None => denial(error_name).to_string(),
+    }
+}
+
 /// What the Shell's refusal of the window list says to the owner, from the
-/// D-Bus error's name.
+/// D-Bus error's name, where the extension is not installed.
 pub fn denial(error_name: &str) -> &'static str {
     match error_name {
         "org.freedesktop.DBus.Error.AccessDenied" => {
-            "GNOME Shell does not give a program its list of windows (only GNOME's own apps may ask), so this computer cannot offer one to lend without a Shell extension"
+            "GNOME Shell does not give a program its list of windows (only GNOME's own apps may ask): install the Pocketdesk GNOME Shell extension and turn it on to lend a window"
         }
         "org.freedesktop.DBus.Error.ServiceUnknown"
         | "org.freedesktop.DBus.Error.NameHasNoOwner"
@@ -307,9 +350,54 @@ mod tests {
     }
 
     #[test]
+    fn the_extensions_list_is_read_in_id_order_and_a_window_put_away_is_hidden() {
+        let w = |id, minimized, hidden| gnome_windows::Window {
+            id,
+            title: format!("t{id}"),
+            app: "app".into(),
+            frame: (5, 6, 640, 480),
+            minimized,
+            hidden,
+            ..gnome_windows::Window::default()
+        };
+        let windows = from_extension(vec![
+            w(9, false, false),
+            w(3, true, false),
+            w(5, false, true),
+        ]);
+        assert_eq!(windows.iter().map(|w| w.id).collect::<Vec<_>>(), [3, 5, 9]);
+        assert_eq!(
+            windows.iter().map(|w| w.hidden).collect::<Vec<_>>(),
+            [true, true, false]
+        );
+        assert_eq!((windows[2].width, windows[2].height), (640, 480));
+        assert_eq!(windows[2].title, "t9");
+        assert!(from_extension(Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn a_broken_extension_is_said_and_a_missing_one_is_the_install_words() {
+        let missing = denial_with(None, "org.freedesktop.DBus.Error.AccessDenied");
+        assert!(
+            missing.contains("install the Pocketdesk GNOME Shell extension"),
+            "{missing}"
+        );
+        let broken = denial_with(
+            Some("the GNOME Shell extension did not answer"),
+            "org.freedesktop.DBus.Error.AccessDenied",
+        );
+        assert!(broken.contains("did not answer"), "{broken}");
+        assert!(!broken.contains("install"), "{broken}");
+    }
+
+    #[test]
     fn the_refusal_is_said_in_the_owners_terms() {
         let denied = denial("org.freedesktop.DBus.Error.AccessDenied");
         assert!(denied.contains("Shell extension"), "{denied}");
+        assert!(
+            denied.contains("install the Pocketdesk GNOME Shell extension"),
+            "{denied}"
+        );
         assert!(denied.contains("GNOME's own apps"));
         for gone in [
             "org.freedesktop.DBus.Error.ServiceUnknown",

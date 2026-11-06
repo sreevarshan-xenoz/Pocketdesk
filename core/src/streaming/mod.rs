@@ -26,6 +26,7 @@ pub use dmabuf::GpuFrame;
 #[cfg(all(windows, feature = "capture", feature = "inproc-windows"))]
 pub use gpu_frame::GpuFrame;
 pub mod gnome_unattended;
+pub mod gnome_windows;
 pub mod idle_repeats;
 pub mod in_flight;
 pub mod input_packet;
