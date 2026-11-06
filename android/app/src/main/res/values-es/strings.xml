@@ -54,6 +54,7 @@
     <string name="settings_direct_links">Unirse a los enlaces directos de los equipos</string>
     <string name="settings_direct_links_summary">Al escanear un código de «Crear un enlace directo» de un equipo, te unes al Wi-Fi propio de ese equipo solo para Pocketdesk. Tus datos móviles siguen activos para todo lo demás</string>
     <string name="reconnecting_in">Reconectando en %1$d s…</string>
+    <string name="link_quiet">Reconectando…</string>
     <string name="reconnect_gave_up">Se dejó de intentar tras 10 minutos.</string>
     <string name="settings_reveal_pin">Mostrar PIN por defecto</string>
     <string name="settings_reveal_pin_summary">Dígitos de emparejamiento visibles sin tocar el ojo</string>

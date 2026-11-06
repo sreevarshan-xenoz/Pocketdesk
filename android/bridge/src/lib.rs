@@ -13,6 +13,7 @@ mod clipboard_push;
 mod commands;
 mod computer_media;
 mod deck;
+mod dial_race;
 mod dials;
 mod download;
 mod extra_links;
@@ -548,6 +549,37 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
     };
     let json = envelope_unit(RUNTIME.block_on(api::connect_streaming_wan(
         address,
+        identity,
+        monitor,
+        codec_caps as u8,
+        pocketdesk_core::streaming::SessionMode::Screen,
+    )));
+    to_jstring(&mut env, json)
+}
+
+/// Connect to the computer's screen with the home and internet roads dialed
+/// at once (BG6), the first to answer carrying the session: `{"ok": "lan"}`
+/// or `{"ok": "wan"}`, or `{"error": reason}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectStreamingRace(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    identity_json: JString<'_>,
+    monitor_index: jint,
+    codec_caps: jint,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let identity = jstring_to_string(&mut env, &identity_json);
+    let monitor = if monitor_index < 0 {
+        None
+    } else {
+        Some(monitor_index as u32)
+    };
+    let json = envelope(RUNTIME.block_on(api::connect_streaming_race(
+        address,
+        port as u16,
         identity,
         monitor,
         codec_caps as u8,
@@ -1602,6 +1634,18 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeVideoBy
     _class: JClass<'_>,
 ) -> jni::sys::jlong {
     crate::video_bytes() as jni::sys::jlong
+}
+
+/// How long the live session's link has been quiet, in ms (BG6): the time
+/// since the datagrams it received last rose (0 with no session). The
+/// connection pings every second, so on a live link this stays near zero
+/// whether or not a picture is coming.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeStreamQuietMs(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jni::sys::jlong {
+    api::stream_quiet_ms() as jni::sys::jlong
 }
 
 /// Hand a web link to the computer to open in its browser (T8a):

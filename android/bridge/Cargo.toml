@@ -33,3 +33,5 @@ sha2 = "0.10"
 async-trait.workspace = true
 # A desktop's end of the internet road in tests (T10a).
 iroh = "1.3"
+# Paused time, for the dial race (BG6).
+tokio = { workspace = true, features = ["test-util"] }

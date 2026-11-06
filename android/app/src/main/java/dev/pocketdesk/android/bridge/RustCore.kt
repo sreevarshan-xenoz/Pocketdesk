@@ -222,6 +222,16 @@ object RustCore {
     private external fun nativeDeclineOffer(address: String, port: Int, id: String, reason: String): String
     private external fun nativeFetchFolder(address: String, port: Int, path: String): String
     private external fun nativeVideoBytes(): Long
+
+    private external fun nativeStreamQuietMs(): Long
+
+    private external fun nativeConnectStreamingRace(
+        address: String,
+        port: Int,
+        identityJson: String,
+        monitorIndex: Int,
+        codecCaps: Int,
+    ): String
     private external fun nativeListRemoteFiles(address: String, port: Int, remotePath: String): String
     private external fun nativeGetMonitors(address: String, port: Int): String
     private external fun nativeVirtualScreen(address: String, port: Int, action: String, width: Int, height: Int): String
@@ -649,6 +659,20 @@ object RustCore {
      */
     fun connectStreamingWan(address: String, identityJson: String, monitorIndex: Int = -1): Result<Unit> =
         envelope(nativeConnectStreamingWan(address, identityJson, monitorIndex, videoCodecCaps())).map { }
+
+    /**
+     * Connect to the screen with the home and the internet road dialed at once (BG6), the first
+     * to answer carrying the session: `"lan"` or `"wan"`, the road it came by. The internet road
+     * starts a moment after home, so a computer on the same network is still reached at home.
+     * For a computer with a cached endpoint identity ([identityJson]).
+     */
+    fun connectStreamingRace(
+        address: String,
+        port: Int,
+        identityJson: String,
+        monitorIndex: Int = -1,
+    ): Result<String> =
+        envelope(nativeConnectStreamingRace(address, port, identityJson, monitorIndex, videoCodecCaps()))
 
     /** Connect the phone as a remote (T10i): input only, no picture or sound. */
     fun connectRemote(address: String, port: Int): Result<Unit> = envelope(nativeConnectRemote(address, port)).map { }
@@ -1090,6 +1114,20 @@ object RustCore {
 
     /** Video bytes the live session has received, counted as frames arrive (0 with none). */
     fun videoBytes(): Long = nativeVideoBytes()
+
+    /**
+     * How long the live session's connection has heard nothing from the computer, in ms (0 with
+     * none). The connection pings every second, so on a live link this stays near zero whether
+     * or not a picture is coming (BG6).
+     */
+    fun streamQuietMs(): Long = nativeStreamQuietMs()
+
+    /**
+     * Nudge the network layer (BG6): the live internet road's endpoint looks at the phone's
+     * interfaces and, on a real change, rebinds and finds its relay again. Harmless when nothing
+     * changed; asked when a session's link has been quiet for a few seconds.
+     */
+    fun networkMayHaveChanged() = nativeNetworkChanged()
 
     /** Files the desktop offered since the last call, as a JSON array of `{id, name, size}`. */
     fun takeFileOffers(): String = envelope(nativeTakeFileOffers()).getOrDefault("[]")
