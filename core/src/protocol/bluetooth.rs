@@ -83,6 +83,12 @@ pub fn parse_link_hello(line: &str) -> Option<u64> {
     id.parse().ok()
 }
 
+/// Computer → phone, over a Bluetooth control link: open a transfer
+/// connection for link `{id}` (a `u64`). The phone opens a second RFCOMM
+/// connection to the service, sends the link hello with that id, and then
+/// answers the computer's TLS as its transfer listener does at home.
+pub const LINK_PACKET: &str = "kdeconnect.pocketdesk.bluetooth.link";
+
 /// The most a file may be to go over Bluetooth, in bytes (8 MiB): a slow
 /// link is for a note or a photo, and a bigger file waits for Wi-Fi.
 pub const TRANSFER_MAX: u64 = 8_388_608;
@@ -132,6 +138,7 @@ mod tests {
         );
         assert_eq!(serde_json::from_value::<BluetoothInfo>(json).unwrap(), info);
         assert_eq!(PACKET, "kdeconnect.pocketdesk.bluetooth");
+        assert_eq!(LINK_PACKET, "kdeconnect.pocketdesk.bluetooth.link");
     }
 
     #[test]

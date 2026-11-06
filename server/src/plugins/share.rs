@@ -1063,7 +1063,9 @@ pub(crate) enum Route {
         tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
     },
     /// A stream on the phone's own control connection, by the internet road
-    /// (2c): iroh proved both keys, and nothing dials back across a NAT.
+    /// (2c): iroh proved both keys, and nothing dials back across a NAT. By
+    /// the Bluetooth road, a transfer link the phone opens, inside the
+    /// transfer's TLS (`bluetooth::BluetoothLinks`).
     Link(std::sync::Arc<dyn OpenLinkStream>),
     /// A stream another of the owner's computers opened on this one's link
     /// to it (2h), its key line already read: that end presented the key.
@@ -1074,7 +1076,7 @@ impl std::fmt::Display for Route {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Dial { to, .. } => write!(f, "{to}"),
-            Self::Link(_) => f.write_str("the phone's link by the internet road"),
+            Self::Link(_) => f.write_str("the phone's own link"),
             Self::Arrived(_) => f.write_str("the link to the other computer"),
         }
     }
@@ -1108,7 +1110,8 @@ impl Route {
                 .take()
                 .ok_or_else(|| io_error("open", "the stream was used")),
             Self::Dial { to, tls } => Ok(Box::new(dial_transfer(*to, tls.clone()).await?)),
-            Self::Link(link) => tokio::time::timeout(CONNECT_TIMEOUT, link.open())
+            // The Bluetooth road waits for the phone's link, then its TLS.
+            Self::Link(link) => tokio::time::timeout(2 * CONNECT_TIMEOUT, link.open())
                 .await
                 .map_err(|_| io_error("open", "timed out"))?
                 .map_err(|e| io_error("open", e)),
@@ -1200,7 +1203,8 @@ fn can_reach(sender: &dyn DeviceSender) -> std::result::Result<(), String> {
 
 /// The route for `reach`: at home with the transfer's TLS; on the internet
 /// road with the iroh key the link proved, held to the one the phone
-/// registered at home.
+/// registered at home; on the Bluetooth road with the TLS key the link
+/// proved, held to the bound one, and the link runs the transfer's TLS.
 pub(crate) fn route(reach: Reach, sender: &dyn DeviceSender) -> std::result::Result<Route, String> {
     match reach {
         Reach::Dial(ip, port) => Ok(Route::dial(
@@ -1233,7 +1237,7 @@ pub(crate) fn transfer_tls(
 
 /// This desktop's identity, read once: the one its control channel and
 /// stream present (loaded at start by the service from the same folder).
-fn desktop_certs()
+pub(crate) fn desktop_certs()
 -> std::result::Result<std::sync::Arc<pocketdesk_core::streaming::transport::CertManager>, String> {
     use pocketdesk_core::streaming::transport::CertManager;
     static CERTS: std::sync::Mutex<Option<std::sync::Arc<CertManager>>> =
@@ -1263,9 +1267,25 @@ async fn dial_transfer(
         .map_err(|_| io_error("connect", "timed out"))?
         .map_err(|e| io_error("connect", e))?;
     let name = tokio_rustls::rustls::pki_types::ServerName::IpAddress(to.ip().into());
+    transfer_tls_on(tcp, name, tls).await
+}
+
+/// Open the transfer's TLS (phase C) on `stream`, this desktop the client:
+/// `tls` ([`transfer_tls`]) holds the phone to the key its control
+/// connection proved, and the phone must speak the transfer protocol.
+/// `name` is not checked (the pinned key is). The home road runs it on the
+/// connection it dials, the Bluetooth road on the phone's transfer link.
+pub(crate) async fn transfer_tls_on<S>(
+    stream: S,
+    name: tokio_rustls::rustls::pki_types::ServerName<'static>,
+    tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
+) -> Result<tokio_rustls::client::TlsStream<S>>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     let stream = tokio::time::timeout(
         CONNECT_TIMEOUT,
-        tokio_rustls::TlsConnector::from(tls).connect(name, tcp),
+        tokio_rustls::TlsConnector::from(tls).connect(name, stream),
     )
     .await
     .map_err(|_| io_error("tls", "timed out"))?

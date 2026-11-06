@@ -3,6 +3,10 @@
 //! told over a working road. The control connection itself is
 //! `service::handle_bluetooth_control`, under the internet road's rules.
 
+// Used by the listener, which comes next.
+#[cfg_attr(not(test), allow(dead_code))]
+mod links;
+
 use pocketdesk_core::protocol::bluetooth::{BluetoothInfo, PACKET};
 use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
 
