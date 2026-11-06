@@ -226,17 +226,19 @@ async fn kwin_owner(conn: &Connection) -> Result<String, Failure> {
 /// Make the script report now, through the global shortcut it registered:
 /// whether the call was taken.
 async fn poke(conn: &Connection) -> bool {
-    // Newer KDE takes an activation token as a second argument; older takes
-    // the name alone.
-    for with_token in [true, false] {
-        let reply = if with_token {
+    // The second argument is the shortcut's context, "default" for one a
+    // KWin script registers (an empty one names no context: the call is
+    // taken and nothing happens). The name alone means the same where the
+    // two-argument form is not served.
+    for with_context in [true, false] {
+        let reply = if with_context {
             call(
                 conn,
                 "org.kde.kglobalaccel",
                 "/component/kwin",
                 "org.kde.kglobalaccel.Component",
                 "invokeShortcut",
-                &(POKE_SHORTCUT, ""),
+                &(POKE_SHORTCUT, "default"),
             )
             .await
         } else {
