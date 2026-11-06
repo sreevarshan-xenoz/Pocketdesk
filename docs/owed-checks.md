@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1437 open items.
+1436 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 19 |
 | Away from home: another network, or through a router | 43 |
 | A second computer | 249 |
-| A Linux desktop (the Azure VM serves for some) | 266 |
+| A Linux desktop (the Azure VM serves for some) | 265 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 99 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
 
@@ -2110,8 +2110,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **284. A KDE Plasma computer lends a window to look at (phase 6 follow-up of the window handoff: KDE as the source)**
 
-- The script loads: `list` on a KDE host loads the script (`org.kde.KWin /Scripting loadScript` then `run` on `/Scripting/Script<id>`; if that object path is not right on this KWin, the fallback `start`), the first report arrives within three seconds, and `list` names the ordinary windows of programs by title and app, none of Pocketdesk's own, no panel, desktop, menu, notification or dialog. Say which KWin version and whether the script's object path or the fallback worked. (where: linux)
-- The script reports when asked: the global shortcut `PocketdeskPoke` is triggered through `org.kde.kglobalaccel /component/kwin invokeShortcut` (with its context, `default`, as the second argument, else the name alone) and a second report follows within a second and a half; the log does not say the script "does not report when asked". If it does, say how stale a quiet table got (the script's own change signals) and that the minute's reload happened. (where: linux)
+- The script loads: `list` on a KDE host loads the script (`org.kde.KWin /Scripting loadScript` then `run` on `/Scripting/Script<id>`; if that object path is not right on this KWin, the fallback `start`), the first report arrives within three seconds, and `list` names the ordinary windows of programs by title and app, none of Pocketdesk's own, no panel, desktop, menu, notification or dialog. Say which KWin version and whether the script's object path or the fallback worked. (where: linux) Partly checked 2026-11-06 (a GitHub runner's throwaway Arch container, KWin 6.8.2 as `kwin_wayland --virtual`, kglobalacceld 6.8.2, `.github/workflows/rig-kde.yml` on a `rig/` branch): the script loaded, the first report came at once (`LIST_SECS 0.0`) and `list` named the one `wev` window by title and class with its size; the rig has no panel, desktop, menu, notification or dialog, so leaving those out is not shown.
 - The report's facts are right: a window's frame, minimised flag, "shown" (a window on another virtual desktop is not shown), transient-for parent (a dialog), the stacking order (a window raised or lowered), the active window, and `normalWindow` (a panel, the desktop, a menu and a notification are not ordinary). Say which of `normalWindow`, `skipTaskbar`, `desktops`, `transientFor`, `stackingOrder` and `activeWindow` did not behave as the script assumes. (where: linux)
 - Only KWin's report is taken: a second program on the session bus calling `dev.pocketdesk.Windows.Update` with a table that names a made-up window changes nothing (no new window listed, the table's age unchanged). (where: linux)
 - Refusals in words: a KDE session on X11 says it needs Wayland; the KWin scripting interface unavailable (or scripts disabled in `kwinrc`) says KWin did not take the script; xdg-desktop-portal stopped says the portal is missing; a portal whose `AvailableSourceTypes` lacks windows says it cannot share a single window; a non-KDE desktop never picks this path. (where: linux)

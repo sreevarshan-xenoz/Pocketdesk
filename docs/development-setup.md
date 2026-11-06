@@ -153,11 +153,13 @@ and checks they are the window's size; `PD_GNOME_RIG_CLOSE_CMD` closes the
 window to try the closed-window rule and `PD_GNOME_RIG_SNAP` writes the frame
 as a PPM. The test refuses to run against this process's own session bus.
 
-### 3a-2b. Lending a KDE window, live (headless KWin; written, not yet run)
+### 3a-2b. Lending a KDE window, live (headless KWin)
 
 `server/tests/lend_window_kde_live.rs` (ignored) lends a window of a throwaway
 headless KWin, through the KWin script and the screen-sharing portal as the
-server runs them. **It has not been run yet** (the Linux laptop was off when it
+server runs them. It has run in a GitHub runner's Arch container (2026-11-06,
+built and run inside it; see the PR); the recipe here, on the
+laptop, has not been run yet (the Linux laptop was off when it
 was written); checklist section 284 lists what it should settle first. The rig
 is §3a-2's kind of throwaway container (an Arch bootstrap image with `kwin`,
 `xdg-desktop-portal`, `xdg-desktop-portal-kde`, pipewire, wireplumber and a
