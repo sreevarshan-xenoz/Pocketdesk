@@ -326,9 +326,14 @@ pub(crate) enum Kind {
     Link,
 }
 
-/// How long a new connection has to say what it is (its first byte, or the
-/// whole link hello).
+/// How long a new transfer connection has to send its whole link hello.
 const HELLO_WAIT: Duration = Duration::from_secs(5);
+
+/// How long a new control connection has to send its first byte: longer,
+/// as the phone may hold its RFCOMM socket open a while before its TLS
+/// starts (another dial of its own finishing first). Still bounded by the
+/// open connections' cap and the control link's own timeouts after it.
+const CONTROL_HELLO_WAIT: Duration = Duration::from_secs(20);
 
 /// The longest link hello: the word, a space, a `u64` and the newline.
 const HELLO_MAX: usize = LINK_HELLO.len() + 1 + 20 + 1;
@@ -342,7 +347,7 @@ enum Arrival<S> {
 }
 
 /// Read what a new connection to the `kind` service is, within
-/// [`HELLO_WAIT`]: a TLS record on the control service, a link hello on the
+/// [`CONTROL_HELLO_WAIT`] (control) or [`HELLO_WAIT`] (transfer): a TLS record on the control service, a link hello on the
 /// transfer service. Anything else (either on the other's service
 /// included), a hello longer than [`HELLO_MAX`], or silence, is `None`.
 /// Nothing past the hello's newline is read.
@@ -377,7 +382,11 @@ async fn sort<S: AsyncRead + Unpin>(mut stream: S, kind: Kind) -> Option<Arrival
         )?;
         Some(Arrival::Link(id, stream))
     };
-    tokio::time::timeout(HELLO_WAIT, read).await.ok().flatten()
+    let wait = match kind {
+        Kind::Control => CONTROL_HELLO_WAIT,
+        Kind::Link => HELLO_WAIT,
+    };
+    tokio::time::timeout(wait, read).await.ok().flatten()
 }
 
 /// Sort each connection the listener accepts, each on a task of its own: a
@@ -785,9 +794,33 @@ mod tests {
     async fn a_hello_that_never_ends_is_dropped_in_time() {
         let (server_end, mut phone_end) = tokio::io::duplex(1024);
         phone_end.write_all(b"POCKETDESK-BT").await.unwrap();
+        let at = tokio::time::Instant::now();
         assert!(sort(server_end, Kind::Link).await.is_none());
+        assert_eq!(at.elapsed(), HELLO_WAIT);
         let (server_end, _silent) = tokio::io::duplex(1024);
+        let at = tokio::time::Instant::now();
         assert!(sort(server_end, Kind::Control).await.is_none(), "silence");
+        assert_eq!(at.elapsed(), CONTROL_HELLO_WAIT);
+    }
+
+    /// A control connection whose TLS starts late (the phone finishing
+    /// another dial first) is still taken, within its longer wait.
+    #[tokio::test(start_paused = true)]
+    async fn a_control_link_may_start_its_tls_late() {
+        let (server_end, mut phone_end) = tokio::io::duplex(1024);
+        let late = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(12)).await;
+            phone_end
+                .write_all(&[pocketdesk_core::protocol::TLS_HANDSHAKE_RECORD])
+                .await
+                .unwrap();
+            phone_end
+        });
+        assert!(matches!(
+            sort(server_end, Kind::Control).await,
+            Some(Arrival::Control(_))
+        ));
+        drop(late.await.unwrap());
     }
 
     /// A radio in memory: its address, and whether its listener runs.
