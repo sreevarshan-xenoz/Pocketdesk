@@ -672,12 +672,12 @@ The phone binds Pocketdesk's own sockets to that network by binding its process 
 
 When the phone reaches the computer neither on the home network nor over the internet, and the two are within Bluetooth range, the phone's link to the computer comes back over Bluetooth: the clipboard, notifications, the remote, the deck, ringing the phone, quiet hours, questions, links and small files. The screen does not go over Bluetooth yet. Once Wi-Fi or the internet path works again, the phone moves back to it.
 
-- **On by default.** Desktop Settings, **Keep working over Bluetooth when Wi-Fi drops** (`bluetooth_fallback`) turns it off; within about ten seconds the computer stops listening and drops a phone linked over it.
+- **On by default.** Desktop Settings, **Keep working over Bluetooth when Wi-Fi drops** (`bluetooth_fallback`) turns it off; within about a second the computer stops listening and drops a phone linked over it.
 - **Bond the phone once, by hand,** in the system's Bluetooth settings (Windows: Settings, Bluetooth & devices, Add device). Pocketdesk never pairs, scans or bonds anything over Bluetooth: it asks the system for an encrypted link with a bonded device (a device that is not bonded may be offered the system's own pairing), and the phone must also be paired with Pocketdesk at home, with its key, as for the internet path: that is what lets it in. Pairing never happens over Bluetooth.
 - **What goes over it** follows the internet path's rules (SECURITY.md, limit 90). The phone learns where to dial (the computer's Bluetooth address) over a working road first, so connect once at home after bonding.
 - **Files over 8 MiB wait for Wi-Fi:** the phone is told so and can send them later. Smaller files go, one at a time, each on a link of its own inside the same pinned encryption as at home. "Files over the internet" does not apply here.
 - **Windows only for now.** The computer listens while its Bluetooth radio is on; Linux comes later.
-- **How it stands:** `pocketdesk status`, and the desktop's Settings row, say "Bluetooth: listening", "no radio" (the switch is on but there is no radio to listen on), "off", or, off Windows, "Windows only for now", as the server last checked (every 10 s).
+- **How it stands:** `pocketdesk status`, and the desktop's Settings row, say "Bluetooth: listening", "no radio" (the switch is on but there is no radio to listen on), "off", or, off Windows, "Windows only for now", as the server last checked: the switch each second, the radio every 10 s.
 
 ### Away From Home: Your Own Relay
 

@@ -527,29 +527,53 @@ fn radio() -> Arc<dyn Radio> {
     radio
 }
 
-/// How often the listener checks the switch and the radio.
+/// How often the listener asks the radio (whether there is one, and its
+/// address), and starts again a listener that would not start.
 const CHECK_EVERY: Duration = Duration::from_secs(10);
+
+/// How often the listener reads the switch: a change is acted on at once,
+/// so turning it off ends the road within about a second. One look at the
+/// config file's time each, the radio left alone.
+const SWITCH_EVERY: Duration = Duration::from_secs(1);
 
 /// Whether this system has a listener (Windows only for now).
 const LISTENS_HERE: bool = cfg!(windows);
 
 /// Listen while `wanted()` (the `bluetooth_fallback` switch) is on and
-/// `radio` has an address, checked every `every`: start when both hold,
-/// stop (the SDP record taken down) when either goes, or the radio's
-/// address changes, and start again after a listener that ended by itself.
-/// `state` says where it listens meanwhile, and how the road stands
-/// ([`RoadState`]) after each check.
+/// `radio` has an address: start when both hold, stop (the SDP record taken
+/// down) when either goes, or the radio's address changes, and start again
+/// after a listener that ended by itself. The switch is read every
+/// `switch_every`; the radio is asked when the switch changes, when a
+/// listener ended, and otherwise every `radio_every`. `state` says where it
+/// listens meanwhile, and how the road stands ([`RoadState`]) after each
+/// check.
 async fn keep_listening(
     radio: Arc<dyn Radio>,
     state: &'static Listening,
     wanted: impl Fn() -> bool,
     accepted: mpsc::Sender<Incoming>,
-    every: Duration,
+    switch_every: Duration,
+    radio_every: Duration,
 ) {
     let mut running: Option<(Box<dyn Listener>, [u8; 6])> = None;
     let mut failure_said = false;
+    let mut last: Option<(bool, tokio::time::Instant)> = None;
     loop {
         let on = wanted();
+        let now = tokio::time::Instant::now();
+        let due = match last {
+            None => true,
+            Some((was, at)) => {
+                was != on
+                    || now.duration_since(at) >= radio_every
+                    || running.as_ref().is_some_and(|(l, _)| l.ended())
+            }
+        };
+        if !due {
+            tokio::time::sleep(switch_every).await;
+            continue;
+        }
+        last = Some((on, now));
         let address = if on {
             let radio = radio.clone();
             tokio::task::spawn_blocking(move || radio.address())
@@ -603,7 +627,7 @@ async fn keep_listening(
             }
         }
         state.set_road(RoadState::of(on, LISTENS_HERE, running.is_some()));
-        tokio::time::sleep(every).await;
+        tokio::time::sleep(switch_every).await;
     }
 }
 
@@ -618,6 +642,7 @@ pub(crate) async fn run(control: mpsc::Sender<Control>) {
         &LISTENING,
         || crate::events::current_config().bluetooth_fallback,
         accepted_tx,
+        SWITCH_EVERY,
         CHECK_EVERY,
     )
     .await;
@@ -772,6 +797,7 @@ mod tests {
         running: Arc<AtomicBool>,
         ended: Arc<AtomicBool>,
         accepted: std::sync::Mutex<Option<mpsc::Sender<Incoming>>>,
+        asked: std::sync::atomic::AtomicUsize,
     }
 
     struct FakeListener {
@@ -793,6 +819,7 @@ mod tests {
 
     impl Radio for FakeRadio {
         fn address(&self) -> Option<[u8; 6]> {
+            self.asked.fetch_add(1, Ordering::SeqCst);
             *self.address.lock().unwrap()
         }
 
@@ -838,6 +865,7 @@ mod tests {
                 state,
                 move || on.load(Ordering::SeqCst),
                 accepted,
+                Duration::from_millis(5),
                 Duration::from_millis(5),
             )
         });
@@ -894,6 +922,69 @@ mod tests {
         task.abort();
     }
 
+    /// The switch is followed within about a second, on or off, while
+    /// the radio is asked at most every ten seconds otherwise.
+    #[tokio::test(start_paused = true)]
+    async fn the_switch_is_read_each_second_and_the_radio_each_ten() {
+        let radio = Arc::new(FakeRadio::default());
+        *radio.address.lock().unwrap() = Some([0x00, 0x00, 0x5E, 0x00, 0x53, 0x01]);
+        let state: &'static Listening = Box::leak(Box::new(Listening::new()));
+        let on = Arc::new(AtomicBool::new(true));
+        let (accepted, _) = mpsc::channel(1);
+        let task = tokio::spawn({
+            let radio: Arc<dyn Radio> = radio.clone();
+            let on = on.clone();
+            keep_listening(
+                radio,
+                state,
+                move || on.load(Ordering::SeqCst),
+                accepted,
+                Duration::from_secs(1),
+                Duration::from_secs(10),
+            )
+        });
+        let running = || radio.running.load(Ordering::SeqCst);
+        let asked = || radio.asked.load(Ordering::SeqCst);
+        until("listening", || {
+            running() && state.road() == Some(RoadState::Listening)
+        })
+        .await;
+
+        // A steady switch: the radio is asked once in ten seconds, not
+        // each second.
+        let before = asked();
+        tokio::time::sleep(Duration::from_millis(9_500)).await;
+        assert!(asked() - before <= 1, "asked {} times", asked() - before);
+
+        // Off: stopped, and said, within about a second.
+        let at = tokio::time::Instant::now();
+        on.store(false, Ordering::SeqCst);
+        until("stopped", || {
+            !running() && state.road() == Some(RoadState::Off)
+        })
+        .await;
+        assert!(
+            at.elapsed() <= Duration::from_millis(1_100),
+            "{:?}",
+            at.elapsed()
+        );
+        assert_eq!(state.get(), None);
+
+        // On again: listening within about a second.
+        let at = tokio::time::Instant::now();
+        on.store(true, Ordering::SeqCst);
+        until("listening again", || {
+            running() && state.road() == Some(RoadState::Listening)
+        })
+        .await;
+        assert!(
+            at.elapsed() <= Duration::from_millis(1_100),
+            "{:?}",
+            at.elapsed()
+        );
+        task.abort();
+    }
+
     /// Turning the road off ends the control links it took (and with them
     /// the away lock's presence), not only the listening.
     #[tokio::test]
@@ -914,6 +1005,7 @@ mod tests {
                 state,
                 move || on.load(Ordering::SeqCst),
                 accepted_tx,
+                Duration::from_millis(5),
                 Duration::from_millis(5),
             )
         });

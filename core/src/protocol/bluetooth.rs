@@ -116,7 +116,8 @@ pub const LINK_PACKET: &str = "kdeconnect.pocketdesk.bluetooth.link";
 pub const TRANSFER_MAX: u64 = 8_388_608;
 
 /// How the Bluetooth road stands on a computer, as its server last checked
-/// (every 10 s): what `pocketdesk status` and the desktop's Settings say.
+/// (the switch each second, the radio every 10 s): what `pocketdesk status`
+/// and the desktop's Settings say.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RoadState {
@@ -167,7 +168,7 @@ mod tests {
         assert_eq!(RoadState::of(true, true, true), RoadState::Listening);
         assert_eq!(RoadState::of(true, true, false), RoadState::NoRadio);
         assert_eq!(RoadState::of(false, true, false), RoadState::Off);
-        // Off wins while a listener still stops (it is checked every 10 s).
+        // Off wins while a listener still stops.
         assert_eq!(RoadState::of(false, true, true), RoadState::Off);
         assert_eq!(RoadState::of(true, false, false), RoadState::Unsupported);
         assert_eq!(RoadState::of(false, false, false), RoadState::Off);
