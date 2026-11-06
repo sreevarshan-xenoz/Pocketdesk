@@ -123,7 +123,7 @@ class Screenshots(private val ctx: Context) {
     /** Hand [uris] to the transfer service for the computer's Downloads. */
     private fun toDownloads(address: String, port: Int, uris: List<Pair<Uri, Int>>) {
         uris.forEach { (uri, _) -> SendOutcomes.expect(uri) }
-        runCatching { TransferService.start(ctx, address, port, uris.map { it.first }) }
+        runCatching { TransferService.start(ctx, address, port, uris.map { it.first }, automatic = true) }
             .onFailure { Log.w(TAG, "a screenshot was not sent to the computer's Downloads", it) }
         handed = handed + uris
         handedAtMs = SystemClock.elapsedRealtime()

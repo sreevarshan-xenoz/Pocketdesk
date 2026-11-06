@@ -31,8 +31,20 @@ object TransferRetry {
      * Wi-Fi; nothing starts during a call or music to a headset) until the
      * wait ran out: not tried again now, though not refused either, so a
      * later send (the camera's, the kept folders' next run) may go.
+     * [forWifi]: it waited for Wi-Fi, else for a call or music to stop.
      */
-    class Waited(message: String) : Exception(message)
+    class Waited(message: String, val forWifi: Boolean = true) : Exception(message)
+
+    /**
+     * Whether [error] held the file for the Bluetooth road, on the phone
+     * ([Waited]) or by the computer's own refusal (over 8 MiB "waits for
+     * Wi-Fi"): it goes again later, not counted as a failure.
+     */
+    fun held(error: Throwable?): Boolean {
+        if (error is Waited) return true
+        val text = error?.message?.lowercase() ?: return false
+        return "bluetooth" in text && "waits for wi-fi" in text
+    }
 
     /** [delayBefore] for a failure [error]: a [Refusal] or a [Waited] is final, whatever it says. */
     fun delayAfter(attempt: Int, error: Throwable?, enabled: Boolean): Long? =

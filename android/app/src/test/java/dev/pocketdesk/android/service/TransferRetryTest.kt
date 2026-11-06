@@ -273,4 +273,14 @@ class TransferRetryTest {
             TransferRetry.next(1, waited, enabled = true, hasNetwork = false, waitedOfflineSeconds = 0),
         )
     }
+
+    /** Held for the Bluetooth road: by the phone, or by the computer's refusal; nothing else. */
+    @Test
+    fun aFileHeldForTheBluetoothRoadIsTold() {
+        assertTrue(TransferRetry.held(TransferRetry.Waited("Not sent")))
+        assertTrue(TransferRetry.held(Exception("The computer refused the file: over 8 MiB over Bluetooth: the file waits for Wi-Fi")))
+        assertFalse(TransferRetry.held(Exception("The computer refused the file: the phone may not send files")))
+        assertFalse(TransferRetry.held(TransferRetry.Refusal("no room")))
+        assertFalse(TransferRetry.held(null))
+    }
 }

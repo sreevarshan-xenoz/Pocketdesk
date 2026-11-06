@@ -255,6 +255,8 @@
     <string name="transfer_waits_for_audio">அழைப்பு அல்லது இசை நிற்கும் வரை காத்திருக்கிறது</string>
     <string name="transfer_waited_wifi">அனுப்பப்படவில்லை: புளூடூத்தில் 8 MB-க்கு மேற்பட்ட கோப்புகள் Wi-Fi-க்காகக் காத்திருக்கும். Wi-Fi-இல் மீண்டும் அனுப்புங்கள்</string>
     <string name="transfer_waited_audio">அனுப்பப்படவில்லை: அழைப்பு அல்லது இசை புளூடூத்தை நீண்ட நேரம் பயன்படுத்தியது. அது நின்றதும் மீண்டும் அனுப்புங்கள்</string>
+    <string name="transfer_not_received_wifi">பெறப்படவில்லை: புளூடூத்தில் 8 MB-க்கு மேற்பட்ட கோப்புகள் Wi-Fi-க்காகக் காத்திருக்கும். Wi-Fi-இல் மீண்டும் கேளுங்கள்</string>
+    <string name="transfer_not_received_audio">பெறப்படவில்லை: அழைப்பு அல்லது இசை புளூடூத்தை நீண்ட நேரம் பயன்படுத்தியது. அது நின்றதும் மீண்டும் கேளுங்கள்</string>
     <string name="transfer_sending_folder">%1$s கோப்புறை அனுப்பப்படுகிறது: %3$d இல் %2$d</string>
     <string name="transfer_folder_empty">%1$s இலிருந்து எதையும் அனுப்ப முடியவில்லை: அது காலியாக உள்ளது, அல்லது அதன் கோப்புகளைப் படிக்க முடியவில்லை</string>
     <string name="transfer_folder_stopped">%1$s அனுப்புவது நிறுத்தப்பட்டது: கணினி பதிலளிப்பதை நிறுத்தியது. அனுப்பப்படாதவை: %2$d</string>

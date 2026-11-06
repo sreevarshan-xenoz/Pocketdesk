@@ -3,8 +3,13 @@ package dev.pocketdesk.android.files
 import android.net.Uri
 import java.util.concurrent.ConcurrentHashMap
 
-/** How a file an uploader handed to the transfer service went (BB4). */
-enum class SendOutcome { PENDING, SENT, FAILED, CANCELLED }
+/**
+ * How a file an uploader handed to the transfer service went (BB4).
+ * [WAITED]: held by the Bluetooth road's rules (over 8 MiB, or a call or
+ * music on the radio) until the wait ran out; it goes again, and the send
+ * is not counted against it.
+ */
+enum class SendOutcome { PENDING, SENT, FAILED, CANCELLED, WAITED }
 
 /**
  * The camera's and the screenshots' files handed to the transfer service,
@@ -49,21 +54,26 @@ object UploadRetry {
     /**
      * Those of [handed] (each with how many times it has been sent) that go
      * again: failed, or never run, and sent fewer than [MAX_SENDS] times.
-     * One cancelled, or sent, does not. Null while one is still waiting
-     * within [START_GRACE_MS] of [handedAgoMs].
+     * One cancelled, or sent, does not. One held for the Bluetooth road
+     * ([SendOutcome.WAITED]) always goes again, and that send is taken back
+     * from its count (the uploader adds one as it hands it over), so it is
+     * never given up. Null while one is still waiting within
+     * [START_GRACE_MS] of [handedAgoMs].
      */
     fun <T> again(handed: List<Pair<T, Int>>, handedAgoMs: Long, outcome: (T) -> SendOutcome?): List<Pair<T, Int>>? {
         val outcomes = handed.map { (item, _) -> outcome(item) }
         if (outcomes.any { it == SendOutcome.PENDING } && handedAgoMs < START_GRACE_MS) return null
         return handed.zip(outcomes)
-            .filter { (sent, how) -> how != SendOutcome.SENT && how != SendOutcome.CANCELLED && sent.second < MAX_SENDS }
-            .map { (sent, _) -> sent }
+            .filter { (sent, how) ->
+                how == SendOutcome.WAITED || (how != SendOutcome.SENT && how != SendOutcome.CANCELLED && sent.second < MAX_SENDS)
+            }
+            .map { (sent, how) -> if (how == SendOutcome.WAITED) sent.first to (sent.second - 1).coerceAtLeast(0) else sent }
     }
 
     /** How many of [handed] failed for the last time, to be given up (review: not those sent at last). */
     fun <T> givenUp(handed: List<Pair<T, Int>>, outcome: (T) -> SendOutcome?): Int =
         handed.count { (item, sends) ->
             val how = outcome(item)
-            sends >= MAX_SENDS && how != SendOutcome.SENT && how != SendOutcome.CANCELLED
+            sends >= MAX_SENDS && how != SendOutcome.SENT && how != SendOutcome.CANCELLED && how != SendOutcome.WAITED
         }
 }

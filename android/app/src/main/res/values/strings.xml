@@ -264,6 +264,8 @@
     <string name="transfer_waits_for_audio">Waits until the call or music stops</string>
     <string name="transfer_waited_wifi">Not sent: over Bluetooth, files over 8 MB wait for Wi-Fi. Send it again on Wi-Fi</string>
     <string name="transfer_waited_audio">Not sent: a call or music held Bluetooth too long. Send it again once it stops</string>
+    <string name="transfer_not_received_wifi">Not received: over Bluetooth, files over 8 MB wait for Wi-Fi. Ask for it again on Wi-Fi</string>
+    <string name="transfer_not_received_audio">Not received: a call or music held Bluetooth too long. Ask for it again once it stops</string>
     <string name="transfer_sending_folder">Sending folder %1$s: %2$d of %3$d</string>
     <string name="transfer_folder_empty">Nothing in %1$s could be sent: it is empty, or its files could not be read</string>
     <string name="transfer_folder_stopped">Stopped sending %1$s: the computer stopped answering. Not sent: %2$d</string>

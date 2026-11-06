@@ -123,7 +123,7 @@ class CameraUploads(private val ctx: Context) {
      */
     private fun hand(address: String, port: Int, items: List<Pair<Item, Int>>): Boolean {
         items.forEach { (item, _) -> SendOutcomes.expect(item.uri) }
-        val went = runCatching { TransferService.start(ctx, address, port, items.map { it.first.uri }) }
+        val went = runCatching { TransferService.start(ctx, address, port, items.map { it.first.uri }, automatic = true) }
             .onFailure { Log.w(TAG, "new camera photos were not sent to the computer", it) }
             .isSuccess
         handed = items
