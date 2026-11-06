@@ -90,14 +90,6 @@ impl ConnectionManager {
         port: u16,
         identity: &DeviceIdentity,
     ) -> Result<(ControlStream, PeerClaims)> {
-        let conn_id = uuid::Uuid::new_v4().to_string();
-        let span = info_span!(
-            "handshake",
-            conn_id = %conn_id,
-            peer = %address,
-            proto = %PROTOCOL_VERSION
-        );
-
         async move {
             let socket_addr = format!("{address}:{port}");
 
@@ -116,36 +108,83 @@ impl ConnectionManager {
             stream.set_nodelay(true)?;
             keep_alive(&stream)?;
 
-            // The channel runs inside TLS. The desktop's certificate is
-            // checked against the pin for the address dialed (the server
-            // name), the same pin the stream uses, and this device presents
-            // its own.
-            let server_name = rustls::pki_types::ServerName::try_from(address.to_string())
-                .map_err(|e| PocketdeskError::ConnectionFailed {
+            self.secure(stream, address, port, identity).await
+        }
+        .instrument(handshake_span(address))
+        .await
+    }
+
+    /// The control link's TLS and handshake on a stream already open to the
+    /// desktop, whatever carries it (a Bluetooth stream, say): TLS with the
+    /// desktop's certificate checked against the pin for `address` (the
+    /// server name) and this device's own presented, then the handshake.
+    /// What [`ConnectionManager::connect_named`] does after dialing TCP.
+    pub async fn secure_named<S>(
+        &self,
+        stream: S,
+        address: &str,
+        identity: &DeviceIdentity,
+    ) -> Result<(ControlDuplex, PeerClaims)>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
+        let (stream, claims) = self
+            .secure(stream, address, 0, identity)
+            .instrument(handshake_span(address))
+            .await?;
+        Ok((Box::new(stream), claims))
+    }
+
+    /// TLS, then the handshake, on `stream`. `port` only names the dial in
+    /// errors (0 when there was none).
+    async fn secure<S>(
+        &self,
+        stream: S,
+        address: &str,
+        port: u16,
+        identity: &DeviceIdentity,
+    ) -> Result<(tokio_rustls::client::TlsStream<S>, PeerClaims)>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        // The channel runs inside TLS. The desktop's certificate is checked
+        // against the pin for the address dialed (the server name), the same
+        // pin the stream uses, and this device presents its own.
+        let server_name =
+            rustls::pki_types::ServerName::try_from(address.to_string()).map_err(|e| {
+                PocketdeskError::ConnectionFailed {
                     address: address.to_string(),
                     port,
                     reason: format!("not an address: {e}"),
-                })?;
-            let stream = tokio::time::timeout(
-                self.timeout,
-                tokio_rustls::TlsConnector::from(self.tls.clone()).connect(server_name, stream),
-            )
-            .await
-            .map_err(|_| PocketdeskError::Timeout {
-                operation: "TLS handshake",
-                duration_ms: self.timeout.as_millis() as u64,
-            })?
-            .map_err(|e| PocketdeskError::ConnectionFailed {
-                address: address.to_string(),
-                port,
-                reason: format!("TLS: {e}"),
+                }
             })?;
-
-            control_handshake_named(stream, address, identity).await
-        }
-        .instrument(span)
+        let stream = tokio::time::timeout(
+            self.timeout,
+            tokio_rustls::TlsConnector::from(self.tls.clone()).connect(server_name, stream),
+        )
         .await
+        .map_err(|_| PocketdeskError::Timeout {
+            operation: "TLS handshake",
+            duration_ms: self.timeout.as_millis() as u64,
+        })?
+        .map_err(|e| PocketdeskError::ConnectionFailed {
+            address: address.to_string(),
+            port,
+            reason: format!("TLS: {e}"),
+        })?;
+
+        control_handshake_named(stream, address, identity).await
     }
+}
+
+/// The tracing span of one control handshake.
+fn handshake_span(address: &str) -> tracing::Span {
+    info_span!(
+        "handshake",
+        conn_id = %uuid::Uuid::new_v4(),
+        peer = %address,
+        proto = %PROTOCOL_VERSION
+    )
 }
 
 /// The control channel's opening, on a stream already secured (TLS over
