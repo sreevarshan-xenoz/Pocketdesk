@@ -9,6 +9,7 @@
 //! the phone to the key its control link proved. For the same reason a
 //! phone has one transfer link at a time: the next waits its turn.
 
+use super::Stream;
 use pocketdesk_core::protocol::bluetooth::LINK_PACKET;
 use pocketdesk_core::protocol::kdeconnect::{
     DeviceSender, NetworkPacket, OpenLinkStream, TransferIo,
@@ -16,7 +17,6 @@ use pocketdesk_core::protocol::kdeconnect::{
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
-use tokio::io::DuplexStream;
 use tokio::sync::oneshot;
 
 /// How long the computer waits for the phone's transfer link once it has
@@ -31,13 +31,13 @@ pub(crate) const TURN_WAIT: Duration = Duration::from_secs(60);
 /// control link on the Bluetooth road.
 #[derive(Default)]
 pub(crate) struct LinkTable {
-    waiting: Mutex<HashMap<u64, oneshot::Sender<DuplexStream>>>,
+    waiting: Mutex<HashMap<u64, oneshot::Sender<Stream>>>,
 }
 
 impl LinkTable {
     /// A new link id, random and not waiting already, and where its
     /// connection arrives. The id waits until the [`Waiting`] is dropped.
-    pub(super) fn wait(self: &Arc<Self>) -> (Waiting, oneshot::Receiver<DuplexStream>) {
+    pub(super) fn wait(self: &Arc<Self>) -> (Waiting, oneshot::Receiver<Stream>) {
         let (tx, rx) = oneshot::channel();
         let mut waiting = self.waiting.lock().unwrap_or_else(|e| e.into_inner());
         let id = loop {
@@ -59,7 +59,7 @@ impl LinkTable {
     /// Hand the phone's connection for link `id` to the transfer waiting
     /// for it. `false`, and the stream dropped, when nothing waits for that
     /// id: an id is taken once.
-    pub(crate) fn offer(&self, id: u64, stream: DuplexStream) -> bool {
+    pub(crate) fn offer(&self, id: u64, stream: Stream) -> bool {
         let taken = self
             .waiting
             .lock()
@@ -225,6 +225,7 @@ mod tests {
     use super::*;
     use pocketdesk_core::error::Result;
     use pocketdesk_core::streaming::transport::CertManager;
+    use tokio::io::DuplexStream;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     /// The phone's control link, as the links see it: what is sent on it
@@ -313,7 +314,7 @@ mod tests {
         });
         let id = asked_id(&asked.recv().await.unwrap());
         let (computer_end, phone_end) = tokio::io::duplex(64 * 1024);
-        assert!(links.table.offer(id, computer_end));
+        assert!(links.table.offer(id, crate::bluetooth::live(computer_end)));
         let mut phone_side = phone_answers(phone, phone_end).await.unwrap();
         let mut opened = opening.await.unwrap().expect("the link, inside TLS");
         phone_side.write_all(b"from the phone").await.unwrap();
@@ -322,7 +323,10 @@ mod tests {
         opened.read_exact(&mut got).await.unwrap();
         assert_eq!(&got, b"from the phone");
         let (again, _) = tokio::io::duplex(1024);
-        assert!(!links.table.offer(id, again), "an id is taken once");
+        assert!(
+            !links.table.offer(id, crate::bluetooth::live(again)),
+            "an id is taken once"
+        );
     }
 
     /// Open one link, the phone answering as it should.
@@ -339,7 +343,7 @@ mod tests {
         });
         let id = asked_id(&asked.recv().await.unwrap());
         let (computer_end, phone_end) = tokio::io::duplex(64 * 1024);
-        assert!(links.table.offer(id, computer_end));
+        assert!(links.table.offer(id, crate::bluetooth::live(computer_end)));
         let phone_side = phone_answers(&phone_certs().0, phone_end).await.unwrap();
         (opening.await.unwrap().unwrap(), phone_side)
     }
@@ -367,7 +371,7 @@ mod tests {
             .map(|p| asked_id(&p))
             .unwrap();
         let (computer_end, phone_end) = tokio::io::duplex(64 * 1024);
-        assert!(links.table.offer(id, computer_end));
+        assert!(links.table.offer(id, crate::bluetooth::live(computer_end)));
         let _phone_side = phone_answers(&phone_certs().0, phone_end).await.unwrap();
         assert!(second.await.unwrap().is_ok());
     }
@@ -394,7 +398,7 @@ mod tests {
         });
         let id = asked_id(&asked.recv().await.unwrap());
         let (computer_end, phone_end) = tokio::io::duplex(64 * 1024);
-        assert!(links.table.offer(id, computer_end));
+        assert!(links.table.offer(id, crate::bluetooth::live(computer_end)));
         let _ = phone_answers(stranger, phone_end).await;
         assert!(opening.await.unwrap().is_err());
     }
@@ -408,14 +412,17 @@ mod tests {
         assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
         let id = asked_id(&asked.recv().await.unwrap());
         let (late, _) = tokio::io::duplex(1024);
-        assert!(!links.table.offer(id, late), "the id waits no longer");
+        assert!(
+            !links.table.offer(id, crate::bluetooth::live(late)),
+            "the id waits no longer"
+        );
     }
 
     #[tokio::test]
     async fn offer_unknown_id_is_refused() {
         let table = LinkTable::default();
         let (computer_end, mut phone_end) = tokio::io::duplex(1024);
-        assert!(!table.offer(7, computer_end));
+        assert!(!table.offer(7, crate::bluetooth::live(computer_end)));
         let mut rest = Vec::new();
         phone_end.read_to_end(&mut rest).await.unwrap();
         assert!(rest.is_empty(), "the stream was dropped");

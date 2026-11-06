@@ -23,27 +23,61 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, DuplexStream};
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
-/// Where this computer listens by Bluetooth now: set when the listener
-/// starts, cleared when it stops. Read on every connection's seed, so it
-/// is kept here, never asked of the radio there.
-struct Listening(RwLock<Option<BluetoothInfo>>);
+/// Where this computer listens by Bluetooth now, and the token that ends
+/// what came while it listened. Set when the listener starts, cleared (and
+/// every connection it took ended) when it stops. The address is read on
+/// every connection's seed, so it is kept here, never asked of the radio
+/// there.
+struct Listening {
+    info: RwLock<Option<BluetoothInfo>>,
+    period: std::sync::Mutex<CancellationToken>,
+}
 
 impl Listening {
-    const fn new() -> Self {
-        Self(RwLock::new(None))
+    fn new() -> Self {
+        let ended = CancellationToken::new();
+        ended.cancel();
+        Self {
+            info: RwLock::new(None),
+            period: std::sync::Mutex::new(ended),
+        }
     }
 
     fn get(&self) -> Option<BluetoothInfo> {
-        self.0.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.info.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    fn set(&self, info: Option<BluetoothInfo>) {
-        *self.0.write().unwrap_or_else(|e| e.into_inner()) = info;
+    /// Listening at `info`: connections from now on live until [`stop`].
+    ///
+    /// [`stop`]: Self::stop
+    fn start(&self, info: BluetoothInfo) {
+        *self.period.lock().unwrap_or_else(|e| e.into_inner()) = CancellationToken::new();
+        *self.info.write().unwrap_or_else(|e| e.into_inner()) = Some(info);
+    }
+
+    /// Not listening: nothing is told, and every connection taken while it
+    /// listened ends (its control link, and with it the away lock's
+    /// presence, and its transfer links).
+    fn stop(&self) {
+        *self.info.write().unwrap_or_else(|e| e.into_inner()) = None;
+        self.period
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .cancel();
+    }
+
+    /// The token of the period a connection arrives in.
+    fn period(&self) -> CancellationToken {
+        self.period
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 }
 
-static LISTENING: Listening = Listening::new();
+static LISTENING: std::sync::LazyLock<Listening> = std::sync::LazyLock::new(Listening::new);
 
 /// Where a phone dials this computer by Bluetooth, while it listens there;
 /// `None` while it does not (the switch off, no radio, or not Windows).
@@ -68,11 +102,89 @@ fn format_address(address: [u8; 6]) -> String {
         .join(":")
 }
 
+/// An accepted connection, as the server sees it: it ends (reads and
+/// writes fail) once the listener it came by stops.
+pub(crate) type Stream = Endable<DuplexStream>;
+
+/// A stream that fails from the moment its token is cancelled: a
+/// Bluetooth connection, once the road is turned off. The server's own
+/// read then ends it, with the cleanup a dropped connection gets.
+pub(crate) struct Endable<S> {
+    inner: S,
+    token: CancellationToken,
+    ended: std::pin::Pin<Box<tokio_util::sync::WaitForCancellationFutureOwned>>,
+}
+
+impl<S> Endable<S> {
+    pub(crate) fn new(inner: S, token: CancellationToken) -> Self {
+        Self {
+            inner,
+            ended: Box::pin(token.clone().cancelled_owned()),
+            token,
+        }
+    }
+
+    /// `Err` once the token is cancelled, and wakes the task then.
+    fn check(&mut self, cx: &mut std::task::Context<'_>) -> std::io::Result<()> {
+        use std::future::Future;
+        if self.token.is_cancelled() || self.ended.as_mut().poll(cx).is_ready() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionAborted,
+                "the Bluetooth road was turned off",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl<S: AsyncRead + Unpin> AsyncRead for Endable<S> {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        if let Err(e) = self.check(cx) {
+            return std::task::Poll::Ready(Err(e));
+        }
+        std::pin::Pin::new(&mut self.inner).poll_read(cx, buf)
+    }
+}
+
+impl<S: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for Endable<S> {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        if let Err(e) = self.check(cx) {
+            return std::task::Poll::Ready(Err(e));
+        }
+        std::pin::Pin::new(&mut self.inner).poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        if let Err(e) = self.check(cx) {
+            return std::task::Poll::Ready(Err(e));
+        }
+        std::pin::Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
 /// A control connection over Bluetooth, for the server's loop: its stream
 /// (the first byte, read to tell it apart, put back) and the transfer links
 /// it asks for.
 pub(crate) struct Control {
-    pub(crate) stream: Prefixed<DuplexStream>,
+    pub(crate) stream: Prefixed<Stream>,
     pub(crate) links: Arc<BluetoothLinks>,
 }
 
@@ -200,15 +312,18 @@ async fn sort<S: AsyncRead + Unpin>(mut stream: S, kind: Kind) -> Option<Arrival
 
 /// Sort each connection the listener accepts, each on a task of its own: a
 /// transfer link goes to the transfer waiting for its id, a control link to
-/// `control` with links of its own; anything else is dropped.
+/// `control` with links of its own; anything else is dropped. Each lives
+/// only while `state` listens.
 async fn serve(
     mut accepted: mpsc::Receiver<(Kind, DuplexStream)>,
     table: Arc<LinkTable>,
     control: mpsc::Sender<Control>,
+    state: &'static Listening,
 ) {
     while let Some((kind, stream)) = accepted.recv().await {
         let table = table.clone();
         let control = control.clone();
+        let stream = Endable::new(stream, state.period());
         tokio::spawn(async move {
             match sort(stream, kind).await {
                 Some(Arrival::Control(stream)) => {
@@ -340,7 +455,7 @@ const CHECK_EVERY: Duration = Duration::from_secs(10);
 /// `state` says where it listens meanwhile.
 async fn keep_listening(
     radio: Arc<dyn Radio>,
-    state: &Listening,
+    state: &'static Listening,
     wanted: impl Fn() -> bool,
     accepted: mpsc::Sender<(Kind, DuplexStream)>,
     every: Duration,
@@ -362,7 +477,7 @@ async fn keep_listening(
             .is_some_and(|(listener, at)| listener.ended() || address != Some(*at))
         {
             running = None;
-            state.set(None);
+            state.stop();
             tracing::info!("Stopped listening over Bluetooth");
         }
         if running.is_none()
@@ -383,10 +498,10 @@ async fn keep_listening(
             match started {
                 Ok(listener) => {
                     tracing::info!("Listening over Bluetooth for service {service}");
-                    state.set(Some(BluetoothInfo {
+                    state.start(BluetoothInfo {
                         address: format_address(at),
                         service,
-                    }));
+                    });
                     running = Some((listener, at));
                     failure_said = false;
                 }
@@ -407,7 +522,7 @@ async fn keep_listening(
 /// now), and hands each control link to `control`.
 pub(crate) async fn run(control: mpsc::Sender<Control>) {
     let (accepted_tx, accepted_rx) = mpsc::channel(8);
-    tokio::spawn(serve(accepted_rx, Arc::default(), control));
+    tokio::spawn(serve(accepted_rx, Arc::default(), control, &LISTENING));
     keep_listening(
         radio(),
         &LISTENING,
@@ -416,6 +531,12 @@ pub(crate) async fn run(control: mpsc::Sender<Control>) {
         CHECK_EVERY,
     )
     .await;
+}
+
+/// A stream that ends with no road (the tests').
+#[cfg(test)]
+fn live(stream: DuplexStream) -> Stream {
+    Endable::new(stream, CancellationToken::new())
 }
 
 #[cfg(test)]
@@ -444,7 +565,12 @@ mod tests {
         let (accepted_tx, accepted_rx) = mpsc::channel(8);
         let (control_tx, control_rx) = mpsc::channel(8);
         let table = Arc::new(LinkTable::default());
-        tokio::spawn(serve(accepted_rx, table.clone(), control_tx));
+        let state: &'static Listening = Box::leak(Box::new(Listening::new()));
+        state.start(BluetoothInfo {
+            address: format_address([0, 0, 0x5E, 0, 0x53, 1]),
+            service: pocketdesk_core::protocol::bluetooth::SERVICE_UUID.to_string(),
+        });
+        tokio::spawn(serve(accepted_rx, table.clone(), control_tx, state));
         (accepted_tx, table, control_rx)
     }
 
@@ -532,7 +658,7 @@ mod tests {
         assert!(control.try_recv().is_err(), "no control link");
         let (late, _) = tokio::io::duplex(1024);
         assert!(
-            table.offer(waiting.id, late),
+            table.offer(waiting.id, live(late)),
             "the id still waits: no wrong-service hello took it"
         );
     }
@@ -552,6 +678,7 @@ mod tests {
         address: std::sync::Mutex<Option<[u8; 6]>>,
         running: Arc<AtomicBool>,
         ended: Arc<AtomicBool>,
+        accepted: std::sync::Mutex<Option<mpsc::Sender<(Kind, DuplexStream)>>>,
     }
 
     struct FakeListener {
@@ -580,12 +707,13 @@ mod tests {
             &self,
             control: uuid::Uuid,
             link: uuid::Uuid,
-            _accepted: mpsc::Sender<(Kind, DuplexStream)>,
+            accepted: mpsc::Sender<(Kind, DuplexStream)>,
         ) -> std::io::Result<Box<dyn Listener>> {
             assert_eq!(
                 link,
                 pocketdesk_core::protocol::bluetooth::link_uuid(control)
             );
+            *self.accepted.lock().unwrap() = Some(accepted);
             self.ended.store(false, Ordering::SeqCst);
             self.running.store(true, Ordering::SeqCst);
             Ok(Box::new(FakeListener {
@@ -658,5 +786,77 @@ mod tests {
         })
         .await;
         task.abort();
+    }
+
+    /// Turning the road off ends the control links it took (and with them
+    /// the away lock's presence), not only the listening.
+    #[tokio::test]
+    async fn turning_the_road_off_ends_its_live_links() {
+        let radio = Arc::new(FakeRadio::default());
+        *radio.address.lock().unwrap() = Some([0x00, 0x00, 0x5E, 0x00, 0x53, 0x01]);
+        let state: &'static Listening = Box::leak(Box::new(Listening::new()));
+        let on = Arc::new(AtomicBool::new(true));
+        let (accepted_tx, accepted_rx) = mpsc::channel(8);
+        let (control_tx, mut control_rx) = mpsc::channel(8);
+        let table = Arc::new(LinkTable::default());
+        let serving = tokio::spawn(serve(accepted_rx, table.clone(), control_tx, state));
+        let listening = tokio::spawn({
+            let radio: Arc<dyn Radio> = radio.clone();
+            let on = on.clone();
+            keep_listening(
+                radio,
+                state,
+                move || on.load(Ordering::SeqCst),
+                accepted_tx,
+                Duration::from_millis(5),
+            )
+        });
+        until("listening", || state.get().is_some()).await;
+        let accepted = radio.accepted.lock().unwrap().clone().unwrap();
+
+        let record = [pocketdesk_core::protocol::TLS_HANDSHAKE_RECORD, 3, 1];
+        let _phone = dial(&accepted, Kind::Control, &record).await;
+        let mut link = control_rx.recv().await.expect("a control link");
+        let mut got = [0u8; 3];
+        link.stream.read_exact(&mut got).await.unwrap();
+        // A transfer link that arrived meanwhile ends too.
+        let (waiting, arrived) = table.wait();
+        let _transfer_phone = dial(
+            &accepted,
+            Kind::Link,
+            format_link_hello(waiting.id).as_bytes(),
+        )
+        .await;
+        let mut transfer = arrived.await.unwrap();
+
+        // Waiting on the phone when the road goes off: the read fails.
+        let reading = tokio::spawn(async move {
+            let mut buf = [0u8; 8];
+            link.stream.read(&mut buf).await
+        });
+        on.store(false, Ordering::SeqCst);
+        let read = tokio::time::timeout(Duration::from_secs(5), reading)
+            .await
+            .expect("ended in time")
+            .unwrap();
+        assert_eq!(
+            read.err().map(|e| e.kind()),
+            Some(std::io::ErrorKind::ConnectionAborted)
+        );
+        assert!(
+            transfer.write_all(b"x").await.is_err(),
+            "the transfer link ended"
+        );
+
+        // On again: a new link lives.
+        on.store(true, Ordering::SeqCst);
+        until("listening again", || state.get().is_some()).await;
+        let accepted = radio.accepted.lock().unwrap().clone().unwrap();
+        let _phone = dial(&accepted, Kind::Control, &record).await;
+        let mut link = control_rx.recv().await.expect("a new control link");
+        link.stream.read_exact(&mut got).await.unwrap();
+        assert_eq!(got, record);
+        listening.abort();
+        serving.abort();
     }
 }
