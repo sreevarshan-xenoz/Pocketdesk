@@ -110,9 +110,80 @@ pub const LINK_PACKET: &str = "kdeconnect.pocketdesk.bluetooth.link";
 /// link is for a note or a photo, and a bigger file waits for Wi-Fi.
 pub const TRANSFER_MAX: u64 = 8_388_608;
 
+/// How the Bluetooth road stands on a computer, as its server last checked
+/// (every 10 s): what `pocketdesk status` and the desktop's Settings say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoadState {
+    /// Listening for a bonded phone.
+    Listening,
+    /// The switch is on, but there is no radio to listen on (none, it is
+    /// off, or it would not listen).
+    NoRadio,
+    /// The switch (`bluetooth_fallback`) is off.
+    Off,
+    /// The switch is on, but this system does not listen yet: Windows only
+    /// for now.
+    Unsupported,
+}
+
+impl RoadState {
+    /// The state with the switch `on`, on a system that `listens_here`,
+    /// and a listener `listening` or not.
+    pub fn of(on: bool, listens_here: bool, listening: bool) -> Self {
+        if !on {
+            RoadState::Off
+        } else if listening {
+            RoadState::Listening
+        } else if !listens_here {
+            RoadState::Unsupported
+        } else {
+            RoadState::NoRadio
+        }
+    }
+
+    /// The state in words, after "Bluetooth: ".
+    pub fn words(self) -> &'static str {
+        match self {
+            RoadState::Listening => "listening",
+            RoadState::NoRadio => "no radio",
+            RoadState::Off => "off",
+            RoadState::Unsupported => "Windows only for now",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_road_state_follows_the_switch_and_the_radio() {
+        assert_eq!(RoadState::of(true, true, true), RoadState::Listening);
+        assert_eq!(RoadState::of(true, true, false), RoadState::NoRadio);
+        assert_eq!(RoadState::of(false, true, false), RoadState::Off);
+        // Off wins while a listener still stops (it is checked every 10 s).
+        assert_eq!(RoadState::of(false, true, true), RoadState::Off);
+        assert_eq!(RoadState::of(true, false, false), RoadState::Unsupported);
+        assert_eq!(RoadState::of(false, false, false), RoadState::Off);
+        let words: Vec<_> = [
+            RoadState::Listening,
+            RoadState::NoRadio,
+            RoadState::Off,
+            RoadState::Unsupported,
+        ]
+        .iter()
+        .map(|s| s.words())
+        .collect();
+        assert_eq!(
+            words,
+            ["listening", "no radio", "off", "Windows only for now"]
+        );
+        assert_eq!(
+            serde_json::to_value(RoadState::NoRadio).unwrap(),
+            serde_json::json!("no_radio")
+        );
+    }
 
     #[test]
     fn service_uuid_override() {

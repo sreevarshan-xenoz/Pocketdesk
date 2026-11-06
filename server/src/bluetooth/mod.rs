@@ -17,7 +17,7 @@ mod windows;
 
 use links::{BluetoothLinks, LinkTable};
 
-use pocketdesk_core::protocol::bluetooth::{BluetoothInfo, LINK_HELLO, PACKET};
+use pocketdesk_core::protocol::bluetooth::{BluetoothInfo, LINK_HELLO, PACKET, RoadState};
 use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -33,6 +33,8 @@ use tokio_util::sync::CancellationToken;
 struct Listening {
     info: RwLock<Option<BluetoothInfo>>,
     period: std::sync::Mutex<CancellationToken>,
+    /// How the road stood at the last check; `None` before the first.
+    road: RwLock<Option<RoadState>>,
 }
 
 impl Listening {
@@ -42,7 +44,16 @@ impl Listening {
         Self {
             info: RwLock::new(None),
             period: std::sync::Mutex::new(ended),
+            road: RwLock::new(None),
         }
+    }
+
+    fn road(&self) -> Option<RoadState> {
+        *self.road.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn set_road(&self, road: RoadState) {
+        *self.road.write().unwrap_or_else(|e| e.into_inner()) = Some(road);
     }
 
     fn get(&self) -> Option<BluetoothInfo> {
@@ -83,6 +94,13 @@ static LISTENING: std::sync::LazyLock<Listening> = std::sync::LazyLock::new(List
 /// `None` while it does not (the switch off, no radio, or not Windows).
 pub(crate) fn info() -> Option<BluetoothInfo> {
     LISTENING.get()
+}
+
+/// How the road stands, as last checked (for the live mirror, so
+/// `pocketdesk status` and the desktop say it); `None` before the first
+/// check. Cheap: no radio is asked.
+pub(crate) fn road() -> Option<RoadState> {
+    LISTENING.road()
 }
 
 /// [`PACKET`] saying `info`.
@@ -455,11 +473,15 @@ fn radio() -> Arc<dyn Radio> {
 /// How often the listener checks the switch and the radio.
 const CHECK_EVERY: Duration = Duration::from_secs(10);
 
+/// Whether this system has a listener (Windows only for now).
+const LISTENS_HERE: bool = cfg!(windows);
+
 /// Listen while `wanted()` (the `bluetooth_fallback` switch) is on and
 /// `radio` has an address, checked every `every`: start when both hold,
 /// stop (the SDP record taken down) when either goes, or the radio's
 /// address changes, and start again after a listener that ended by itself.
-/// `state` says where it listens meanwhile.
+/// `state` says where it listens meanwhile, and how the road stands
+/// ([`RoadState`]) after each check.
 async fn keep_listening(
     radio: Arc<dyn Radio>,
     state: &'static Listening,
@@ -470,7 +492,8 @@ async fn keep_listening(
     let mut running: Option<(Box<dyn Listener>, [u8; 6])> = None;
     let mut failure_said = false;
     loop {
-        let address = if wanted() {
+        let on = wanted();
+        let address = if on {
             let radio = radio.clone();
             tokio::task::spawn_blocking(move || radio.address())
                 .await
@@ -520,6 +543,7 @@ async fn keep_listening(
                 }
             }
         }
+        state.set_road(RoadState::of(on, LISTENS_HERE, running.is_some()));
         tokio::time::sleep(every).await;
     }
 }
@@ -757,14 +781,25 @@ mod tests {
         });
         let running = || radio.running.load(Ordering::SeqCst);
 
-        // No radio: nothing listens, nothing is told.
+        // No radio: nothing listens, nothing is told, and the road says
+        // so (off Windows, that it is Windows only).
         tokio::time::sleep(Duration::from_millis(30)).await;
         assert!(!running());
         assert_eq!(state.get(), None);
+        let no_radio = if LISTENS_HERE {
+            RoadState::NoRadio
+        } else {
+            RoadState::Unsupported
+        };
+        assert_eq!(state.road(), Some(no_radio));
 
         // A radio: it listens, and says where.
         *radio.address.lock().unwrap() = Some([0x00, 0x00, 0x5E, 0x00, 0x53, 0x01]);
         until("listening", || running() && state.get().is_some()).await;
+        until("said listening", || {
+            state.road() == Some(RoadState::Listening)
+        })
+        .await;
         let told = state.get().unwrap();
         assert_eq!(told.address, "00:00:5E:00:53:01");
         assert_eq!(
@@ -775,6 +810,7 @@ mod tests {
         // The switch off: it stops, and tells nothing.
         on.store(false, Ordering::SeqCst);
         until("stopped", || !running() && state.get().is_none()).await;
+        until("said off", || state.road() == Some(RoadState::Off)).await;
 
         // On again: it listens again; a listener that ends by itself is
         // started again.
@@ -792,6 +828,7 @@ mod tests {
             !running() && state.get().is_none()
         })
         .await;
+        until("said no radio", || state.road() == Some(no_radio)).await;
         task.abort();
     }
 

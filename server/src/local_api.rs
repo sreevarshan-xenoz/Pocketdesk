@@ -202,9 +202,9 @@ fn trust_store(state_dir: &Path) -> Result<TrustStore, String> {
         .map_err(|e| format!("the paired phones could not be read: {e:#}"))
 }
 
-/// Whether the server runs, the phones in a session now, and how phones
-/// reach this computer from outside (`endpoint.json`, when the server
-/// keeps one).
+/// Whether the server runs, the phones in a session now, how phones reach
+/// this computer from outside (`endpoint.json`, when the server keeps one),
+/// and how its Bluetooth road stands.
 pub fn status(state_dir: &Path, now_unix: u64, running: bool) -> Value {
     let pid = running
         .then(|| pocketdesk_core::local::server::server_pid(state_dir))
@@ -238,6 +238,7 @@ pub fn status(state_dir: &Path, now_unix: u64, running: bool) -> Value {
         "pocketdesk_version": env!("CARGO_PKG_VERSION"),
         "sessions": sessions,
         "endpoint": endpoint,
+        "bluetooth": live_mirror(state_dir, now_unix, running).and_then(|m| m.bluetooth),
     }))
 }
 
@@ -1937,12 +1938,19 @@ mod tests {
         assert_eq!(stopped["server"].get("version"), None);
         assert_eq!(stopped["sessions"], json!([]));
         assert_eq!(stopped["endpoint"], Value::Null);
+        assert_eq!(stopped["bluetooth"], Value::Null);
         std::fs::write(
             dir.join(LIVE_FILE),
-            r#"{"updated_unix":100,"sessions":[{"id":7,"device_id":"phone-a","peer":"192.0.2.7:1","transport":"wan","started_unix":90,"driving":true}]}"#,
+            r#"{"updated_unix":100,"sessions":[{"id":7,"device_id":"phone-a","peer":"192.0.2.7:1","transport":"wan","started_unix":90,"driving":true}],"bluetooth":"no_radio"}"#,
         )
         .unwrap();
+        assert_eq!(
+            status(&dir, 101, false)["bluetooth"],
+            Value::Null,
+            "a stopped server's last word is not now's"
+        );
         let running = status(&dir, 101, true);
+        assert_eq!(running["bluetooth"], "no_radio");
         let session = &running["sessions"][0];
         assert_eq!(session["device_id"], "phone-a");
         assert_eq!(session["transport"], "wan");

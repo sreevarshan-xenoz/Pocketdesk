@@ -677,6 +677,7 @@ When the phone reaches the computer neither on the home network nor over the int
 - **What goes over it** follows the internet path's rules (SECURITY.md, limit 90). The phone learns where to dial (the computer's Bluetooth address) over a working road first, so connect once at home after bonding.
 - **Files over 8 MiB wait for Wi-Fi:** the phone is told so and can send them later. Smaller files go, one at a time, each on a link of its own inside the same pinned encryption as at home. "Files over the internet" does not apply here.
 - **Windows only for now.** The computer listens while its Bluetooth radio is on; Linux comes later.
+- **How it stands:** `pocketdesk status` says "Bluetooth: listening", "no radio" (the switch is on but there is no radio to listen on), "off", or, off Windows, "Windows only for now", as the server last checked (every 10 s).
 
 ### Away From Home: Your Own Relay
 
@@ -801,7 +802,7 @@ The helper serves one thing: "send the magic packet for this computer". It answe
 |---------|-------------|
 | `pocketdesk start` | Start the server daemon |
 | `pocketdesk stop` | Stop the running daemon |
-| `pocketdesk status [--json]` | Show connection status; `--json` gives the server, the phones in a session and the internet endpoint |
+| `pocketdesk status [--json]` | Show connection status, with how the Bluetooth fallback stands ("Bluetooth: listening", "no radio", "off", or "Windows only for now"); `--json` gives the server, the phones in a session, the internet endpoint and the Bluetooth fallback |
 | `pocketdesk devices [--json]` | List the paired phones, what each may do, and whether each is in a session |
 | `pocketdesk send <phone>[,<phone>…] <path> [--wait SECONDS]` | Send a file or folder to a phone, or to several (or a file or folder to a paired computer), as the desktop app's Files page does; the exit code says how it went |
 | `pocketdesk sent` / `received [--count N] [--json]` | The Files page's two lists |

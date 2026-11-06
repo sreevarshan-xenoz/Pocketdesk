@@ -1157,6 +1157,9 @@ pub async fn print_status() -> Result<()> {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
+        if let Some(line) = crate::live_sessions::bluetooth_status_line(&raw, now) {
+            println!("\n{line}");
+        }
         if let Some(lines) = crate::live_sessions::format_status_lines(&raw, now) {
             if lines.is_empty() {
                 println!("\nStreaming sessions: none live");
