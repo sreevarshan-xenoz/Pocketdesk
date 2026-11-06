@@ -28,6 +28,12 @@ cp -r "/src/contrib/gnome-shell-extension/pocketdesk-windows@pocketdesk.dev" \
   /home/rig/.local/share/gnome-shell/extensions/
 chown -R rig /home/rig/.local
 
+# The Shell asks the system bus for logind and others at start; with none in
+# the container its JS threw ("Could not connect: No such file or directory")
+# and the Shell exited before the extension loaded.
+install -d -m 755 /run/dbus
+dbus-uuidgen --ensure
+dbus-daemon --system --fork
 as_rig dbus-daemon --session --address="unix:path=$RUN/bus" --fork
 as_rig gsettings set org.gnome.shell disable-user-extensions false
 as_rig gsettings set org.gnome.shell enabled-extensions "['pocketdesk-windows@pocketdesk.dev']"
