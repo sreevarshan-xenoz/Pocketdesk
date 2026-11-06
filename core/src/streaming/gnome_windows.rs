@@ -80,6 +80,10 @@ pub struct Window {
     pub pid: u32,
     /// Its frame on the desktop, in logical pixels.
     pub frame: Rect,
+    /// Its buffer on the desktop: the frame and, for a client-side decorated
+    /// window, the shadow round it. Mutter's window stream shows this, and
+    /// places a pointer in it. `None` when the extension did not say.
+    pub buffer: Option<Rect>,
     pub minimized: bool,
     /// Minimised or put away (another workspace).
     pub hidden: bool,
@@ -262,6 +266,57 @@ pub fn local_pointer(norm: (u16, u16), frame: Rect) -> Option<(i32, i32)> {
         return None;
     }
     Some((at.0 - frame.0, at.1 - frame.1))
+}
+
+/// Where a window's frame starts in its buffer, which is what mutter's
+/// window stream shows and places a pointer in: the shadow's width and
+/// height above and left of a client-side decorated window, `(0, 0)` for one
+/// with none, or when the buffer is not known or does not hold the frame.
+pub fn frame_offset(window: &Window) -> (i32, i32) {
+    match window.buffer {
+        Some(buffer) if holds(buffer, window.frame) => {
+            (window.frame.0 - buffer.0, window.frame.1 - buffer.1)
+        }
+        _ => (0, 0),
+    }
+}
+
+/// The part of a window stream's picture that is the window's frame, for a
+/// picture of `picture` pixels showing the buffer (scaled to it, as a
+/// monitor's scale makes it). `None` when that is the whole picture, or when
+/// it cannot be told: the picture is then sent as it is.
+pub fn frame_in_picture(window: &Window, picture: (u32, u32)) -> Option<(u32, u32, u32, u32)> {
+    let buffer = window.buffer.filter(|b| holds(*b, window.frame))?;
+    if buffer == window.frame || buffer.2 == 0 || buffer.3 == 0 {
+        return None;
+    }
+    // A picture that is not the buffer, scaled (its shape is another's): not
+    // known to be it, so not cut.
+    let (bw, bh) = (u64::from(buffer.2), u64::from(buffer.3));
+    let (pw, ph) = (u64::from(picture.0), u64::from(picture.1));
+    if (pw * bh).abs_diff(ph * bw) > bw.max(bh) * 2 {
+        return None;
+    }
+    let along = |at: i32, size: u32, picture: u32| {
+        let at = u64::from(at.max(0) as u32) * u64::from(picture) / u64::from(size);
+        u32::try_from(at).ok()
+    };
+    let x = along(window.frame.0 - buffer.0, buffer.2, picture.0)?;
+    let y = along(window.frame.1 - buffer.1, buffer.3, picture.1)?;
+    let w = u32::try_from(u64::from(window.frame.2) * u64::from(picture.0) / u64::from(buffer.2))
+        .ok()?;
+    let h = u32::try_from(u64::from(window.frame.3) * u64::from(picture.1) / u64::from(buffer.3))
+        .ok()?;
+    (w > 0 && h > 0 && x + w <= picture.0 && y + h <= picture.1).then_some((x, y, w, h))
+}
+
+/// Whether `outer` holds all of `inner`.
+fn holds(outer: Rect, inner: Rect) -> bool {
+    let end = |at: i32, size: u32| i64::from(at) + i64::from(size);
+    inner.0 >= outer.0
+        && inner.1 >= outer.1
+        && end(inner.0, inner.2) <= end(outer.0, outer.2)
+        && end(inner.1, inner.3) <= end(outer.1, outer.3)
 }
 
 /// The evdev codes of the mouse buttons a packet names (left, middle, right,
@@ -556,6 +611,14 @@ pub mod bus {
                         unsigned(&props, "width"),
                         unsigned(&props, "height"),
                     ),
+                    buffer: {
+                        let (w, h) = (
+                            unsigned(&props, "buffer-width"),
+                            unsigned(&props, "buffer-height"),
+                        );
+                        (w > 0 && h > 0)
+                            .then(|| (signed(&props, "buffer-x"), signed(&props, "buffer-y"), w, h))
+                    },
                     minimized: flag(&props, "minimized"),
                     hidden: flag(&props, "hidden"),
                     focus: flag(&props, "focus"),
@@ -734,6 +797,19 @@ pub mod bus {
         }
 
         #[test]
+        fn a_windows_buffer_is_read_when_said_and_none_when_not() {
+            let mut said = entry(4, "t", "app", 1, (319, 101, 640, 480), false, true, 0);
+            said.insert("buffer-x".into(), owned(Value::from(305i32)));
+            said.insert("buffer-y".into(), owned(Value::from(87i32)));
+            said.insert("buffer-width".into(), owned(Value::from(668u32)));
+            said.insert("buffer-height".into(), owned(Value::from(508u32)));
+            let not_said = entry(5, "t", "app", 1, (0, 0, 640, 480), false, false, 1);
+            let windows = parse_list(vec![said, not_said]);
+            assert_eq!(windows[0].buffer, Some((305, 87, 668, 508)));
+            assert_eq!(windows[1].buffer, None);
+        }
+
+        #[test]
         fn the_extensions_list_is_read_in_the_order_said() {
             let windows = parse_list(vec![
                 entry(
@@ -827,6 +903,50 @@ mod tests {
             focus,
             ..Window::default()
         }
+    }
+
+    /// A 640x480 window with a client-side shadow of 14 pixels each side.
+    fn shadowed() -> Window {
+        Window {
+            buffer: Some((305, 87, 668, 508)),
+            ..win(1, 7, (319, 101, 640, 480), true)
+        }
+    }
+
+    #[test]
+    fn a_shadowed_windows_picture_is_cut_to_its_frame_and_its_pointer_moved_by_the_shadow() {
+        let w = shadowed();
+        assert_eq!(frame_offset(&w), (14, 14));
+        assert_eq!(frame_in_picture(&w, (668, 508)), Some((14, 14, 640, 480)));
+        // At twice the scale the cut is twice as far in and as big.
+        assert_eq!(
+            frame_in_picture(&w, (1336, 1016)),
+            Some((28, 28, 1280, 960))
+        );
+    }
+
+    #[test]
+    fn a_picture_is_left_whole_when_it_is_the_frame_or_cannot_be_told() {
+        // No shadow: the buffer is the frame.
+        let plain = Window {
+            buffer: Some((319, 101, 640, 480)),
+            ..win(1, 7, (319, 101, 640, 480), true)
+        };
+        assert_eq!(frame_offset(&plain), (0, 0));
+        assert_eq!(frame_in_picture(&plain, (640, 480)), None);
+        // The buffer not said (an older extension).
+        let unknown = win(1, 7, (319, 101, 640, 480), true);
+        assert_eq!(frame_offset(&unknown), (0, 0));
+        assert_eq!(frame_in_picture(&unknown, (668, 508)), None);
+        // A buffer that does not hold the frame is not believed.
+        let wrong = Window {
+            buffer: Some((400, 101, 100, 100)),
+            ..win(1, 7, (319, 101, 640, 480), true)
+        };
+        assert_eq!(frame_offset(&wrong), (0, 0));
+        assert_eq!(frame_in_picture(&wrong, (100, 100)), None);
+        // A picture of another shape (the whole screen's stream) is not cut.
+        assert_eq!(frame_in_picture(&shadowed(), (1280, 720)), None);
     }
 
     /// An extension that says what it was told, and notes what it was asked.

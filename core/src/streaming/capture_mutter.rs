@@ -767,11 +767,21 @@ pub async fn start_window_capture(
     // The pointer is out of the picture (the capture is told there is no
     // cursor feed, so it never reports one). The stream is as big as a screen
     // with the window in a corner of it: it is asked which part is the window,
-    // and each frame is cut to that.
+    // and each frame is cut to that. That part is the window's buffer, a
+    // client-side decorated window's shadow with it; each picture is cut
+    // again to the frame, which is the size the lend said.
+    let (cut_tx, cut_rx) = crate::streaming::latest_frame::channel();
+    tokio::spawn(cut_to_frame(
+        conn.clone(),
+        id,
+        cut_rx,
+        frame_tx,
+        cancel.child_token(),
+    ));
     let zero_copy = match super::capture_linux::spawn_pipewire_capture_with(
         node_id,
         config.clone(),
-        frame_tx,
+        cut_tx,
         cancel.clone(),
         None,
         true,
@@ -788,6 +798,49 @@ pub async fn start_window_capture(
         session = session.with_window_input(tx).with_input_refused(refused);
     }
     Ok(session)
+}
+
+/// Each picture of a lent window's stream, cut from its buffer to its frame
+/// ([`gnome_windows::frame_in_picture`](super::gnome_windows::frame_in_picture)),
+/// on to `out`. The window's place is asked of the extension now and then;
+/// without it (a Shell with no extension) pictures go on as they are.
+async fn cut_to_frame(
+    conn: Connection,
+    id: u64,
+    mut pictures: crate::streaming::latest_frame::FrameReceiver<VideoFrame>,
+    out: crate::streaming::latest_frame::FrameSender<VideoFrame>,
+    end: CancellationToken,
+) {
+    use super::gnome_windows::{bus, frame_in_picture};
+    let mut window = None;
+    let mut asked: Option<std::time::Instant> = None;
+    loop {
+        let mut picture = tokio::select! {
+            picture = pictures.recv() => match picture {
+                Some(picture) => picture,
+                None => break,
+            },
+            _ = end.cancelled() => break,
+        };
+        if asked.is_none_or(|at| at.elapsed() >= Duration::from_millis(500)) {
+            asked = Some(std::time::Instant::now());
+            window = bus::list(&conn)
+                .await
+                .ok()
+                .and_then(|all| all.into_iter().find(|w| w.id == id));
+        }
+        eprintln!("RIGDBG picture {}x{} window {:?}", picture.width, picture.height, window.as_ref().map(|w| (w.frame, w.buffer)));
+        if let Some((x, y, w, h)) = window
+            .as_ref()
+            .and_then(|w| frame_in_picture(w, (picture.width, picture.height)))
+            && !picture.crop_region(x, y, w, h)
+        {
+            continue;
+        }
+        if out.try_send(picture).is_err() {
+            break;
+        }
+    }
 }
 
 /// What the packets a lent window's guard let through do: into the window's
@@ -841,7 +894,9 @@ async fn apply_window_packet(
     packet: super::input_packet::InputPacket,
     releases_only: bool,
 ) -> Result<()> {
-    use super::gnome_windows::{bus, is_release, local_pointer, visible, window_events};
+    use super::gnome_windows::{
+        bus, frame_offset, is_release, local_pointer, visible, window_events,
+    };
     use super::input_packet::InputPacket;
 
     match packet {
@@ -851,18 +906,22 @@ async fn apply_window_packet(
             if releases_only {
                 return Ok(());
             }
-            let frame = bus::list(&input.conn)
+            let window = bus::list(&input.conn)
                 .await
                 .ok()
                 .and_then(|all| all.into_iter().find(|w| w.id == id))
-                .filter(visible)
-                .map(|w| w.frame);
-            let local = frame.and_then(|frame| local_pointer((x_norm, y_norm), frame));
-            eprintln!("RIGDBG move norm=({x_norm},{y_norm}) frame={frame:?} local={local:?}");
+                .filter(visible);
+            // In the frame, then moved by the shadow mutter's stream has
+            // round a client-side decorated window.
+            let local = window.and_then(|w| {
+                let (dx, dy) = frame_offset(&w);
+                local_pointer((x_norm, y_norm), w.frame).map(|(x, y)| (x + dx, y + dy))
+            });
+            eprintln!("RIGDBG move norm=({x_norm},{y_norm}) local={local:?}");
             match placement.moved(local) {
                 Some((x, y)) => {
                     let moved = input.move_to(f64::from(x), f64::from(y)).await;
-                    eprintln!("RIGDBG move_to({x},{y}) on {:?} -> {:?}", input.stream, moved.as_ref().err());
+                    eprintln!("RIGDBG move_to({x},{y}) -> {:?}", moved.as_ref().err());
                     if moved.is_err() {
                         placement.failed();
                     }
@@ -874,11 +933,10 @@ async fn apply_window_packet(
         other => {
             let mut result = Ok(());
             for event in window_events(&other) {
-                let allowed = placement.allows(&event);
-                eprintln!("RIGDBG event {event:?} allowed={allowed}");
-                if !allowed || (releases_only && !is_release(&event)) {
+                if !placement.allows(&event) || (releases_only && !is_release(&event)) {
                     continue;
                 }
+                eprintln!("RIGDBG event {event:?}");
                 result = input.apply(rest, event).await;
                 eprintln!("RIGDBG applied -> {:?}", result.as_ref().err());
                 if result.is_err() {
