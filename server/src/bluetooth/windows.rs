@@ -14,10 +14,10 @@ use windows::Win32::Devices::Bluetooth::{
 };
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Networking::WinSock::{
-    CSADDR_INFO, RNRSERVICE_DELETE, RNRSERVICE_REGISTER, SD_SEND, SEND_RECV_FLAGS, SO_RCVTIMEO,
-    SOCK_STREAM, SOCKADDR, SOCKET, SOCKET_ADDRESS, SOCKET_ERROR, SOL_SOCKET, WSADATA, WSAETIMEDOUT,
-    WSAGetLastError, WSAQUERYSETW, WSASetServiceW, WSAStartup, accept, bind, closesocket,
-    getsockname, recv, send, setsockopt, shutdown, socket,
+    CSADDR_INFO, POLLRDNORM, RNRSERVICE_DELETE, RNRSERVICE_REGISTER, SD_SEND, SEND_RECV_FLAGS,
+    SO_SNDTIMEO, SOCK_STREAM, SOCKADDR, SOCKET, SOCKET_ADDRESS, SOCKET_ERROR, SOL_SOCKET, WSADATA,
+    WSAGetLastError, WSAPOLLFD, WSAPoll, WSAQUERYSETW, WSASetServiceW, WSAStartup, accept, bind,
+    closesocket, getsockname, recv, send, setsockopt, shutdown, socket,
 };
 use windows::core::{GUID, PWSTR};
 
@@ -259,7 +259,13 @@ pub(crate) fn spawn_accepting(
             loop {
                 match listener.accept() {
                     Ok(socket) => {
-                        let socket = Arc::new(Accepted::new(socket, &open));
+                        let socket = match Accepted::new(socket, &open) {
+                            Ok(socket) => Arc::new(socket),
+                            Err(e) => {
+                                tracing::warn!("Dropped a Bluetooth connection: {e}");
+                                continue;
+                            }
+                        };
                         if open.0.load(Ordering::SeqCst) > MAX_OPEN {
                             tracing::warn!(
                                 "Refused a Bluetooth connection: {MAX_OPEN} are open already"
@@ -284,9 +290,13 @@ pub(crate) fn spawn_accepting(
         .map(|_| ())
 }
 
-/// How long the in-pump waits on the phone before it looks whether the
-/// server is done with the connection.
-const RECV_TIMEOUT_MS: u32 = 1000;
+/// How long the in-pump waits for the phone's bytes before it looks
+/// whether the server is done with the connection.
+const POLL_MS: i32 = 1000;
+
+/// How long a send to the phone may wait before the connection is given
+/// up: a phone that stopped reading does not hold a pump forever.
+const SEND_TIMEOUT_MS: u32 = 30_000;
 
 /// An accepted socket, counted in [`Open`] and closed once, when both of
 /// its pumps are done (so neither can ever use its handle after it is
@@ -294,22 +304,46 @@ const RECV_TIMEOUT_MS: u32 = 1000;
 struct Accepted {
     socket: SOCKET,
     open: Open,
-    /// The server has ended its side: the in-pump stops at its next wait.
+    /// The server has ended its side (or the out-pump gave up): the
+    /// in-pump stops at its next wait.
     server_done: AtomicBool,
 }
 
 impl Accepted {
-    fn new(socket: SOCKET, open: &Open) -> Self {
+    /// Take `socket`, counted in `open`; an error (and the socket closed)
+    /// when its send timeout cannot be set.
+    fn new(socket: SOCKET, open: &Open) -> std::io::Result<Self> {
         open.0.fetch_add(1, Ordering::SeqCst);
-        // The in-pump wakes each second to see whether the server is done.
-        let timeout = RECV_TIMEOUT_MS.to_ne_bytes();
-        // SAFETY: the socket is this connection's own; `timeout` outlives
-        // the call.
-        unsafe { setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, Some(&timeout)) };
-        Self {
+        let accepted = Self {
             socket,
             open: open.clone(),
             server_done: AtomicBool::new(false),
+        };
+        let timeout = SEND_TIMEOUT_MS.to_ne_bytes();
+        // SAFETY: the socket is this connection's own; `timeout` outlives
+        // the call.
+        if unsafe { setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, Some(&timeout)) } == SOCKET_ERROR {
+            // Dropped here, which closes it.
+            return Err(last_error());
+        }
+        Ok(accepted)
+    }
+
+    /// Wait up to [`POLL_MS`] for bytes (or the end) from the phone:
+    /// `Some(true)` when a read will not block, `Some(false)` on the
+    /// timeout, `None` on an error.
+    fn readable(&self) -> Option<bool> {
+        let mut fd = WSAPOLLFD {
+            fd: self.socket,
+            events: POLLRDNORM,
+            revents: Default::default(),
+        };
+        // SAFETY: `fd` outlives the call; the socket stays open while a
+        // pump holds it.
+        match unsafe { WSAPoll(&mut fd, 1, POLL_MS) } {
+            0 => Some(false),
+            ready if ready > 0 => Some(true),
+            _ => None,
         }
     }
 }
@@ -325,8 +359,11 @@ impl Drop for Accepted {
 
 /// The server's end of a stream joined to `socket` by two blocking threads:
 /// one copies what the phone sends in, the other what the server writes out.
-/// When the server ends its side, the phone is sent the end of the stream,
-/// and the in-pump stops within a second, after what was still in flight.
+/// The in-pump reads only once a poll says a read will not block, and
+/// between polls looks whether the server is done: once the server ends
+/// its side (or a send times out), the phone is sent the end of the
+/// stream and the in-pump stops within a second, after what was still in
+/// flight. The socket closes when both have let go.
 fn pump(socket: Arc<Accepted>, runtime: tokio::runtime::Handle) -> DuplexStream {
     let (ours, theirs) = tokio::io::duplex(PUMP_BUFFER);
     let (mut from_server, mut to_server) = tokio::io::split(theirs);
@@ -337,17 +374,14 @@ fn pump(socket: Arc<Accepted>, runtime: tokio::runtime::Handle) -> DuplexStream 
         .spawn(move || {
             let mut buf = vec![0u8; 16 * 1024];
             loop {
+                match inbound.readable() {
+                    Some(true) => {}
+                    Some(false) if !inbound.server_done.load(Ordering::SeqCst) => continue,
+                    _ => break,
+                }
                 // SAFETY: the socket stays open while this thread holds it.
                 let read = unsafe { recv(inbound.socket, &mut buf, SEND_RECV_FLAGS(0)) };
-                if read < 0 {
-                    // SAFETY: reads this thread's last Winsock error.
-                    let timed_out = unsafe { WSAGetLastError() } == WSAETIMEDOUT;
-                    if timed_out && !inbound.server_done.load(Ordering::SeqCst) {
-                        continue;
-                    }
-                    break;
-                }
-                if read == 0 {
+                if read <= 0 {
                     break;
                 }
                 let chunk = &buf[..read as usize];
@@ -360,7 +394,8 @@ fn pump(socket: Arc<Accepted>, runtime: tokio::runtime::Handle) -> DuplexStream 
             }
             let _ = inbound_runtime.block_on(to_server.shutdown());
         });
-    let _ = std::thread::Builder::new()
+    let outbound = socket.clone();
+    let spawned = std::thread::Builder::new()
         .name("bluetooth-out".into())
         .spawn(move || {
             let mut buf = vec![0u8; 16 * 1024];
@@ -371,8 +406,8 @@ fn pump(socket: Arc<Accepted>, runtime: tokio::runtime::Handle) -> DuplexStream 
                 };
                 let mut chunk = &buf[..read];
                 while !chunk.is_empty() {
-                    // SAFETY: as above.
-                    let sent = unsafe { send(socket.socket, chunk, SEND_RECV_FLAGS(0)) };
+                    // SAFETY: as above. A send that times out gives up.
+                    let sent = unsafe { send(outbound.socket, chunk, SEND_RECV_FLAGS(0)) };
                     if sent <= 0 {
                         break 'out;
                     }
@@ -380,9 +415,13 @@ fn pump(socket: Arc<Accepted>, runtime: tokio::runtime::Handle) -> DuplexStream 
                 }
             }
             // SAFETY: as above; the phone reads the end of the stream.
-            unsafe { shutdown(socket.socket, SD_SEND) };
-            socket.server_done.store(true, Ordering::SeqCst);
+            unsafe { shutdown(outbound.socket, SD_SEND) };
+            outbound.server_done.store(true, Ordering::SeqCst);
         });
+    if spawned.is_err() {
+        // No out-pump: the in-pump must not wait on it.
+        socket.server_done.store(true, Ordering::SeqCst);
+    }
     ours
 }
 
