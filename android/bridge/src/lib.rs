@@ -323,7 +323,8 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeBlu
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
-    let id = api::take_bluetooth_link_request()
+    let id = RUNTIME
+        .block_on(api::take_bluetooth_link_request())
         .map(|id| link_id_to_java(id).to_string())
         .unwrap_or_default();
     to_jstring(&mut env, id)

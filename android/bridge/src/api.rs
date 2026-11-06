@@ -776,8 +776,8 @@ pub fn bluetooth_info(address: &str) -> String {
 
 /// The oldest transfer link the computer asked for over a Bluetooth
 /// control link and the app has not taken.
-pub fn take_bluetooth_link_request() -> Option<u64> {
-    crate::bluetooth::take_link_request()
+pub async fn take_bluetooth_link_request() -> Option<u64> {
+    crate::bluetooth::take_link_request().await
 }
 
 /// Run the control link on `stream`, already secured to the computer at
@@ -812,6 +812,9 @@ async fn run_control(
         if let Some(old_peer) = old_peer.filter(|old| *old != (address.clone(), port)) {
             forget_link(&old_peer).await;
         }
+        // Transfer links the old link asked for, even the same computer's:
+        // the link that would carry them is gone.
+        crate::bluetooth::forget_link_requests();
     }
     crate::set_control_road(road);
     crate::session::CONTROL_LINKS.fetch_add(1, Ordering::SeqCst);
@@ -6118,7 +6121,7 @@ mod bluetooth_road_tests {
         let peer = control_peer().await;
         let mut request = None;
         for _ in 0..100 {
-            request = take_bluetooth_link_request();
+            request = take_bluetooth_link_request().await;
             if request.is_some() {
                 break;
             }

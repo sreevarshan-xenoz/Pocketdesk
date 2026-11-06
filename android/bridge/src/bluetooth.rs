@@ -13,7 +13,7 @@
 //! computer's transfer TLS as the home road's transfer listener does, and
 //! gives the stream to the transfer its key names.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
@@ -33,13 +33,17 @@ const LINK_TLS_WAIT: Duration = Duration::from_secs(15);
 /// one at a time and waits 10 s for each.
 const MAX_LINK_REQUESTS: usize = 8;
 
-/// What each computer last said of its Bluetooth road, by its address: the
-/// JSON [`info`] gives.
-static INFO: LazyLock<Mutex<HashMap<String, String>>> = LazyLock::new(Default::default);
+/// The most computers whose Bluetooth road is kept: the app saves it with
+/// each computer's record after a connect, so only recent ones matter.
+const MAX_INFO: usize = 32;
 
-/// The link ids the computer asked for and the app has not taken, oldest
-/// first.
-static LINK_REQUESTS: LazyLock<Mutex<VecDeque<u64>>> = LazyLock::new(Default::default);
+/// What each computer last said of its Bluetooth road, `(address, the JSON
+/// [`info`] gives)`, the one heard longest ago first.
+static INFO: LazyLock<Mutex<VecDeque<(String, String)>>> = LazyLock::new(Default::default);
+
+/// The link ids asked for and not taken, with the address of the computer
+/// that asked, oldest first.
+static LINK_REQUESTS: LazyLock<Mutex<VecDeque<(String, u64)>>> = LazyLock::new(Default::default);
 
 /// A packet from the computer at `from` on a control link that came by
 /// `road`: where to dial it by Bluetooth, from any road; a link request
@@ -47,9 +51,12 @@ static LINK_REQUESTS: LazyLock<Mutex<VecDeque<u64>>> = LazyLock::new(Default::de
 pub(crate) fn receive(packet_type: &str, body: &serde_json::Value, from: &str, road: Road) {
     if packet_type == PACKET {
         if let Some(info) = info_of(body) {
-            INFO.lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .insert(from.to_string(), info);
+            let mut kept = INFO.lock().unwrap_or_else(|e| e.into_inner());
+            kept.retain(|(address, _)| address != from);
+            if kept.len() >= MAX_INFO {
+                kept.pop_front();
+            }
+            kept.push_back((from.to_string(), info));
         }
     } else if packet_type == LINK_PACKET
         && road == Road::Bluetooth
@@ -59,7 +66,7 @@ pub(crate) fn receive(packet_type: &str, body: &serde_json::Value, from: &str, r
         if requests.len() >= MAX_LINK_REQUESTS {
             requests.pop_front();
         }
-        requests.push_back(id);
+        requests.push_back((from.to_string(), id));
     }
 }
 
@@ -86,20 +93,28 @@ fn info_of(body: &serde_json::Value) -> Option<String> {
 pub(crate) fn info(address: &str) -> String {
     INFO.lock()
         .unwrap_or_else(|e| e.into_inner())
-        .get(address)
-        .cloned()
+        .iter()
+        .find(|(kept, _)| kept == address)
+        .map(|(_, info)| info.clone())
         .unwrap_or_default()
 }
 
-/// The oldest link request not yet taken.
-pub(crate) fn take_link_request() -> Option<u64> {
-    LINK_REQUESTS
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .pop_front()
+/// The oldest link request not yet taken from the computer the live
+/// Bluetooth control link is to; any older one from another computer is
+/// dropped (nothing can answer it now).
+pub(crate) async fn take_link_request() -> Option<u64> {
+    let peer = bluetooth_peer().await;
+    let mut requests = LINK_REQUESTS.lock().unwrap_or_else(|e| e.into_inner());
+    while let Some((from, id)) = requests.pop_front() {
+        if peer.as_deref() == Some(from.as_str()) {
+            return Some(id);
+        }
+    }
+    None
 }
 
-/// Forget the link requests: the control link that asked has ended.
+/// Forget the link requests: the control link that asked has ended, or
+/// another has replaced it.
 pub(crate) fn forget_link_requests() {
     LINK_REQUESTS
         .lock()
@@ -176,8 +191,9 @@ mod tests {
 
     const SERVICE: &str = "b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b13";
 
-    #[test]
-    fn bluetooth_info_kept_per_computer() {
+    #[tokio::test]
+    async fn bluetooth_info_kept_per_computer() {
+        let _globals = crate::api::TRANSFER_TEST_LOCK.lock().await;
         let body = json!({"address": "00:00:5e:00:53:01", "service": SERVICE});
         receive(PACKET, &body, "192.0.2.10", Road::Home);
         let kept: serde_json::Value = serde_json::from_str(&info("192.0.2.10")).unwrap();
@@ -205,50 +221,69 @@ mod tests {
     }
 
     /// Requests are taken in order; ids are u64s, the largest included.
+    /// Only the live Bluetooth computer's are taken.
     #[tokio::test]
     async fn link_request_queue() {
         let _globals = crate::api::TRANSFER_TEST_LOCK.lock().await;
+        let was_peer = crate::CONTROL_PEER.lock().await.clone();
+        let was_road = crate::control_road();
+        *crate::CONTROL_PEER.lock().await = Some(("192.0.2.12".to_string(), 1716));
+        crate::set_control_road(Road::Bluetooth);
         forget_link_requests();
-        receive(
-            LINK_PACKET,
-            &json!({"id": 7}),
-            "192.0.2.12",
-            Road::Bluetooth,
-        );
-        receive(
-            LINK_PACKET,
-            &json!({"id": u64::MAX}),
-            "192.0.2.12",
-            Road::Bluetooth,
-        );
-        // Not on another road, and not without an id.
-        receive(LINK_PACKET, &json!({"id": 8}), "192.0.2.12", Road::Home);
-        receive(LINK_PACKET, &json!({"id": 9}), "192.0.2.12", Road::Internet);
-        receive(
-            LINK_PACKET,
-            &json!({"id": -1}),
-            "192.0.2.12",
-            Road::Bluetooth,
-        );
+        let ask = |id: serde_json::Value, from: &str, road: Road| {
+            receive(LINK_PACKET, &json!({ "id": id }), from, road)
+        };
+        ask(json!(7), "192.0.2.12", Road::Bluetooth);
+        // Another computer's, before the live one's next.
+        ask(json!(5), "192.0.2.13", Road::Bluetooth);
+        ask(json!(u64::MAX), "192.0.2.12", Road::Bluetooth);
+        // Not on another road, and not without a u64 id.
+        ask(json!(8), "192.0.2.12", Road::Home);
+        ask(json!(9), "192.0.2.12", Road::Internet);
+        ask(json!(-1), "192.0.2.12", Road::Bluetooth);
         receive(LINK_PACKET, &json!({}), "192.0.2.12", Road::Bluetooth);
-        assert_eq!(take_link_request(), Some(7));
-        assert_eq!(take_link_request(), Some(u64::MAX));
-        assert_eq!(take_link_request(), None);
+        let first = take_link_request().await;
+        let second = take_link_request().await;
+        let none = take_link_request().await;
         for id in 0..20 {
-            receive(
-                LINK_PACKET,
-                &json!({"id": id}),
-                "192.0.2.12",
-                Road::Bluetooth,
-            );
+            ask(json!(id), "192.0.2.12", Road::Bluetooth);
         }
-        assert_eq!(
-            take_link_request(),
-            Some(12),
-            "the oldest go past the bound"
-        );
+        let bounded = take_link_request().await;
+        // A link on another road takes none.
+        ask(json!(30), "192.0.2.12", Road::Bluetooth);
+        crate::set_control_road(Road::Home);
+        let not_bluetooth = take_link_request().await;
+        crate::set_control_road(Road::Bluetooth);
+        let after = take_link_request().await;
+        ask(json!(31), "192.0.2.12", Road::Bluetooth);
         forget_link_requests();
-        assert_eq!(take_link_request(), None);
+        let forgotten = take_link_request().await;
+        *crate::CONTROL_PEER.lock().await = was_peer;
+        crate::set_control_road(was_road);
+        assert_eq!(first, Some(7));
+        assert_eq!(second, Some(u64::MAX), "the other computer's is dropped");
+        assert_eq!(none, None);
+        assert_eq!(bounded, Some(12), "the oldest go past the bound");
+        assert_eq!(not_bluetooth, None);
+        assert_eq!(after, None, "nothing could answer them: dropped");
+        assert_eq!(forgotten, None);
+    }
+
+    /// At most [`MAX_INFO`] computers are kept, the one heard longest ago
+    /// going first; hearing one again keeps it.
+    #[tokio::test]
+    async fn bluetooth_info_is_bounded() {
+        let _globals = crate::api::TRANSFER_TEST_LOCK.lock().await;
+        let body = json!({"address": "00:00:5E:00:53:01", "service": SERVICE});
+        for n in 0..MAX_INFO {
+            receive(PACKET, &body, &format!("198.51.100.{n}"), Road::Home);
+        }
+        receive(PACKET, &body, "198.51.100.0", Road::Home);
+        receive(PACKET, &body, "203.0.113.1", Road::Home);
+        assert!(!info("198.51.100.0").is_empty(), "heard again, kept");
+        assert!(!info("203.0.113.1").is_empty());
+        assert!(info("198.51.100.1").is_empty(), "heard longest ago, gone");
+        assert!(INFO.lock().unwrap().len() <= MAX_INFO);
     }
 
     /// The computer's side of a transfer link: read the hello, then the
