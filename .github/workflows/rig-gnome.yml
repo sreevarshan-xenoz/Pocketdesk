@@ -123,3 +123,18 @@ jobs:
             /tmp/*.log
             /tmp/lent.ppm
           if-no-files-found: ignore
+
+  # The same test against current GNOME (Arch's gnome-shell and mutter), where
+  # the #643 research saw a window's RemoteDesktop input arrive; Ubuntu 24.04's
+  # mutter 46 took the calls and delivered nothing.
+  gnome-arch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        lent: [wev, clicker]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rig and test
+        run: docker run --rm --privileged -v "$PWD:/src" archlinux:latest bash /src/.github/rig/gnome.sh ${{ matrix.lent }}
