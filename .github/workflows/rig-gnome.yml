@@ -1,0 +1,125 @@
+name: Rig (GNOME, live)
+
+# The GNOME window lend's live test (docs/development-setup.md §3a-2) on a
+# runner instead of an nspawn container: a throwaway headless GNOME Shell on its
+# own session bus, software rendering, the Pocketdesk extension enabled, and
+# `wev` windows that overlap. Runs only on pushes to rig/ branches.
+on:
+  push:
+    branches: ['rig/**']
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  gnome:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        lent: [wev, clicker]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        timeout-minutes: 30
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod*
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get install -y --no-install-recommends \
+            libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config \
+            libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev \
+            libswresample-dev libswscale-dev \
+            gnome-shell mutter pipewire wireplumber pipewire-bin dbus dbus-user-session \
+            libgl1-mesa-dri mesa-utils wev python3-gi gir1.2-gtk-4.0 gnome-shell-extension-prefs \
+            dconf-cli coreutils
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build the live test
+        run: cargo test -p pocketdesk-server --test lend_window_gnome_live --no-run
+
+      - name: Start the rig
+        run: |
+          set -eux
+          RUN=/tmp/rig-run
+          mkdir -p "$RUN"; chmod 700 "$RUN"
+          echo "RIG_RUN=$RUN" >> "$GITHUB_ENV"
+          # The extension, where a user's Shell looks for it.
+          mkdir -p ~/.local/share/gnome-shell/extensions
+          cp -r "contrib/gnome-shell-extension/pocketdesk-windows@pocketdesk.dev" ~/.local/share/gnome-shell/extensions/
+          export XDG_RUNTIME_DIR="$RUN"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$RUN/bus"
+          dbus-daemon --session --address="$DBUS_SESSION_BUS_ADDRESS" --fork --print-pid > /tmp/dbus.pid
+          # Enabled before the Shell starts, as the recipe does.
+          gsettings set org.gnome.shell disable-user-extensions false
+          gsettings set org.gnome.shell enabled-extensions "['pocketdesk-windows@pocketdesk.dev']"
+          gsettings set org.gnome.shell welcome-dialog-last-shown-version '999'
+          nohup pipewire > /tmp/pipewire.log 2>&1 &
+          sleep 1
+          nohup wireplumber > /tmp/wireplumber.log 2>&1 &
+          export LIBGL_ALWAYS_SOFTWARE=1 XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=GNOME
+          nohup gnome-shell --headless --wayland --no-x11 --virtual-monitor 1280x720 > /tmp/gnome-shell.log 2>&1 &
+          for i in $(seq 60); do [ -S "$RUN/wayland-0" ] && break; sleep 1; done
+          ls -la "$RUN"
+          for i in $(seq 30); do
+            gdbus call --session --dest dev.pocketdesk.Windows --object-path /dev/pocketdesk/Windows \
+              --method dev.pocketdesk.Windows.List && break
+            sleep 1
+          done
+          gnome-extensions info pocketdesk-windows@pocketdesk.dev || true
+
+      - name: Open the windows
+        run: |
+          set -eux
+          export XDG_RUNTIME_DIR="$RIG_RUN" WAYLAND_DISPLAY=wayland-0 DBUS_SESSION_BUS_ADDRESS="unix:path=$RIG_RUN/bus"
+          if [ "${{ matrix.lent }}" = clicker ]; then
+            nohup python3 -u scripts/rig_click_logger.py > /tmp/lent.log 2>&1 &
+          else
+            nohup stdbuf -oL wev > /tmp/lent.log 2>&1 &
+          fi
+          sleep 3
+          nohup stdbuf -oL wev > /tmp/cover.log 2>&1 &
+          sleep 2
+          nohup stdbuf -oL wev > /tmp/third.log 2>&1 &
+          sleep 3
+          gdbus call --session --dest dev.pocketdesk.Windows --object-path /dev/pocketdesk/Windows \
+            --method dev.pocketdesk.Windows.List
+
+      - name: Live test
+        run: |
+          set -x
+          P=$(pgrep -u "$(id -u)" -f 'gnome-shell --headless' | head -1)
+          export PD_GNOME_RIG_BUS="unix:path=/proc/$P/root$RIG_RUN/bus"
+          export PD_GNOME_RIG_RUNTIME="/proc/$P/root$RIG_RUN"
+          export PD_GNOME_RIG_SHELL=extension
+          export PD_GNOME_RIG_LENT_LOG=/tmp/lent.log PD_GNOME_RIG_COVER_LOG=/tmp/cover.log
+          export PD_GNOME_RIG_SNAP=/tmp/lent.ppm
+          if [ "${{ matrix.lent }}" = clicker ]; then
+            export PD_GNOME_RIG_LENT_APP=dev.pocketdesk.RigClicker PD_GNOME_RIG_COVER_APP=wev
+          fi
+          export RUST_LOG=info
+          cargo test -p pocketdesk-server --test lend_window_gnome_live -- --ignored --nocapture --test-threads=1
+
+      - name: Logs
+        if: always()
+        run: |
+          for f in /tmp/gnome-shell.log /tmp/pipewire.log /tmp/wireplumber.log /tmp/lent.log /tmp/cover.log; do
+            echo "=== $f"; tail -n 80 "$f" || true
+          done
+
+      - name: Upload the rig's files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rig-gnome-${{ matrix.lent }}
+          path: |
+            /tmp/*.log
+            /tmp/lent.ppm
+          if-no-files-found: ignore
