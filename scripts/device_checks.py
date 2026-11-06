@@ -1656,6 +1656,128 @@ def w1_caption(ctx: Ctx) -> tuple[str, str]:
     return session_check(ctx, body)
 
 
+def phone_seconds() -> float:
+    """The phone's time of day, in seconds (as logcat's lines say it)."""
+    now = adb("shell", "date", "+%H:%M:%S.%N").strip()
+    hours, minutes, seconds = now.split(":")
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds[:6])
+
+
+def first_line(tag: str, words: str, after: float) -> Optional[tuple[float, str]]:
+    """The first line of `tag` since the last logcat clear that says `words`,
+    at or after `after` (seconds of the day), with its time."""
+    for line in adb("logcat", "-d", "-s", f"{tag}:*").splitlines():
+        at = log_seconds(line)
+        if at is not None and (at - after) % 86400 < 43200 and words in line:
+            return at, line
+    return None
+
+
+def session_count(ctx: Ctx) -> int:
+    """The sessions the server's fresh mirror lists from the phone."""
+    path = ctx.server.root / "state" / "live_sessions.json"
+    try:
+        mirror = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    return sum(s.get("device_id") == ctx.device for s in mirror.get("sessions", []))
+
+
+def wifi(on: bool) -> None:
+    adb("shell", "svc", "wifi", "enable" if on else "disable")
+
+
+BG6_RUNS = 5
+
+
+@check("bg6-wifi-drop", "§285")
+def bg6_wifi_drop(ctx: Ctx) -> tuple[str, str]:
+    """BG6: Wi-Fi off mid-session: "link quiet" about 3 s after the radio
+    goes, "link dropped: quiet" about 8 s after; Wi-Fi back on: the session
+    reconnects by itself, by the road the log names, and the computer holds
+    one session from the phone, never two."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        if not wait_for(connected_at, 20, 0.5):
+            return "TIMEOUT", "no session within 20 s of the tap"
+        runs: list[str] = []
+        bad: list[str] = []
+        for run in range(1, BG6_RUNS + 1):
+            time.sleep(5)
+            adb("logcat", "-c")
+            off = phone_seconds()
+            wifi(False)
+            try:
+                wait_for(lambda: first_line("H264Decoder", "link dropped: quiet", off), 20, 0.5)
+            finally:
+                on = phone_seconds()
+                wifi(True)
+            quiet = first_line("H264Decoder", "link quiet", off)
+            dropped = first_line("H264Decoder", "link dropped: quiet", off)
+            back = wait_for(lambda: first_line("PocketdeskRust", "Streaming session connected", on), 90, 1)
+            road = first_line("PocketdeskRust", "carries the session", on)
+            road_said = re.search(r"road=(\S+)", road[1]).group(1) if road and "road=" in road[1] else "?"
+            time.sleep(4)
+            count = session_count(ctx)
+            said = (
+                f"run {run}: quiet {((quiet[0] - off) % 86400):.1f} s" if quiet else f"run {run}: no quiet"
+            ) + (
+                f", dropped {((dropped[0] - off) % 86400):.1f} s" if dropped else ", not dropped"
+            ) + (
+                f", back {((back[0] - on) % 86400):.1f} s after the radio by {road_said}" if back else ", not back within 90 s"
+            ) + f", {count} session(s)"
+            runs.append(said)
+            if not (quiet and dropped and back) or count != 1 or not 2 <= (quiet[0] - off) % 86400 <= 5:
+                bad.append(said)
+            if not back:
+                break
+        return ("FAIL" if bad else "PASS"), "; ".join(runs)
+    return session_check(ctx, body)
+
+
+@check("bg6-wifi-blip", "§285")
+def bg6_wifi_blip(ctx: Ctx) -> tuple[str, str]:
+    """BG6: Wi-Fi off for 5 s and back on mid-session (a roam's gap):
+    "link quiet" then "link heard from again", no "link dropped", one
+    session on the computer. Says how many runs recovered with no teardown."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        if not wait_for(connected_at, 20, 0.5):
+            return "TIMEOUT", "no session within 20 s of the tap"
+        runs: list[str] = []
+        kept = 0
+        for run in range(1, BG6_RUNS + 1):
+            time.sleep(5)
+            adb("logcat", "-c")
+            off = phone_seconds()
+            wifi(False)
+            time.sleep(5)
+            wifi(True)
+            settled = wait_for(
+                lambda: first_line("H264Decoder", "link heard from again", off)
+                or first_line("PocketdeskRust", "Streaming session connected", off),
+                60,
+                1,
+            )
+            dropped = first_line("H264Decoder", "link dropped", off)
+            heard = first_line("H264Decoder", "link heard from again", off)
+            time.sleep(4)
+            count = session_count(ctx)
+            if heard and not dropped and count == 1:
+                kept += 1
+            runs.append(
+                f"run {run}: "
+                + ("heard again" if heard else "not heard again")
+                + (f", dropped at {((dropped[0] - off) % 86400):.1f} s" if dropped else ", no drop")
+                + ("" if settled else ", nothing within 60 s")
+                + f", {count} session(s)"
+            )
+        return ("PASS" if kept == BG6_RUNS else "FAIL"), f"{kept} of {BG6_RUNS} kept the session; " + "; ".join(runs)
+    return session_check(ctx, body)
+
+
 @check("w1-reset", "§2d")
 def w1_reset(ctx: Ctx) -> tuple[str, str]:
     """V7: a new session's caption starts from its own polls, never with the
