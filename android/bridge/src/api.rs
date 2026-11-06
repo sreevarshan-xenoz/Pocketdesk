@@ -598,13 +598,13 @@ pub async fn connect_to_peer(
     use tracing::Instrument;
 
     let result = async move {
-        // The stream, and whether it came by the internet road.
-        let dialed: Result<(ControlDuplex, bool), _> =
+        // The stream, and the road it came by.
+        let dialed: Result<(ControlDuplex, crate::Road), _> =
             match conn_mgr.connect_named(&address, port, &identity).await {
                 Ok((stream, claims)) => {
                     // U3: the computer's name, for the app to keep.
                     crate::peer_names::note(&address, claims);
-                    Ok((Box::new(stream) as ControlDuplex, false))
+                    Ok((Box::new(stream) as ControlDuplex, crate::Road::Home))
                 }
                 Err(home) => match wan_identity.as_deref().map(WanTarget::parse) {
                     Some(Ok(target)) if INTERNET_PAUSE.may_try(&address, Instant::now()) => {
@@ -615,7 +615,7 @@ pub async fn connect_to_peer(
                         match dial_internet_control(&target, &identity, &address, true).await {
                             Ok(stream) => {
                                 INTERNET_PAUSE.succeeded(&address);
-                                Ok((stream, true))
+                                Ok((stream, crate::Road::Internet))
                             }
                             Err(e) => {
                                 tracing::warn!("The internet road failed too: {e}");
@@ -636,402 +636,7 @@ pub async fn connect_to_peer(
                 },
             };
         match dialed {
-            Ok((stream, over_internet)) => {
-                let (reader, writer) = tokio::io::split(stream);
-                let writer_arc = Arc::new(Mutex::new(writer));
-                let replaced = (*CONTROL_WRITER).lock().await.replace(writer_arc.clone());
-                let old_peer = crate::CONTROL_PEER.lock().await.replace((address.clone(), port));
-                // A connection this one replaces (to another computer, or one
-                // the check above found dead) is closed, so its reader ends
-                // instead of holding the socket and a server slot.
-                if let Some(old) = replaced {
-                    let _ = old.lock().await.shutdown().await;
-                    // Its reader leaves its slots alone, as it is not the
-                    // live one: what another computer's carried is forgotten
-                    // here instead, or its links, offers and pairing answer
-                    // would be read as this one's (AR1). The same computer
-                    // dialed again keeps what is still its own.
-                    if let Some(old_peer) = old_peer.filter(|old| *old != (address.clone(), port)) {
-                        forget_link(&old_peer).await;
-                    }
-                }
-                crate::CONTROL_OVER_INTERNET.store(over_internet, Ordering::SeqCst);
-                crate::session::CONTROL_LINKS.fetch_add(1, Ordering::SeqCst);
-
-                // Create a broadcast channel for forwarding incoming packets to Flutter
-                let (packet_tx, _) = broadcast::channel(256);
-                {
-                    let mut incoming = crate::INCOMING_PACKETS.lock().await;
-                    *incoming = Some(packet_tx.clone());
-                }
-                // Which computer this connection is to: a reply request is
-                // acted on only when it came from the phone's own computer.
-                let from_peer = (address.clone(), port);
-
-                tokio::spawn(
-                    async move {
-                        let mut reader = tokio::io::BufReader::new(reader);
-                        let mut line = String::new();
-                        while let Ok(n) = reader.read_line(&mut line).await {
-                            if n == 0 {
-                                break;
-                            }
-                            // Replaced by a newer connection (another computer,
-                            // or this one dialed again): it handles nothing
-                            // more, or what it latched would be read as the
-                            // newer one's (AR1).
-                            if !is_live((*CONTROL_WRITER).lock().await.as_ref(), &writer_arc) {
-                                break;
-                            }
-                            let trimmed = line.trim().to_string();
-                            if !trimmed.is_empty() {
-                                // What it says of this phone's standing there
-                                // (BB1): not paired, or let in.
-                                if let Ok(pkt) = NetworkPacket::from_wire(&trimmed) {
-                                    crate::unpaired::heard(&from_peer.0, &pkt.packet_type, &pkt.body);
-                                }
-                                // The computer's keyboard and mouse on this
-                                // phone as a screen (BK5): kept for the
-                                // pointer thread, its pings answered at once,
-                                // and nothing else to look at in it.
-                                if trimmed.contains("shared_input.input")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type
-                                        == pocketdesk_core::protocol::phone_screen::INPUT
-                                {
-                                    for pong in crate::phone_screen::receive(
-                                        &pkt.body,
-                                        &from_peer.0,
-                                        from_peer.1,
-                                    ) {
-                                        let (host, port) = from_peer.clone();
-                                        tokio::spawn(async move {
-                                            let _ = send_on_live(&host, port, &pong).await;
-                                        });
-                                    }
-                                    line.clear();
-                                    continue;
-                                }
-                                // Cache the server's iroh WAN identity as it is
-                                // announced, independent of Kotlin's poll loop.
-                                if trimmed.contains("pocketdesk.endpoint")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == "kdeconnect.pocketdesk.endpoint"
-                                {
-                                    *crate::WAN_IDENTITY.lock().await = Some((
-                                        from_peer.0.clone(),
-                                        from_peer.1,
-                                        pkt.body.to_string(),
-                                    ));
-                                }
-                                // Who drives, when several phones are
-                                // connected (N7).
-                                if trimmed.contains("pocketdesk.control")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == "kdeconnect.pocketdesk.control"
-                                {
-                                    *crate::CONTROL_STATE.lock().await = Some((
-                                        from_peer.0.clone(),
-                                        from_peer.1,
-                                        pkt.body.to_string(),
-                                    ));
-                                }
-                                // How to wake this desktop (N6), kept for the
-                                // app to save with the computer.
-                                if trimmed.contains("pocketdesk.wake_info")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == "kdeconnect.pocketdesk.wake_info"
-                                {
-                                    *crate::WAKE_INFO.lock().await = Some((
-                                        from_peer.0.clone(),
-                                        from_peer.1,
-                                        pkt.body.to_string(),
-                                    ));
-                                }
-                                // Find-my-device siren: latch so the UI can ring
-                                // even if the poll loop misses the packet.
-                                if trimmed.contains("findmydevice")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == "kdeconnect.findmydevice"
-                                    && pkt
-                                        .body
-                                        .get("ring")
-                                        .and_then(|v| v.as_bool())
-                                        .unwrap_or(true)
-                                {
-                                    crate::SIREN_RINGING
-                                        .store(true, std::sync::atomic::Ordering::SeqCst);
-                                }
-                                // Pairing decisions/announcements from the
-                                // desktop latch for the pairing UI (Tier-2 #11b).
-                                if trimmed.contains("kdeconnect.pair")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && (pkt.packet_type == "kdeconnect.pair"
-                                        || pkt.packet_type == "kdeconnect.pocketdesk.pair")
-                                {
-                                    let mut slot = crate::PAIR_RESULT.lock().await;
-                                    *slot = Some(pkt.body.clone());
-                                    // A packet carrying the PIN itself must not
-                                    // reach Kotlin pollers — the latch consumed it.
-                                    if pkt.body.get("pin").is_some() {
-                                        line.clear();
-                                        continue;
-                                    }
-                                }
-                                // Desktop notifications addressed to us queue
-                                // for the notification-posting poller (Tier-2 #11c).
-                                if trimmed.contains("kdeconnect.notification")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == "kdeconnect.notification"
-                                    && pkt.source.as_deref() != Some(&client_identity().device_id)
-                                    && !pkt
-                                        .body
-                                        .get("isClear")
-                                        .and_then(|v| v.as_bool())
-                                        .unwrap_or(false)
-                                    && pkt.body.get("id").is_some()
-                                {
-                                    crate::queue_notification(
-                                        &pkt.body,
-                                        pkt.source.as_deref().unwrap_or("desktop"),
-                                    );
-                                }
-                                // A reply the desktop asks us to text (N5b):
-                                // latched for the app to send.
-                                if trimmed.contains("kdeconnect.sms.request")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == "kdeconnect.sms.request"
-                                {
-                                    crate::queue_sms_request(&pkt.body, &from_peer.0, from_peer.1);
-                                }
-                                // A file the desktop's owner sent us (F7b):
-                                // latched for the session to download.
-                                if trimmed.contains("file_offer")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == crate::download::FILE_OFFER
-                                {
-                                    crate::queue_file_offer(&pkt.body);
-                                }
-                                // A task's result (ecosystem 1c), kept for
-                                // the app under its run's id.
-                                if trimmed.contains("task_result")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == crate::tasks::TASK_RESULT
-                                {
-                                    crate::tasks::receive(&pkt.body);
-                                }
-                                // A number the computer asks this phone to
-                                // dial (L4), kept with its computer.
-                                if trimmed.contains("pocketdesk.dial")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == pocketdesk_core::protocol::dial::DIAL
-                                {
-                                    crate::dials::receive(&pkt.body, &from_peer.0, from_peer.1);
-                                }
-                                // A question the computer puts to its
-                                // owner (BF3), kept with its computer.
-                                if trimmed.contains("pocketdesk.ask")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == pocketdesk_core::protocol::ask::ASK
-                                {
-                                    crate::asks::receive(&pkt.body, &from_peer.0, from_peer.1);
-                                }
-                                // A screenshot or a lock the computer asks
-                                // of this phone (O2), kept with its computer.
-                                if trimmed.contains("pocketdesk.phone_action")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type
-                                        == pocketdesk_core::protocol::phone_action::PHONE_ACTION
-                                {
-                                    crate::phone_actions::receive(&pkt.body, &from_peer.0, from_peer.1);
-                                }
-                                // What the computer types here (M4), kept
-                                // in order with its computer.
-                                if trimmed.contains("pocketdesk.type")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == pocketdesk_core::protocol::typing::TYPE
-                                {
-                                    crate::typing::receive(&pkt.body, &from_peer.0, from_peer.1);
-                                }
-                                // A command for this phone's automation
-                                // apps (L6), kept with its computer.
-                                if trimmed.contains("pocketdesk.command")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == pocketdesk_core::protocol::command::COMMAND
-                                {
-                                    crate::commands::receive(&pkt.body, &from_peer.0, from_peer.1);
-                                }
-                                // A link the computer handed over (T8a),
-                                // kept for the app to show.
-                                if trimmed.contains("pocketdesk.link")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == pocketdesk_core::protocol::link::LINK
-                                {
-                                    crate::links::receive(&pkt.body);
-                                }
-                                // The computer's requests to browse this
-                                // phone's shared folders (T10g).
-                                if trimmed.contains("phone_files.")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                {
-                                    crate::phone_file_requests::receive(
-                                        &pkt.packet_type,
-                                        &pkt.body,
-                                        &from_peer.0,
-                                        from_peer.1,
-                                    );
-                                }
-                                // The computer's requests for this phone's
-                                // recent photos (C7).
-                                // F6 part 2: and to be its camera, kept with them.
-                                if (trimmed.contains("phone_photos.")
-                                    || trimmed.contains("phone_camera."))
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                {
-                                    crate::photo_requests::receive(
-                                        &pkt.packet_type,
-                                        &pkt.body,
-                                        &from_peer.0,
-                                        from_peer.1,
-                                    );
-                                }
-                                // The computer's asks for this phone's
-                                // location (GeoClue); the place is never
-                                // kept here, only the ask.
-                                if trimmed.contains("phone_location.ask")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                {
-                                    crate::location_requests::receive(
-                                        &pkt.packet_type,
-                                        &pkt.body,
-                                        &from_peer.0,
-                                        from_peer.1,
-                                    );
-                                }
-                                // What the computer says of wake helpers: a
-                                // helper's duty, an owner phone's word of the
-                                // helper. Read again here; only a body that
-                                // reads is kept for the app.
-                                if trimmed.contains("pocketdesk.wake_helper_")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                {
-                                    crate::wake_helper::receive(
-                                        &pkt.packet_type,
-                                        &pkt.body,
-                                        &from_peer.0,
-                                        from_peer.1,
-                                    );
-                                }
-                                // The computer's mutes for this phone (D2).
-                                if trimmed.contains("pocketdesk.quiet")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                {
-                                    crate::quiet_requests::receive(
-                                        &pkt.packet_type,
-                                        &pkt.body,
-                                        &from_peer.0,
-                                        from_peer.1,
-                                    );
-                                }
-                                // The computer's answers to this phone's
-                                // notifications (T10c), kept for the app.
-                                if (trimmed.contains("kdeconnect.notification.")
-                                    || trimmed.contains("notification_open"))
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                {
-                                    crate::notification_answers::receive(
-                                        &pkt.packet_type,
-                                        &pkt.body,
-                                        &from_peer.0,
-                                        from_peer.1,
-                                    );
-                                }
-                                // The computer's clipboard (T10b), kept
-                                // for the app; still passed on, since it is
-                                // also the answer to the phone's request.
-                                // N7: whether the computer is in use.
-                                if trimmed.contains("in_use_answer")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type
-                                        == pocketdesk_core::protocol::in_use::ANSWER
-                                {
-                                    crate::in_use::receive(&pkt.body, &from_peer.0, from_peer.1);
-                                }
-                                // N5: the computer's music, kept for the app.
-                                if trimmed.contains("computer_media")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type
-                                        == pocketdesk_core::protocol::computer_media::PUSH
-                                {
-                                    crate::computer_media::receive(
-                                        &pkt.body,
-                                        &from_peer.0,
-                                        from_peer.1,
-                                    );
-                                }
-                                if trimmed.contains("kdeconnect.clipboard")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == "kdeconnect.clipboard"
-                                {
-                                    crate::clipboard_push::receive(
-                                        &pkt.body,
-                                        &from_peer.0,
-                                        from_peer.1,
-                                    );
-                                }
-                                // A press for the phone's player (T8d),
-                                // kept for the app to act on.
-                                if trimmed.contains("phone_media_control")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type
-                                        == pocketdesk_core::protocol::phone_media::PHONE_MEDIA_CONTROL
-                                {
-                                    crate::media_presses::receive(&pkt.body);
-                                }
-                                // The answer to a folder request (T6b),
-                                // kept by the path asked.
-                                if trimmed.contains("folder_fetch_reply")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == crate::download::FOLDER_FETCH_REPLY
-                                {
-                                    crate::latch_folder_reply(&pkt.body);
-                                }
-                                let latched = NetworkPacket::from_wire(&trimmed)
-                                    .is_ok_and(|p| crate::kept_from_pollers(&p.packet_type));
-                                if !latched {
-                                    let _ = packet_tx.send(trimmed);
-                                }
-                            }
-                            line.clear();
-                        }
-                        // Only retire the shared slots if they still belong to
-                        // *this* connection. An older reader that dies late
-                        // would otherwise wipe a newer connection's writer,
-                        // permanently pushing every query onto the one-shot
-                        // fallback path. Asked under the state's and the
-                        // writer's locks, in connect_to_peer's order: a dial
-                        // holds the state's while it connects, and one that
-                        // succeeded meanwhile must win (AR1 review).
-                        let mut state_guard = (*CONNECTION_STATE).lock().await;
-                        let mut writer_guard = (*CONTROL_WRITER).lock().await;
-                        if !is_live(writer_guard.as_ref(), &writer_arc) {
-                            tracing::debug!("Control connection replaced");
-                            return;
-                        }
-                        tracing::warn!("Control connection lost");
-                        *crate::CONTROL_PEER.lock().await = None;
-                        crate::CONTROL_OVER_INTERNET.store(false, Ordering::SeqCst);
-                        *crate::INCOMING_PACKETS.lock().await = None;
-                        *state_guard = ConnectionState::Disconnected;
-                        *writer_guard = None;
-                        forget_link(&from_peer).await;
-                    }
-                    .instrument(tracing::debug_span!("control_reader")),
-                );
-
-                tracing::info!("Connected to peer");
-                Ok(ConnectionState::Connected)
-            }
+            Ok((stream, road)) => Ok(run_control(stream, address, port, road).await),
             Err(e) => {
                 tracing::error!(error = %e, "Connection failed");
                 Ok(ConnectionState::Error(PocketdeskErrorDto::from(e)))
@@ -1050,6 +655,392 @@ pub async fn connect_to_peer(
         };
     }
     result
+}
+
+/// Run the control link on `stream`, already secured to the computer at
+/// `address` (its control `port`), which came by `road`: it becomes the live
+/// one, replacing any other, and a reader handles what the computer sends
+/// until it closes. The caller holds [`crate::session::CONNECT_LOCK`] and
+/// the connection state.
+async fn run_control(
+    stream: ControlDuplex,
+    address: String,
+    port: u16,
+    road: crate::Road,
+) -> ConnectionState {
+    use tracing::Instrument;
+    let (reader, writer) = tokio::io::split(stream);
+    let writer_arc = Arc::new(Mutex::new(writer));
+    let replaced = (*CONTROL_WRITER).lock().await.replace(writer_arc.clone());
+    let old_peer = crate::CONTROL_PEER
+        .lock()
+        .await
+        .replace((address.clone(), port));
+    // A connection this one replaces (to another computer, or one
+    // the check above found dead) is closed, so its reader ends
+    // instead of holding the socket and a server slot.
+    if let Some(old) = replaced {
+        let _ = old.lock().await.shutdown().await;
+        // Its reader leaves its slots alone, as it is not the
+        // live one: what another computer's carried is forgotten
+        // here instead, or its links, offers and pairing answer
+        // would be read as this one's (AR1). The same computer
+        // dialed again keeps what is still its own.
+        if let Some(old_peer) = old_peer.filter(|old| *old != (address.clone(), port)) {
+            forget_link(&old_peer).await;
+        }
+    }
+    crate::set_control_road(road);
+    crate::session::CONTROL_LINKS.fetch_add(1, Ordering::SeqCst);
+
+    // Create a broadcast channel for forwarding incoming packets to Flutter
+    let (packet_tx, _) = broadcast::channel(256);
+    {
+        let mut incoming = crate::INCOMING_PACKETS.lock().await;
+        *incoming = Some(packet_tx.clone());
+    }
+    // Which computer this connection is to: a reply request is
+    // acted on only when it came from the phone's own computer.
+    let from_peer = (address.clone(), port);
+
+    tokio::spawn(
+        async move {
+            let mut reader = tokio::io::BufReader::new(reader);
+            let mut line = String::new();
+            while let Ok(n) = reader.read_line(&mut line).await {
+                if n == 0 {
+                    break;
+                }
+                // Replaced by a newer connection (another computer,
+                // or this one dialed again): it handles nothing
+                // more, or what it latched would be read as the
+                // newer one's (AR1).
+                if !is_live((*CONTROL_WRITER).lock().await.as_ref(), &writer_arc) {
+                    break;
+                }
+                let trimmed = line.trim().to_string();
+                if !trimmed.is_empty() {
+                    // What it says of this phone's standing there
+                    // (BB1): not paired, or let in.
+                    if let Ok(pkt) = NetworkPacket::from_wire(&trimmed) {
+                        crate::unpaired::heard(&from_peer.0, &pkt.packet_type, &pkt.body);
+                    }
+                    // The computer's keyboard and mouse on this
+                    // phone as a screen (BK5): kept for the
+                    // pointer thread, its pings answered at once,
+                    // and nothing else to look at in it.
+                    if trimmed.contains("shared_input.input")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == pocketdesk_core::protocol::phone_screen::INPUT
+                    {
+                        for pong in
+                            crate::phone_screen::receive(&pkt.body, &from_peer.0, from_peer.1)
+                        {
+                            let (host, port) = from_peer.clone();
+                            tokio::spawn(async move {
+                                let _ = send_on_live(&host, port, &pong).await;
+                            });
+                        }
+                        line.clear();
+                        continue;
+                    }
+                    // Cache the server's iroh WAN identity as it is
+                    // announced, independent of Kotlin's poll loop.
+                    if trimmed.contains("pocketdesk.endpoint")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == "kdeconnect.pocketdesk.endpoint"
+                    {
+                        *crate::WAN_IDENTITY.lock().await =
+                            Some((from_peer.0.clone(), from_peer.1, pkt.body.to_string()));
+                    }
+                    // Who drives, when several phones are
+                    // connected (N7).
+                    if trimmed.contains("pocketdesk.control")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == "kdeconnect.pocketdesk.control"
+                    {
+                        *crate::CONTROL_STATE.lock().await =
+                            Some((from_peer.0.clone(), from_peer.1, pkt.body.to_string()));
+                    }
+                    // How to wake this desktop (N6), kept for the
+                    // app to save with the computer.
+                    if trimmed.contains("pocketdesk.wake_info")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == "kdeconnect.pocketdesk.wake_info"
+                    {
+                        *crate::WAKE_INFO.lock().await =
+                            Some((from_peer.0.clone(), from_peer.1, pkt.body.to_string()));
+                    }
+                    // Find-my-device siren: latch so the UI can ring
+                    // even if the poll loop misses the packet.
+                    if trimmed.contains("findmydevice")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == "kdeconnect.findmydevice"
+                        && pkt
+                            .body
+                            .get("ring")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(true)
+                    {
+                        crate::SIREN_RINGING.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    // Pairing decisions/announcements from the
+                    // desktop latch for the pairing UI (Tier-2 #11b).
+                    if trimmed.contains("kdeconnect.pair")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && (pkt.packet_type == "kdeconnect.pair"
+                            || pkt.packet_type == "kdeconnect.pocketdesk.pair")
+                    {
+                        let mut slot = crate::PAIR_RESULT.lock().await;
+                        *slot = Some(pkt.body.clone());
+                        // A packet carrying the PIN itself must not
+                        // reach Kotlin pollers — the latch consumed it.
+                        if pkt.body.get("pin").is_some() {
+                            line.clear();
+                            continue;
+                        }
+                    }
+                    // Desktop notifications addressed to us queue
+                    // for the notification-posting poller (Tier-2 #11c).
+                    if trimmed.contains("kdeconnect.notification")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == "kdeconnect.notification"
+                        && pkt.source.as_deref() != Some(&client_identity().device_id)
+                        && !pkt
+                            .body
+                            .get("isClear")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false)
+                        && pkt.body.get("id").is_some()
+                    {
+                        crate::queue_notification(
+                            &pkt.body,
+                            pkt.source.as_deref().unwrap_or("desktop"),
+                        );
+                    }
+                    // A reply the desktop asks us to text (N5b):
+                    // latched for the app to send.
+                    if trimmed.contains("kdeconnect.sms.request")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == "kdeconnect.sms.request"
+                    {
+                        crate::queue_sms_request(&pkt.body, &from_peer.0, from_peer.1);
+                    }
+                    // A file the desktop's owner sent us (F7b):
+                    // latched for the session to download.
+                    if trimmed.contains("file_offer")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == crate::download::FILE_OFFER
+                    {
+                        crate::queue_file_offer(&pkt.body);
+                    }
+                    // A task's result (ecosystem 1c), kept for
+                    // the app under its run's id.
+                    if trimmed.contains("task_result")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == crate::tasks::TASK_RESULT
+                    {
+                        crate::tasks::receive(&pkt.body);
+                    }
+                    // A number the computer asks this phone to
+                    // dial (L4), kept with its computer.
+                    if trimmed.contains("pocketdesk.dial")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == pocketdesk_core::protocol::dial::DIAL
+                    {
+                        crate::dials::receive(&pkt.body, &from_peer.0, from_peer.1);
+                    }
+                    // A question the computer puts to its
+                    // owner (BF3), kept with its computer.
+                    if trimmed.contains("pocketdesk.ask")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == pocketdesk_core::protocol::ask::ASK
+                    {
+                        crate::asks::receive(&pkt.body, &from_peer.0, from_peer.1);
+                    }
+                    // A screenshot or a lock the computer asks
+                    // of this phone (O2), kept with its computer.
+                    if trimmed.contains("pocketdesk.phone_action")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == pocketdesk_core::protocol::phone_action::PHONE_ACTION
+                    {
+                        crate::phone_actions::receive(&pkt.body, &from_peer.0, from_peer.1);
+                    }
+                    // What the computer types here (M4), kept
+                    // in order with its computer.
+                    if trimmed.contains("pocketdesk.type")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == pocketdesk_core::protocol::typing::TYPE
+                    {
+                        crate::typing::receive(&pkt.body, &from_peer.0, from_peer.1);
+                    }
+                    // A command for this phone's automation
+                    // apps (L6), kept with its computer.
+                    if trimmed.contains("pocketdesk.command")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == pocketdesk_core::protocol::command::COMMAND
+                    {
+                        crate::commands::receive(&pkt.body, &from_peer.0, from_peer.1);
+                    }
+                    // A link the computer handed over (T8a),
+                    // kept for the app to show.
+                    if trimmed.contains("pocketdesk.link")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == pocketdesk_core::protocol::link::LINK
+                    {
+                        crate::links::receive(&pkt.body);
+                    }
+                    // The computer's requests to browse this
+                    // phone's shared folders (T10g).
+                    if trimmed.contains("phone_files.")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                    {
+                        crate::phone_file_requests::receive(
+                            &pkt.packet_type,
+                            &pkt.body,
+                            &from_peer.0,
+                            from_peer.1,
+                        );
+                    }
+                    // The computer's requests for this phone's
+                    // recent photos (C7).
+                    // F6 part 2: and to be its camera, kept with them.
+                    if (trimmed.contains("phone_photos.") || trimmed.contains("phone_camera."))
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                    {
+                        crate::photo_requests::receive(
+                            &pkt.packet_type,
+                            &pkt.body,
+                            &from_peer.0,
+                            from_peer.1,
+                        );
+                    }
+                    // The computer's asks for this phone's
+                    // location (GeoClue); the place is never
+                    // kept here, only the ask.
+                    if trimmed.contains("phone_location.ask")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                    {
+                        crate::location_requests::receive(
+                            &pkt.packet_type,
+                            &pkt.body,
+                            &from_peer.0,
+                            from_peer.1,
+                        );
+                    }
+                    // What the computer says of wake helpers: a
+                    // helper's duty, an owner phone's word of the
+                    // helper. Read again here; only a body that
+                    // reads is kept for the app.
+                    if trimmed.contains("pocketdesk.wake_helper_")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                    {
+                        crate::wake_helper::receive(
+                            &pkt.packet_type,
+                            &pkt.body,
+                            &from_peer.0,
+                            from_peer.1,
+                        );
+                    }
+                    // The computer's mutes for this phone (D2).
+                    if trimmed.contains("pocketdesk.quiet")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                    {
+                        crate::quiet_requests::receive(
+                            &pkt.packet_type,
+                            &pkt.body,
+                            &from_peer.0,
+                            from_peer.1,
+                        );
+                    }
+                    // The computer's answers to this phone's
+                    // notifications (T10c), kept for the app.
+                    if (trimmed.contains("kdeconnect.notification.")
+                        || trimmed.contains("notification_open"))
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                    {
+                        crate::notification_answers::receive(
+                            &pkt.packet_type,
+                            &pkt.body,
+                            &from_peer.0,
+                            from_peer.1,
+                        );
+                    }
+                    // The computer's clipboard (T10b), kept
+                    // for the app; still passed on, since it is
+                    // also the answer to the phone's request.
+                    // N7: whether the computer is in use.
+                    if trimmed.contains("in_use_answer")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == pocketdesk_core::protocol::in_use::ANSWER
+                    {
+                        crate::in_use::receive(&pkt.body, &from_peer.0, from_peer.1);
+                    }
+                    // N5: the computer's music, kept for the app.
+                    if trimmed.contains("computer_media")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == pocketdesk_core::protocol::computer_media::PUSH
+                    {
+                        crate::computer_media::receive(&pkt.body, &from_peer.0, from_peer.1);
+                    }
+                    if trimmed.contains("kdeconnect.clipboard")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == "kdeconnect.clipboard"
+                    {
+                        crate::clipboard_push::receive(&pkt.body, &from_peer.0, from_peer.1);
+                    }
+                    // A press for the phone's player (T8d),
+                    // kept for the app to act on.
+                    if trimmed.contains("phone_media_control")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type
+                            == pocketdesk_core::protocol::phone_media::PHONE_MEDIA_CONTROL
+                    {
+                        crate::media_presses::receive(&pkt.body);
+                    }
+                    // The answer to a folder request (T6b),
+                    // kept by the path asked.
+                    if trimmed.contains("folder_fetch_reply")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == crate::download::FOLDER_FETCH_REPLY
+                    {
+                        crate::latch_folder_reply(&pkt.body);
+                    }
+                    let latched = NetworkPacket::from_wire(&trimmed)
+                        .is_ok_and(|p| crate::kept_from_pollers(&p.packet_type));
+                    if !latched {
+                        let _ = packet_tx.send(trimmed);
+                    }
+                }
+                line.clear();
+            }
+            // Only retire the shared slots if they still belong to
+            // *this* connection. An older reader that dies late
+            // would otherwise wipe a newer connection's writer,
+            // permanently pushing every query onto the one-shot
+            // fallback path. Asked under the state's and the
+            // writer's locks, in connect_to_peer's order: a dial
+            // holds the state's while it connects, and one that
+            // succeeded meanwhile must win (AR1 review).
+            let mut state_guard = (*CONNECTION_STATE).lock().await;
+            let mut writer_guard = (*CONTROL_WRITER).lock().await;
+            if !is_live(writer_guard.as_ref(), &writer_arc) {
+                tracing::debug!("Control connection replaced");
+                return;
+            }
+            tracing::warn!("Control connection lost");
+            *crate::CONTROL_PEER.lock().await = None;
+            crate::set_control_road(crate::Road::Home);
+            *crate::INCOMING_PACKETS.lock().await = None;
+            *state_guard = ConnectionState::Disconnected;
+            *writer_guard = None;
+            forget_link(&from_peer).await;
+        }
+        .instrument(tracing::debug_span!("control_reader")),
+    );
+
+    tracing::info!("Connected to peer");
+    ConnectionState::Connected
 }
 
 /// Poll for incoming KDE Connect packets from the control connection.
@@ -2576,17 +2567,22 @@ pub async fn connect_streaming(
         Some(codec_caps),
         mode,
     );
-    // V8: with the control link to this computer by the internet road, home
-    // most likely does not answer, and a QUIC dial to an address that does
-    // not waits out its 10 s. Home gets a short try instead: a phone back on
-    // its Wi-Fi with the link still on the road answers well within it (V8
-    // review), and one away falls to the road seconds sooner.
+    // V8: with the control link to this computer by the internet road (or
+    // Bluetooth), home most likely does not answer, and a QUIC dial to an
+    // address that does not waits out its 10 s. Home gets a short try
+    // instead: a phone back on its Wi-Fi with the link still on the road
+    // answers well within it (V8 review), and one away falls to the road
+    // seconds sooner.
     let connected = if crate::link::home_unreachable(&address).await {
         match tokio::time::timeout(HOME_TRY_WHILE_AWAY, connecting).await {
             Ok(connected) => connected,
             Err(_) => {
+                let road = match crate::control_road() {
+                    crate::Road::Bluetooth => "Bluetooth",
+                    _ => "the internet road",
+                };
                 return Err(format!(
-                    "{address} did not answer at home within {} s, and its control link is by the internet road",
+                    "{address} did not answer at home within {} s, and its control link is by {road}",
                     HOME_TRY_WHILE_AWAY.as_secs()
                 ));
             }
@@ -3455,8 +3451,6 @@ mod hud_window_tests {
 
 #[cfg(test)]
 mod home_skip_tests {
-    use std::sync::atomic::Ordering;
-
     /// V8: with the control link to this computer on the internet road, the
     /// session's home dial gets 2 s, not its 10, and the caller takes the road.
     #[tokio::test]
@@ -3464,10 +3458,10 @@ mod home_skip_tests {
         // The control link's statics, as the pairing road's test holds them.
         let _globals = super::TRANSFER_TEST_LOCK.lock().await;
         let was_peer = crate::CONTROL_PEER.lock().await.clone();
-        let was_road = crate::CONTROL_OVER_INTERNET.load(Ordering::SeqCst);
+        let was_road = crate::control_road();
         // A documentation address: nothing answers there.
         *crate::CONTROL_PEER.lock().await = Some(("192.0.2.7".to_string(), 1716));
-        crate::CONTROL_OVER_INTERNET.store(true, Ordering::SeqCst);
+        crate::set_control_road(crate::Road::Internet);
         let started = std::time::Instant::now();
         let said = super::connect_streaming(
             "192.0.2.7".to_string(),
@@ -3479,7 +3473,7 @@ mod home_skip_tests {
         .await;
         let took = started.elapsed();
         *crate::CONTROL_PEER.lock().await = was_peer;
-        crate::CONTROL_OVER_INTERNET.store(was_road, Ordering::SeqCst);
+        crate::set_control_road(was_road);
         assert!(said.unwrap_err().contains("internet road"));
         assert!(took < std::time::Duration::from_secs(4), "{took:?}");
     }
@@ -5662,7 +5656,7 @@ mod internet_road_tests {
                 .await
                 .is_ok_and(|accepted| accepted.is_ok())
         });
-        crate::CONTROL_OVER_INTERNET.store(true, Ordering::SeqCst);
+        crate::set_control_road(crate::Road::Internet);
         // A home that answers (but speaks no TLS): the PIN went there, and
         // its failure is not a matter of networks.
         *crate::CONTROL_PEER.lock().await = Some(("127.0.0.1".to_string(), port));
@@ -5672,7 +5666,7 @@ mod internet_road_tests {
         let started = std::time::Instant::now();
         let refused = pair_with_pin("127.0.0.1".into(), closed, "123456".into()).await;
         let took = started.elapsed();
-        crate::CONTROL_OVER_INTERNET.store(false, Ordering::SeqCst);
+        crate::set_control_road(crate::Road::Home);
         *crate::CONTROL_PEER.lock().await = None;
         *crate::CERT_DIR.lock().unwrap() = had;
         let _ = std::fs::remove_dir_all(&certs);
