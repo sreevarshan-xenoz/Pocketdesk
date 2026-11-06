@@ -367,7 +367,7 @@ mod tests {
             desktop_says(tls).await;
         });
         let (_stream, claims) = manager
-            .secure_named(phone_end, "192.0.2.10", &identity)
+            .secure_named(phone_end, "192.0.2.10", 1716, &identity)
             .await
             .expect("secure_named over a duplex");
         server.await.unwrap();
@@ -403,13 +403,17 @@ mod tests {
                 .await;
         });
         let err = match manager
-            .secure_named(phone_end, "192.0.2.10", &identity)
+            .secure_named(phone_end, "192.0.2.10", 1716, &identity)
             .await
         {
             Ok(_) => panic!("a certificate that is not the pinned one must be refused"),
             Err(e) => e.to_string(),
         };
         assert!(err.contains("TLS"), "a TLS failure: {err}");
+        assert!(
+            err.contains("192.0.2.10:1716"),
+            "the real port named: {err}"
+        );
     }
 
     /// A desktop that vanished (slept, left the network) leaves a socket

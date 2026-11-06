@@ -701,7 +701,10 @@ pub async fn connect_over_bluetooth(
 
     use tracing::Instrument;
     let result = async move {
-        match conn_mgr.secure_named(stream, &address, &identity).await {
+        match conn_mgr
+            .secure_named(stream, &address, port, &identity)
+            .await
+        {
             Ok((stream, claims)) => {
                 crate::peer_names::note(&address, claims);
                 Ok(run_control(stream, address, port, crate::Road::Bluetooth).await)
@@ -6277,7 +6280,7 @@ mod bluetooth_road_tests {
         );
         let identity = client_identity();
         let secured = manager
-            .secure_named(phone_end, "192.0.2.64", &identity)
+            .secure_named(phone_end, "192.0.2.64", 1716, &identity)
             .await;
         let _ = server.await;
         let pinned = CertManager::load_or_create(&dir).unwrap().known_peers();

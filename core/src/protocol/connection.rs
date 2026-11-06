@@ -119,17 +119,19 @@ impl ConnectionManager {
     /// desktop's certificate checked against the pin for `address` (the
     /// server name) and this device's own presented, then the handshake.
     /// What [`ConnectionManager::connect_named`] does after dialing TCP.
+    /// `port` only names the computer in errors (its control port).
     pub async fn secure_named<S>(
         &self,
         stream: S,
         address: &str,
+        port: u16,
         identity: &DeviceIdentity,
     ) -> Result<(ControlDuplex, PeerClaims)>
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
     {
         let (stream, claims) = self
-            .secure(stream, address, 0, identity)
+            .secure(stream, address, port, identity)
             .instrument(handshake_span(address))
             .await?;
         Ok((Box::new(stream), claims))
