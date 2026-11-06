@@ -395,7 +395,7 @@ async fn a_gnome_window_is_lent_to_look_at_when_the_shell_gives_its_list() {
 /// The app of the window to lend and of the one to cover it (the class the
 /// extension reports): `wev` for both unless `PD_GNOME_RIG_LENT_APP` and
 /// `PD_GNOME_RIG_COVER_APP` say otherwise. Lend a client-side decorated GTK
-/// window (`scripts/rig_click_logger.py`, `dev.pocketdesk.RigClicker`) to check
+/// window (`scripts/rig_click_logger.py`, `org.example.RigClicker`) to check
 /// that a click lands at the aimed place in one too.
 fn lent_app() -> String {
     std::env::var("PD_GNOME_RIG_LENT_APP").unwrap_or_else(|_| "wev".to_string())
