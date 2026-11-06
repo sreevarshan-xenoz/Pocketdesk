@@ -249,7 +249,7 @@ pub(crate) struct Open(Arc<AtomicUsize>);
 pub(crate) fn spawn_accepting(
     listener: Arc<Listener>,
     kind: super::Kind,
-    accepted: tokio::sync::mpsc::Sender<(super::Kind, DuplexStream)>,
+    accepted: tokio::sync::mpsc::Sender<super::Incoming>,
     open: Open,
     runtime: tokio::runtime::Handle,
 ) -> std::io::Result<()> {
@@ -259,7 +259,8 @@ pub(crate) fn spawn_accepting(
             loop {
                 match listener.accept() {
                     Ok(socket) => {
-                        let socket = match Accepted::new(socket, &open) {
+                        let (closed_tx, closed) = tokio::sync::oneshot::channel();
+                        let socket = match Accepted::new(socket, &open, closed_tx) {
                             Ok(socket) => Arc::new(socket),
                             Err(e) => {
                                 tracing::warn!("Dropped a Bluetooth connection: {e}");
@@ -273,7 +274,12 @@ pub(crate) fn spawn_accepting(
                             continue;
                         }
                         let stream = pump(socket, runtime.clone());
-                        if accepted.blocking_send((kind, stream)).is_err() {
+                        let incoming = super::Incoming {
+                            kind,
+                            stream,
+                            closed: Some(closed),
+                        };
+                        if accepted.blocking_send(incoming).is_err() {
                             break;
                         }
                     }
@@ -307,17 +313,25 @@ struct Accepted {
     /// The server has ended its side (or the out-pump gave up): the
     /// in-pump stops at its next wait.
     server_done: AtomicBool,
+    /// Dropped with the socket, as it closes: the transfer that held it
+    /// gives its phone's turn back then.
+    _closed: tokio::sync::oneshot::Sender<()>,
 }
 
 impl Accepted {
     /// Take `socket`, counted in `open`; an error (and the socket closed)
     /// when its send timeout cannot be set.
-    fn new(socket: SOCKET, open: &Open) -> std::io::Result<Self> {
+    fn new(
+        socket: SOCKET,
+        open: &Open,
+        closed: tokio::sync::oneshot::Sender<()>,
+    ) -> std::io::Result<Self> {
         open.0.fetch_add(1, Ordering::SeqCst);
         let accepted = Self {
             socket,
             open: open.clone(),
             server_done: AtomicBool::new(false),
+            _closed: closed,
         };
         let timeout = SEND_TIMEOUT_MS.to_ne_bytes();
         // SAFETY: the socket is this connection's own; `timeout` outlives

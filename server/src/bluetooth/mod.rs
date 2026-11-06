@@ -15,7 +15,10 @@ mod links;
 #[cfg(windows)]
 mod windows;
 
+#[cfg(test)]
+pub(crate) use links::turn;
 use links::{BluetoothLinks, LinkTable};
+pub(crate) use links::{ONE_AT_A_TIME, busy as transfer_busy};
 
 use pocketdesk_core::protocol::bluetooth::{BluetoothInfo, LINK_HELLO, PACKET, RoadState};
 use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
@@ -131,6 +134,7 @@ pub(crate) struct Endable<S> {
     inner: S,
     token: CancellationToken,
     ended: std::pin::Pin<Box<tokio_util::sync::WaitForCancellationFutureOwned>>,
+    closed: Option<tokio::sync::oneshot::Receiver<()>>,
 }
 
 impl<S> Endable<S> {
@@ -139,7 +143,20 @@ impl<S> Endable<S> {
             inner,
             ended: Box::pin(token.clone().cancelled_owned()),
             token,
+            closed: None,
         }
+    }
+
+    /// With `closed`, which resolves once the connection's socket has
+    /// closed.
+    fn closing(mut self, closed: Option<tokio::sync::oneshot::Receiver<()>>) -> Self {
+        self.closed = closed;
+        self
+    }
+
+    /// What resolves once the connection's socket has closed, if known.
+    pub(crate) fn take_closed(&mut self) -> Option<tokio::sync::oneshot::Receiver<()>> {
+        self.closed.take()
     }
 
     /// `Err` once the token is cancelled, and wakes the task then.
@@ -263,6 +280,14 @@ impl<S: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for Prefixed<S> {
     }
 }
 
+/// A connection the listener accepted: the service it came to, the
+/// server's end of it, and what resolves once its socket has closed.
+pub(crate) struct Incoming {
+    pub(crate) kind: Kind,
+    pub(crate) stream: DuplexStream,
+    pub(crate) closed: Option<tokio::sync::oneshot::Receiver<()>>,
+}
+
 /// Which of the two services a connection came to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Kind {
@@ -333,15 +358,20 @@ async fn sort<S: AsyncRead + Unpin>(mut stream: S, kind: Kind) -> Option<Arrival
 /// `control` with links of its own; anything else is dropped. Each lives
 /// only while `state` listens.
 async fn serve(
-    mut accepted: mpsc::Receiver<(Kind, DuplexStream)>,
+    mut accepted: mpsc::Receiver<Incoming>,
     table: Arc<LinkTable>,
     control: mpsc::Sender<Control>,
     state: &'static Listening,
 ) {
-    while let Some((kind, stream)) = accepted.recv().await {
+    while let Some(Incoming {
+        kind,
+        stream,
+        closed,
+    }) = accepted.recv().await
+    {
         let table = table.clone();
         let control = control.clone();
-        let stream = Endable::new(stream, state.period());
+        let stream = Endable::new(stream, state.period()).closing(closed);
         tokio::spawn(async move {
             match sort(stream, kind).await {
                 Some(Arrival::Control(stream)) => {
@@ -373,7 +403,7 @@ trait Radio: Send + Sync + 'static {
         &self,
         control: uuid::Uuid,
         link: uuid::Uuid,
-        accepted: mpsc::Sender<(Kind, DuplexStream)>,
+        accepted: mpsc::Sender<Incoming>,
     ) -> std::io::Result<Box<dyn Listener>>;
 }
 
@@ -398,7 +428,7 @@ impl Radio for NoRadio {
         &self,
         _control: uuid::Uuid,
         _link: uuid::Uuid,
-        _accepted: mpsc::Sender<(Kind, DuplexStream)>,
+        _accepted: mpsc::Sender<Incoming>,
     ) -> std::io::Result<Box<dyn Listener>> {
         Err(std::io::ErrorKind::Unsupported.into())
     }
@@ -438,7 +468,7 @@ impl Radio for Winsock {
         &self,
         control: uuid::Uuid,
         link: uuid::Uuid,
-        accepted: mpsc::Sender<(Kind, DuplexStream)>,
+        accepted: mpsc::Sender<Incoming>,
     ) -> std::io::Result<Box<dyn Listener>> {
         use pocketdesk_core::protocol::bluetooth::{LINK_SERVICE_NAME, SERVICE_NAME};
         let runtime = tokio::runtime::Handle::try_current().map_err(std::io::Error::other)?;
@@ -486,7 +516,7 @@ async fn keep_listening(
     radio: Arc<dyn Radio>,
     state: &'static Listening,
     wanted: impl Fn() -> bool,
-    accepted: mpsc::Sender<(Kind, DuplexStream)>,
+    accepted: mpsc::Sender<Incoming>,
     every: Duration,
 ) {
     let mut running: Option<(Box<dyn Listener>, [u8; 6])> = None;
@@ -589,7 +619,7 @@ mod tests {
 
     /// The listener's side, in memory: what `serve` hands on.
     fn serving() -> (
-        mpsc::Sender<(Kind, DuplexStream)>,
+        mpsc::Sender<Incoming>,
         Arc<LinkTable>,
         mpsc::Receiver<Control>,
     ) {
@@ -607,13 +637,16 @@ mod tests {
 
     /// A connection from the phone to the `kind` service that sends
     /// `first`, and its phone end.
-    async fn dial(
-        accepted: &mpsc::Sender<(Kind, DuplexStream)>,
-        kind: Kind,
-        first: &[u8],
-    ) -> DuplexStream {
+    async fn dial(accepted: &mpsc::Sender<Incoming>, kind: Kind, first: &[u8]) -> DuplexStream {
         let (server_end, mut phone_end) = tokio::io::duplex(64 * 1024);
-        accepted.send((kind, server_end)).await.unwrap();
+        accepted
+            .send(Incoming {
+                kind,
+                stream: server_end,
+                closed: None,
+            })
+            .await
+            .unwrap();
         phone_end.write_all(first).await.unwrap();
         phone_end
     }
@@ -709,7 +742,7 @@ mod tests {
         address: std::sync::Mutex<Option<[u8; 6]>>,
         running: Arc<AtomicBool>,
         ended: Arc<AtomicBool>,
-        accepted: std::sync::Mutex<Option<mpsc::Sender<(Kind, DuplexStream)>>>,
+        accepted: std::sync::Mutex<Option<mpsc::Sender<Incoming>>>,
     }
 
     struct FakeListener {
@@ -738,7 +771,7 @@ mod tests {
             &self,
             control: uuid::Uuid,
             link: uuid::Uuid,
-            accepted: mpsc::Sender<(Kind, DuplexStream)>,
+            accepted: mpsc::Sender<Incoming>,
         ) -> std::io::Result<Box<dyn Listener>> {
             assert_eq!(
                 link,

@@ -1220,6 +1220,11 @@ pub(crate) fn route(reach: Reach, sender: &dyn DeviceSender) -> std::result::Res
             };
             crate::plugins::pair::may_transfer(sender.device_id(), &key)?;
             if sender.nearby_by_radio() {
+                // One transfer link at a time per phone (RFCOMM): told at
+                // once, so the phone can try again, not left waiting.
+                if crate::bluetooth::transfer_busy(sender.device_id()) {
+                    return Err(crate::bluetooth::ONE_AT_A_TIME.to_string());
+                }
                 return Ok(Route::Bluetooth(link));
             }
             Ok(Route::Link(link))
@@ -3116,6 +3121,41 @@ mod tests {
             reach_with(&bluetooth, Some(5000), false).is_err(),
             "nothing dials back by the Bluetooth road"
         );
+    }
+
+    /// A phone whose last transfer still crosses over Bluetooth is told at
+    /// once to try again; the internet road has no such turn.
+    #[test]
+    fn one_file_at_a_time_over_bluetooth_is_told() {
+        let _state = crate::state::use_test_dirs();
+        let phone = LinkPhone {
+            id: format!("bt-busy-{}", uuid::Uuid::new_v4().simple()),
+            link: fake_link().0,
+            radio: true,
+            sent: Default::default(),
+        };
+        let held = crate::bluetooth::turn(&phone.id)
+            .try_acquire_owned()
+            .unwrap();
+        let refused = route(Reach::Link(phone.link.clone()), &phone).err();
+        assert_eq!(refused.as_deref(), Some(crate::bluetooth::ONE_AT_A_TIME));
+        let internet = LinkPhone {
+            radio: false,
+            ..phone
+        };
+        assert!(matches!(
+            route(Reach::Link(internet.link.clone()), &internet),
+            Ok(Route::Link(_))
+        ));
+        drop(held);
+        let phone = LinkPhone {
+            radio: true,
+            ..internet
+        };
+        assert!(matches!(
+            route(Reach::Link(phone.link.clone()), &phone),
+            Ok(Route::Bluetooth(_))
+        ));
     }
 
     /// On the Bluetooth road a transfer is at most 8 MiB; the home and
