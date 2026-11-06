@@ -50,7 +50,18 @@ export CARGO_PROFILE_RELEASE_STRIP=symbols
 # rustc applies the last mapping that matches, so the checkout comes last:
 # it wins even when it lies inside Cargo's home. Flags of the caller's go
 # first, so they cannot undo these.
-export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$cargo_home=/cargo --remap-path-prefix=$sysroot=/rust --remap-path-prefix=$root=/pocketdesk -C link-arg=-Wl,--build-id=none"
+# Passed as CARGO_ENCODED_RUSTFLAGS (flags apart by 0x1f), which keeps a
+# path with a space in it whole; RUSTFLAGS is split at every space.
+sep=$(printf '')
+encoded=""
+set -f
+for flag in ${RUSTFLAGS:-}; do
+    encoded="$encoded$flag$sep"
+done
+set +f
+encoded="$encoded--remap-path-prefix=$cargo_home=/cargo$sep--remap-path-prefix=$sysroot=/rust$sep--remap-path-prefix=$root=/pocketdesk$sep-C${sep}link-arg=-Wl,--build-id=none"
+export CARGO_ENCODED_RUSTFLAGS="$encoded"
+unset RUSTFLAGS
 
 rm -rf "$out/arm64-v8a"
 cd "$here"
