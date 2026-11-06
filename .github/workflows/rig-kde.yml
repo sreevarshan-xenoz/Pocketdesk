@@ -26,7 +26,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed git base-devel rust clang pkgconf \
             pipewire wireplumber libpipewire wayland mesa ffmpeg dbus \
-            kwin xdg-desktop-portal xdg-desktop-portal-kde wev procps-ng
+            kwin kglobalacceld xdg-desktop-portal xdg-desktop-portal-kde wev procps-ng qt6-tools
 
       - uses: actions/checkout@v4
 
@@ -72,6 +72,16 @@ jobs:
           unset DBUS_SESSION_BUS_ADDRESS
           export RUST_LOG=info
           cargo test -p pocketdesk-server --test lend_window_kde_live -- --ignored --nocapture --test-threads=1
+
+      - name: Global shortcuts
+        if: always()
+        run: |
+          export DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/pd-kde-run/bus
+          dbus-send --session --print-reply --dest=org.freedesktop.DBus / org.freedesktop.DBus.ListNames | grep string || true
+          dbus-send --session --print-reply --dest=org.kde.kglobalaccel /kglobalaccel org.kde.KGlobalAccel.allComponents || true
+          dbus-send --session --print-reply --dest=org.kde.kglobalaccel /component/kwin org.kde.kglobalaccel.Component.shortcutNames | grep -i pocketdesk || true
+          ls /usr/lib/qt6/plugins/org.kde.kglobalacceld.platforms 2>/dev/null || true
+          pacman -Ql kglobalacceld | head -20 || true
 
       - name: Logs
         if: always()
