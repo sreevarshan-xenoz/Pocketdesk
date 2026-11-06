@@ -1,0 +1,86 @@
+package dev.pocketdesk.android.bluetooth
+
+import org.json.JSONObject
+import java.util.UUID
+
+/**
+ * When the phone dials its computer by Bluetooth (the fallback road,
+ * protocol.md 1.4a), as pure rules: [BluetoothRoad] reads the phone and
+ * asks these.
+ */
+object BluetoothRoadRule {
+    /** The road the bridge says a control link came by over Bluetooth (`nativeControlRoad`). */
+    const val ROAD_BLUETOOTH = 2
+
+    /** The rest after the first failed dial; it doubles with each one after. */
+    const val FIRST_REST_MS = 30_000L
+
+    /** The longest rest between dials: a computer away or off is not dialed every few seconds all day. */
+    const val MAX_REST_MS = 480_000L
+
+    /** How long a link request is answered for: the last link's channel may still be closing. */
+    const val LINK_TRY_MS = 8_000L
+
+    /** The wait between tries to open a transfer link. */
+    const val LINK_STEP_MS = 500L
+
+    /** What a computer said of its Bluetooth road: its radio's [address], the control [service] and the transfer service ([link]). */
+    data class Info(val address: String, val service: UUID, val link: UUID)
+
+    /**
+     * Whether to dial the computer by Bluetooth now: the switch is on
+     * ([enabled]), the phone may use Bluetooth ([permitted]) and its radio
+     * is on, the computer told the phone its radio's address
+     * ([knownAddress]) and that device is bonded (nothing else bonded, such
+     * as earbuds or a car, is ever dialed), the other roads failed or there
+     * is no usable network to try them on, and the rest after the last
+     * failed dial is over.
+     */
+    fun shouldDial(
+        enabled: Boolean,
+        permitted: Boolean,
+        radioOn: Boolean,
+        knownAddress: String?,
+        bonded: Set<String>,
+        hasUsableNetwork: Boolean,
+        otherRoadsFailed: Boolean,
+        now: Long,
+        restUntil: Long,
+    ): Boolean {
+        if (!enabled || !permitted || !radioOn || knownAddress == null) return false
+        val known = knownAddress.uppercase()
+        if (bonded.none { it.uppercase() == known }) return false
+        if (hasUsableNetwork && !otherRoadsFailed) return false
+        return now >= restUntil
+    }
+
+    /** The rest after [fails] failed dials in a row: 30 s, doubling, at most 8 minutes. */
+    fun nextRest(fails: Int): Long {
+        if (fails < 1) return 0L
+        return (FIRST_REST_MS shl (fails - 1).coerceAtMost(8)).coerceAtMost(MAX_REST_MS)
+    }
+
+    /** Whether a control link on [road] stays on Bluetooth: not once home or the internet answers again. */
+    fun keepBluetooth(road: Int, homeOrInternetUp: Boolean): Boolean =
+        road == ROAD_BLUETOOTH && !homeOrInternetUp
+
+    /** Whether to take the next link request: the computer serves one transfer link at a time, so none while one is up. */
+    fun takeLinkRequest(linkLive: Boolean): Boolean = !linkLive
+
+    /** Whether another try to open a link started at [startedAt] may go at [now], a step later, within [LINK_TRY_MS]. */
+    fun tryLinkAgain(startedAt: Long, now: Long): Boolean =
+        now + LINK_STEP_MS < startedAt + LINK_TRY_MS
+
+    /** The bridge's `{address, service, link}` (`nativeBluetoothInfo`), or null when it is empty or does not read. */
+    fun info(json: String?): Info? {
+        if (json.isNullOrBlank()) return null
+        return runCatching {
+            val o = JSONObject(json)
+            val address = o.getString("address").uppercase()
+            if (!ADDRESS.matches(address)) return null
+            Info(address, UUID.fromString(o.getString("service")), UUID.fromString(o.getString("link")))
+        }.getOrNull()
+    }
+
+    private val ADDRESS = Regex("^[0-9A-F]{2}(:[0-9A-F]{2}){5}$")
+}

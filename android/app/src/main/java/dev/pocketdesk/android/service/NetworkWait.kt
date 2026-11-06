@@ -46,18 +46,26 @@ internal object NetworkWait {
                 .any { it.isUp && ConnectionChecks.sharingOf(it.name) != null }
         }.getOrDefault(false)
 
-    /** Block up to [seconds] for [usable]; true once it is, after a moment to settle. */
+    /**
+     * Whether a transfer with the computer at [address] has a way to go: a
+     * [usable] network, or the control link to it over Bluetooth, which
+     * carries its transfers too (protocol.md 1.4a).
+     */
+    fun reachable(context: Context, address: String): Boolean =
+        dev.pocketdesk.android.bluetooth.BluetoothRoad.carries(address) || usable(context, address)
+
+    /** Block up to [seconds] for [reachable]; true once it is, after a moment to settle. */
     fun await(context: Context, address: String, seconds: Long, stop: () -> Boolean = { false }): Boolean {
         val deadline = SystemClock.elapsedRealtime() + seconds * 1000
         while (SystemClock.elapsedRealtime() < deadline) {
             // A Cancel (C1) ends the wait; the caller sees it is stopped.
             if (stop()) return false
-            if (usable(context, address)) {
+            if (reachable(context, address)) {
                 Thread.sleep(SETTLE_MS)
                 return true
             }
             Thread.sleep(POLL_MS)
         }
-        return usable(context, address)
+        return reachable(context, address)
     }
 }

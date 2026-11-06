@@ -241,7 +241,7 @@ class TransferService : Service() {
         runningJob = number
         lastAddress = job.address
         // A job that starts with a network ends any outage.
-        if (NetworkWait.usable(this, job.address)) offline.reset()
+        if (NetworkWait.reachable(this, job.address)) offline.reset()
         val (sentBefore, countBefore) = sentTotal to sendCount
         plannedSends = 0
         var threw = false
@@ -558,7 +558,7 @@ class TransferService : Service() {
         var attempt = 1
         retry@ while (result.isFailure) {
             val error = result.exceptionOrNull()
-            when (val next = TransferRetry.next(attempt, error, Prefs.retryTransfers(this), NetworkWait.usable(this, address), offline.waited(SystemClock.elapsedRealtime()))) {
+            when (val next = TransferRetry.next(attempt, error, Prefs.retryTransfers(this), NetworkWait.reachable(this, address), offline.waited(SystemClock.elapsedRealtime()))) {
                 is TransferRetry.Next.Stop -> {
                     if (next.noNetwork) result = Result.failure(java.io.IOException(getString(R.string.transfer_no_network)))
                     break@retry
@@ -675,7 +675,7 @@ class TransferService : Service() {
         var attempt = 1
         retry@ while (result.isFailure) {
             val error = result.exceptionOrNull()
-            when (val next = TransferRetry.next(attempt, error, Prefs.retryTransfers(this), NetworkWait.usable(this, job.address), offline.waited(SystemClock.elapsedRealtime()))) {
+            when (val next = TransferRetry.next(attempt, error, Prefs.retryTransfers(this), NetworkWait.reachable(this, job.address), offline.waited(SystemClock.elapsedRealtime()))) {
                 is TransferRetry.Next.Stop -> {
                     if (next.noNetwork) result = Result.failure(java.io.IOException(getString(R.string.transfer_no_network)))
                     break@retry

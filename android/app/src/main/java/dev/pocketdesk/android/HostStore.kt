@@ -157,6 +157,8 @@ object HostStore {
             KEY_HELPER_DUTY_AT_PREFIX,
             KEY_HELPER_INFO_PREFIX,
             KEY_WAN_IDENTITY_PREFIX,
+            // Where to dial it by Bluetooth, as it said.
+            KEY_BLUETOOTH_PREFIX,
             KEY_MONITOR_PREFIX,
             KEY_PAIRED_PREFIX,
             KEY_NAME_PREFIX,
@@ -495,6 +497,26 @@ object HostStore {
     }
 
     private const val KEY_WAN_IDENTITY_PREFIX = "wan_identity:"
+
+    /**
+     * What the computer at [address] last said of its Bluetooth road, the
+     * bridge's `{address, service, link}` (protocol.md 1.4a): kept after each
+     * connect, so the phone can dial it by Bluetooth once Wi-Fi is gone.
+     */
+    fun bluetoothInfo(ctx: Context, address: String): String? =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString("$KEY_BLUETOOTH_PREFIX$address", null)?.takeIf { it.isNotBlank() }
+
+    /** Keep [infoJson] for the saved computer at [address]; written only when it changed. */
+    fun saveBluetoothInfo(ctx: Context, address: String, infoJson: String) {
+        if (bluetoothInfo(ctx, address) == infoJson) return
+        if (hosts(ctx).none { it.address == address }) return
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            putString("$KEY_BLUETOOTH_PREFIX$address", infoJson)
+        }
+    }
+
+    private const val KEY_BLUETOOTH_PREFIX = "bluetooth:"
 
     /** Selected streaming monitor per desktop (`-1` = server default). */
     fun monitorIndex(ctx: Context, address: String): Int =
