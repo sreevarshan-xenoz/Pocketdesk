@@ -671,8 +671,7 @@ pub async fn connect_over_bluetooth(
 ) -> Result<ConnectionState, String> {
     let stream =
         crate::bluetooth::stream_of(fd).map_err(|e| format!("The Bluetooth stream: {e}"))?;
-    let _one_at_a_time = crate::session::CONNECT_LOCK.lock().await;
-    // Another road came up meanwhile: it stays, and this stream closes.
+    // Another road is up already: it stays, and this stream closes.
     if live_to(&address, port).await {
         return Ok(ConnectionState::Connected);
     }
@@ -694,34 +693,43 @@ pub async fn connect_over_bluetooth(
             }));
         }
     };
-    let mut state_guard = (*CONNECTION_STATE).lock().await;
-    *state_guard = ConnectionState::Connecting;
     let identity = client_identity();
     let span = control_span(&address, "bluetooth");
 
     use tracing::Instrument;
-    let result = async move {
-        match conn_mgr
-            .secure_named(stream, &address, port, &identity)
-            .await
-        {
-            Ok((stream, claims)) => {
-                crate::peer_names::note(&address, claims);
-                Ok(run_control(stream, address, port, crate::Road::Bluetooth).await)
+    // The TLS and handshake run before the connect lock is taken: the
+    // computer waits only so long for the first byte, and another dial
+    // (the home road's, say) may hold the lock for 10 s or more.
+    let secured = conn_mgr
+        .secure_named(stream, &address, port, &identity)
+        .instrument(span.clone())
+        .await;
+    let _one_at_a_time = crate::session::CONNECT_LOCK.lock().await;
+    let mut state_guard = (*CONNECTION_STATE).lock().await;
+    match secured {
+        Ok((mut stream, claims)) => {
+            crate::peer_names::note(&address, claims);
+            // Another road came up meanwhile: it stays, and this link closes.
+            if live_to(&address, port).await {
+                let _ = stream.shutdown().await;
+                return Ok(ConnectionState::Connected);
             }
-            Err(e) => {
-                tracing::error!(error = %e, "Connection over Bluetooth failed");
-                Ok(ConnectionState::Error(PocketdeskErrorDto::from(e)))
+            let state = run_control(stream, address, port, crate::Road::Bluetooth)
+                .instrument(span)
+                .await;
+            *state_guard = state.clone();
+            Ok(state)
+        }
+        Err(e) => {
+            span.in_scope(|| tracing::error!(error = %e, "Connection over Bluetooth failed"));
+            let state = ConnectionState::Error(PocketdeskErrorDto::from(e));
+            // Said only while no other link is up: a live one's state stays.
+            if (*CONTROL_WRITER).lock().await.is_none() {
+                *state_guard = state.clone();
             }
+            Ok(state)
         }
     }
-    .instrument(span)
-    .await;
-
-    if let Ok(state) = &result {
-        *state_guard = state.clone();
-    }
-    result
 }
 
 /// [`control_manager`] for a road where nothing pairs: the computer's
@@ -6204,6 +6212,71 @@ mod bluetooth_road_tests {
         assert!(matches!(state, Ok(ConnectionState::Error(_))), "{state:?}");
         assert!(matches!(closed, Ok(Ok(_))), "the stream closed");
         assert_eq!(road, 0);
+    }
+
+    /// The TLS starts at once, though another dial holds the connect lock
+    /// (the computer waits only so long for the first byte); the link is
+    /// installed once the lock is free.
+    #[tokio::test]
+    async fn the_bluetooth_hello_goes_while_another_dial_holds_the_lock() {
+        let _globals = super::TRANSFER_TEST_LOCK.lock().await;
+        let certs = std::env::temp_dir().join(format!("bridge-bt-locked-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&certs);
+        let had = crate::CERT_DIR.lock().unwrap().replace(certs.clone());
+        let computer = CertManager::new().unwrap();
+        pin(&certs, "192.0.2.65", computer.cert_fingerprint());
+        let (phone_end, computer_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        computer_stream.set_nonblocking(true).unwrap();
+        let computer_stream = tokio::net::UnixStream::from_std(computer_stream).unwrap();
+
+        let held = crate::session::CONNECT_LOCK.lock().await;
+        let connecting = tokio::spawn(connect_over_bluetooth(
+            "192.0.2.65".to_string(),
+            1716,
+            std::os::fd::OwnedFd::from(phone_end),
+        ));
+        // TLS and the opening, all while the lock is held.
+        let opened = tokio::time::timeout(Duration::from_secs(5), async {
+            let tls = tokio_rustls::TlsAcceptor::from(computer.control_server_config().unwrap())
+                .accept(computer_stream)
+                .await
+                .expect("the phone's TLS");
+            let mut tls = BufReader::new(tls);
+            let mut hello = String::new();
+            tls.read_line(&mut hello).await.unwrap();
+            tls.get_mut()
+                .write_all(
+                    format!("{HANDSHAKE_OK}\n{{\"type\":\"kdeconnect.identity\"}}\n").as_bytes(),
+                )
+                .await
+                .unwrap();
+            tls.get_mut().flush().await.unwrap();
+            let mut phone = String::new();
+            tls.read_line(&mut phone).await.unwrap();
+            (hello, phone, tls)
+        })
+        .await
+        .expect("TLS and the opening while the lock is held");
+        let (hello, phone, tls) = opened;
+        let waited = !connecting.is_finished();
+        drop(held);
+        let state = connecting.await.unwrap();
+        let road = control_road();
+        // The computer closes: the link ends.
+        drop(tls);
+        for _ in 0..100 {
+            if control_peer().await.is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        *crate::CERT_DIR.lock().unwrap() = had;
+        let _ = std::fs::remove_dir_all(&certs);
+        assert_eq!(hello.trim(), HANDSHAKE_HELLO);
+        assert!(phone.contains("kdeconnect.identity"), "{phone}");
+        assert!(waited, "installed only once the lock was free");
+        assert!(matches!(state, Ok(ConnectionState::Connected)), "{state:?}");
+        assert_eq!(road, 2);
     }
 
     /// This phone's pin of `fingerprint` for `address`, in `certs`.
