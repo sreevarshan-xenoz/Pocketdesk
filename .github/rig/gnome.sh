@@ -92,6 +92,11 @@ as_rig bash -c "cd /src && unset DBUS_SESSION_BUS_ADDRESS; \
   RUST_LOG=info,pocketdesk_core::streaming=debug \
   cargo test -p pocketdesk-server --test lend_window_gnome_live -- --ignored --nocapture --test-threads=1" || status=$?
 
+presses() { cat /tmp/lent.log /tmp/cover.log /tmp/third.log 2>/dev/null | grep -c "button: state: pressed" || true; }
+before=$(presses)
+as_rig env WAYLAND_DISPLAY=wayland-0 python3 /src/.github/rig/rd_probe.py 700 500 || echo "rd_probe failed"
+sleep 1
+echo "=== rd_probe: presses in the windows' logs before $before, after $(presses)"
 echo "=== gnome-shell.log"; tail -n 60 /tmp/gnome-shell.log || true
 echo "=== lent.log"; cat /tmp/lent.log || true
 echo "=== cover.log"; tail -n 40 /tmp/cover.log || true
