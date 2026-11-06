@@ -29,8 +29,13 @@ pub fn service_uuid() -> String {
 
 /// [`service_uuid`] for a given value of the variable: `env` when it parses
 /// as a UUID (given back in lower case, hyphenated), else [`SERVICE_UUID`].
+/// An override equal to the default's transfer service
+/// ([`link_uuid`]`(SERVICE_UUID)`) is refused too: its own transfer service
+/// would be the owner's control service.
 pub fn service_uuid_from(env: Option<&str>) -> String {
+    let default = Uuid::parse_str(SERVICE_UUID).expect("SERVICE_UUID is a UUID");
     env.and_then(|value| Uuid::parse_str(value.trim()).ok())
+        .filter(|uuid| *uuid != link_uuid(default))
         .map(|uuid| uuid.hyphenated().to_string())
         .unwrap_or_else(|| SERVICE_UUID.to_string())
 }
@@ -197,6 +202,12 @@ mod tests {
         assert_eq!(service_uuid_from(Some("not-a-uuid")), SERVICE_UUID);
         assert_eq!(service_uuid_from(Some("")), SERVICE_UUID);
         assert_eq!(service_uuid_from(None), SERVICE_UUID);
+        // The default's transfer service as an override would take the
+        // owner's control service for its transfers.
+        assert_eq!(
+            service_uuid_from(Some("b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b12")),
+            SERVICE_UUID
+        );
         assert!(Uuid::parse_str(SERVICE_UUID).is_ok(), "the default parses");
     }
 
