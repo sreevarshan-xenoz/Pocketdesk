@@ -2348,17 +2348,19 @@ mod tests {
             })
         );
         assert_eq!(again, None, "taken once");
-        assert_eq!(
-            requests,
-            [
-                ComputerAsk::WindowsThere {
-                    device_id: "mine-pc".to_string()
-                },
-                ComputerAsk::CloseWindowsThere {
-                    device_id: "mine-pc".to_string()
-                }
-            ],
-            "asked as the picker opens, forgotten as it closes with the pick"
+        // Both are left within the same second, and `take_all` hands
+        // requests over in the folder's order (their ids are random), so
+        // which comes first is not a fact to test.
+        let asked = ComputerAsk::WindowsThere {
+            device_id: "mine-pc".to_string(),
+        };
+        let forgotten = ComputerAsk::CloseWindowsThere {
+            device_id: "mine-pc".to_string(),
+        };
+        assert_eq!(requests.len(), 2, "{requests:?}");
+        assert!(
+            requests.contains(&asked) && requests.contains(&forgotten),
+            "asked as the picker opens, forgotten as it closes with the pick: {requests:?}"
         );
     }
 
