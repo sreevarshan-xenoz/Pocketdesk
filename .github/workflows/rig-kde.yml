@@ -1,0 +1,81 @@
+name: Rig (KDE, live)
+
+# The KDE window lend's live test (docs/development-setup.md §3a-2b) on a
+# runner: an Arch container (Plasma 6's KWin) with a throwaway session bus,
+# `kwin_wayland --virtual`, the screen-sharing portal and one `wev` window.
+# The test is built and run in the same container, so the script folder is at
+# one path on both sides. Runs only on pushes to rig/ branches.
+on:
+  push:
+    branches: ['rig/**']
+  workflow_dispatch:
+
+jobs:
+  kde:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    container:
+      image: archlinux:latest
+      options: --privileged
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [full, no-portal]
+    steps:
+      - name: Install packages
+        run: |
+          pacman -Syu --noconfirm --needed git base-devel rust clang pkgconf \
+            pipewire wireplumber libpipewire wayland mesa ffmpeg dbus \
+            kwin xdg-desktop-portal xdg-desktop-portal-kde wev procps-ng
+
+      - uses: actions/checkout@v4
+
+      - name: Build the live test
+        run: cargo test -p pocketdesk-server --test lend_window_kde_live --no-run
+
+      - name: Start the rig
+        run: |
+          set -eux
+          RUN=/tmp/pd-kde-run
+          mkdir -p "$RUN"; chmod 700 "$RUN"
+          export XDG_RUNTIME_DIR="$RUN" DBUS_SESSION_BUS_ADDRESS="unix:path=$RUN/bus"
+          export XDG_CURRENT_DESKTOP=KDE XDG_SESSION_TYPE=wayland LIBGL_ALWAYS_SOFTWARE=1
+          if [ "${{ matrix.mode }}" = no-portal ]; then
+            # The refusal case: no portal may be activated on this bus.
+            rm -f /usr/share/dbus-1/services/*portal*.service
+          fi
+          dbus-daemon --session --address="$DBUS_SESSION_BUS_ADDRESS" --fork
+          nohup pipewire > /tmp/pipewire.log 2>&1 &
+          sleep 1
+          nohup wireplumber > /tmp/wireplumber.log 2>&1 &
+          nohup kwin_wayland --virtual --no-lockscreen --socket wayland-rig --width 1280 --height 720 \
+            > /tmp/kwin.log 2>&1 &
+          for i in $(seq 60); do [ -S "$RUN/wayland-rig" ] && break; sleep 1; done
+          ls -la "$RUN"
+          export WAYLAND_DISPLAY=wayland-rig
+          dbus-update-activation-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XDG_RUNTIME_DIR || true
+          nohup stdbuf -oL wev > /tmp/wev.log 2>&1 &
+          sleep 3
+          if [ "${{ matrix.mode }}" = full ]; then
+            nohup /usr/lib/xdg-desktop-portal-kde > /tmp/portal-kde.log 2>&1 &
+            nohup /usr/lib/xdg-desktop-portal -r > /tmp/portal.log 2>&1 &
+            sleep 5
+          fi
+          dbus-send --session --print-reply --dest=org.freedesktop.DBus / org.freedesktop.DBus.ListNames
+
+      - name: Live test
+        run: |
+          set -x
+          export PD_KDE_RIG_BUS="unix:path=/tmp/pd-kde-run/bus" PD_KDE_RIG_RUN=/tmp/pd-kde-run
+          export PD_KDE_RIG_MODE=${{ matrix.mode }} PD_KDE_RIG_CLASS=wev
+          export PD_KDE_RIG_CLOSE_CMD="pkill -x wev"
+          unset DBUS_SESSION_BUS_ADDRESS
+          export RUST_LOG=info
+          cargo test -p pocketdesk-server --test lend_window_kde_live -- --ignored --nocapture --test-threads=1
+
+      - name: Logs
+        if: always()
+        run: |
+          for f in /tmp/kwin.log /tmp/portal.log /tmp/portal-kde.log /tmp/pipewire.log /tmp/wev.log; do
+            echo "=== $f"; tail -n 80 "$f" || true
+          done
