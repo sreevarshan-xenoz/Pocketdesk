@@ -564,18 +564,8 @@ pub async fn connect_to_peer(
     // and re-register the same device_id, which the server reads as a
     // reconnect storm. Reuse what is already connected.
     let _one_at_a_time = crate::session::CONNECT_LOCK.lock().await;
-    {
-        // Locked in the same order as the control reader (writer, then peer) so
-        // the two can never dead-lock against each other.
-        let writer_live = (*CONTROL_WRITER).lock().await.is_some();
-        let live = (*CONTROL_PEER).lock().await;
-        if writer_live
-            && live
-                .as_ref()
-                .is_some_and(|(host, live_port)| *host == address && *live_port == port)
-        {
-            return Ok(ConnectionState::Connected);
-        }
+    if live_to(&address, port).await {
+        return Ok(ConnectionState::Connected);
     }
 
     let conn_mgr = control_manager(Duration::from_secs(10))?;
@@ -583,17 +573,7 @@ pub async fn connect_to_peer(
     *state_guard = ConnectionState::Connecting;
 
     let identity = client_identity();
-
-    let conn_id = uuid::Uuid::new_v4().to_string();
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let span = tracing::info_span!(
-        "conn",
-        id = %conn_id,
-        session = %session_id,
-        peer = %address,
-        transport = "tcp",
-        proto = %pocketdesk_core::protocol::PROTOCOL_VERSION
-    );
+    let span = control_span(&address, "tcp");
 
     use tracing::Instrument;
 
@@ -646,15 +626,120 @@ pub async fn connect_to_peer(
     .instrument(span)
     .await;
 
-    if let Ok(ref state) = result {
-        *state_guard = match state {
-            ConnectionState::Connected => ConnectionState::Connected,
-            ConnectionState::Disconnected => ConnectionState::Disconnected,
-            ConnectionState::Connecting => ConnectionState::Connecting,
-            ConnectionState::Error(e) => ConnectionState::Error(e.clone()),
-        };
+    if let Ok(state) = &result {
+        *state_guard = state.clone();
     }
     result
+}
+
+/// Whether the live control connection is to `address`, `port`.
+async fn live_to(address: &str, port: u16) -> bool {
+    // Locked in the same order as the control reader (writer, then peer) so
+    // the two can never dead-lock against each other.
+    let writer_live = (*CONTROL_WRITER).lock().await.is_some();
+    let live = (*CONTROL_PEER).lock().await;
+    writer_live
+        && live
+            .as_ref()
+            .is_some_and(|(host, live_port)| *host == address && *live_port == port)
+}
+
+/// The span a control link to `address` runs in, carried by `transport`.
+fn control_span(address: &str, transport: &str) -> tracing::Span {
+    let conn_id = uuid::Uuid::new_v4().to_string();
+    let session_id = uuid::Uuid::new_v4().to_string();
+    tracing::info_span!(
+        "conn",
+        id = %conn_id,
+        session = %session_id,
+        peer = %address,
+        transport = %transport,
+        proto = %pocketdesk_core::protocol::PROTOCOL_VERSION
+    )
+}
+
+/// Run the control link to the computer at `address` (its control `port`)
+/// on `fd`, an RFCOMM stream the app dialed and handed over (the Bluetooth
+/// fallback): TLS with the computer held to the pin for `address`, as at
+/// home, the handshake, then the link as any other. `fd` is this call's
+/// from here on, closed whenever the link does not come up on it.
+#[cfg(unix)]
+pub async fn connect_over_bluetooth(
+    address: String,
+    port: u16,
+    fd: std::os::fd::OwnedFd,
+) -> Result<ConnectionState, String> {
+    let stream =
+        crate::bluetooth::stream_of(fd).map_err(|e| format!("The Bluetooth stream: {e}"))?;
+    let _one_at_a_time = crate::session::CONNECT_LOCK.lock().await;
+    // Another road came up meanwhile: it stays, and this stream closes.
+    if live_to(&address, port).await {
+        return Ok(ConnectionState::Connected);
+    }
+    let conn_mgr = control_manager(BLUETOOTH_HANDSHAKE_WAIT)?;
+    let mut state_guard = (*CONNECTION_STATE).lock().await;
+    *state_guard = ConnectionState::Connecting;
+    let identity = client_identity();
+    let span = control_span(&address, "bluetooth");
+
+    use tracing::Instrument;
+    let result = async move {
+        match conn_mgr.secure_named(stream, &address, &identity).await {
+            Ok((stream, claims)) => {
+                crate::peer_names::note(&address, claims);
+                Ok(run_control(stream, address, port, crate::Road::Bluetooth).await)
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Connection over Bluetooth failed");
+                Ok(ConnectionState::Error(PocketdeskErrorDto::from(e)))
+            }
+        }
+    }
+    .instrument(span)
+    .await;
+
+    if let Ok(state) = &result {
+        *state_guard = state.clone();
+    }
+    result
+}
+
+/// How long the control link's TLS and handshake may take on a Bluetooth
+/// stream: a slower link than the home road's.
+#[cfg(unix)]
+const BLUETOOTH_HANDSHAKE_WAIT: Duration = Duration::from_secs(15);
+
+/// Answer the computer's request for transfer link `id` on `fd`, a new
+/// RFCOMM connection the app opened to its transfer service
+/// ([`crate::bluetooth::offer_link`]). `fd` is this call's, closed unless a
+/// transfer took it. Whether one did.
+#[cfg(unix)]
+pub async fn offer_bluetooth_link(id: u64, fd: std::os::fd::OwnedFd) -> bool {
+    match crate::bluetooth::stream_of(fd) {
+        Ok(stream) => crate::bluetooth::offer_link(id, stream).await,
+        Err(e) => {
+            tracing::warn!("Bluetooth: the transfer link's stream: {e}");
+            false
+        }
+    }
+}
+
+/// The road the live control link came by, as the app reads it: 0 home
+/// (or none), 1 the internet, 2 Bluetooth.
+pub fn control_road() -> u8 {
+    crate::control_road() as u8
+}
+
+/// What the computer at `address` last said of its Bluetooth road, as
+/// `{address, service, link}` JSON; `""` when nothing.
+pub fn bluetooth_info(address: &str) -> String {
+    crate::bluetooth::info(address)
+}
+
+/// The oldest transfer link the computer asked for over a Bluetooth
+/// control link and the app has not taken.
+pub fn take_bluetooth_link_request() -> Option<u64> {
+    crate::bluetooth::take_link_request()
 }
 
 /// Run the control link on `stream`, already secured to the computer at
@@ -998,6 +1083,13 @@ async fn run_control(
                     {
                         crate::media_presses::receive(&pkt.body);
                     }
+                    // Where to dial this computer by Bluetooth, and
+                    // the transfer links it asks for on that road.
+                    if trimmed.contains("pocketdesk.bluetooth")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                    {
+                        crate::bluetooth::receive(&pkt.packet_type, &pkt.body, &from_peer.0, road);
+                    }
                     // The answer to a folder request (T6b),
                     // kept by the path asked.
                     if trimmed.contains("folder_fetch_reply")
@@ -1112,6 +1204,8 @@ async fn forget_link(from: &(String, u16)) {
     crate::photo_requests::forget();
     crate::location_requests::forget();
     crate::quiet_requests::forget();
+    // Transfer links asked for on it: nothing waits for them now.
+    crate::bluetooth::forget_link_requests();
 }
 
 /// The cached iroh WAN identity (raw `kdeconnect.pocketdesk.endpoint` body
@@ -2413,15 +2507,31 @@ async fn check_transfer_connection(
     tls: &tokio_rustls::TlsAcceptor,
     key: &str,
 ) -> Result<TransferStream, &'static str> {
-    let mut stream = tokio::time::timeout(Duration::from_secs(5), tls.accept(stream))
+    let mut stream = transfer_tls(stream, tls, Duration::from_secs(5)).await?;
+    if !presents_key(&mut stream, key).await {
+        return Err("without the key");
+    }
+    Ok(stream)
+}
+
+/// The phone's side of a transfer's TLS on `stream`, done within `wait`: the
+/// dialer must be the pinned desktop of `tls` ([`transfer_acceptor`]) and
+/// speak the transfer protocol. A connection the desktop dialed at home, or
+/// a Bluetooth transfer link after its hello.
+pub(crate) async fn transfer_tls<S>(
+    stream: S,
+    tls: &tokio_rustls::TlsAcceptor,
+    wait: Duration,
+) -> Result<tokio_rustls::server::TlsStream<S>, &'static str>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let stream = tokio::time::timeout(wait, tls.accept(stream))
         .await
         .map_err(|_| "no TLS handshake")?
         .map_err(|_| "not the computer")?;
     if stream.get_ref().1.alpn_protocol() != Some(pocketdesk_core::protocol::ALPN_TRANSFER) {
         return Err("not a file transfer");
-    }
-    if !presents_key(&mut stream, key).await {
-        return Err("without the key");
     }
     Ok(stream)
 }
@@ -5882,5 +5992,186 @@ mod share_tag_tests {
         tag_body(&mut body, None, &tags);
         assert!(body.get("keep").is_none());
         assert!(body.get("folderId").is_some());
+    }
+}
+
+#[cfg(all(test, unix))]
+mod bluetooth_road_tests {
+    use super::*;
+    use pocketdesk_core::protocol::bluetooth::{LINK_PACKET, PACKET};
+    use pocketdesk_core::protocol::{HANDSHAKE_HELLO, HANDSHAKE_OK};
+    use pocketdesk_core::streaming::transport::CertManager;
+    use tokio::io::BufReader;
+
+    /// The computer's end of a control link: TLS as its server, the
+    /// opening, then what the test has it say; held open until `close`.
+    async fn computer_end(
+        stream: tokio::net::UnixStream,
+        computer: CertManager,
+        says: Vec<Vec<u8>>,
+        close: tokio::sync::oneshot::Receiver<()>,
+    ) -> String {
+        let tls = tokio_rustls::TlsAcceptor::from(computer.control_server_config().unwrap())
+            .accept(stream)
+            .await
+            .expect("the phone's TLS");
+        let mut tls = BufReader::new(tls);
+        let mut hello = String::new();
+        tls.read_line(&mut hello).await.unwrap();
+        assert_eq!(hello.trim(), HANDSHAKE_HELLO);
+        tls.get_mut()
+            .write_all(
+                format!(
+                    "{HANDSHAKE_OK}\n{{\"type\":\"kdeconnect.identity\",\"body\":{{\"deviceName\":\"Desk\"}}}}\n"
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let mut phone = String::new();
+        tls.read_line(&mut phone).await.unwrap();
+        for line in says {
+            tls.get_mut().write_all(&line).await.unwrap();
+        }
+        tls.get_mut().flush().await.unwrap();
+        let _ = close.await;
+        phone
+    }
+
+    /// The control link runs on a stream the app hands over: the link is
+    /// live, by road 2, and what the computer says on it is heard.
+    #[tokio::test]
+    async fn connect_over_bluetooth_runs_control() {
+        let _globals = super::TRANSFER_TEST_LOCK.lock().await;
+        let certs = std::env::temp_dir().join(format!("bridge-bt-control-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&certs);
+        let had = crate::CERT_DIR.lock().unwrap().replace(certs.clone());
+        crate::bluetooth::forget_link_requests();
+        let computer = CertManager::new().unwrap();
+        let fingerprint = computer.cert_fingerprint();
+        let (phone_end, computer_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        computer_stream.set_nonblocking(true).unwrap();
+        let computer_stream = tokio::net::UnixStream::from_std(computer_stream).unwrap();
+        let says = vec![
+            NetworkPacket::new(PACKET)
+                .with_body(serde_json::json!({
+                    "address": "00:00:5E:00:53:01",
+                    "service": "b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b13",
+                }))
+                .to_wire()
+                .unwrap(),
+            NetworkPacket::new(LINK_PACKET)
+                .with_body(serde_json::json!({ "id": u64::MAX }))
+                .to_wire()
+                .unwrap(),
+        ];
+        let (close, closed) = tokio::sync::oneshot::channel();
+        let computer_side = tokio::spawn(computer_end(computer_stream, computer, says, closed));
+
+        let state = connect_over_bluetooth(
+            "192.0.2.61".to_string(),
+            1716,
+            std::os::fd::OwnedFd::from(phone_end),
+        )
+        .await;
+        let road = control_road();
+        let peer = control_peer().await;
+        let mut request = None;
+        for _ in 0..100 {
+            request = take_bluetooth_link_request();
+            if request.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let info = bluetooth_info("192.0.2.61");
+        // The computer closes: the link ends and the road is home again.
+        let _ = close.send(());
+        let phone = computer_side.await.unwrap();
+        for _ in 0..100 {
+            if control_peer().await.is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let road_after = control_road();
+        let pinned = CertManager::load_or_create(&certs).unwrap().known_peers();
+        *crate::CERT_DIR.lock().unwrap() = had;
+        let _ = std::fs::remove_dir_all(&certs);
+
+        assert!(matches!(state, Ok(ConnectionState::Connected)), "{state:?}");
+        assert_eq!(road, 2);
+        assert_eq!(
+            peer.as_deref(),
+            Some(r#"{"host":"192.0.2.61","port":1716}"#)
+        );
+        assert!(phone.contains("kdeconnect.identity"), "{phone}");
+        assert_eq!(request, Some(u64::MAX), "the link request, its id whole");
+        assert!(info.contains("00:00:5E:00:53:01"), "{info}");
+        assert_eq!(road_after, 0);
+        let label =
+            pocketdesk_core::streaming::transport::peer_label_for_address("192.0.2.61").unwrap();
+        assert!(
+            pinned.contains(&(label, fingerprint)),
+            "pinned by the computer's address, as at home"
+        );
+    }
+
+    /// A stream that never becomes a control link is closed, and leaves the
+    /// road as it was.
+    #[tokio::test]
+    async fn a_failed_bluetooth_link_closes_its_stream() {
+        let _globals = super::TRANSFER_TEST_LOCK.lock().await;
+        let certs = std::env::temp_dir().join(format!("bridge-bt-failed-{}", std::process::id()));
+        let had = crate::CERT_DIR.lock().unwrap().replace(certs.clone());
+        let (phone_end, computer_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        computer_stream.set_nonblocking(true).unwrap();
+        let mut computer_stream = tokio::net::UnixStream::from_std(computer_stream).unwrap();
+        let connecting = tokio::spawn(connect_over_bluetooth(
+            "192.0.2.62".to_string(),
+            1716,
+            std::os::fd::OwnedFd::from(phone_end),
+        ));
+        // Not TLS: the phone gives up on it.
+        let mut hello = [0u8; 5];
+        computer_stream.read_exact(&mut hello).await.unwrap();
+        computer_stream
+            .write_all(b"HTTP/1.1 400 Bad\r\n\r\n")
+            .await
+            .unwrap();
+        let state = connecting.await.unwrap();
+        let mut rest = Vec::new();
+        let closed = tokio::time::timeout(
+            Duration::from_secs(5),
+            computer_stream.read_to_end(&mut rest),
+        )
+        .await;
+        let road = control_road();
+        *crate::CERT_DIR.lock().unwrap() = had;
+        let _ = std::fs::remove_dir_all(&certs);
+        assert!(matches!(state, Ok(ConnectionState::Error(_))), "{state:?}");
+        assert!(matches!(closed, Ok(Ok(_))), "the stream closed");
+        assert_eq!(road, 0);
+    }
+
+    /// A refusal over Bluetooth reaches the app in words: the file too big
+    /// for the road, and the one-at-a-time rule.
+    #[test]
+    fn a_bluetooth_refusal_is_said_as_the_computer_said_it() {
+        let wifi = refusal_text(
+            "file",
+            "over 8 MiB over Bluetooth: the file waits for Wi-Fi",
+            true,
+        );
+        assert_eq!(
+            wifi,
+            "The computer refused the file: over 8 MiB over Bluetooth: the file waits for Wi-Fi"
+        );
+        let turn = refusal_text(
+            "download",
+            "one file at a time over Bluetooth: try again once the other has crossed",
+            true,
+        );
+        assert!(turn.contains("one file at a time over Bluetooth"), "{turn}");
     }
 }

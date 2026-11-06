@@ -39,6 +39,20 @@ object RustCore {
     private external fun nativeCheckTailscaleStatus(): String
     private external fun nativeGetPeers(): String
     private external fun nativeConnectToPeer(address: String, port: Int, wanIdentity: String): String
+
+    // The Bluetooth road (protocol.md 1.4a); the app's side dials RFCOMM and
+    // hands each stream over as one end of a socket pair (`detachFd`).
+    /** The control link over [fd], taken in every case; the envelope of [nativeConnectToPeer]. */
+    private external fun nativeConnectOverBluetooth(address: String, port: Int, fd: Int): String
+    /** `{address, service, link}` the computer at [address] last said, `""` if none. */
+    private external fun nativeBluetoothInfo(address: String): String
+    /** The oldest transfer link asked for, as a `Long` in decimal (`toLong()`), `""` if none. */
+    private external fun nativeTakeBluetoothLinkRequest(): String
+    /** Answer link [id] on [fd], a new connection to the transfer service; [fd] taken in every case. */
+    private external fun nativeOfferBluetoothLink(id: Long, fd: Int): Boolean
+    /** The live control link's road: 0 home (or none), 1 the internet, 2 Bluetooth. */
+    private external fun nativeControlRoad(): Int
+
     private external fun nativeSendClipboard(address: String, port: Int, content: String): String
     private external fun nativeGetClipboard(address: String, port: Int): String
     private external fun nativeGetClipboardState(address: String, port: Int): String

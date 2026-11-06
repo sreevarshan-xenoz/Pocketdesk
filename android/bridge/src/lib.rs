@@ -7,6 +7,7 @@
 
 mod api;
 mod asks;
+mod bluetooth;
 mod cancel;
 mod cast;
 mod clipboard_push;
@@ -259,6 +260,112 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
             .map(|state| format!("{state:?}")),
     );
     to_jstring(&mut env, json)
+}
+
+/// Run the control link to the computer at `address` (its control `port`)
+/// on `fd`, one end of a socket pair the app pumps to and from an RFCOMM
+/// socket it dialed (the Bluetooth fallback). Takes `fd` in every case,
+/// closing it whenever the link does not come up on it. The envelope of
+/// [`Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectToPeer`].
+#[cfg(unix)]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectOverBluetooth(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    fd: jint,
+) -> jstring {
+    // Owned before anything can fail, so every way out closes it.
+    let fd = owned_fd(fd);
+    let address = jstring_to_string(&mut env, &address);
+    let result = match fd {
+        Some(fd) => RUNTIME
+            .block_on(api::connect_over_bluetooth(address, port as u16, fd))
+            .map(|state| format!("{state:?}")),
+        None => Err("no Bluetooth stream".to_string()),
+    };
+    to_jstring(&mut env, envelope(result))
+}
+
+/// `fd` as this call's own, closed when dropped; `None` for no descriptor.
+#[cfg(unix)]
+fn owned_fd(fd: jint) -> Option<std::os::fd::OwnedFd> {
+    use std::os::fd::FromRawFd;
+    // SAFETY: the app gives up `fd` (ParcelFileDescriptor.detachFd), so this
+    // is its only owner from here on.
+    (fd >= 0).then(|| unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) })
+}
+
+/// What the computer at `address` last said of its Bluetooth road, as JSON
+/// `{address, service, link}`: its radio's address, the control service's
+/// UUID, and the transfer service's UUID a link request is answered on;
+/// `""` when it has said nothing.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeBluetoothInfo(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let info = api::bluetooth_info(&address);
+    to_jstring(&mut env, info)
+}
+
+/// The oldest transfer link the computer asked for over a Bluetooth control
+/// link, `""` when none waits. The id is a u64 written as the decimal of the
+/// signed 64-bit number with the same bits, so `String.toLong()` gives the
+/// `Long` that [`Java_dev_pocketdesk_android_bridge_RustCore_nativeOfferBluetoothLink`]
+/// takes back (an empty string, not a number, says none: every number is a
+/// possible id).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeBluetoothLinkRequest(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let id = api::take_bluetooth_link_request()
+        .map(|id| link_id_to_java(id).to_string())
+        .unwrap_or_default();
+    to_jstring(&mut env, id)
+}
+
+/// A link id as the `Long` with the same bits.
+fn link_id_to_java(id: u64) -> jlong {
+    id as jlong
+}
+
+/// The link id a `Long` from [`link_id_to_java`] carries.
+fn link_id_from_java(id: jlong) -> u64 {
+    id as u64
+}
+
+/// Answer the computer's request for transfer link `id` on `fd`, one end of
+/// a socket pair the app pumps to and from a new RFCOMM connection to the
+/// computer's transfer service: the link hello, the transfer's TLS as at
+/// home, then the transfer its key names takes the stream. Takes `fd` in
+/// every case. Whether a transfer took it.
+#[cfg(unix)]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeOfferBluetoothLink(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    id: jlong,
+    fd: jint,
+) -> jboolean {
+    let Some(fd) = owned_fd(fd) else {
+        return 0;
+    };
+    RUNTIME.block_on(api::offer_bluetooth_link(link_id_from_java(id), fd)) as jboolean
+}
+
+/// The road the live control link came by: 0 home (or no link), 1 the
+/// internet, 2 Bluetooth.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeControlRoad(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jint {
+    jint::from(api::control_road())
 }
 
 /// Push clipboard content to the remote device.
@@ -2681,4 +2788,26 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWakeVia
     let info_json = jstring_to_string(&mut env, &info_json);
     let json = envelope(RUNTIME.block_on(wake_helper::ask(&info_json)));
     to_jstring(&mut env, json)
+}
+
+#[cfg(test)]
+mod tests {
+    /// A link id crosses JNI as the `Long` with its bits and comes back as
+    /// it went, the largest ids included.
+    #[test]
+    fn a_link_id_round_trips_through_a_long() {
+        for id in [
+            0,
+            7,
+            i64::MAX as u64,
+            i64::MAX as u64 + 1,
+            u64::MAX - 3,
+            u64::MAX,
+        ] {
+            let long = super::link_id_to_java(id);
+            let said: i64 = long.to_string().parse().unwrap();
+            assert_eq!(super::link_id_from_java(said), id);
+        }
+        assert_eq!(super::link_id_to_java(u64::MAX), -1, "a real id, not none");
+    }
 }

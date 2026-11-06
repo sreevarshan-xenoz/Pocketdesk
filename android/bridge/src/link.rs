@@ -33,34 +33,39 @@ static WAITERS: LazyLock<Mutex<HashMap<String, Arrived>>> = LazyLock::new(Defaul
 pub(crate) fn spawn_acceptor(acceptor: pocketdesk_core::streaming::LinkAcceptor) {
     tokio::spawn(async move {
         while let Some(stream) = acceptor.accept().await {
-            tokio::spawn(hand_over(stream));
+            tokio::spawn(async move {
+                hand_over(stream).await;
+            });
         }
     });
 }
 
 /// Read `stream`'s key line and give it to its waiter; drop one with no key
-/// in time, or a key no transfer waits for.
-async fn hand_over(mut stream: Box<dyn TransferIo>) {
+/// in time, or a key no transfer waits for. Whether a transfer took it. A
+/// stream on the internet road's link, or a Bluetooth transfer link once
+/// inside its TLS ([`crate::bluetooth::offer_link`]).
+pub(crate) async fn hand_over(mut stream: Box<dyn TransferIo>) -> bool {
     let mut line = [0u8; 33];
     match tokio::time::timeout(KEY_WAIT, stream.read_exact(&mut line)).await {
         Ok(Ok(_)) if line[32] == b'\n' => {}
         _ => {
             tracing::warn!("File transfer: dropped a stream without a key line");
-            return;
+            return false;
         }
     }
     let Ok(key) = std::str::from_utf8(&line[..32]) else {
-        return;
+        return false;
     };
     let waiter = WAITERS
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(key);
     match waiter {
-        Some(waiter) => {
-            let _ = waiter.send(stream);
+        Some(waiter) => waiter.send(stream).is_ok(),
+        None => {
+            tracing::warn!("File transfer: dropped a stream for no transfer waiting");
+            false
         }
-        None => tracing::warn!("File transfer: dropped a stream for no transfer waiting"),
     }
 }
 
