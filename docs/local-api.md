@@ -38,10 +38,11 @@ Whether the server runs, the phones in a session now, and how phones reach this 
                "transport": "lan", "started_unix": 1792050000, "driving": true,
                "control_only": false, "cast": false, "sound_only": false,
                "phone_sound_only": false}],
- "endpoint": {"…": "what the server announces for the internet path, or null"}}
+ "endpoint": {"…": "what the server announces for the internet path, or null"},
+ "bluetooth": "listening"}
 ```
 
-`sessions` is empty and `endpoint` null when no server runs. `pocketdesk_version` is this program's: a server started before an upgrade may still be an older one. `transport` is `lan` or `wan`. `driving` says which phone has the keyboard and pointer when several are connected. `control_only` is a phone used as a remote: input only, no screen sent. `cast` is a phone showing its own screen here. `sound_only` is a phone used as this computer's speaker and mic: sound both ways, no screen or input (N5). `phone_sound_only` is a phone playing its own sound here, with no screen (M7).
+`sessions` is empty and `endpoint` null when no server runs. `pocketdesk_version` is this program's: a server started before an upgrade may still be an older one. `transport` is `lan` or `wan`. `driving` says which phone has the keyboard and pointer when several are connected. `control_only` is a phone used as a remote: input only, no screen sent. `cast` is a phone showing its own screen here. `sound_only` is a phone used as this computer's speaker and mic: sound both ways, no screen or input (N5). `phone_sound_only` is a phone playing its own sound here, with no screen (M7). `bluetooth` is how the Bluetooth fallback stands, as the server last checked (the switch each second, the radio every 10 s): `listening`, `no_radio` (the switch is on but there is no radio to listen on), `off` (`bluetooth_fallback` off) or `unsupported` (the switch is on, on a system that does not listen yet: Windows only for now); null when no server runs, or from a server before it.
 
 ### `pocketdesk devices --json`
 

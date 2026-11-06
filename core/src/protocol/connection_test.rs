@@ -322,6 +322,100 @@ mod tests {
         assert!(crate::protocol::connection::control_peer_addr(&stream).is_ok());
     }
 
+    /// The desktop's side of the opening on a secured stream: read HELLO,
+    /// answer OK and an identity, read the phone's identity.
+    async fn desktop_says<S>(stream: S)
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        let mut reader = BufReader::new(stream);
+        let mut hello = String::new();
+        reader.read_line(&mut hello).await.expect("read HELLO");
+        assert_eq!(hello.trim(), HANDSHAKE_HELLO);
+        reader
+            .get_mut()
+            .write_all(
+                format!(
+                    "{HANDSHAKE_OK}\n{{\"type\":\"kdeconnect.identity\",\"body\":{{\"deviceName\":\"Desk\"}}}}\n"
+                )
+                .as_bytes(),
+            )
+            .await
+            .expect("write OK");
+        reader.get_mut().flush().await.ok();
+        let mut identity = String::new();
+        reader
+            .read_line(&mut identity)
+            .await
+            .expect("read identity");
+        assert!(identity.contains("test-client"), "our identity: {identity}");
+    }
+
+    /// The control link's TLS and handshake run on any stream (a Bluetooth
+    /// one, later), with the same claims a TCP dial hears.
+    #[tokio::test]
+    async fn secure_named_over_a_duplex_matches_tcp() {
+        let identity = DeviceIdentity::new("test-client", "Test Client");
+        let manager = manager(Duration::from_secs(5));
+
+        let (phone_end, desktop_end) = tokio::io::duplex(64 * 1024);
+        let server = tokio::spawn(async move {
+            let tls = tokio_rustls::TlsAcceptor::from(desktop().control_server_config().unwrap())
+                .accept(desktop_end)
+                .await
+                .expect("mock server TLS");
+            desktop_says(tls).await;
+        });
+        let (_stream, claims) = manager
+            .secure_named(phone_end, "192.0.2.10", 1716, &identity)
+            .await
+            .expect("secure_named over a duplex");
+        server.await.unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move { desktop_says(accept_tls(&listener).await).await });
+        let (_stream, tcp_claims) = manager
+            .connect_named("127.0.0.1", port, &identity)
+            .await
+            .expect("connect_named over TCP");
+        server.await.unwrap();
+
+        assert_eq!(claims.name.as_deref(), Some("Desk"));
+        assert_eq!(claims, tcp_claims);
+    }
+
+    /// The desktop's certificate is held to the pin for the address given,
+    /// on any stream.
+    #[tokio::test]
+    async fn secure_named_holds_the_desktop_to_its_pin() {
+        let identity = DeviceIdentity::new("test-client", "Test Client");
+        let phone = CertManager::new().expect("phone certificate");
+        // Pinned for this address: some other computer's certificate.
+        let label = crate::streaming::transport::peer_label_for_address("192.0.2.10").unwrap();
+        phone.pin_peer(&label, [7u8; 32]).unwrap();
+        let manager = ConnectionManager::new(Duration::from_secs(5), phone.control_client_config());
+
+        let (phone_end, desktop_end) = tokio::io::duplex(64 * 1024);
+        tokio::spawn(async move {
+            let _ = tokio_rustls::TlsAcceptor::from(desktop().control_server_config().unwrap())
+                .accept(desktop_end)
+                .await;
+        });
+        let err = match manager
+            .secure_named(phone_end, "192.0.2.10", 1716, &identity)
+            .await
+        {
+            Ok(_) => panic!("a certificate that is not the pinned one must be refused"),
+            Err(e) => e.to_string(),
+        };
+        assert!(err.contains("TLS"), "a TLS failure: {err}");
+        assert!(
+            err.contains("192.0.2.10:1716"),
+            "the real port named: {err}"
+        );
+    }
+
     /// A desktop that vanished (slept, left the network) leaves a socket
     /// that looks open forever unless the phone probes it: keepalive finds
     /// the dead link, so the reader ends and the phone dials again.

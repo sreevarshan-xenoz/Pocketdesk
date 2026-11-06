@@ -4,7 +4,7 @@
 
 use crate::api;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64};
 use std::sync::{Arc, LazyLock};
 use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::broadcast;
@@ -44,9 +44,43 @@ pub(crate) static CONNECT_LOCK: LazyLock<TokioMutex<()>> = LazyLock::new(|| Toki
 pub(crate) static CONTROL_PEER: LazyLock<TokioMutex<Option<(String, u16)>>> =
     LazyLock::new(|| TokioMutex::new(None));
 
-/// Whether the control link in [`CONTROL_PEER`] came by the internet road
-/// (T10a), where nothing pairs.
-pub(crate) static CONTROL_OVER_INTERNET: AtomicBool = AtomicBool::new(false);
+/// The road a control link came by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Road {
+    /// TLS over TCP to the computer's address (at home, or Tailscale).
+    Home = 0,
+    /// The internet road (T10a), where nothing pairs.
+    Internet = 1,
+    /// An RFCOMM stream the app dialed (the Bluetooth fallback): no address
+    /// to dial back, so transfers ride links the computer asks for.
+    Bluetooth = 2,
+}
+
+impl Road {
+    /// The road numbered `n` as [`CONTROL_ROAD`] keeps it; home for any
+    /// other number.
+    pub(crate) fn from_number(n: u8) -> Self {
+        match n {
+            1 => Road::Internet,
+            2 => Road::Bluetooth,
+            _ => Road::Home,
+        }
+    }
+}
+
+/// Which road the control link in [`CONTROL_PEER`] came by, a [`Road`] as a
+/// number: 0 home, 1 the internet, 2 Bluetooth. What the app reads too.
+pub(crate) static CONTROL_ROAD: AtomicU8 = AtomicU8::new(Road::Home as u8);
+
+/// The road of the control link in [`CONTROL_PEER`].
+pub(crate) fn control_road() -> Road {
+    Road::from_number(CONTROL_ROAD.load(std::sync::atomic::Ordering::SeqCst))
+}
+
+/// Say the control link in [`CONTROL_PEER`] came by `road`.
+pub(crate) fn set_control_road(road: Road) {
+    CONTROL_ROAD.store(road as u8, std::sync::atomic::Ordering::SeqCst);
+}
 
 /// How many control links this process has opened (BK5): the app says
 /// the phone's screen again on each new one, as the computer forgets what
@@ -481,6 +515,8 @@ pub(crate) fn kept_from_pollers(packet_type: &str) -> bool {
         || packet_type == pocketdesk_core::protocol::phone_photos::LIST
         || packet_type == pocketdesk_core::protocol::phone_photos::FETCH
         || packet_type == pocketdesk_core::protocol::phone_photos::TAKE
+        || packet_type == pocketdesk_core::protocol::bluetooth::PACKET
+        || packet_type == pocketdesk_core::protocol::bluetooth::LINK_PACKET
 }
 
 /// Drain the queued offers as a JSON array.
@@ -648,6 +684,36 @@ mod tests {
         assert!(
             !queued(&PENDING_ALERTS, "Pocketdesk done|Done: bf1-test"),
             "drained"
+        );
+    }
+}
+
+#[cfg(test)]
+mod road_tests {
+    use super::{Road, control_road, set_control_road};
+
+    /// The road is kept as a number the app reads, and read back as it was
+    /// said.
+    #[tokio::test]
+    async fn road_atomic_round_trip() {
+        let _globals = crate::api::TRANSFER_TEST_LOCK.lock().await;
+        let was = control_road();
+        for road in [Road::Bluetooth, Road::Internet, Road::Home] {
+            set_control_road(road);
+            assert_eq!(control_road(), road);
+            assert_eq!(
+                super::CONTROL_ROAD.load(std::sync::atomic::Ordering::SeqCst),
+                road as u8
+            );
+        }
+        set_control_road(was);
+        assert_eq!(Road::from_number(0), Road::Home);
+        assert_eq!(Road::from_number(1), Road::Internet);
+        assert_eq!(Road::from_number(2), Road::Bluetooth);
+        assert_eq!(
+            Road::from_number(9),
+            Road::Home,
+            "an unknown number is home"
         );
     }
 }

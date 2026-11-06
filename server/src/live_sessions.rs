@@ -43,7 +43,7 @@ pub fn parse_kick_file(raw: &str, now_unix: u64) -> Option<String> {
 }
 
 /// Serialize the registry snapshot in the mirror format the CLI's `status`
-/// and the desktop app read.
+/// and the desktop app read, with how the Bluetooth road stands.
 pub fn render_json(
     live: &[LiveSession],
     driver: Option<u64>,
@@ -71,7 +71,13 @@ pub fn render_json(
             webcam: s.streamed.webcam,
         })
         .collect();
-    shared::render_mirror(&sessions, crate::driving::is_shared(), linked, now_unix)
+    shared::render_mirror(
+        &sessions,
+        crate::driving::is_shared(),
+        linked,
+        crate::bluetooth::road(),
+        now_unix,
+    )
 }
 
 /// Atomic mirror write: tmp + rename, so `status` never sees a torn file.
@@ -622,6 +628,14 @@ pub fn linked_phones(
         .collect()
 }
 
+/// `pocketdesk status`'s line on the Bluetooth road ("Bluetooth:
+/// listening"), from the mirror `raw` at `now_unix`; `None` when the mirror
+/// is stale (no server writes it) or from a server that does not say.
+pub fn bluetooth_status_line(raw: &str, now_unix: u64) -> Option<String> {
+    let mirror = shared::parse_mirror(raw).filter(|m| m.is_fresh(now_unix))?;
+    Some(format!("Bluetooth: {}", mirror.bluetooth?.words()))
+}
+
 /// CLI-side rendering of the mirrored file: one line per live session.
 /// Returns `None` when the file is absent or unreadable (daemon not
 /// running, or predates D2).
@@ -1016,6 +1030,24 @@ mod tests {
         // The mirror is machine-readable: same-file garbage must not panic.
         assert!(format_status_lines("not json", 1).is_none());
         assert!(format_status_lines(r#"{"sessions":{}}"#, 1).is_none());
+    }
+
+    #[test]
+    fn status_says_how_the_bluetooth_road_stands_while_the_server_writes() {
+        use pocketdesk_core::protocol::bluetooth::RoadState;
+        for (road, line) in [
+            (RoadState::Listening, "Bluetooth: listening"),
+            (RoadState::NoRadio, "Bluetooth: no radio"),
+            (RoadState::Off, "Bluetooth: off"),
+            (RoadState::Unsupported, "Bluetooth: Windows only for now"),
+        ] {
+            let raw = shared::render_mirror(&[], false, &[], Some(road), 100);
+            assert_eq!(bluetooth_status_line(&raw, 101).as_deref(), Some(line));
+            assert_eq!(bluetooth_status_line(&raw, 200), None, "stale");
+        }
+        let unsaid = shared::render_mirror(&[], false, &[], None, 100);
+        assert_eq!(bluetooth_status_line(&unsaid, 101), None);
+        assert_eq!(bluetooth_status_line("not json", 101), None);
     }
 
     #[test]

@@ -1,7 +1,8 @@
 //! Lock the computer when the phone leaves (D9). A phone with "Lock this
 //! computer when it leaves" (`AwayLock`) on counts as present while it has
-//! a control link on this computer's network (V1: one by the internet road
-//! or a tailnet reaches from anywhere, so it counts as gone). Once every
+//! a control link on this computer's network or by Bluetooth (V1: one by
+//! the internet road or a tailnet reaches from anywhere, so it counts as
+//! gone). Once every
 //! such phone that was present has been gone for `away_lock_minutes`, and
 //! nobody has touched the keyboard or mouse for that long, the computer
 //! locks: once per departure. Where the computer cannot say how long it has
@@ -323,6 +324,14 @@ fn nearby(peer: Option<std::net::SocketAddr>) -> bool {
     }
 }
 
+/// Whether a phone's link counts as the phone being here: [`nearby`] by
+/// its address, or a Bluetooth link, which proves the phone is within a few
+/// metres (Bluetooth fallback, calls after review 1: otherwise the computer
+/// would lock with the owner beside it and Wi-Fi down).
+fn present(link: &dyn pocketdesk_core::protocol::kdeconnect::DeviceSender) -> bool {
+    nearby(link.link_addr()) || link.nearby_by_radio()
+}
+
 /// Watch the phones for the server's life, and lock as they leave.
 pub async fn run() {
     let started = std::time::Instant::now();
@@ -362,12 +371,13 @@ pub async fn run() {
         if !last_switched.is_empty() {
             let _ = tokio::task::spawn_blocking(pocketdesk_core::input::idle_notify::watch).await;
         }
-        // V1: present is nearby, on this computer's network; a phone linked
-        // by the internet road (or a tailnet) from anywhere is not here.
+        // V1: present is nearby, on this computer's network, or linked by
+        // Bluetooth; a phone linked by the internet road (or a tailnet) from
+        // anywhere is not here.
         let present: Vec<String> = crate::state::clone_clients()
             .await
             .iter()
-            .filter(|c| nearby(c.link_addr()))
+            .filter(|c| present(&***c))
             .map(|c| c.device_id().to_string())
             .collect();
         // Off the runtime, and only when a lock could follow: on Linux it
@@ -456,6 +466,27 @@ mod tests {
             assert!(!nearby(at(away)), "{away}");
         }
         assert!(!nearby(None), "the internet road");
+    }
+
+    /// Bluetooth fallback (calls after review, 1): a live Bluetooth link
+    /// has no address here but proves the phone is within a few metres, so
+    /// it is present; the internet road's link (no address, no radio) is not.
+    #[test]
+    fn bluetooth_link_counts_as_near() {
+        use pocketdesk_core::protocol::kdeconnect::{DeviceSender, TcpDeviceSender};
+        let link = |by_radio: bool| {
+            TcpDeviceSender::new(tokio::io::sink(), "phone".to_string()).by_radio(by_radio)
+        };
+        let bluetooth = link(true);
+        assert_eq!(bluetooth.link_addr(), None);
+        assert!(bluetooth.nearby_by_radio());
+        assert!(present(&bluetooth), "the Bluetooth road is here");
+        let internet = link(false);
+        assert_eq!(internet.link_addr(), None);
+        assert!(!internet.nearby_by_radio());
+        assert!(!present(&internet), "the internet road is away");
+        let home = link(false).with_peer(Some("192.168.1.20:5000".parse().unwrap()));
+        assert!(present(&home), "the home network is here");
     }
 
     /// R3 review: the idle time is asked only once a lock could follow.

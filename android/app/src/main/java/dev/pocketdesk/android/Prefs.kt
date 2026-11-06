@@ -30,6 +30,8 @@ object Prefs {
     private const val KEY_CONTROL_FROM_COMPUTER = "control_from_computer"
     private const val KEY_PHONE_ACTIONS_FROM_COMPUTER = "phone_actions_from_computer"
     private const val KEY_INTERNET_FILES = "internet_files"
+    private const val KEY_BLUETOOTH_FALLBACK = "bluetooth_fallback"
+    private const val KEY_BLUETOOTH_TOLD = "bluetooth_told"
     private const val KEY_DIRECT_LINKS = "direct_links"
     private const val KEY_OTHERS_CHOOSE_COMPUTER = "others_choose_computer"
     private const val KEY_TELL_OTHER_APPS = "tell_other_apps"
@@ -822,6 +824,26 @@ object Prefs {
     fun setInternetFiles(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_INTERNET_FILES, enabled) }
         bump()
+    }
+
+    /**
+     * Whether the phone keeps its link to its computer over Bluetooth when
+     * Wi-Fi is gone (the fallback road). On by default, as on the computer.
+     */
+    fun bluetoothFallback(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_BLUETOOTH_FALLBACK, true)
+
+    fun setBluetoothFallback(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_BLUETOOTH_FALLBACK, enabled) }
+        bump()
+    }
+
+    /** Whether the phone said, once, that the link went over Bluetooth ([dev.pocketdesk.android.bluetooth.BluetoothNotice]). */
+    fun bluetoothTold(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_BLUETOOTH_TOLD, false)
+
+    fun setBluetoothTold(ctx: Context) {
+        prefs(ctx).edit { putBoolean(KEY_BLUETOOTH_TOLD, true) }
     }
 
     /**

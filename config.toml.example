@@ -193,8 +193,17 @@ video_quality = "balanced"
 
 # Move files with a phone linked by the internet road, on a stream of its own
 # control connection (nothing dials the phone back). Relays see sizes and
-# timing, never content. Each phone's Files permission still applies.
+# timing, never content. Each phone's Files permission still applies. It does
+# not hold the Bluetooth road, where a file over 8 MiB waits for Wi-Fi.
 # internet_files = true
+
+# Keep working over Bluetooth when neither the home nor the internet road
+# reaches this computer: it listens for a phone bonded to it in the system's
+# Bluetooth settings while the radio is on (Windows only for now). Pairing and
+# each phone's permissions still apply. Files over Bluetooth stop at 8 MiB.
+# Followed within about a second: turned off, the computer stops listening
+# and drops a phone linked over Bluetooth.
+# bluetooth_fallback = true
 
 # Received files keep the date they were last changed where they came from,
 # and files sent from here carry theirs (`lastModified` on the share and the

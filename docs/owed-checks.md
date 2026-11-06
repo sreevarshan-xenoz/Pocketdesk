@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1436 open items.
+1460 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 101 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 117 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 205 |
-| A phone with a SIM | 40 |
-| A second phone | 19 |
-| Away from home: another network, or through a router | 43 |
+| A phone with a SIM | 41 |
+| A second phone | 20 |
+| Away from home: another network, or through a router | 45 |
 | A second computer | 249 |
 | A Linux desktop (the Azure VM serves for some) | 265 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 99 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 400 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -248,6 +248,25 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **282. Zero-copy capture on the PipeWire path (low-latency window handoff, phase 2b: GNOME's and KDE's screen goes from the compositor to VA-API as a DMA-BUF)**
 
 - The Settings row "Copy the screen through memory" on this Windows box's app: its help now names GNOME and KDE. (where: here)
+
+**286. Bluetooth when Wi-Fi drops (phase 1: the light features over RFCOMM, Windows and Android)**
+
+- `bt1-takeover`: Wi-Fi off on the phone and its home link cut: the throwaway's log shows a control link with `transport="bluetooth"`. Say the time from the cut (the target 10 s; over 20 s is a failure, and a server-side or phone-side fix is owed) and the phone's own "the control link runs over Bluetooth" time. Run it five times and give the spread. (where: here)
+- `bt2-clipboard`: over Bluetooth alone, a copy on the phone reaches the computer and a copy on the computer is sent to the phone (and the phone says it took it); no home or internet link meanwhile. (where: here)
+- `bt3-notification`: over Bluetooth alone, the fixture's notification reaches the computer; say how long it took. (where: here)
+- `bt4-off-switch`: linked over Bluetooth, the throwaway's `bluetooth_fallback` turned off in its config: "Stopped listening over Bluetooth" within about a second (say the time), the link ends, status says `off`, nothing links again for 45 s and the phone's card does not say "Over Bluetooth"; back on, it listens again. This is also the check that turning the switch off ends live links within about a second (the away lock's side is the last item). (where: here)
+- `bt5-back-to-wifi`: linked over Bluetooth, Wi-Fi back on and home reachable: the link is back at home within 30 s (say the time), the phone says it left Bluetooth, and one link remains. (where: here)
+- `bt6-big-file-waits`: over Bluetooth, a 9 MiB share from the phone says "Waits for Wi-Fi" in its notification and does not cross. Also by hand: after 8 minutes it gives up with "Not sent: over Bluetooth, files over 8 MB wait for Wi-Fi", and is not counted as the computer not answering. (where: here)
+- The Windows listener on real hardware: both SDP records ("Pocketdesk" and "Pocketdesk transfers") are registered and the phone finds them (the throwaway's on its test service, the owner's own server's untouched beside it); the radio's address is read and the phone saves it with its computer after a home connect (and a phone connected before the listener started saves it on its next connect); `pocketdesk status` says "Bluetooth: listening", "no radio" with the PC's radio off in Windows' own settings by the owner, and "off" with the switch off; the desktop's Settings row says the same, fresh after a save. (where: here)
+- The RFCOMM dial lands within its 12 s; the socket-pair pumps carry TLS both ways under load (the clipboard, notifications and a file at once, for a few minutes) with no stall or garbled packet. (where: here)
+- The phone's radio turned off mid-link, and separately its Nearby devices permission revoked in Android's settings mid-link: the link ends at once and cleanly, the app shows it lost (no spinner left turning), and nothing dials until the radio or the permission is back. Say what the computer's log shows for each. (where: here)
+- Files over Bluetooth: a file from the computer (`pocketdesk send`) and one shared from the phone, each under 8 MiB, cross on the transfer service; say the speed. Back-to-back transfers (the next asked while the last link's channel is still closing: the phone's ~8 s connect retry), and two at once: the second is refused "one file at a time over Bluetooth" and goes by its retry (5 s, 15 s, 45 s budget), with a file near 8 MiB at RFCOMM speed. Say whether any retry budget ran out. (where: here)
+- Back to Wi-Fi with a transfer under way over Bluetooth: it is cut and finishes by its retry at home; say how long the link was down. (where: here)
+- Battery with the option on and Wi-Fi fine: over a few hours at home, nothing Bluetooth runs on the phone (no RFCOMM socket in `dumpsys bluetooth_manager`, no Pocketdesk wake lock beyond the usual) and the battery use matches the switch off. (where: here)
+- The one-time notice: the first time the link goes over Bluetooth, a dialog with the app in front, else a notification on the "Bluetooth link" channel ("Wi-Fi dropped, so Pocketdesk is using Bluetooth to reach …"), with "Turn this off" opening Settings at the switch; told once only (Wi-Fi off and on again does not show it again); with notifications off and the app away, it shows when the app opens. (where: here)
+- The phone's switch, "Keep working over Bluetooth when Wi-Fi drops" beside "Files over the internet": on by default; turning it on asks for Nearby devices where not granted; refused, the switch shows off and says why, and nothing dials; off while linked, the road ends. (where: here)
+- The words on the phone: "Over Bluetooth" on the computer's card on Home while linked so (and "On this network" again after); the transfer notification's "Waits for Wi-Fi" and "Waits until the call or music stops"; the computer's own refusals (over 8 MiB, one at a time) in the app's words, in English, Spanish and Tamil; the bridge's road 2 shown as Bluetooth wherever the app names the road (the Home card; say whether any other place, such as the connection details or the doctor, calls it home or the internet). (where: here)
+- The away lock over Bluetooth: with the throwaway's lock seam and `away_lock` on, the phone linked only over Bluetooth counts as near (no lock), and once the throwaway's switch goes off it no longer does (a lock line in the seam file after the away minutes). (where: here)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -876,6 +895,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The schedule: the job is queued with its constraints (`adb shell dumpsys jobscheduler` lists the app's WorkManager job needing an unmetered network and charging; with "Every few hours" the charging need goes); on mobile data with Wi-Fi off, nothing runs; plugged in on Wi-Fi it runs within the period, and on ColorOS 14 the transfer service's notification shows during the run and goes when it ends (or the run waits for the app to be opened or the notification listener's next look, which the log says). (where: OPPO)
 
+**286. Bluetooth when Wi-Fi drops (phase 1: the light features over RFCOMM, Windows and Android)**
+
+- Battery on Bluetooth: an hour linked over Bluetooth (Wi-Fi off, mobile data up where the phone has a SIM), against an hour at home: the phone's and the laptop's battery use. (where: sim)
+
 ## A second phone
 
 **1. Connect + pairing gate (Tier 1 #5, Tier-2 #11b)**
@@ -932,6 +955,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Owner phones learn of it: another owner phone, connected once while the computer is awake, shows "Wake through my helper" in the computer's Wake settings with the helper's name (off by default); a guest phone shows "No wake helper yet". (where: second phone)
 - The limit: two Wakes in a row work; a third within 30 seconds says "the helper was asked a moment ago: try again in half a minute", and one half a minute later works. (where: second phone)
 - Revoking: remove an owner phone from the computer's Devices page: within a minute the helper's list drops it and that phone's Wake now fails ("the helper could not send it" or "could not be reached"); the packet capture shows nothing for it. (where: second phone)
+
+**286. Bluetooth when Wi-Fi drops (phase 1: the light features over RFCOMM, Windows and Android)**
+
+- `SO_BTH_AUTHENTICATE`/`SO_BTH_ENCRYPT` with a bonded and an unbonded device: the bonded OPPO gets through with no prompt; an unbonded phone that knows the address (a second phone, its Pocketdesk given the throwaway's info by hand) dialing the service: say what Windows does (a pairing prompt on the PC or the phone, a refusal, or nothing), and that Pocketdesk then refuses it at TLS whatever Windows did. (where: second phone)
 
 ## Away from home: another network, or through a router
 
@@ -1055,6 +1082,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **263. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
 
 - The display flags: the display is neither public nor a presentation, so check on each Android at hand that `am start --display <id>` from the helper still launches another app on it (Android 14 first; on 10 to 12, where it may refuse a private display, the page then opens the app on the phone's screen and the log says the launch failed), and that the helper's touch, scroll, Back, Enter and Delete reach that app and no key outside those three is ever pressed. (where: OPPO)
+
+**286. Bluetooth when Wi-Fi drops (phase 1: the light features over RFCOMM, Windows and Android)**
+
+- Leaving Bluetooth for the internet road: the phone over Bluetooth, then on another network where home does not answer but the computer's internet road does (a stranger's Wi-Fi, or mobile data coming back): it moves to the internet road; say how long the link was down. On mobile data alone the 15 s home check never runs. (where: away)
+- The 15 s home check's cost on a stranger's Wi-Fi (connected, home not there) over 30 minutes on Bluetooth: the phone's battery use and data use, against the same 30 minutes without the fallback. (where: away)
 
 ## A second computer
 
@@ -3290,3 +3322,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A swipe: the Swipe tool, drag from a start to an end, a key: pressing it draws a swipe from the start to the end over the set time (a list scrolls by the right amount) and lifts at the end; pressing again meanwhile does nothing; the time slider changes its speed. (where: OPPO)
 - The keymap file: one per app in the state folder under `keymaps/`, named `app.<package>.json` (a package such as `con.example` is `app.con.example.json`, a file from before the prefix is renamed as it is read); a second window of the same app opens with it; another app has its own; a file edited into something unsound (a key twice, Escape, a radius out of range, a name with a slash) or past 64 KiB is ignored and the editor starts empty; removing every binding removes the file. No keymap is in any log or sent to the phone. (where: by hand)
 - The Settings row and the bar by hand on Windows and on Linux, light and dark, in a narrow window; the editor's list beside the picture, the markers' labels and the warning; the pointer lock on Windows (confined and recentred) and on a Wayland session (locked). The Settings page's snapshot (`settings_*.png`) shows only the top of the page: confirm by eye the Phones section row, as the snapshot test cannot run without a GPU here. (where: by hand)
+
+**286. Bluetooth when Wi-Fi drops (phase 1: the light features over RFCOMM, Windows and Android)**
+
+- Only the computer is dialed: with earbuds (or a car kit) bonded and connected to the phone, Wi-Fi off: `adb shell dumpsys bluetooth_manager` shows no RFCOMM connection to them from Pocketdesk, and no scan runs. (where: by hand)
+- Home over the real Wi-Fi, not the reverse: the phone saved the throwaway at this PC's address on the home network, Wi-Fi off then on by the phone's own quick settings: over Bluetooth within the target, back at home within about 30 s. (where: by hand)
+- Earbuds on the laptop while `bt2-clipboard` and `bt3-notification` run (and while a file crosses): music in them does not stutter or drop. If it does, a server-side throttle comes in before phase 1 ships (the design's call 2); say how bad. (where: by hand)
+- Earbuds on the phone: music playing to them, or a call, while over Bluetooth: a share says "Waits until the call or music stops" and goes once it stops (or gives up after 8 minutes); the clipboard and notifications still go; the music does not stutter. (where: by hand)

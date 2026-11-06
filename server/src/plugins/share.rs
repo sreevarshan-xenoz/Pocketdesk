@@ -645,6 +645,9 @@ impl Plugin for SharePlugin {
                     ))
                     .await;
                 }
+                if let Err(reason) = fits_the_road(sender, size) {
+                    return refused(reason).await;
+                }
                 let Some(dir) = self.fixed_dir.clone().or_else(download_dir) else {
                     return refused("no downloads or home folder".into()).await;
                 };
@@ -1026,6 +1029,12 @@ fn plan_fetch(
         }
         return Err(reason.to_string());
     }
+    if let Err(reason) = fits_the_road(sender, size) {
+        if let Some(id) = &offer {
+            crate::offers::fail(id, reason.clone());
+        }
+        return Err(reason);
+    }
     // Last, after every check that can refuse: at home it reads this
     // desktop's certificate.
     let route = match route(reach, sender) {
@@ -1056,6 +1065,10 @@ pub(crate) enum Route {
     /// A stream on the phone's own control connection, by the internet road
     /// (2c): iroh proved both keys, and nothing dials back across a NAT.
     Link(std::sync::Arc<dyn OpenLinkStream>),
+    /// By the Bluetooth road: a transfer link the phone opens when asked,
+    /// inside the transfer's TLS (`bluetooth::BluetoothLinks`), which keeps
+    /// its own deadlines (its turn, the phone's link, the TLS).
+    Bluetooth(std::sync::Arc<dyn OpenLinkStream>),
     /// A stream another of the owner's computers opened on this one's link
     /// to it (2h), its key line already read: that end presented the key.
     Arrived(std::sync::Mutex<Option<Box<dyn TransferIo>>>),
@@ -1066,6 +1079,7 @@ impl std::fmt::Display for Route {
         match self {
             Self::Dial { to, .. } => write!(f, "{to}"),
             Self::Link(_) => f.write_str("the phone's link by the internet road"),
+            Self::Bluetooth(_) => f.write_str("the phone's Bluetooth link"),
             Self::Arrived(_) => f.write_str("the link to the other computer"),
         }
     }
@@ -1103,6 +1117,7 @@ impl Route {
                 .await
                 .map_err(|_| io_error("open", "timed out"))?
                 .map_err(|e| io_error("open", e)),
+            Self::Bluetooth(link) => link.open().await.map_err(|e| io_error("open", e)),
         }
     }
 }
@@ -1122,7 +1137,9 @@ pub(crate) fn reach(
     reach_with(sender, port, crate::events::current_config().internet_files)
 }
 
-/// [`reach`] with `internet_files` given.
+/// [`reach`] with `internet_files` given. It holds the internet road only:
+/// "Files over the internet" does not gate the Bluetooth road, whose size
+/// rule is [`fits_the_road`].
 fn reach_with(
     sender: &dyn DeviceSender,
     port: Option<u16>,
@@ -1130,13 +1147,13 @@ fn reach_with(
 ) -> std::result::Result<Reach, String> {
     match (sender.link_streams(), port) {
         (Some(link), None) => {
-            if !internet_files {
+            if !internet_files && !sender.nearby_by_radio() {
                 return Err("files over the internet road are off on this computer".to_string());
             }
             Ok(Reach::Link(link))
         }
         (Some(_), Some(_)) => {
-            Err("nothing connects back by the internet road: ask without a port".to_string())
+            Err("nothing connects back on this road: ask without a port".to_string())
         }
         (None, Some(port)) => Ok(Reach::Dial(dial_back(sender)?, port)),
         (None, None) => Err("no usable port".to_string()),
@@ -1144,11 +1161,38 @@ fn reach_with(
 }
 
 /// Whether files can reach the phone behind `sender`: a connection with an
-/// address to dial back, or a link by the internet road while
-/// `internet_files` is on (2c).
+/// address to dial back, a link by the internet road while `internet_files`
+/// is on (2c), or a link by the Bluetooth road.
 pub(crate) fn files_reach(sender: &dyn DeviceSender) -> bool {
+    files_reach_with(sender, crate::events::current_config().internet_files)
+}
+
+/// [`files_reach`] with `internet_files` given.
+fn files_reach_with(sender: &dyn DeviceSender, internet_files: bool) -> bool {
     sender.peer_addr().is_some()
-        || (sender.link_streams().is_some() && crate::events::current_config().internet_files)
+        || (sender.link_streams().is_some() && (internet_files || sender.nearby_by_radio()))
+}
+
+/// Why a file is not moved over the Bluetooth road: it is over
+/// [`TRANSFER_MAX`], and a slow radio link is for a note or a photo. The
+/// phone shows it.
+///
+/// [`TRANSFER_MAX`]: pocketdesk_core::protocol::bluetooth::TRANSFER_MAX
+pub(crate) const WAITS_FOR_WIFI: &str = "over 8 MiB over Bluetooth: the file waits for Wi-Fi";
+
+/// Whether a transfer of `size` bytes may go on `sender`'s road: at most
+/// [`TRANSFER_MAX`] on the Bluetooth road (the link that proves the phone
+/// near by radio), any size on the others.
+///
+/// [`TRANSFER_MAX`]: pocketdesk_core::protocol::bluetooth::TRANSFER_MAX
+pub(crate) fn fits_the_road(
+    sender: &dyn DeviceSender,
+    size: u64,
+) -> std::result::Result<(), String> {
+    if sender.nearby_by_radio() && size > pocketdesk_core::protocol::bluetooth::TRANSFER_MAX {
+        return Err(WAITS_FOR_WIFI.to_string());
+    }
+    Ok(())
 }
 
 /// Whether files can reach the phone behind `sender` at all: a folder it
@@ -1162,7 +1206,8 @@ fn can_reach(sender: &dyn DeviceSender) -> std::result::Result<(), String> {
 
 /// The route for `reach`: at home with the transfer's TLS; on the internet
 /// road with the iroh key the link proved, held to the one the phone
-/// registered at home.
+/// registered at home; on the Bluetooth road with the TLS key the link
+/// proved, held to the bound one, and the link runs the transfer's TLS.
 pub(crate) fn route(reach: Reach, sender: &dyn DeviceSender) -> std::result::Result<Route, String> {
     match reach {
         Reach::Dial(ip, port) => Ok(Route::dial(
@@ -1174,6 +1219,14 @@ pub(crate) fn route(reach: Reach, sender: &dyn DeviceSender) -> std::result::Res
                 return Err("the phone's connection proved no key".to_string());
             };
             crate::plugins::pair::may_transfer(sender.device_id(), &key)?;
+            if sender.nearby_by_radio() {
+                // One transfer link at a time per phone (RFCOMM): told at
+                // once, so the phone can try again, not left waiting.
+                if crate::bluetooth::transfer_busy(sender.device_id()) {
+                    return Err(crate::bluetooth::ONE_AT_A_TIME.to_string());
+                }
+                return Ok(Route::Bluetooth(link));
+            }
             Ok(Route::Link(link))
         }
     }
@@ -1195,7 +1248,7 @@ pub(crate) fn transfer_tls(
 
 /// This desktop's identity, read once: the one its control channel and
 /// stream present (loaded at start by the service from the same folder).
-fn desktop_certs()
+pub(crate) fn desktop_certs()
 -> std::result::Result<std::sync::Arc<pocketdesk_core::streaming::transport::CertManager>, String> {
     use pocketdesk_core::streaming::transport::CertManager;
     static CERTS: std::sync::Mutex<Option<std::sync::Arc<CertManager>>> =
@@ -1225,9 +1278,25 @@ async fn dial_transfer(
         .map_err(|_| io_error("connect", "timed out"))?
         .map_err(|e| io_error("connect", e))?;
     let name = tokio_rustls::rustls::pki_types::ServerName::IpAddress(to.ip().into());
+    transfer_tls_on(tcp, name, tls).await
+}
+
+/// Open the transfer's TLS (phase C) on `stream`, this desktop the client:
+/// `tls` ([`transfer_tls`]) holds the phone to the key its control
+/// connection proved, and the phone must speak the transfer protocol.
+/// `name` is not checked (the pinned key is). The home road runs it on the
+/// connection it dials, the Bluetooth road on the phone's transfer link.
+pub(crate) async fn transfer_tls_on<S>(
+    stream: S,
+    name: tokio_rustls::rustls::pki_types::ServerName<'static>,
+    tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
+) -> Result<tokio_rustls::client::TlsStream<S>>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     let stream = tokio::time::timeout(
         CONNECT_TIMEOUT,
-        tokio_rustls::TlsConnector::from(tls).connect(name, tcp),
+        tokio_rustls::TlsConnector::from(tls).connect(name, stream),
     )
     .await
     .map_err(|_| io_error("tls", "timed out"))?
@@ -3029,6 +3098,146 @@ mod tests {
         );
     }
 
+    /// "Files over the internet" holds the internet road only: a link by
+    /// the Bluetooth road reaches the phone with it off.
+    #[test]
+    fn files_over_bluetooth_are_not_gated_by_files_over_the_internet() {
+        let bluetooth = LinkPhone::on(true);
+        let internet = LinkPhone::on(false);
+        assert!(matches!(
+            reach_with(&bluetooth, None, false),
+            Ok(Reach::Link(_))
+        ));
+        assert!(files_reach_with(&bluetooth, false));
+        assert!(
+            reach_with(&internet, None, false)
+                .err()
+                .is_some_and(|e| e.contains("are off")),
+            "the internet road is still held to it"
+        );
+        assert!(!files_reach_with(&internet, false));
+        assert!(files_reach_with(&internet, true));
+        assert!(
+            reach_with(&bluetooth, Some(5000), false).is_err(),
+            "nothing dials back by the Bluetooth road"
+        );
+    }
+
+    /// A phone whose last transfer still crosses over Bluetooth is told at
+    /// once to try again; the internet road has no such turn.
+    #[test]
+    fn one_file_at_a_time_over_bluetooth_is_told() {
+        let _state = crate::state::use_test_dirs();
+        let phone = LinkPhone {
+            id: format!("bt-busy-{}", uuid::Uuid::new_v4().simple()),
+            link: fake_link().0,
+            radio: true,
+            sent: Default::default(),
+        };
+        let held = crate::bluetooth::turn(&phone.id)
+            .try_acquire_owned()
+            .unwrap();
+        let refused = route(Reach::Link(phone.link.clone()), &phone).err();
+        assert_eq!(refused.as_deref(), Some(crate::bluetooth::ONE_AT_A_TIME));
+        let internet = LinkPhone {
+            radio: false,
+            ..phone
+        };
+        assert!(matches!(
+            route(Reach::Link(internet.link.clone()), &internet),
+            Ok(Route::Link(_))
+        ));
+        drop(held);
+        let phone = LinkPhone {
+            radio: true,
+            ..internet
+        };
+        assert!(matches!(
+            route(Reach::Link(phone.link.clone()), &phone),
+            Ok(Route::Bluetooth(_))
+        ));
+    }
+
+    /// On the Bluetooth road a transfer is at most 8 MiB; the home and
+    /// internet roads take any size.
+    #[test]
+    fn a_file_over_eight_mebibytes_waits_for_wifi_on_bluetooth_only() {
+        use pocketdesk_core::protocol::bluetooth::TRANSFER_MAX;
+        let bluetooth = LinkPhone::on(true);
+        assert_eq!(fits_the_road(&bluetooth, TRANSFER_MAX), Ok(()));
+        assert!(
+            fits_the_road(&bluetooth, TRANSFER_MAX + 1)
+                .err()
+                .is_some_and(|e| e.contains("waits for Wi-Fi"))
+        );
+        let internet = LinkPhone::on(false);
+        let home = Phone::at("192.0.2.7:51000");
+        for size in [TRANSFER_MAX + 1, MAX_FILE_BYTES] {
+            assert_eq!(fits_the_road(&internet, size), Ok(()));
+            assert_eq!(fits_the_road(&home, size), Ok(()));
+        }
+    }
+
+    /// A share from the phone over Bluetooth that says it is over 8 MiB is
+    /// refused, and the phone is told it waits for Wi-Fi.
+    #[tokio::test]
+    async fn a_big_share_over_bluetooth_is_told_it_waits_for_wifi() {
+        use pocketdesk_core::protocol::bluetooth::TRANSFER_MAX;
+        let _state = crate::state::use_test_dirs();
+        let plugin = SharePlugin::with_download_dir(temp_dir("bt-share"));
+        let phone = LinkPhone::on(true);
+        let packet = NetworkPacket::new("kdeconnect.share.request")
+            .with_body(serde_json::json!({
+                "filename": "a.bin",
+                "payloadTransferInfo": { "key": KEY },
+            }))
+            .with_payload_size(TRANSFER_MAX + 1);
+        plugin.handle_packet(&packet, &phone).await.unwrap();
+        assert_eq!(phone.refusal().as_deref(), Some(WAITS_FOR_WIFI));
+    }
+
+    /// A download over Bluetooth of exactly 8 MiB goes; one byte more is
+    /// refused with why, and its offer fails. By the internet road the
+    /// bigger one goes.
+    #[tokio::test]
+    async fn a_download_over_bluetooth_is_held_to_eight_mebibytes() {
+        use pocketdesk_core::protocol::bluetooth::TRANSFER_MAX;
+        let _state = crate::state::use_test_dirs();
+        let dir = temp_dir("bt-fetch");
+        let fits = dir.join("fits.bin");
+        let over = dir.join("over.bin");
+        std::fs::File::create(&fits)
+            .unwrap()
+            .set_len(TRANSFER_MAX)
+            .unwrap();
+        std::fs::File::create(&over)
+            .unwrap()
+            .set_len(TRANSFER_MAX + 1)
+            .unwrap();
+        let now = std::time::Instant::now();
+        crate::offers::offer_at("bt-fits", fits, "phone", now);
+        crate::offers::offer_at("bt-over", over.clone(), "phone", now);
+        crate::offers::offer_at("internet-over", over, "phone", now);
+        let ask = |offer: &str| serde_json::json!({ "offer": offer, "key": KEY });
+
+        let bluetooth = LinkPhone::on(true);
+        let fetch = plan_fetch(&ask("bt-fits"), &bluetooth).expect("8 MiB goes");
+        assert_eq!(fetch.size, TRANSFER_MAX);
+        drop(fetch);
+        assert_eq!(
+            plan_fetch(&ask("bt-over"), &bluetooth).err().as_deref(),
+            Some(WAITS_FOR_WIFI)
+        );
+        let internet = LinkPhone::on(false);
+        assert_eq!(
+            plan_fetch(&ask("internet-over"), &internet)
+                .map(|f| f.size)
+                .ok(),
+            Some(TRANSFER_MAX + 1),
+            "no limit by the internet road"
+        );
+    }
+
     #[tokio::test]
     async fn a_partial_is_continued_only_for_its_own_phone_and_only_while_kept() {
         let dir = temp_dir("resume-other");
@@ -3533,12 +3742,33 @@ mod tests {
         assert_eq!(refusal(&phone).map(|(k, _)| k), Some(KEY.to_string()));
     }
 
-    /// An owner phone on a link by the internet road, in memory: a stub for
-    /// the phone's side of kept folders (no real phone, no real network).
+    /// An owner phone on a link by the internet road (by the Bluetooth road
+    /// with `radio`), in memory: a stub for the phone's side of kept folders
+    /// and of the roads' rules (no real phone, no real network).
     struct LinkPhone {
         id: String,
         link: std::sync::Arc<dyn OpenLinkStream>,
+        radio: bool,
         sent: std::sync::Mutex<Vec<NetworkPacket>>,
+    }
+
+    impl LinkPhone {
+        /// The phone "phone" on a link by the Bluetooth road (`radio`) or
+        /// by the internet road.
+        fn on(radio: bool) -> Self {
+            Self {
+                id: "phone".to_string(),
+                link: fake_link().0,
+                radio,
+                sent: Default::default(),
+            }
+        }
+
+        fn refusal(&self) -> Option<String> {
+            let sent = self.sent.lock().unwrap();
+            let packet = sent.iter().find(|p| p.packet_type == FETCH_REFUSED)?;
+            Some(packet.body["reason"].as_str()?.to_string())
+        }
     }
 
     #[async_trait::async_trait]
@@ -3556,6 +3786,9 @@ mod tests {
         }
         fn link_streams(&self) -> Option<std::sync::Arc<dyn OpenLinkStream>> {
             Some(self.link.clone())
+        }
+        fn nearby_by_radio(&self) -> bool {
+            self.radio
         }
         async fn send_packet(&self, packet: &NetworkPacket) -> Result<()> {
             self.sent.lock().unwrap().push(packet.clone());
@@ -3658,6 +3891,7 @@ mod tests {
         let phone = LinkPhone {
             id: id.to_string(),
             link,
+            radio: false,
             sent: Default::default(),
         };
         let files = generated(7);
@@ -3766,6 +4000,7 @@ mod tests {
         let stranger = LinkPhone {
             id: "kept-live-stranger".to_string(),
             link: fake_link().0,
+            radio: false,
             sent: Default::default(),
         };
         let ask = NetworkPacket::new("kdeconnect.share.request")

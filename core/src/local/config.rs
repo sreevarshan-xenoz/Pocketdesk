@@ -71,6 +71,12 @@ pub struct Config {
     /// nothing a session there does not (sizes and timing, never content).
     #[serde(default = "default_true")]
     pub internet_files: bool,
+    /// Keep working over Bluetooth when neither the home nor the internet
+    /// road reaches this computer: it listens for a bonded phone on an
+    /// RFCOMM service while the radio is on. On by default; the system's
+    /// bond and Pocketdesk's pairing still decide who gets in.
+    #[serde(default = "default_true")]
+    pub bluetooth_fallback: bool,
     /// Received files keep the date they were last changed where they came
     /// from, and sent files carry theirs (K1). On by default.
     #[serde(default = "default_true")]
@@ -881,6 +887,7 @@ impl Default for Config {
             capture_copy: false,
             laser_pointer: true,
             internet_files: true,
+            bluetooth_fallback: true,
             keep_file_dates: true,
             capture_backend: CaptureBackend::Auto,
             mic_relay_device: None,
@@ -1187,6 +1194,7 @@ impl Config {
         "capture_copy",
         "laser_pointer",
         "internet_files",
+        "bluetooth_fallback",
         "keep_file_dates",
         "capture_backend",
         "mic_relay_device",
@@ -2148,6 +2156,20 @@ phone_battery = \"x\"
         config.internet_files = false;
         config.save_to(&path).unwrap();
         assert!(!Config::load_from(&path).unwrap().internet_files);
+    }
+
+    #[test]
+    fn bluetooth_fallback_defaults_on() {
+        assert!(Config::default().bluetooth_fallback);
+        assert!(Config::KNOWN_KEYS.contains(&"bluetooth_fallback"));
+        let path = temp("bluetooth-fallback");
+        let mut config = Config::load_from(&path).unwrap();
+        assert!(config.bluetooth_fallback, "a file without the key");
+        std::fs::write(&path, "control_port = 1800\n").unwrap();
+        assert!(Config::load_from(&path).unwrap().bluetooth_fallback);
+        config.bluetooth_fallback = false;
+        config.save_to(&path).unwrap();
+        assert!(!Config::load_from(&path).unwrap().bluetooth_fallback);
     }
 
     #[test]

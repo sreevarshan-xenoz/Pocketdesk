@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
+use crate::Road;
 use pocketdesk_core::protocol::kdeconnect::TransferIo;
 use tokio::io::AsyncReadExt;
 
@@ -32,34 +33,39 @@ static WAITERS: LazyLock<Mutex<HashMap<String, Arrived>>> = LazyLock::new(Defaul
 pub(crate) fn spawn_acceptor(acceptor: pocketdesk_core::streaming::LinkAcceptor) {
     tokio::spawn(async move {
         while let Some(stream) = acceptor.accept().await {
-            tokio::spawn(hand_over(stream));
+            tokio::spawn(async move {
+                hand_over(stream).await;
+            });
         }
     });
 }
 
 /// Read `stream`'s key line and give it to its waiter; drop one with no key
-/// in time, or a key no transfer waits for.
-async fn hand_over(mut stream: Box<dyn TransferIo>) {
+/// in time, or a key no transfer waits for. Whether a transfer took it. A
+/// stream on the internet road's link, or a Bluetooth transfer link once
+/// inside its TLS ([`crate::bluetooth::offer_link`]).
+pub(crate) async fn hand_over(mut stream: Box<dyn TransferIo>) -> bool {
     let mut line = [0u8; 33];
     match tokio::time::timeout(KEY_WAIT, stream.read_exact(&mut line)).await {
         Ok(Ok(_)) if line[32] == b'\n' => {}
         _ => {
             tracing::warn!("File transfer: dropped a stream without a key line");
-            return;
+            return false;
         }
     }
     let Ok(key) = std::str::from_utf8(&line[..32]) else {
-        return;
+        return false;
     };
     let waiter = WAITERS
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(key);
     match waiter {
-        Some(waiter) => {
-            let _ = waiter.send(stream);
+        Some(waiter) => waiter.send(stream).is_ok(),
+        None => {
+            tracing::warn!("File transfer: dropped a stream for no transfer waiting");
+            false
         }
-        None => tracing::warn!("File transfer: dropped a stream for no transfer waiting"),
     }
 }
 
@@ -103,29 +109,37 @@ impl Drop for Waiter {
 }
 
 /// Whether a transfer with the computer at `address`, `port` rides the
-/// link: the live control connection is to it, by the internet road, and
-/// files may go that way.
+/// link: the live control connection is to it, by the internet road with
+/// files allowed that way, or by Bluetooth, where nothing else reaches it
+/// and "Files over the internet" does not hold (the computer refuses a
+/// file too big for the road itself).
 pub(crate) async fn ready(address: &str, port: u16) -> bool {
-    INTERNET_FILES.load(Ordering::Relaxed) && by_internet(address, port).await
+    match road_to(address, port).await {
+        Some(Road::Internet) => INTERNET_FILES.load(Ordering::Relaxed),
+        Some(Road::Bluetooth) => true,
+        Some(Road::Home) | None => false,
+    }
 }
 
-/// Whether the live control connection is to `address`, `port`, by the
-/// internet road.
-async fn by_internet(address: &str, port: u16) -> bool {
-    crate::CONTROL_OVER_INTERNET.load(Ordering::SeqCst)
-        && (*crate::CONTROL_PEER)
-            .lock()
-            .await
-            .as_ref()
-            .is_some_and(|(host, live)| host == address && *live == port)
+/// The road of the live control connection, when it is to `address`,
+/// `port`.
+async fn road_to(address: &str, port: u16) -> Option<Road> {
+    let road = crate::control_road();
+    (*crate::CONTROL_PEER)
+        .lock()
+        .await
+        .as_ref()
+        .is_some_and(|(host, live)| host == address && *live == port)
+        .then_some(road)
 }
 
 /// Whether the live control connection to the computer at `address` came by
-/// the internet road (V8): its home address most likely does not answer. How
-/// the link was dialed, not a reading of now: a phone back home keeps it. By
-/// host alone, as a session names the stream port, not the control one.
+/// the internet road (V8) or by Bluetooth: its home address most likely
+/// does not answer. How the link was dialed, not a reading of now: a phone
+/// back home keeps it. By host alone, as a session names the stream port,
+/// not the control one.
 pub(crate) async fn home_unreachable(address: &str) -> bool {
-    crate::CONTROL_OVER_INTERNET.load(Ordering::SeqCst)
+    crate::control_road() != Road::Home
         && (*crate::CONTROL_PEER)
             .lock()
             .await
@@ -164,7 +178,9 @@ impl Arrival {
         }
         // Linked by the internet road but with the switch off: nothing else
         // can reach that computer, so say why now.
-        if !INTERNET_FILES.load(Ordering::Relaxed) && by_internet(address, port).await {
+        if !INTERNET_FILES.load(Ordering::Relaxed)
+            && road_to(address, port).await == Some(Road::Internet)
+        {
             return Err("Files over the internet are off in this phone's Settings".to_string());
         }
         tokio::net::TcpListener::bind("0.0.0.0:0")
@@ -259,6 +275,59 @@ mod tests {
         let key = "fedcba9876543210fedcba9876543210";
         drop(Waiter::for_key(key));
         assert!(!WAITERS.lock().unwrap().contains_key(key));
+    }
+
+    /// What each road means for a transfer with the computer linked by it:
+    /// home dials back; the internet road rides the link while "Files over
+    /// the internet" is on; Bluetooth rides the link whatever that says.
+    /// Home does not answer on either of the other two.
+    #[tokio::test]
+    async fn each_road_says_how_a_transfer_arrives() {
+        let _globals = crate::api::TRANSFER_TEST_LOCK.lock().await;
+        let was_peer = crate::CONTROL_PEER.lock().await.clone();
+        let was_road = crate::control_road();
+        let was_files = INTERNET_FILES.load(Ordering::Relaxed);
+        *crate::CONTROL_PEER.lock().await = Some(("192.0.2.10".to_string(), 1716));
+        let mut seen = Vec::new();
+        for road in [Road::Home, Road::Internet, Road::Bluetooth] {
+            crate::set_control_road(road);
+            for files in [true, false] {
+                INTERNET_FILES.store(files, Ordering::Relaxed);
+                seen.push((
+                    road,
+                    files,
+                    ready("192.0.2.10", 1716).await,
+                    home_unreachable("192.0.2.10").await,
+                ));
+            }
+            assert!(!ready("192.0.2.11", 1716).await, "another computer");
+            assert!(!ready("192.0.2.10", 1717).await, "another port");
+            assert!(!home_unreachable("192.0.2.11").await);
+        }
+        crate::set_control_road(Road::Internet);
+        INTERNET_FILES.store(false, Ordering::Relaxed);
+        let internet_off = Arrival::new("192.0.2.10", 1716, KEY).await.err();
+        crate::set_control_road(Road::Bluetooth);
+        let bluetooth_off = Arrival::new("192.0.2.10", 1716, KEY).await;
+        *crate::CONTROL_PEER.lock().await = was_peer;
+        crate::set_control_road(was_road);
+        INTERNET_FILES.store(was_files, Ordering::Relaxed);
+        assert_eq!(
+            seen,
+            [
+                (Road::Home, true, false, false),
+                (Road::Home, false, false, false),
+                (Road::Internet, true, true, true),
+                (Road::Internet, false, false, true),
+                (Road::Bluetooth, true, true, true),
+                (Road::Bluetooth, false, true, true),
+            ]
+        );
+        assert!(internet_off.is_some_and(|e| e.contains("Files over the internet")));
+        assert!(
+            bluetooth_off.is_ok_and(|arrival| arrival.port().is_none()),
+            "on the link, asking with no port"
+        );
     }
 
     #[test]

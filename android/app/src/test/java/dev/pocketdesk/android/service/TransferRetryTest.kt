@@ -76,6 +76,15 @@ class TransferRetryTest {
             5L,
             TransferRetry.delayBefore(1, "The computer refused the file: this phone's last transfer is still running", enabled = true),
         )
+        // Over Bluetooth one file goes at a time: the next goes once the other has crossed.
+        assertEquals(
+            5L,
+            TransferRetry.delayBefore(
+                1,
+                "The computer refused the file: one file at a time over Bluetooth: try again once the other has crossed",
+                enabled = true,
+            ),
+        )
     }
 
     @Test
@@ -252,5 +261,26 @@ class TransferRetryTest {
         assertNotEquals(id, SourceId.of("content://media/external/video/1", 301, 1_700_000_000_000))
         assertNotEquals(id, SourceId.of("content://media/external/video/1", 300, 1_700_000_000_001))
         assertNotEquals(id, SourceId.of("content://media/external/video/2", 300, 1_700_000_000_000))
+    }
+
+    /** A file that waited out the Bluetooth road's rules is not tried again now, even with no network. */
+    @Test
+    fun aFileThatWaitedForWifiIsNotTriedAgainNow() {
+        val waited = TransferRetry.Waited("Not sent: files over 8 MB wait for Wi-Fi")
+        assertNull(TransferRetry.delayAfter(1, waited, enabled = true))
+        assertEquals(
+            TransferRetry.Next.Stop(noNetwork = false),
+            TransferRetry.next(1, waited, enabled = true, hasNetwork = false, waitedOfflineSeconds = 0),
+        )
+    }
+
+    /** Held for the Bluetooth road: by the phone, or by the computer's refusal; nothing else. */
+    @Test
+    fun aFileHeldForTheBluetoothRoadIsTold() {
+        assertTrue(TransferRetry.held(TransferRetry.Waited("Not sent")))
+        assertTrue(TransferRetry.held(Exception("The computer refused the file: over 8 MiB over Bluetooth: the file waits for Wi-Fi")))
+        assertFalse(TransferRetry.held(Exception("The computer refused the file: the phone may not send files")))
+        assertFalse(TransferRetry.held(TransferRetry.Refusal("no room")))
+        assertFalse(TransferRetry.held(null))
     }
 }
