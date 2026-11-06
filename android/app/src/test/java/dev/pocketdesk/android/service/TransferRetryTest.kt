@@ -76,6 +76,15 @@ class TransferRetryTest {
             5L,
             TransferRetry.delayBefore(1, "The computer refused the file: this phone's last transfer is still running", enabled = true),
         )
+        // Over Bluetooth one file goes at a time: the next goes once the other has crossed.
+        assertEquals(
+            5L,
+            TransferRetry.delayBefore(
+                1,
+                "The computer refused the file: one file at a time over Bluetooth: try again once the other has crossed",
+                enabled = true,
+            ),
+        )
     }
 
     @Test

@@ -219,7 +219,8 @@ object TransferRetry {
     /**
      * Refusals that pass: while other transfers run, or a request that went
      * by the internet road while the home network came back (the computer
-     * dials a download back on the home network only).
+     * dials a download back on the home network only), or one file while
+     * another still crosses by Bluetooth (one at a time there).
      */
-    private val BUSY = listOf("busy", "still running", "need the local network")
+    private val BUSY = listOf("busy", "still running", "need the local network", "one file at a time over bluetooth")
 }
