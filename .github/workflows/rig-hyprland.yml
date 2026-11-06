@@ -1,0 +1,27 @@
+name: Rig (Hyprland, live)
+
+# The window lend's live test (owed check 272) against a Hyprland nested in a
+# headless Sway, in a throwaway Arch container. The host loads vgem so the
+# container has a render node for Hyprland's renderer. Runs only on pushes to
+# rig/ branches.
+on:
+  push:
+    branches: ['rig/**']
+  workflow_dispatch:
+
+jobs:
+  hyprland:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: A render node
+        run: |
+          sudo modprobe vgem || sudo apt-get install -y "linux-modules-extra-$(uname -r)" && sudo modprobe vgem || true
+          ls -la /dev/dri || true
+
+      - name: Rig and test
+        run: |
+          DRI=""; [ -d /dev/dri ] && DRI="--device /dev/dri"
+          docker run --rm --privileged $DRI -v "$PWD:/src" archlinux:latest bash /src/.github/rig/hyprland.sh
