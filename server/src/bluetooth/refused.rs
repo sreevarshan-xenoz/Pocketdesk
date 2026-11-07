@@ -12,6 +12,9 @@ use std::time::{Duration, Instant};
 /// for any of them too.
 const EVERY: Duration = Duration::from_secs(60);
 
+/// Past this many devices told, the expired are let go.
+const PRUNE_AT: usize = 256;
+
 /// Why a control connection over Bluetooth was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Refused {
@@ -56,6 +59,11 @@ fn due(told: &mut HashMap<Option<String>, Instant>, key: Option<String>, now: In
         .is_some_and(|at| now.duration_since(*at) < EVERY)
     {
         return false;
+    }
+    // A bonded device that claims a new id each time adds one each: the
+    // expired go first, which changes nothing they would say.
+    if told.len() > PRUNE_AT {
+        told.retain(|_, at| now.duration_since(*at) < EVERY);
     }
     told.insert(key, now);
     true
@@ -143,6 +151,22 @@ mod tests {
         );
         assert!(due(&mut told, a(), start + EVERY), "a after the minute");
         assert!(due(&mut told, None, start + EVERY));
+    }
+
+    #[test]
+    fn the_expired_are_let_go_past_the_limit() {
+        let mut told = HashMap::new();
+        let start = Instant::now();
+        for n in 0..=PRUNE_AT {
+            assert!(due(&mut told, Some(format!("id-{n}")), start));
+        }
+        let later = start + EVERY;
+        assert!(due(&mut told, Some("fresh".to_string()), later));
+        assert_eq!(told.len(), 1, "only the fresh one is left");
+        assert!(
+            !due(&mut told, Some("fresh".to_string()), later),
+            "and still counts"
+        );
     }
 
     #[test]
