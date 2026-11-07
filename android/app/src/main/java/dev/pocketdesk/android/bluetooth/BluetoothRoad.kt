@@ -128,7 +128,9 @@ object BluetoothRoad {
         val permitted = hasPermission(app)
         val adapter = adapter(app) ?: return null
         val radioOn = permitted && runCatching { adapter.isEnabled }.getOrDefault(false)
-        val bonded = if (permitted && radioOn) bondedAddresses(adapter) else emptySet()
+        // Null when the bonds could not be read: unknown, not "not bonded".
+        val bondsRead = if (permitted && radioOn) bondedAddresses(adapter) else emptySet()
+        val bonded = bondsRead.orEmpty()
         val now = SystemClock.elapsedRealtime()
         val restUntil = synchronized(rests) { rests[address]?.until ?: 0L }
         val go = BluetoothRoadRule.shouldDial(
@@ -142,7 +144,7 @@ object BluetoothRoad {
             now = now,
             restUntil = restUntil,
         )
-        noteBond(
+        if (bondsRead != null) noteBond(
             address,
             BluetoothRoadRule.unbonded(
                 enabled = Prefs.bluetoothFallback(app),
@@ -171,11 +173,11 @@ object BluetoothRoad {
     }
 
     @SuppressLint("MissingPermission")
-    private fun bondedAddresses(adapter: BluetoothAdapter): Set<String> =
+    private fun bondedAddresses(adapter: BluetoothAdapter): Set<String>? =
         try {
             adapter.bondedDevices.orEmpty().mapNotNull { it.address?.uppercase() }.toSet()
         } catch (_: SecurityException) {
-            emptySet()
+            null
         }
 
     /** Say once that the computer at [address] is not dialed for want of a bond ([BluetoothRoadRule.unbonded]); again only after it was. */

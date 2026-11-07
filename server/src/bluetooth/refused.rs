@@ -77,8 +77,9 @@ fn words(why: Refused, name: &str) -> (&'static str, String) {
              Pair a phone at home first."
             .to_string(),
         Refused::OtherKey => format!(
-            "{name} tried to connect over Bluetooth with a key this computer does not know. \
-             Connect it at home once, or pair it again."
+            "A device claiming to be {name} tried to connect over Bluetooth with a key this \
+             computer does not know. If it was your phone, connect it at home once, or pair it \
+             again."
         ),
         Refused::Computer => {
             format!("{name} tried to connect over Bluetooth, which is for phones only.")
@@ -182,7 +183,7 @@ mod tests {
         );
         let (_, body) = words(Refused::OtherKey, "Pixel");
         assert!(
-            body.starts_with("Pixel ") && body.contains("at home"),
+            body.contains("claiming to be Pixel") && body.contains("at home"),
             "{body}"
         );
         let (_, body) = words(Refused::Computer, "Laptop");
