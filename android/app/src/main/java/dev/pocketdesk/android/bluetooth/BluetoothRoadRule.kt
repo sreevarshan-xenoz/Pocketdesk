@@ -62,6 +62,25 @@ object BluetoothRoadRule {
     }
 
     /**
+     * Whether [shouldDial] would dial but for the bond: the road may be
+     * used and the computer told the phone its radio's address, but the
+     * phone is not bonded with that radio. The phone never bonds by
+     * itself, so this is worth a line in the log ([BluetoothRoad] says it
+     * once per computer), not a silent skip.
+     */
+    fun unbonded(
+        enabled: Boolean,
+        permitted: Boolean,
+        radioOn: Boolean,
+        knownAddress: String?,
+        bonded: Set<String>,
+    ): Boolean {
+        if (!enabled || !permitted || !radioOn || knownAddress == null) return false
+        val known = knownAddress.uppercase()
+        return bonded.none { it.uppercase() == known }
+    }
+
+    /**
      * Whether a transfer of [bytes] may start now on [road] (the control
      * link's, `nativeControlRoad`): on Bluetooth, a file over
      * [TRANSFER_MAX] waits for Wi-Fi, and any file waits while the phone

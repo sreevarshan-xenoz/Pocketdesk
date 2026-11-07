@@ -132,6 +132,24 @@ class BluetoothRoadRuleTest {
         assertFalse(BluetoothRoadRule.tryLinkAgain(startedAt = 0L, now = 5_500L))
         assertTrue(BluetoothRoadRule.LINK_TRY_MS <= 6_000L)
     }
+
+    @Test
+    fun says_when_only_the_bond_is_missing() {
+        fun unbonded(
+            enabled: Boolean = true,
+            permitted: Boolean = true,
+            radioOn: Boolean = true,
+            knownAddress: String? = computer,
+            bonded: Set<String> = emptySet(),
+        ) = BluetoothRoadRule.unbonded(enabled, permitted, radioOn, knownAddress, bonded)
+        assertTrue(unbonded())
+        assertTrue("earbuds bonded are not the computer", unbonded(bonded = setOf(earbuds)))
+        assertFalse(unbonded(bonded = setOf(computer.lowercase())))
+        assertFalse("the switch off says nothing", unbonded(enabled = false))
+        assertFalse("no permission is said in Settings", unbonded(permitted = false))
+        assertFalse("the radio off is not the bond", unbonded(radioOn = false))
+        assertFalse("never told where to dial", unbonded(knownAddress = null))
+    }
 }
 
 class BluetoothTransferRuleTest {

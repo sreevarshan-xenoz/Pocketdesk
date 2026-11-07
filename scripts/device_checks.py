@@ -6619,6 +6619,63 @@ def bt_service(raw: Optional[object]) -> Optional[str]:
     return service.lower() if isinstance(service, str) else None
 
 
+def bt_address(raw: Optional[object]) -> Optional[str]:
+    """The computer's radio address a saved computer's Bluetooth info names
+    (as `bt_service`), upper case."""
+    if not isinstance(raw, str):
+        return None
+    try:
+        address = json.loads(raw).get("address")
+    except (ValueError, AttributeError):
+        return None
+    return address.upper() if isinstance(address, str) else None
+
+
+BT_ADDRESS = re.compile(r"\b(?:[0-9A-Fa-fX]{2}:){5}[0-9A-Fa-fX]{2}\b")
+
+
+def bonded_addresses(dump: str) -> Optional[list[str]]:
+    """The addresses `dumpsys bluetooth_manager` lists under "Bonded
+    devices:", upper case, some perhaps masked (`XX:XX:XX:XX:12:34` on newer
+    Android); None when it has no such list (it could not be read)."""
+    lines = dump.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip().rstrip(":").lower() != "bonded devices":
+            continue
+        indent = len(line) - len(line.lstrip())
+        found = []
+        for entry in lines[i + 1:]:
+            if not entry.strip() or len(entry) - len(entry.lstrip()) <= indent:
+                break
+            match = BT_ADDRESS.search(entry)
+            if match:
+                found.append(match.group(0).upper())
+        return found
+    return None
+
+
+def bonded_with(addresses: list[str], address: str) -> bool:
+    """Whether `address` is among `addresses`, where a masked byte (`XX`)
+    matches any."""
+    want = address.upper().split(":")
+    return any(
+        all(have in ("XX", byte) for have, byte in zip(listed.split(":"), want))
+        for listed in addresses
+    )
+
+
+def bt_bonded(ctx: Ctx) -> Optional[bool]:
+    """Whether the phone is bonded with the radio the throwaway told it of;
+    None when that cannot be read (the check then goes on and says what it
+    sees). The phone never dials a computer it is not bonded with, and says
+    so only in its log."""
+    address = bt_address(ctx.phone.prefs("pocketdesk-host").get("bluetooth:127.0.0.1"))
+    listed = bonded_addresses(adb("shell", "dumpsys", "bluetooth_manager"))
+    if address is None or listed is None:
+        return None
+    return bonded_with(listed, address)
+
+
 def link_uuid(service: str) -> str:
     """The transfer service that goes with `service`: the lowest bit of its
     last byte flipped (core::protocol::bluetooth::link_uuid)."""
@@ -6706,6 +6763,9 @@ def bt_check(ctx: Ctx, body: Callable[[Ctx], tuple[str, str]]) -> tuple[str, str
                 return "TIMEOUT", why
             if not wait_for(lambda: knows_bt(ctx), 30, 2):
                 return "FAIL", f"the phone was not told the throwaway's Bluetooth service {BT_TEST_SERVICE} at home"
+        if bt_bonded(ctx) is False:
+            return "SKIP", ("the phone is not bonded with this computer's Bluetooth radio: pair them once"
+                            " in the phone's Bluetooth settings (it never dials an unbonded computer)")
         return body(ctx)
     finally:
         # Each step whatever the one before did; Wi-Fi first.
