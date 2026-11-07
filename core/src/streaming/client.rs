@@ -1360,6 +1360,10 @@ async fn recv_with_cancel(
     let (arrival_tx, mut arrivals) = mpsc::channel::<Arrival>(ARRIVALS);
     let mut stops: std::collections::BTreeMap<u64, tokio::sync::oneshot::Sender<()>> =
         std::collections::BTreeMap::new();
+    // The streams other than media keep the order they were opened in (the
+    // pointer's messages are dropped when one arrives after a newer): each
+    // reader hands the next its turn once its header is read ([`Turn`]).
+    let mut last_turn: Option<tokio::sync::oneshot::Receiver<()>> = None;
     let mut order = super::frame_order::FrameOrder::default();
     let mut hole_check = tokio::time::interval(HOLE_CHECK);
     hole_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -1529,11 +1533,17 @@ async fn recv_with_cancel(
             result = connection.accept_uni() => {
                 match result {
                     Ok(recv_stream) => {
+                        let (done, next_turn) = tokio::sync::oneshot::channel();
+                        let turn = Turn {
+                            after: last_turn.replace(next_turn),
+                            done,
+                        };
                         tokio::spawn(read_stream(
                             recv_stream,
                             (remote.input_only, remote.sound),
                             arrival_tx.clone(),
                             video_bytes.clone(),
+                            turn,
                         ));
                     }
                     Err(ConnectionError::Closed) => {
@@ -1623,35 +1633,70 @@ enum Arrival {
     ),
 }
 
+/// A stream's turn among the streams accepted, for the kinds that keep the
+/// order they were opened in: `after` is the turn of the stream accepted
+/// before (none for the first), `done` hands the next its turn.
+struct Turn {
+    after: Option<tokio::sync::oneshot::Receiver<()>>,
+    done: tokio::sync::oneshot::Sender<()>,
+}
+
+impl Turn {
+    /// Wait for the streams before to have had their turn (a turn dropped
+    /// unsent is had).
+    async fn wait(&mut self) {
+        if let Some(after) = self.after.take() {
+            let _ = after.await;
+        }
+    }
+
+    /// This stream needs no turn (media, or no header): it hands the next
+    /// its turn as soon as the ones before had theirs, without waiting here.
+    fn pass(self) {
+        tokio::spawn(async move {
+            let mut turn = self;
+            turn.wait().await;
+            let _ = turn.done.send(());
+        });
+    }
+}
+
 /// Read one stream the computer opened (BG3: each on a task of its own),
 /// for a session that is `(input_only, sound)`: the media it takes
 /// ([`remote_stream`]) whole, a video frame said first as coming and
 /// stopped when the receive loop says (a newer keyframe made it moot); the
-/// pointer's messages and any other kind handed over unread.
+/// pointer's messages and any other kind handed over unread, in the order
+/// their streams were opened (`turn`).
 async fn read_stream(
     mut stream: Box<dyn super::connection::InStream>,
     (input_only, sound): (bool, bool),
     arrivals: mpsc::Sender<Arrival>,
     video_bytes: Arc<std::sync::atomic::AtomicU64>,
+    mut turn: Turn,
 ) {
     let mut header_bytes = [0u8; transport::PacketHeader::SIZE];
     if let Err(e) = stream.read_exact(&mut header_bytes).await {
         debug!("Failed to read packet header: {e}");
+        turn.pass();
         return;
     }
     let header = match transport::PacketHeader::from_bytes(&header_bytes) {
         Ok(h) => h,
         Err(e) => {
             warn!("Invalid packet header: {e}");
+            turn.pass();
             return;
         }
     };
     let media = header.stream_kind != transport::STREAM_KIND_CURSOR
         && remote_stream(header.stream_kind, input_only, sound) == RemoteStream::Media;
     if !media {
+        turn.wait().await;
         let _ = arrivals.send(Arrival::Other(header, stream)).await;
+        let _ = turn.done.send(());
         return;
     }
+    turn.pass();
     match header.stream_kind {
         // Sound flows even when video does not, so it is not counted.
         transport::STREAM_KIND_AUDIO => match stream.read_to_end(MAX_AUDIO_PACKET).await {
