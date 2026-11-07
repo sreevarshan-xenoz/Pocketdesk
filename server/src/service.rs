@@ -1906,14 +1906,22 @@ where
                 // ways. The radio's own bond is not the phone's key.
                 // Phones only: one of the owner's computers is refused here
                 // (also in `bluetooth_may_act`), as one being recorded is.
-                let admitted = !crate::peer_computers::being_recorded(&device_id)
-                    && !crate::plugins::pair::is_computer_device(&device_id)
-                    && crate::plugins::pair::bluetooth_may_act(&device_id, peer_key.as_ref());
-                if !admitted {
-                    tracing::warn!(
-                        "Refused {device_id}'s control connection over Bluetooth: not paired, \
-                         or not with this key"
-                    );
+                // The owner is told why, in Activity and a notification
+                // (`bluetooth::refused`).
+                use crate::bluetooth::Refused;
+                let refused = if crate::peer_computers::being_recorded(&device_id)
+                    || crate::plugins::pair::is_computer_device(&device_id)
+                {
+                    Some(Refused::Computer)
+                } else if crate::plugins::pair::bluetooth_may_act(&device_id, peer_key.as_ref()) {
+                    None
+                } else if crate::plugins::pair::is_paired_device(&device_id) {
+                    Some(Refused::OtherKey)
+                } else {
+                    Some(Refused::NotPaired)
+                };
+                if let Some(why) = refused {
+                    crate::bluetooth::refused(&device_id, why);
                     say_refused(&writer).await;
                     return Ok(());
                 }

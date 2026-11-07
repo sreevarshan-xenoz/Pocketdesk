@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1455 open items.
+1457 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 112 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 114 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 205 |
 | A phone with a SIM | 41 |
@@ -262,6 +262,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The phone's switch, "Keep working over Bluetooth when Wi-Fi drops" beside "Files over the internet": on by default; turning it on asks for Nearby devices where not granted; refused, the switch shows off and says why, and nothing dials; off while linked, the road ends. (where: here)
 - The words on the phone: "Over Bluetooth" on the computer's card on Home while linked so (and "On this network" again after); the transfer notification's "Waits for Wi-Fi" and "Waits until the call or music stops"; the computer's own refusals (over 8 MiB, one at a time) in the app's words, in English, Spanish and Tamil; the bridge's road 2 shown as Bluetooth wherever the app names the road (the Home card; say whether any other place, such as the connection details or the doctor, calls it home or the internet). (where: here)
 - The away lock over Bluetooth: with the throwaway's lock seam and `away_lock` on, the phone linked only over Bluetooth counts as near (no lock), and once the throwaway's switch goes off it no longer does (a lock line in the seam file after the away minutes). (where: here)
+- A refusal said: a phone paired with the throwaway at home, its key then changed (the app's data cleared and paired with another throwaway), Wi-Fi off: the throwaway's Activity shows "Refused over Bluetooth: not the key paired here" once, `pocketdesk events` holds one `bluetooth_refused` with `reason` `other_key` within the minute however often the phone dials, and one desktop notification shows. (where: here)
+- Not bonded: the OPPO's bond with this computer removed by hand in the phone's Bluetooth settings, Wi-Fi off: the phone's log says "not dialing the computer over Bluetooth: this phone is not bonded with it" once, not at each dial, and again only after a bond and its removal; `bt1-takeover` then SKIPs with "not bonded" before it cuts Wi-Fi. (where: here)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 

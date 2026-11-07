@@ -12,8 +12,11 @@
 //! `bluetooth_fallback` is on and the computer has a radio.
 
 mod links;
+mod refused;
 #[cfg(windows)]
 mod windows;
+
+pub(crate) use refused::{Refused, refused};
 
 #[cfg(test)]
 pub(crate) use links::turn;
