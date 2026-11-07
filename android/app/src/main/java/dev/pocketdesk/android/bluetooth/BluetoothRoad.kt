@@ -63,6 +63,9 @@ object BluetoothRoad {
 
     private val rests = HashMap<String, Rest>()
 
+    /** The computers (by [dial]'s address) the log said are not bonded, said once until they are. */
+    private val toldUnbonded = HashSet<String>()
+
     /** One dial at a time: the many callers of a connect do not each open one. */
     private val dialing = ReentrantLock()
 
@@ -125,7 +128,9 @@ object BluetoothRoad {
         val permitted = hasPermission(app)
         val adapter = adapter(app) ?: return null
         val radioOn = permitted && runCatching { adapter.isEnabled }.getOrDefault(false)
-        val bonded = if (permitted && radioOn) bondedAddresses(adapter) else emptySet()
+        // Null when the bonds could not be read: unknown, not "not bonded".
+        val bondsRead = if (permitted && radioOn) bondedAddresses(adapter) else emptySet()
+        val bonded = bondsRead.orEmpty()
         val now = SystemClock.elapsedRealtime()
         val restUntil = synchronized(rests) { rests[address]?.until ?: 0L }
         val go = BluetoothRoadRule.shouldDial(
@@ -138,6 +143,16 @@ object BluetoothRoad {
             otherRoadsFailed = otherRoadsFailed,
             now = now,
             restUntil = restUntil,
+        )
+        if (bondsRead != null) noteBond(
+            address,
+            BluetoothRoadRule.unbonded(
+                enabled = Prefs.bluetoothFallback(app),
+                permitted = permitted,
+                radioOn = radioOn,
+                knownAddress = info.address,
+                bonded = bonded,
+            ),
         )
         if (!go || !dialing.tryLock()) return null
         try {
@@ -158,12 +173,27 @@ object BluetoothRoad {
     }
 
     @SuppressLint("MissingPermission")
-    private fun bondedAddresses(adapter: BluetoothAdapter): Set<String> =
+    private fun bondedAddresses(adapter: BluetoothAdapter): Set<String>? =
         try {
             adapter.bondedDevices.orEmpty().mapNotNull { it.address?.uppercase() }.toSet()
         } catch (_: SecurityException) {
-            emptySet()
+            null
         }
+
+    /** Say once that the computer at [address] is not dialed for want of a bond ([BluetoothRoadRule.unbonded]); again only after it was. */
+    private fun noteBond(address: String, unbonded: Boolean) {
+        val first = synchronized(toldUnbonded) {
+            if (unbonded) {
+                toldUnbonded.add(address)
+            } else {
+                toldUnbonded.remove(address)
+                false
+            }
+        }
+        if (first) {
+            Log.i(TAG, "not dialing the computer over Bluetooth: this phone is not bonded with it (pair them once in Android's Bluetooth settings)")
+        }
+    }
 
     private fun failed(address: String) {
         synchronized(rests) {

@@ -95,6 +95,23 @@ class PureParts(unittest.TestCase):
         self.assertFalse(dc.status_running('{"api": 1, "server": {"running": false}}'))
         self.assertFalse(dc.status_running("no server"))
 
+    def test_the_phone_s_bonded_devices(self):
+        dump = (
+            "Bluetooth Status\n  enabled: true\n  Bonded devices:\n"
+            "    XX:XX:XX:XX:53:01 [ DUAL ] Laptop\n"
+            "    00:00:5e:00:53:02 [BR/EDR] Earbuds\n"
+            "\n  ScanMode: SCAN_MODE_CONNECTABLE\n  Other: 00:00:5E:00:53:09\n"
+        )
+        listed = dc.bonded_addresses(dump)
+        self.assertEqual(listed, ["XX:XX:XX:XX:53:01", "00:00:5E:00:53:02"])
+        self.assertTrue(dc.bonded_with(listed, "00:00:5e:00:53:01"), "a masked byte matches any")
+        self.assertTrue(dc.bonded_with(listed, "00:00:5E:00:53:02"))
+        self.assertFalse(dc.bonded_with(listed, "00:00:5E:00:53:09"), "listed after the section is not bonded")
+        self.assertEqual(dc.bonded_addresses("  Bonded devices:\n  ScanMode: x\n"), [])
+        self.assertIsNone(dc.bonded_addresses("Can't find service: bluetooth_manager"))
+        self.assertEqual(dc.bt_address('{"address": "00:00:5e:00:53:01", "service": "x"}'), "00:00:5E:00:53:01")
+        self.assertIsNone(dc.bt_address("not json"))
+
     def test_device_commands_keep_empty_and_spaced_arguments(self):
         self.assertEqual(dc.device_command("am", "--es", "text", ""), "am --es text ''")
         self.assertEqual(dc.device_command("--es", "text", "In hand"), "--es text 'In hand'")
