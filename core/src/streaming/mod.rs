@@ -17,6 +17,7 @@ pub mod dht;
 pub mod dmabuf;
 pub mod encoder_detect;
 pub mod ffmpeg_flags;
+pub mod frame_order;
 mod frame_pool;
 #[cfg(all(windows, feature = "capture", feature = "inproc-windows"))]
 mod gpu_frame;
