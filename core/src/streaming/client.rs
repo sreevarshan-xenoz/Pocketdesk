@@ -1351,11 +1351,18 @@ async fn recv_with_cancel(
     reset_e2e_probe();
     reset_video_window();
 
-    // Video sequence-gap tracking for IDR requests. Because each frame is sent
-    // on its own unidirectional stream, frames can complete out of order; we
-    // only ask for a fresh IDR when a *non-keyframe* arrives with a gap before
-    // it (a broken delta chain), and rate-limit so we don't spam the server.
-    let mut last_video_seq: Option<u64> = None;
+    // BG3: each stream is read by a task of its own ([`read_stream`]), so a
+    // frame stuck on a lost packet holds up neither the frames after it nor
+    // the sound; `order` puts the frames back in sequence for the decoder,
+    // skipping those a newer keyframe made moot (each reader is told to
+    // stop by its `stops` entry, decided here only). A hole asks for a
+    // keyframe only when nothing on its way fills it, at most every 250 ms.
+    let (arrival_tx, mut arrivals) = mpsc::channel::<Arrival>(ARRIVALS);
+    let mut stops: std::collections::BTreeMap<u64, tokio::sync::oneshot::Sender<()>> =
+        std::collections::BTreeMap::new();
+    let mut order = super::frame_order::FrameOrder::default();
+    let mut hole_check = tokio::time::interval(HOLE_CHECK);
+    hole_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_idr_request: Option<std::time::Instant> = None;
     let mut freeze = FreezeClock::default();
     const IDR_REQUEST_INTERVAL: Duration = Duration::from_millis(250);
@@ -1371,6 +1378,10 @@ async fn recv_with_cancel(
     });
 
     loop {
+        // The frames ready for the decoder this turn, and whether a hole
+        // was given up (the picture is broken until a keyframe).
+        let mut ready = Vec::new();
+        let mut gave_up = false;
         tokio::select! {
             biased;
 
@@ -1379,24 +1390,57 @@ async fn recv_with_cancel(
                 break;
             }
 
-            result = connection.accept_uni() => {
-                match result {
-                    Ok(mut recv_stream) => {
-                        // Read the 18-byte packet header
-                        let mut header_bytes = [0u8; 18];
-                        if let Err(e) = recv_stream.read_exact(&mut header_bytes).await {
-                            debug!("Failed to read packet header: {e}");
-                            continue;
+            Some(arrival) = arrivals.recv() => {
+                let now = std::time::Instant::now();
+                match arrival {
+                    Arrival::Coming(header, stop) => {
+                        order.coming(&header);
+                        if order.is_moot(header.sequence) {
+                            let _ = stop.send(());
+                        } else {
+                            stops.insert(header.sequence, stop);
                         }
-
-                        let header = match transport::PacketHeader::from_bytes(&header_bytes) {
-                            Ok(h) => h,
-                            Err(e) => {
-                                warn!("Invalid packet header: {e}");
-                                continue;
-                            }
+                    }
+                    Arrival::Video(header, Ok(data)) => {
+                        stops.remove(&header.sequence);
+                        ready = order.arrived(header, data, now);
+                    }
+                    Arrival::Video(header, Err(e)) => {
+                        stops.remove(&header.sequence);
+                        debug!(seq = header.sequence, "A frame's stream ended without it: {e}");
+                        ready = order.lost(header.sequence, now);
+                    }
+                    Arrival::Audio(header, data) => {
+                        // Offered, never insisted on: see `try_deliver_audio`.
+                        let packet = AudioPacket {
+                            data,
+                            sequence: header.sequence,
+                            timestamp: now,
+                            is_config: false,
                         };
 
+                        match try_deliver_audio(&audio_tx, packet) {
+                            AudioDelivery::Queued => {}
+                            AudioDelivery::Dropped => {
+                                audio_dropped += 1;
+                                if audio_dropped.is_multiple_of(100) {
+                                    debug!(
+                                        dropped = audio_dropped,
+                                        "Audio consumer behind — packets skipped"
+                                    );
+                                }
+                            }
+                            AudioDelivery::NoConsumer => {
+                                if !audio_consumer_gone {
+                                    audio_consumer_gone = true;
+                                    info!(
+                                        "Audio consumer gone — audio skipped, video continues"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    Arrival::Other(header, mut recv_stream) => {
                         // The other computer's pointer (local cursor):
                         // read only by a session that asked for it, and
                         // never as a picture. Its messages are read in a
@@ -1475,115 +1519,22 @@ async fn recv_with_cancel(
                                 connection.close(0u32, b"input-only session not known here");
                                 break;
                             }
-                            RemoteStream::Media => {}
+                            // Media never comes this way.
+                            RemoteStream::Media => continue,
                         }
+                    }
+                }
+            }
 
-                        // Read the payload (up to 10 MB for video, 64 KB for audio)
-                        let max_size = if header.stream_kind == transport::STREAM_KIND_AUDIO {
-                            64 * 1024
-                        } else {
-                            10 * 1024 * 1024
-                        };
-                        // Video is counted as it arrives (a slow keyframe is
-                        // not a dead link); audio flows even when video does
-                        // not, so it is not counted.
-                        let read = if header.stream_kind == transport::STREAM_KIND_AUDIO {
-                            recv_stream.read_to_end(max_size).await
-                        } else {
-                            recv_stream.read_to_end_counting(max_size, &video_bytes).await
-                        };
-                        let data = match read {
-                            Ok(data) => data,
-                            Err(e) => {
-                                warn!("Failed to read packet data (seq={}, kind={}): {e}", header.sequence, header.stream_kind);
-                                continue;
-                            }
-                        };
-
-                        if header.stream_kind == transport::STREAM_KIND_AUDIO {
-                            // Offered, never insisted on: see `try_deliver_audio`.
-                            let packet = AudioPacket {
-                                data,
-                                sequence: header.sequence,
-                                timestamp: std::time::Instant::now(),
-                                is_config: false,
-                            };
-
-                            match try_deliver_audio(&audio_tx, packet) {
-                                AudioDelivery::Queued => {}
-                                AudioDelivery::Dropped => {
-                                    audio_dropped += 1;
-                                    if audio_dropped.is_multiple_of(100) {
-                                        debug!(
-                                            dropped = audio_dropped,
-                                            "Audio consumer behind — packets skipped"
-                                        );
-                                    }
-                                }
-                                AudioDelivery::NoConsumer => {
-                                    if !audio_consumer_gone {
-                                        audio_consumer_gone = true;
-                                        info!(
-                                            "Audio consumer gone — audio skipped, video continues"
-                                        );
-                                    }
-                                }
-                            }
-                        } else {
-                            // Gap detection: a missing frame between the last
-                            // delta we got and this one breaks the decode chain.
-                            // A keyframe restarts the chain, so it never needs a
-                            // request; a delta after a gap does.
-                            let gap = !header.is_keyframe
-                                && last_video_seq
-                                    .is_some_and(|last| header.sequence > last + 1);
-                            if gap {
-                                let now = std::time::Instant::now();
-                                freeze.gap(now);
-                                let throttled = last_idr_request
-                                    .is_some_and(|t| now.duration_since(t) < IDR_REQUEST_INTERVAL);
-                                if !throttled {
-                                    last_idr_request = Some(now);
-                                    debug!(
-                                        seq = header.sequence,
-                                        last = ?last_video_seq,
-                                        "Video sequence gap — requesting IDR"
-                                    );
-                                    send_keyframe_request(connection).await;
-                                }
-                            }
-                            if header.is_keyframe
-                                && let Some(took) = freeze.keyframe(std::time::Instant::now())
-                            {
-                                debug!(ms = took.as_millis() as u64, "Recovered from a freeze");
-                                samples.recovery.push(took.as_micros() as u64);
-                            }
-                            last_video_seq = Some(header.sequence);
-                            record_video_sequence(header.sequence);
-
-                            // R4 E3: compositor-true latency sample — the
-                            // header's age is capture→send on the desktop
-                            // clock, plus half the transport RTT for the
-                            // wire leg. The EWMA feeds the HUD; the raw
-                            // sample joins the batch the server turns into
-                            // the session's e2e tail.
-                            let rtt = connection.stats().rtt;
-                            record_e2e_sample(e2e_sample_ms(header.timestamp_us, rtt));
-                            samples.e2e.push(e2e_sample_us(header.timestamp_us, rtt));
-
-                            // Route to video channel
-                            let packet = EncodedPacket {
-                                data,
-                                is_keyframe: header.is_keyframe,
-                                timestamp: std::time::Instant::now(),
-                                sequence: header.sequence,
-                            };
-
-                            if frame_tx.send(packet).await.is_err() {
-                                debug!("Frame receiver dropped — channel closed");
-                                break;
-                            }
-                        }
+            result = connection.accept_uni() => {
+                match result {
+                    Ok(recv_stream) => {
+                        tokio::spawn(read_stream(
+                            recv_stream,
+                            (remote.input_only, remote.sound),
+                            arrival_tx.clone(),
+                            video_bytes.clone(),
+                        ));
                     }
                     Err(ConnectionError::Closed) => {
                         debug!("Connection closed by peer");
@@ -1595,10 +1546,202 @@ async fn recv_with_cancel(
                     }
                 }
             }
+
+            _ = hole_check.tick(), if order.hole_since().is_some() => {
+                ready = order.give_up(std::time::Instant::now());
+                gave_up = !ready.is_empty();
+                if gave_up {
+                    debug!(frames = ready.len(), "A hole in the video given up");
+                }
+            }
+        }
+
+        if !deliver_frames(ready, &frame_tx, connection, &samples, &mut freeze).await {
+            debug!("Frame receiver dropped — channel closed");
+            break;
+        }
+
+        // A hole nothing fills, or one given up: ask for a keyframe.
+        let now = std::time::Instant::now();
+        if gave_up || order.should_ask(now, connection.stats().rtt) {
+            freeze.gap(order.hole_since().unwrap_or(now));
+            let throttled =
+                last_idr_request.is_some_and(|t| now.duration_since(t) < IDR_REQUEST_INTERVAL);
+            if !throttled {
+                last_idr_request = Some(now);
+                debug!(next = order.floor(), "Video hole — requesting IDR");
+                send_keyframe_request(connection).await;
+            }
+        }
+        // Frames the order made moot: their readers stop their streams.
+        let moot: Vec<u64> = stops
+            .keys()
+            .copied()
+            .filter(|seq| order.is_moot(*seq))
+            .collect();
+        for seq in moot {
+            if let Some(stop) = stops.remove(&seq) {
+                let _ = stop.send(());
+            }
         }
     }
 
+    if order.skipped > 0 {
+        debug!(
+            skipped = order.skipped,
+            "Video frames skipped as moot or lost"
+        );
+    }
     Ok(())
+}
+
+/// Arrivals waiting for the receive loop; a stream's reader waits past
+/// this.
+const ARRIVALS: usize = 256;
+
+/// How often a hole in the video is looked at for giving up.
+const HOLE_CHECK: Duration = Duration::from_millis(10);
+
+/// The largest video frame read.
+const MAX_VIDEO_FRAME: usize = 10 * 1024 * 1024;
+
+/// The largest sound packet read.
+const MAX_AUDIO_PACKET: usize = 64 * 1024;
+
+/// What a stream's reader ([`read_stream`]) hands the receive loop.
+enum Arrival {
+    /// A video frame's header: the rest is on its way.
+    Coming(transport::PacketHeader, tokio::sync::oneshot::Sender<()>),
+    /// A video frame whole, or why its stream ended without it.
+    Video(transport::PacketHeader, Result<Vec<u8>, ConnectionError>),
+    /// A sound packet.
+    Audio(transport::PacketHeader, Vec<u8>),
+    /// Any other kind, read by the loop as it comes.
+    Other(
+        transport::PacketHeader,
+        Box<dyn super::connection::InStream>,
+    ),
+}
+
+/// Read one stream the computer opened (BG3: each on a task of its own),
+/// for a session that is `(input_only, sound)`: the media it takes
+/// ([`remote_stream`]) whole, a video frame said first as coming and
+/// stopped when the receive loop says (a newer keyframe made it moot); the
+/// pointer's messages and any other kind handed over unread.
+async fn read_stream(
+    mut stream: Box<dyn super::connection::InStream>,
+    (input_only, sound): (bool, bool),
+    arrivals: mpsc::Sender<Arrival>,
+    video_bytes: Arc<std::sync::atomic::AtomicU64>,
+) {
+    let mut header_bytes = [0u8; transport::PacketHeader::SIZE];
+    if let Err(e) = stream.read_exact(&mut header_bytes).await {
+        debug!("Failed to read packet header: {e}");
+        return;
+    }
+    let header = match transport::PacketHeader::from_bytes(&header_bytes) {
+        Ok(h) => h,
+        Err(e) => {
+            warn!("Invalid packet header: {e}");
+            return;
+        }
+    };
+    let media = header.stream_kind != transport::STREAM_KIND_CURSOR
+        && remote_stream(header.stream_kind, input_only, sound) == RemoteStream::Media;
+    if !media {
+        let _ = arrivals.send(Arrival::Other(header, stream)).await;
+        return;
+    }
+    match header.stream_kind {
+        // Sound flows even when video does not, so it is not counted.
+        transport::STREAM_KIND_AUDIO => match stream.read_to_end(MAX_AUDIO_PACKET).await {
+            Ok(data) => {
+                let _ = arrivals.send(Arrival::Audio(header, data)).await;
+            }
+            Err(e) => warn!(
+                "Failed to read packet data (seq={}, kind={}): {e}",
+                header.sequence, header.stream_kind
+            ),
+        },
+        // Video, and (as before BG3) any other kind a picture session meets.
+        _ => {
+            let (stop_tx, stop) = tokio::sync::oneshot::channel();
+            if arrivals
+                .send(Arrival::Coming(header, stop_tx))
+                .await
+                .is_err()
+            {
+                return;
+            }
+            // A stop dropped unsent (the loop is done with this frame, or
+            // gone) is no stop: the read goes on until the stream ends.
+            let stopped = async {
+                if stop.await.is_err() {
+                    std::future::pending::<()>().await;
+                }
+            };
+            // Video is counted as it arrives (a slow keyframe is not a dead
+            // link).
+            let read = tokio::select! {
+                read = stream.read_to_end_counting(MAX_VIDEO_FRAME, &video_bytes) => Some(read),
+                () = stopped => None,
+            };
+            let read = match read {
+                Some(read) => read,
+                None => {
+                    stream.stop(transport::VIDEO_MOOT);
+                    Err(ConnectionError::Other("moot".into()))
+                }
+            };
+            let _ = arrivals.send(Arrival::Video(header, read)).await;
+        }
+    }
+}
+
+/// Hand the frames `ready` to the decoder in order, as the receive loop
+/// used to frame by frame: a keyframe ends a freeze, each counts toward the
+/// missed-frames window, and each gives an end-to-end sample that includes
+/// its wait for the frames before it. False once the decoder is gone.
+async fn deliver_frames(
+    ready: Vec<super::frame_order::Ready>,
+    frame_tx: &mpsc::Sender<EncodedPacket>,
+    connection: &SharedConnection,
+    samples: &ClientBatches,
+    freeze: &mut FreezeClock,
+) -> bool {
+    for frame in ready {
+        let header = frame.header;
+        if header.is_keyframe
+            && let Some(took) = freeze.keyframe(std::time::Instant::now())
+        {
+            debug!(ms = took.as_millis() as u64, "Recovered from a freeze");
+            samples.recovery.push(took.as_micros() as u64);
+        }
+        record_video_sequence(header.sequence);
+
+        // R4 E3: compositor-true latency sample — the header's age is
+        // capture→send on the desktop clock, plus the wait here for the
+        // frames before it (BG3), plus half the transport RTT for the wire
+        // leg. The EWMA feeds the HUD; the raw sample joins the batch the
+        // server turns into the session's e2e tail.
+        let age_us = header
+            .timestamp_us
+            .saturating_add(frame.held.as_micros() as u64);
+        let rtt = connection.stats().rtt;
+        record_e2e_sample(e2e_sample_ms(age_us, rtt));
+        samples.e2e.push(e2e_sample_us(age_us, rtt));
+
+        let packet = EncodedPacket {
+            data: frame.data,
+            is_keyframe: header.is_keyframe,
+            timestamp: std::time::Instant::now(),
+            sequence: header.sequence,
+        };
+        if frame_tx.send(packet).await.is_err() {
+            return false;
+        }
+    }
+    true
 }
 
 /// Best-effort IDR request to the server after a detected video gap.
@@ -1882,5 +2025,100 @@ mod tests {
             other => panic!("wrong variant: {other:?}"),
         }
         assert!(batch.take_chunk().is_none());
+    }
+
+    /// BG3, over a real QUIC connection: a frame stuck on a lost packet
+    /// holds up no other stream; the delta after it waits for it, a
+    /// keyframe goes at once, and the stuck frame's stream is stopped as
+    /// moot.
+    #[tokio::test]
+    async fn a_stuck_frame_holds_up_nothing_and_a_keyframe_makes_it_moot() {
+        use crate::streaming::connection::tests::loopback_pair;
+        let (client, server) = loopback_pair().await;
+        let (frame_tx, mut frames) = mpsc::channel(16);
+        let (audio_tx, _audio) = mpsc::channel(16);
+        let cancel = CancellationToken::new();
+        let receiver = tokio::spawn({
+            let cancel = cancel.clone();
+            async move {
+                recv_with_cancel(
+                    &client,
+                    frame_tx,
+                    audio_tx,
+                    cancel,
+                    Arc::new(ClientBatches::default()),
+                    Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                    RemoteFlags::default(),
+                )
+                .await
+            }
+        });
+        let header = |sequence, is_keyframe| {
+            transport::PacketHeader {
+                sequence,
+                stream_kind: transport::STREAM_KIND_VIDEO,
+                is_keyframe,
+                timestamp_us: 0,
+            }
+            .as_bytes()
+        };
+        let send = |sequence, is_keyframe, body: &'static [u8]| {
+            let server = server.clone();
+            async move {
+                let mut stream = server.open_uni().await.expect("open");
+                stream
+                    .write_all(&header(sequence, is_keyframe))
+                    .await
+                    .unwrap();
+                stream.write_all(body).await.unwrap();
+                stream.finish().unwrap();
+                stream
+            }
+        };
+        async fn next(frames: &mut mpsc::Receiver<EncodedPacket>) -> EncodedPacket {
+            tokio::time::timeout(Duration::from_secs(5), frames.recv())
+                .await
+                .expect("a frame in time")
+                .expect("open")
+        }
+
+        let _k0 = send(0, true, b"k0").await;
+        assert_eq!(next(&mut frames).await.sequence, 0);
+        // Frame 1 never ends: its header and part of it, then nothing.
+        let mut stuck = server.open_uni().await.expect("open");
+        stuck.write_all(&header(1, false)).await.unwrap();
+        stuck.write_all(b"part").await.unwrap();
+        let _d2 = send(2, false, b"d2").await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), frames.recv())
+                .await
+                .is_err(),
+            "2 waits for 1: the decoder takes frames in order"
+        );
+        let _k3 = send(3, true, b"k3").await;
+        let frame = next(&mut frames).await;
+        assert_eq!(
+            (frame.sequence, frame.is_keyframe),
+            (3, true),
+            "the keyframe goes at once"
+        );
+        assert_eq!(frame.data, b"k3");
+
+        // The phone stopped the stuck stream: writing to it fails soon.
+        let stopped = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if stuck.write_all(b"more").await.is_err() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await;
+        assert!(stopped.is_ok(), "the moot frame's stream is stopped");
+
+        let _d4 = send(4, false, b"d4").await;
+        assert_eq!(next(&mut frames).await.sequence, 4);
+        cancel.cancel();
+        receiver.await.unwrap().unwrap();
     }
 }

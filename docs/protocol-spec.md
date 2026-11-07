@@ -100,12 +100,14 @@ The stream is QUIC (`pocketdesk-stream`).
 
   A cast then sends `[0xFA,…]` streams. Input travels as tagged packets, tags 0 to 15. The tables are in `docs/protocol.md` §3.2, from `core/src/streaming/{client,streamer,input_packet}.rs`.
 - **From the computer:** each frame or audio packet goes on its own uni-stream, with an 18-byte header, little-endian:
-  - sequence, u64;
+  - sequence, u64 (for video, the frames sent on the connection, counted once per session; before BG3 each encoder's, from 0 again when it was rebuilt);
   - kind, u8: `0` video, `1` audio, `2` ready (a session without a picture was admitted; a sound session's carries one byte: bit 7 set, bit 0 the computer's sound sent, bit 1 the phone's mic played; a screen session's, sent as it is admitted, one byte of what the computer takes: bit 7 set, bit 0 a pen, only with the Input permission, bit 1 input taken at all (BK7), bit 2 its system said and bit 3 that system Windows (PC4)), `3` keyframe wanted (a cast), `5` a message about the host's pointer (only to a client that set bit 2 above);
   - a keyframe flag, u8;
   - a timestamp in microseconds, u64.
 
   Video is H.264, or HEVC when both ends allow it. Sound is Opus at 48 kHz, stereo.
+
+  A keyframe makes every video frame before it moot: the computer resets the streams of those still on the wire as it sends one, and the client stops those it is still reading, each with the code `0x4d4f`. The client reads the streams side by side and decodes the frames in sequence order (BG3).
 - **Gates:** a stream session is held to the same pairing, keys and permissions as the control channel. Without the Input permission it is forced to view only.
 
 ## 6. Conformance
