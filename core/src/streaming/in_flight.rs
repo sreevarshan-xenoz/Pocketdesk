@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 
-use super::connection::Delivered;
+use super::connection::{Delivered, OutStream};
 
 /// The fewest video frames that may be on the wire, sent and not yet
 /// delivered, before the next waits. Without a bound, a slow link took every
@@ -28,7 +28,9 @@ pub fn in_flight_window(fps: u32, rtt: Duration) -> usize {
 /// The video frames on the wire ([`in_flight_window`]).
 pub struct InFlight {
     max: usize,
-    pending: Vec<Delivered>,
+    /// Each frame's delivery, and its stream when it may be reset
+    /// ([`InFlight::moot`]).
+    pending: Vec<(Delivered, Option<Box<dyn OutStream>>)>,
 }
 
 impl InFlight {
@@ -50,7 +52,7 @@ impl InFlight {
         let max = self.max;
         let pending = &mut self.pending;
         let room = std::future::poll_fn(|cx| {
-            pending.retain_mut(|delivered| delivered.as_mut().poll(cx).is_pending());
+            pending.retain_mut(|(delivered, _)| delivered.as_mut().poll(cx).is_pending());
             if pending.len() < max {
                 std::task::Poll::Ready(())
             } else {
@@ -66,7 +68,27 @@ impl InFlight {
 
     /// A frame just sent, delivered when `delivered` completes.
     pub fn push(&mut self, delivered: Delivered) {
-        self.pending.push(delivered);
+        self.pending.push((delivered, None));
+    }
+
+    /// A frame just sent on `stream` (finished), kept so a keyframe after
+    /// it can reset it ([`InFlight::moot`]).
+    pub fn push_stream(&mut self, stream: Box<dyn OutStream>) {
+        self.pending.push((stream.delivered(), Some(stream)));
+    }
+
+    /// A keyframe is about to go (BG3): every frame still on the wire is
+    /// moot, so each stream kept is reset with `code` and none waits for
+    /// room any more. How many were reset.
+    pub fn moot(&mut self, code: u32) -> usize {
+        let mut reset = 0;
+        for (_, stream) in self.pending.drain(..) {
+            if let Some(mut stream) = stream {
+                stream.reset(code);
+                reset += 1;
+            }
+        }
+        reset
     }
 }
 
@@ -94,6 +116,45 @@ mod tests {
             tokio::time::timeout(Duration::from_secs(1), in_flight.admit(&cancel))
                 .await
                 .expect("room once any frame is delivered, not only the oldest")
+        );
+    }
+
+    /// BG3: a keyframe makes the frames on the wire moot; their streams are
+    /// reset and the window is free at once.
+    #[tokio::test]
+    async fn a_keyframe_resets_the_frames_still_on_the_wire() {
+        use std::sync::{Arc, Mutex};
+        struct Kept(Arc<Mutex<Vec<u32>>>);
+        #[async_trait::async_trait]
+        impl OutStream for Kept {
+            async fn write_all(
+                &mut self,
+                _: &[u8],
+            ) -> Result<(), super::super::connection::ConnectionError> {
+                Ok(())
+            }
+            fn finish(&mut self) -> Result<(), super::super::connection::ConnectionError> {
+                Ok(())
+            }
+            fn delivered(&self) -> Delivered {
+                Box::pin(std::future::pending())
+            }
+            fn reset(&mut self, code: u32) {
+                self.0.lock().unwrap().push(code);
+            }
+        }
+        let resets = Arc::new(Mutex::new(Vec::new()));
+        let cancel = CancellationToken::new();
+        let mut in_flight = InFlight::new(2);
+        in_flight.push_stream(Box::new(Kept(resets.clone())));
+        in_flight.push_stream(Box::new(Kept(resets.clone())));
+        in_flight.push(Box::pin(std::future::pending()));
+        assert_eq!(in_flight.moot(7), 2, "only the streams kept are reset");
+        assert_eq!(*resets.lock().unwrap(), [7, 7]);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), in_flight.admit(&cancel))
+                .await
+                .expect("the window is free")
         );
     }
 

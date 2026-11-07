@@ -1272,6 +1272,12 @@ pub const STREAM_KIND_CAST_CONTROL: u8 = 4;
 /// Sent to no one else, so a viewer that does not know it never meets it.
 pub const STREAM_KIND_CURSOR: u8 = 5;
 
+/// The code a video frame's stream is reset or stopped with when a newer
+/// keyframe made it moot (BG3): the computer resets those still on the
+/// wire as it sends the keyframe, and the phone stops those it no longer
+/// needs.
+pub const VIDEO_MOOT: u32 = 0x4d4f;
+
 /// Packet header for streaming transport
 ///
 /// Bytes:

@@ -1839,6 +1839,10 @@ impl StreamingServer {
             let mut packets_dropped = 0u64;
             let mut connection_closed = false;
             let mut in_flight = InFlight::new(MAX_VIDEO_IN_FLIGHT);
+            // BG3: the wire numbers frames once per session, so a rebuilt
+            // encoder (which numbers from 0 again) does not read on the
+            // phone as frames from the past.
+            let mut wire_sequence: u64 = 0;
 
             loop {
                 tokio::select! {
@@ -1904,6 +1908,15 @@ impl StreamingServer {
                             // with the writes below, is the delivery ceiling's
                             // signal (R6f).
                             let send_started = Instant::now();
+                            // BG3: a keyframe restarts the picture, so the
+                            // frames still on the wire are moot: reset, no
+                            // time spent resending them, and room at once.
+                            if packet.is_keyframe {
+                                let reset = in_flight.moot(transport::VIDEO_MOOT);
+                                if reset > 0 {
+                                    debug!(reset, seq = packet.sequence, "Reset frames a keyframe made moot");
+                                }
+                            }
                             if !in_flight.admit(&transport_cancel).await {
                                 connection_closed = true;
                                 packets_dropped += 1;
@@ -1915,7 +1928,7 @@ impl StreamingServer {
                                 Ok(mut send_stream) => {
                                     // Build and send header
                                     let header = transport::PacketHeader {
-                                        sequence: packet.sequence,
+                                        sequence: wire_sequence,
                                         stream_kind: transport::STREAM_KIND_VIDEO,
                                         is_keyframe: packet.is_keyframe,
                                         timestamp_us: packet.timestamp.elapsed().as_micros() as u64,
@@ -1942,7 +1955,8 @@ impl StreamingServer {
                                         packets_dropped += 1;
                                         continue;
                                     }
-                                    in_flight.push(send_stream.delivered());
+                                    in_flight.push_stream(send_stream);
+                                    wire_sequence += 1;
                                     super::latency_trace::written(packet.sequence);
 
                                     packets_sent += 1;
