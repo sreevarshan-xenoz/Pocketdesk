@@ -30,6 +30,7 @@ pub const KINDS: &[&str] = &[
     "file_received",
     "link_received",
     "session_refused",
+    "bluetooth_refused",
     "phone_paired",
     "phone_unpaired",
     "hook_ran",
