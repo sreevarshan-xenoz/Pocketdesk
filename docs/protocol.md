@@ -125,7 +125,7 @@ Over the Bluetooth road the control link (§1.2b: TLS with the pinned certificat
 
 A file over 8 MiB (`TRANSFER_MAX`, 8,388,608 bytes) does not go this way and waits for another road: a share, download or clipboard image over it is refused with `kdeconnect.pocketdesk.file_fetch_refused` whose reason says the file waits for Wi-Fi (`share::fits_the_road`), for the phone to show.
 
-### 1.4b A stream session over one byte stream (the Bluetooth fallback, phase 2; built, not yet on the wire)
+### 1.4b A stream session over one byte stream (the Bluetooth fallback, phase 2; the computer's side is built, the phone's is not yet)
 
 The screen over Bluetooth needs the stream session's uni streams (§3) on a link that is one ordered byte stream, an RFCOMM channel carrying TLS, not a QUIC connection. `ByteStreamConnection` (`core/src/streaming/byte_stream.rs`) carries them as frames, `[kind u8][stream id u32 LE][length u32 LE][payload]`:
 
@@ -139,6 +139,8 @@ The screen over Bluetooth needs the stream session's uni streams (§3) on a link
 | `6` | `CLOSE` | the code, `u32` LE, then a reason of at most 1024 bytes: the connection ends |
 
 The dialer opens even stream ids and the listener odd ones, each counting up; a stream's first frame, an empty `DATA`, goes out as its id is taken, so streams reach the peer in the order of their ids and a frame on an id past the last the peer opened starts a new stream. A frame of an unknown kind, longer than its kind allows, or carrying data on a stream the peer did not open ends the connection, and so does a peer holding more than 1024 streams open (quinn's limit). Nothing is lost on the way, so a stream counts as delivered once its `FIN` is written; at most 256 KiB written to streams wait to go onto the link, and a stream reset by its writer or stopped by its reader drops what of it still waits (BG3's moot frames do not hold up the keyframe). A stream dropped unfinished is finished, as quinn does. One `PONG` waits at most, however many pings come, and a peer heard from not once in 30 s is gone: the connection ends. Nothing dials it yet: the road that carries it comes with the rest of phase 2.
+
+**The stream hello.** A stream session rides the transfer service of §1.4a (`link_uuid`), on a connection of its own (RFCOMM carries one connection per channel, so it cannot share the control link's). Its first line is the stream hello, `POCKETDESK-BT-STREAM` and a newline (`core::protocol::bluetooth::format_stream_hello`, `parse_stream_hello`); the link hello's `POCKETDESK-BT-LINK <id>` is the other line that service takes. The phone's TLS starts right after it. Nothing past the newline is read before the session takes the stream, and a first line that is neither hello is closed unread, as the transfer service already does.
 
 ### 1.5 Windows firewall rules made by `pocketdesk install`
 
