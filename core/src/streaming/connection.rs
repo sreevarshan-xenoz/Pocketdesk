@@ -96,6 +96,11 @@ pub trait OutStream: Send {
     fn delivered(&self) -> Delivered {
         Box::pin(std::future::ready(()))
     }
+
+    /// Give up the stream with `code`: what the peer has not got yet is
+    /// never sent (BG3: a frame a newer keyframe made moot). The default
+    /// does nothing.
+    fn reset(&mut self, _code: u32) {}
 }
 
 /// A finished stream's delivery ([`OutStream::delivered`]).
@@ -119,6 +124,10 @@ pub trait InStream: Send {
         progress.fetch_add(data.len() as u64, std::sync::atomic::Ordering::Relaxed);
         Ok(data)
     }
+
+    /// Tell the peer to stop sending this stream, with `code` (BG3: a
+    /// frame a newer keyframe made moot). The default does nothing.
+    fn stop(&mut self, _code: u32) {}
 }
 
 /// Which transport stack a connection rides. The pipeline is deliberately
@@ -340,6 +349,12 @@ impl OutStream for QuinnSendStream {
             let _ = stopped.await;
         })
     }
+
+    fn reset(&mut self, code: u32) {
+        // Already finished and acknowledged, or the connection gone: nothing
+        // left to give up.
+        let _ = self.inner.reset(code.into());
+    }
 }
 
 struct QuinnRecvStream {
@@ -394,10 +409,13 @@ impl InStream for QuinnRecvStream {
             data.extend_from_slice(&chunk.bytes);
         }
     }
+    fn stop(&mut self, code: u32) {
+        let _ = self.inner.stop(code.into());
+    }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::streaming::transport::{CertManager, StreamTransportConfig};
 
@@ -452,7 +470,7 @@ mod tests {
     }
 
     /// A client and server connection over quinn loopback.
-    async fn loopback_pair() -> (SharedConnection, SharedConnection) {
+    pub(crate) async fn loopback_pair() -> (SharedConnection, SharedConnection) {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let certs = Arc::new(CertManager::new().expect("certs"));
         let alpn = vec![StreamTransportConfig::default().alpn];

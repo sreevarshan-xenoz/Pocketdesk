@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1457 open items.
+1462 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 114 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 117 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 205 |
 | A phone with a SIM | 41 |
 | A second phone | 20 |
-| Away from home: another network, or through a router | 45 |
+| Away from home: another network, or through a router | 46 |
 | A second computer | 249 |
-| A Linux desktop (the Azure VM serves for some) | 265 |
+| A Linux desktop (the Azure VM serves for some) | 266 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 99 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 400 |
 
@@ -264,6 +264,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The away lock over Bluetooth: with the throwaway's lock seam and `away_lock` on, the phone linked only over Bluetooth counts as near (no lock), and once the throwaway's switch goes off it no longer does (a lock line in the seam file after the away minutes). (where: here)
 - A refusal said: a phone paired with the throwaway at home, its key then changed (the app's data cleared and paired with another throwaway), Wi-Fi off: the throwaway's Activity shows "Refused over Bluetooth: not the key paired here" once, `pocketdesk events` holds one `bluetooth_refused` with `reason` `other_key` within the minute however often the phone dials, and one desktop notification shows. (where: here)
 - Not bonded: the OPPO's bond with this computer removed by hand in the phone's Bluetooth settings, Wi-Fi off: the phone's log says "not dialing the computer over Bluetooth: this phone is not bonded with it" once, not at each dial, and again only after a bond and its removal; `bt1-takeover` then SKIPs with "not bonded" before it cuts Wi-Fi. (where: here)
+
+**287. Frames side by side (BG3)**
+
+- A screen session on the OPPO for 10 minutes with the picture moving: no frame shown out of order or twice (no flicker back), sound steady, and the server's log shows keyframes asked for only after a real loss (`Video hole` at debug on the phone, `Reset frames a keyframe made moot` on the computer). (where: here)
+- An encoder rebuilt mid-session (Quality changed on the phone, and a crop): the picture goes on within a second, with this server, and with a server from before BG3 (which numbers each encoder from 0: the phone takes its keyframe 0 as a new run). (where: here)
+- A phone app from before BG3 against this server: the picture and an encoder rebuild as before (the wire's numbers no longer start again, which it only counts). (where: here)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -1084,6 +1090,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Leaving Bluetooth for the internet road: the phone over Bluetooth, then on another network where home does not answer but the computer's internet road does (a stranger's Wi-Fi, or mobile data coming back): it moves to the internet road; say how long the link was down. On mobile data alone the 15 s home check never runs. (where: away)
 - The 15 s home check's cost on a stranger's Wi-Fi (connected, home not there) over 30 minutes on Bluetooth: the phone's battery use and data use, against the same 30 minutes without the fallback. (where: away)
+
+**287. Frames side by side (BG3)**
+
+- Over the internet road with loss (the phone on a weak signal, or `POCKETDESK_CHAOS_*` on a throwaway): the picture recovers from a lost packet in about a round trip, without a keyframe each time, and a keyframe asked for does not cause a second one while it is on its way. (where: away)
 
 ## A second computer
 
@@ -2145,6 +2155,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Refusals in words: a KDE session on X11 says it needs Wayland; the KWin scripting interface unavailable (or scripts disabled in `kwinrc`) says KWin did not take the script; xdg-desktop-portal stopped says the portal is missing; a portal whose `AvailableSourceTypes` lacks windows says it cannot share a single window; a non-KDE desktop never picks this path. (where: linux)
 - The match: choosing another window in the dialog (of a different size) ends the session saying the window cannot be shown to be the lent one, shows nothing, and keeps no grant; choosing a monitor says it was a screen; two windows of the same size lent or chosen: the session refuses (cannot tell which), and say whether the portal names the window (its stream id or mapping id) so that twins can be told apart. Say what size KWin reports for a window's stream against its frame and client geometry at scale 1, 1.25 and 1.5 (the match compares device pixels, the client area or the frame times the output's scale, within 2 pixels): which of the two it is, whether it includes a shadow, and whether a window with a server-side title bar differs; and that the script's `output.scale` and `clientGeometry` read right. A window on a fractional-scale output is lent without being refused, and a 533x400 window at 1.5 and an 800x600 one at 1 are refused as twins. (where: linux)
 - Input, once it is wired (not built): a click, scroll and key through the portal's RemoteDesktop on a window source land in the lent window only, with another window over it and with another window active; the guard's questions over the table (`window_kde::KdeOs`) agree with what KWin does. (where: linux)
+
+**287. Frames side by side (BG3)**
+
+- The measuring stick: `lossy_link_smoothness` at 2 % loss against the BG baseline (53 fps, gaps p99 149 ms and max 485, 13 stalls of 200 ms or more in 40 s, e2e p95 435 and p99 623 ms), and on a clean link (no worse than 60 fps, gaps p99 28 ms). Say the numbers and the keyframes asked for. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
