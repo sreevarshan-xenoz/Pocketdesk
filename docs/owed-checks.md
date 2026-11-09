@@ -2158,7 +2158,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **287. Frames side by side (BG3)**
 
-- The measuring stick: `lossy_link_smoothness` at 2 % loss against the BG baseline (53 fps, gaps p99 149 ms and max 485, 13 stalls of 200 ms or more in 40 s, e2e p95 435 and p99 623 ms), and on a clean link (no worse than 60 fps, gaps p99 28 ms). Say the numbers and the keyframes asked for. (where: linux)
+- The measuring stick: `lossy_link_smoothness` at 2 % loss against the BG baseline (53 fps, gaps p99 149 ms and max 485, 13 stalls of 200 ms or more in 40 s, e2e p95 435 and p99 623 ms), and on a clean link (no worse than 60 fps, gaps p99 28 ms). Say the numbers and the keyframes asked for. (where: linux) *Partly measured 2026-11-09 on a runner (the Lossy link workflow, software x264, 45 s, 20 Mbit/s, 10 ms each way), before (360dcaf9) and after (f2fafeeb) BG3: no stall of 200 ms or more in any run, before or after. 720p clean: the same (60 fps, gaps p99 18 ms). 1080p at 2 % loss: gaps p95 39 to 22 ms, p99 57 to 55, max 73 to 72. 1080p at 5 %: gaps p95 47 both, max 96 to 91. The e2e tail rose (2 %: p99 27 to 42 ms; 5 %: 30 to 60) mostly because since BG3 the sample counts a frame's wait behind a hole, which the old loop hid. The software encoder's small frames never stalled even before BG3, unlike the desk's NVENC baseline, so the hardware run is still owed.*
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

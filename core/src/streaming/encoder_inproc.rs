@@ -316,11 +316,17 @@ impl InProcessEncoder {
             } else {
                 ""
             };
+            // The profile is libx264's own option: x264's parameter parser
+            // takes no `profile`, and dropped it from `x264-params` with an
+            // error on every open, leaving x264's default. Only libx264's:
+            // another encoder standing in names its profiles otherwise.
+            if codec.name() == "libx264" {
+                options.set("profile", profile_name(&config.profile));
+            }
             options.set(
                 "x264-params",
                 &format!(
-                    "profile={}:keyint={}:min-keyint=1:bframes=0:rc-lookahead=0:vbv-maxrate={}:vbv-bufsize={}{}",
-                    profile_name(&config.profile),
+                    "keyint={}:min-keyint=1:bframes=0:rc-lookahead=0:vbv-maxrate={}:vbv-bufsize={}{}",
                     plan.gop(),
                     maxrate_kbps,
                     bufsize_kbits,
