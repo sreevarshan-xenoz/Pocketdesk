@@ -142,6 +142,8 @@ The dialer opens even stream ids and the listener odd ones, each counting up; a 
 
 **The stream hello.** A stream session rides the transfer service of §1.4a (`link_uuid`), on a connection of its own (RFCOMM carries one connection per channel, so it cannot share the control link's). Its first line is the stream hello, `POCKETDESK-BT-STREAM` and a newline (`core::protocol::bluetooth::format_stream_hello`, `parse_stream_hello`); the link hello's `POCKETDESK-BT-LINK <id>` is the other line that service takes. The phone's TLS starts right after it. Nothing past the newline is read before the session takes the stream, and a first line that is neither hello is closed unread, as the transfer service already does.
 
+**The gate.** A stream session is judged by `pair::bluetooth_session_gate` with the control link's rules, not the LAN's stream gate: the device the session announces in-band must be a paired phone, not one of the owner's computers nor one being recorded as paired both ways, whose TLS key bound to it is the one the session's TLS proved (`bluetooth_may_act`). A phone with no key bound yet, another key, no announced device, or not paired is refused, with `pairing_required` on or off. The gate never binds a key by first use and never registers an iroh id from the session's claim: both are for a connection at home. A phone that passes then gets its own permissions (and the owner's answer when it asks first), as on the other roads.
+
 ### 1.5 Windows firewall rules made by `pocketdesk install`
 
 | Rule | Scope | Source |
