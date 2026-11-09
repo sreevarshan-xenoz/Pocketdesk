@@ -254,6 +254,8 @@ object BluetoothRoad {
         pipe.onEnd = {
             if (live === road) live = null
             road.transfer?.close()
+            // A screen session ends with its road.
+            road.stream?.close()
         }
         // Given up before the pumps run, so no close can race the detach.
         val theirs = pipe.detachTheirs()
@@ -423,6 +425,11 @@ object BluetoothRoad {
         }
         road.stream?.close()
         road.stream = pipe
+        // The road ended while this connected: its session does not start.
+        if (live !== road) {
+            pipe.close()
+            return null
+        }
         val theirs = pipe.detachTheirs()
         pipe.start("bt-road-stream")
         Log.i(TAG, "a stream link opened")
