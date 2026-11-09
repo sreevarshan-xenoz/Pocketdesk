@@ -1569,7 +1569,11 @@ impl StreamingServer {
                             () => {
                                 if frame.gpu.is_some()
                                     && super::dmabuf::needs_pixels(
-                                        encoder.takes_dmabuf(),
+                                        // The low setting shrinks the picture
+                                        // in memory: a tiled buffer on the card
+                                        // cannot be read back there, so the
+                                        // capture goes back to copies.
+                                        encoder.takes_dmabuf() && !low_link,
                                         software_crop && crop.is_some(),
                                         frame.width,
                                         frame.height,
@@ -1613,7 +1617,14 @@ impl StreamingServer {
                         // rebuild and the stream stays 4:2:0.
                         frame.to_even();
                         if low_link {
-                            frame.downscale(super::low_link::factor(frame.height));
+                            let factor = super::low_link::factor(frame.height);
+                            if factor > 1 && !frame.downscale(factor) {
+                                debug!(
+                                    width = frame.width,
+                                    height = frame.height,
+                                    "A frame went at its own size: it could not be made smaller"
+                                );
+                            }
                         }
 
                         // Adopt the frame resolution into the encoder: the
