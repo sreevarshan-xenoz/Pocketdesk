@@ -664,6 +664,39 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
     to_jstring(&mut env, json)
 }
 
+/// Run a screen session with the computer at `address` on `fd`, one end of
+/// a socket pair the app pumps to and from an RFCOMM socket it dialed to the
+/// computer's transfer service (the Bluetooth fallback, phase 2c). Takes
+/// `fd` in every case, closing it whenever the session does not come up on
+/// it. The envelope of
+/// [`Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectStreamingWan`].
+#[cfg(unix)]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectStreamingBluetooth(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    fd: jint,
+    monitor_index: jint,
+    codec_caps: jint,
+) -> jstring {
+    // Owned before anything can fail, so every way out closes it.
+    let fd = owned_fd(fd);
+    let address = jstring_to_string(&mut env, &address);
+    let monitor = (monitor_index >= 0).then_some(monitor_index as u32);
+    let result = match fd {
+        Some(fd) => RUNTIME.block_on(api::connect_streaming_bluetooth(
+            address,
+            fd,
+            monitor,
+            codec_caps as u8,
+            pocketdesk_core::streaming::SessionMode::Screen,
+        )),
+        None => Err("no Bluetooth stream".to_string()),
+    };
+    to_jstring(&mut env, envelope_unit(result))
+}
+
 /// Connect the phone as a remote (T10i): an input-only session, no picture
 /// or sound, to `address:port` on the LAN.
 #[unsafe(no_mangle)]
