@@ -139,6 +139,9 @@ pub trait InStream: Send {
 pub enum TransportFamily {
     Quinn,
     Iroh,
+    /// One ordered byte stream (the Bluetooth road, phase 2): point to
+    /// point and nearby, like quinn's.
+    ByteStream,
 }
 
 /// The key a connection's peer proved it holds during the handshake
