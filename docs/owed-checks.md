@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1462 open items.
+1463 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 117 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 118 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 205 |
 | A phone with a SIM | 41 |
@@ -264,6 +264,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The away lock over Bluetooth: with the throwaway's lock seam and `away_lock` on, the phone linked only over Bluetooth counts as near (no lock), and once the throwaway's switch goes off it no longer does (a lock line in the seam file after the away minutes). (where: here)
 - A refusal said: a phone paired with the throwaway at home, its key then changed (the app's data cleared and paired with another throwaway), Wi-Fi off: the throwaway's Activity shows "Refused over Bluetooth: not the key paired here" once, `pocketdesk events` holds one `bluetooth_refused` with `reason` `other_key` within the minute however often the phone dials, and one desktop notification shows. (where: here)
 - Not bonded: the OPPO's bond with this computer removed by hand in the phone's Bluetooth settings, Wi-Fi off: the phone's log says "not dialing the computer over Bluetooth: this phone is not bonded with it" once, not at each dial, and again only after a bond and its removal; `bt1-takeover` then SKIPs with "not bonded" before it cuts Wi-Fi. (where: here)
+- The screen over Bluetooth (phase 2, #664 to the app's side): the OPPO linked to a throwaway over Bluetooth (Wi-Fi off), a screen session opens over it (the server's log: `transport="bluetooth"`, a stream session), shows the throwaway's screen at about 540 lines and at most 15 frames a second, takes taps, and ends cleanly; a share during it waits for it to end; with a phone paired but its key changed, the session is refused. Say the frame rate and the delay. (where: here)
 
 **287. Frames side by side (BG3)**
 

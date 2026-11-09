@@ -3034,6 +3034,7 @@ pub async fn connect_streaming_wan(
 
 /// The port a stream session over Bluetooth is kept under: there is none on
 /// this road, and 0 is the internet road's.
+#[cfg(unix)]
 pub const BLUETOOTH_STREAM_PORT: u16 = 1;
 
 /// Run a stream session with the computer at `address` on `fd`, an RFCOMM
