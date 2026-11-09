@@ -1,0 +1,98 @@
+name: Lossy link
+
+# The BG measuring stick (`server/tests/lossy_link_smoothness.rs`) on a
+# runner, run by hand: how smoothly the picture moves through the chaos
+# proxy, for each commit named and each loss rate. The workflow comes from
+# the branch it is run on; the code measured is each commit's, so a commit
+# from before this workflow can be measured too. A runner has no hardware
+# encoder: this is the software one (libx264 in process), so compare
+# commits with each other, not with the numbers from a desk.
+
+on:
+  workflow_dispatch:
+    inputs:
+      commits:
+        description: "Commits to measure, space-separated (a sha, branch or tag each)"
+        required: true
+        default: "main"
+      permilles:
+        description: "Loss rates, per mille of the packets back, space-separated"
+        required: true
+        default: "0 20"
+      seconds:
+        description: "How long each run streams"
+        required: true
+        default: "45"
+      size:
+        description: "The test pattern's size, WIDTHxHEIGHT"
+        required: true
+        default: "1280x720"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      commits: ${{ steps.lists.outputs.commits }}
+      permilles: ${{ steps.lists.outputs.permilles }}
+    steps:
+      - id: lists
+        env:
+          COMMITS: ${{ inputs.commits }}
+          PERMILLES: ${{ inputs.permilles }}
+        run: |
+          to_json() { printf '%s\n' $1 | jq -R . | jq -cs .; }
+          echo "commits=$(to_json "$COMMITS")" >> "$GITHUB_OUTPUT"
+          echo "permilles=$(to_json "$PERMILLES")" >> "$GITHUB_OUTPUT"
+
+  measure:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        commit: ${{ fromJSON(needs.plan.outputs.commits) }}
+        permille: ${{ fromJSON(needs.plan.outputs.permilles) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.commit }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Keep apt's packages between runs
+        uses: actions/cache@v4
+        with:
+          path: ~/apt-archives
+          key: apt-${{ runner.os }}-lossy-${{ hashFiles('.github/workflows/lossy.yml') }}
+          restore-keys: apt-${{ runner.os }}-lossy-
+      - name: Install system dependencies
+        timeout-minutes: 30
+        run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod* && sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update && mkdir -p ~/apt-archives/partial && sudo apt-get -o Dir::Cache::Archives=$HOME/apt-archives install -y --no-install-recommends libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev ffmpeg && sudo chown -R "$USER" ~/apt-archives
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: lossy
+
+      - name: Measure
+        env:
+          POCKETDESK_LOSSY_PERMILLE: ${{ matrix.permille }}
+          POCKETDESK_LOSSY_SECS: ${{ inputs.seconds }}
+          SIZE: ${{ inputs.size }}
+          COMMIT: ${{ matrix.commit }}
+        run: |
+          export POCKETDESK_LOSSY_WIDTH="${SIZE%x*}" POCKETDESK_LOSSY_HEIGHT="${SIZE#*x}"
+          echo "commit $COMMIT ($(git rev-parse --short HEAD)), loss ${POCKETDESK_LOSSY_PERMILLE} per mille, ${SIZE}, ${POCKETDESK_LOSSY_SECS} s" | tee result.txt
+          cargo test -p pocketdesk-server --release --test lossy_link_smoothness -- --ignored --nocapture 2>&1 | tee -a result.txt
+          {
+            echo "### $COMMIT ($(git rev-parse --short HEAD)), ${POCKETDESK_LOSSY_PERMILLE} per mille"
+            echo '```'
+            grep -v -E '^(running|test |$)|Compiling|Finished|Running' result.txt | tail -n 40
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
