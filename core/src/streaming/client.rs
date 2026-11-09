@@ -2166,4 +2166,70 @@ mod tests {
         cancel.cancel();
         receiver.await.unwrap().unwrap();
     }
+
+    /// Phase 2a of the Bluetooth fallback: the receive loop takes a
+    /// session's frames and sound over one byte stream as over QUIC.
+    #[tokio::test]
+    async fn the_receive_loop_runs_over_one_byte_stream() {
+        use crate::streaming::byte_stream::{ByteStreamConnection, Role};
+        let (a, b) = tokio::io::duplex(256 * 1024);
+        let nowhere = std::net::SocketAddr::from(([0, 0, 0, 0], 0));
+        let client: SharedConnection = ByteStreamConnection::new(a, Role::Dialer, nowhere, None);
+        let server: SharedConnection = ByteStreamConnection::new(b, Role::Listener, nowhere, None);
+        let (frame_tx, mut frames) = mpsc::channel(16);
+        let (audio_tx, mut audio) = mpsc::channel(16);
+        let cancel = CancellationToken::new();
+        let receiver = tokio::spawn({
+            let cancel = cancel.clone();
+            async move {
+                recv_with_cancel(
+                    &client,
+                    frame_tx,
+                    audio_tx,
+                    cancel,
+                    Arc::new(ClientBatches::default()),
+                    Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                    RemoteFlags::default(),
+                )
+                .await
+            }
+        });
+        let send = |sequence, stream_kind, is_keyframe, body: Vec<u8>| {
+            let server = server.clone();
+            async move {
+                let mut stream = server.open_uni().await.expect("open");
+                let header = transport::PacketHeader {
+                    sequence,
+                    stream_kind,
+                    is_keyframe,
+                    timestamp_us: 0,
+                };
+                stream.write_all(&header.as_bytes()).await.unwrap();
+                stream.write_all(&body).await.unwrap();
+                stream.finish().unwrap();
+            }
+        };
+        // A keyframe bigger than one frame of the byte stream, then deltas.
+        let keyframe: Vec<u8> = (0..40_000u32).map(|n| n as u8).collect();
+        send(0, transport::STREAM_KIND_VIDEO, true, keyframe.clone()).await;
+        send(1, transport::STREAM_KIND_VIDEO, false, b"d1".to_vec()).await;
+        send(0, transport::STREAM_KIND_AUDIO, false, b"opus".to_vec()).await;
+        send(2, transport::STREAM_KIND_VIDEO, false, b"d2".to_vec()).await;
+        let mut got = Vec::new();
+        for _ in 0..3 {
+            let frame = tokio::time::timeout(Duration::from_secs(5), frames.recv())
+                .await
+                .expect("a frame in time")
+                .expect("open");
+            got.push((frame.sequence, frame.data.len()));
+        }
+        assert_eq!(got, [(0, keyframe.len()), (1, 2), (2, 2)]);
+        let sound = tokio::time::timeout(Duration::from_secs(5), audio.recv())
+            .await
+            .expect("sound in time")
+            .expect("open");
+        assert_eq!(sound.data, b"opus");
+        cancel.cancel();
+        receiver.await.unwrap().unwrap();
+    }
 }

@@ -95,7 +95,10 @@ pub(crate) fn register(
         streamed,
         device_id,
         peer: connection.remote_address(),
-        lan: matches!(connection.transport_family(), TransportFamily::Quinn),
+        lan: matches!(
+            connection.transport_family(),
+            TransportFamily::Quinn | TransportFamily::ByteStream
+        ),
         started_unix: SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())

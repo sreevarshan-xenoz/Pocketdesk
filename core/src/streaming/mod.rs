@@ -5,6 +5,7 @@
 
 pub mod audio;
 pub mod bitrate;
+pub mod byte_stream;
 pub mod cast;
 pub mod cast_control;
 pub mod chaos;
