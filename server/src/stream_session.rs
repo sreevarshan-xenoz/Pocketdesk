@@ -75,4 +75,59 @@ impl SessionSetup {
         server.set_session_gate(move |claim| Box::pin(gate(claim)));
         server
     }
+
+    /// This setup for a session over Bluetooth: the picture's frame rate and
+    /// bitrate at the road's low setting (see [`bluetooth_config`]).
+    pub(crate) fn for_bluetooth(&self) -> Self {
+        Self {
+            config: bluetooth_config(&self.config),
+            ..self.clone()
+        }
+    }
+}
+
+/// The most frames a second a session over Bluetooth asks of the encoder.
+pub(crate) const BLUETOOTH_FPS: u32 = 12;
+
+/// The most bits a second a session over Bluetooth's picture takes: an
+/// RFCOMM link carries about a megabit at best, and the control link, the
+/// sound and the input share it.
+pub(crate) const BLUETOOTH_BITRATE_BPS: u32 = 800_000;
+
+/// `config` at the Bluetooth road's low setting: its frame rate and bitrate
+/// capped at [`BLUETOOTH_FPS`] and [`BLUETOOTH_BITRATE_BPS`], and never
+/// raised (a lower setting stays). The picture's size is the encoder's own:
+/// scaling it down is not built yet.
+pub(crate) fn bluetooth_config(config: &StreamingConfig) -> StreamingConfig {
+    StreamingConfig {
+        fps: config.fps.min(BLUETOOTH_FPS),
+        bitrate_bps: config.bitrate_bps.min(BLUETOOTH_BITRATE_BPS),
+        ..config.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_bluetooth_setting_caps_the_rate_and_never_raises_it() {
+        let high = StreamingConfig {
+            fps: 60,
+            bitrate_bps: 8_000_000,
+            ..StreamingConfig::default()
+        };
+        let low = bluetooth_config(&high);
+        assert_eq!(low.fps, BLUETOOTH_FPS);
+        assert_eq!(low.bitrate_bps, BLUETOOTH_BITRATE_BPS);
+        assert_eq!((low.width, low.height), (high.width, high.height));
+
+        let lower = StreamingConfig {
+            fps: 5,
+            bitrate_bps: 300_000,
+            ..StreamingConfig::default()
+        };
+        let kept = bluetooth_config(&lower);
+        assert_eq!((kept.fps, kept.bitrate_bps), (5, 300_000));
+    }
 }

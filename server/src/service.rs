@@ -729,9 +729,14 @@ pub async fn run(config: Config) -> Result<()> {
 
     // The Bluetooth road (the fallback): it listens while
     // `bluetooth_fallback` is on and a radio is present (Windows only for
-    // now), and its control links come to the loop below.
+    // now), and its control links and stream sessions come to the loop
+    // below.
     let (bluetooth_control_tx, mut bluetooth_control) = tokio::sync::mpsc::channel(4);
-    tokio::spawn(crate::bluetooth::run(bluetooth_control_tx));
+    let (bluetooth_session_tx, mut bluetooth_sessions) = tokio::sync::mpsc::channel(4);
+    tokio::spawn(crate::bluetooth::run(
+        bluetooth_control_tx,
+        bluetooth_session_tx,
+    ));
 
     tracing::info!("Press Ctrl+C to stop");
 
@@ -847,6 +852,18 @@ pub async fn run(config: Config) -> Result<()> {
                     .await
                     {
                         tracing::warn!("Bluetooth control connection failed: {error:#}");
+                    }
+                });
+            }
+            Some(session) = bluetooth_sessions.recv() => {
+                let tls = control_tls.clone();
+                let mut setup = stream_setup.for_bluetooth();
+                setup.laser = config.laser_pointer && crate::laser::available();
+                tokio::spawn(async move {
+                    if let Err(error) =
+                        handle_bluetooth_session(session.stream, tls, &setup).await
+                    {
+                        tracing::warn!("Bluetooth stream session failed: {error:#}");
                     }
                 });
             }
@@ -1698,6 +1715,56 @@ where
             pairing_required,
         )
         .await
+    }
+    .instrument(conn_span)
+    .await
+}
+
+/// A stream session over the Bluetooth road: an RFCOMM stream from a bonded
+/// phone, its stream hello already read, carrying TLS with the pinned
+/// certificates as the control link does; then the session's frames on that
+/// stream (`ByteStreamConnection`), with the stream pipeline as at home. The
+/// session is judged by `bluetooth_session_gate`: the control link's rules,
+/// not the LAN's.
+pub(crate) async fn handle_bluetooth_session<S>(
+    stream: S,
+    tls: tokio_rustls::TlsAcceptor,
+    setup: &crate::stream_session::SessionSetup,
+) -> Result<()>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    use pocketdesk_core::streaming::byte_stream::{ByteStreamConnection, Role};
+    use tracing::Instrument;
+    let conn_span = tracing::info_span!(
+        "conn",
+        id = %uuid::Uuid::new_v4(),
+        transport = "bluetooth",
+        proto = %pocketdesk_core::protocol::PROTOCOL_VERSION
+    );
+    async move {
+        tracing::info!("Handling a stream session over Bluetooth");
+        let stream = timeout(Duration::from_secs(8), tls.accept(stream))
+            .await
+            .context("TLS handshake timeout")?
+            .context("TLS handshake failed")?;
+        let peer_key = stream
+            .get_ref()
+            .1
+            .peer_certificates()
+            .and_then(pocketdesk_core::streaming::PeerKey::from_tls_certs);
+        // A Bluetooth link has no address.
+        let connection = ByteStreamConnection::new(
+            stream,
+            Role::Listener,
+            std::net::SocketAddr::from(([0, 0, 0, 0], 0)),
+            peer_key,
+        );
+        let mut streaming_server = setup.server(crate::plugins::pair::bluetooth_session_gate);
+        streaming_server
+            .run_on_connection(connection)
+            .await
+            .context("stream session over Bluetooth")
     }
     .instrument(conn_span)
     .await
