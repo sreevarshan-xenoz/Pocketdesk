@@ -857,7 +857,9 @@ pub async fn run(config: Config) -> Result<()> {
             }
             Some(session) = bluetooth_sessions.recv() => {
                 let tls = control_tls.clone();
-                let mut setup = stream_setup.for_bluetooth();
+                // Its low setting (`low_link`) follows from its transport, a byte
+                // stream, in the streamer itself.
+                let mut setup = stream_setup.clone();
                 setup.laser = config.laser_pointer && crate::laser::available();
                 tokio::spawn(async move {
                     if let Err(error) =
