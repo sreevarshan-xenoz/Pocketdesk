@@ -15,16 +15,21 @@
 //! reader) asks its writer to give it up, `PING` and `PONG` (a `u64`) time
 //! the round trip, and `CLOSE` (a `u32` code and a reason) ends the
 //! connection. The dialer opens even stream ids and the listener odd ones,
-//! each counting up, so a stream is new exactly when its id is past the
-//! last one the peer opened. Nothing is lost on the way (the byte stream is
-//! reliable and in order), so a stream is delivered once its end is
-//! written; what one writer has not written waits behind a shared budget of
-//! [`WRITE_BUDGET`] bytes, so a fast writer cannot queue without bound.
+//! each counting up; a stream's first frame (an empty `DATA`) goes out as
+//! its id is taken, so streams reach the peer in the order of their ids and
+//! one is new exactly when its id is past the last the peer opened.
+//!
+//! Nothing is lost on the way (the byte stream is reliable and in order),
+//! so a stream is delivered once its end is written. What writers have not
+//! got onto the link yet waits behind a shared budget of [`WRITE_BUDGET`]
+//! bytes; a stream given up (reset by its writer, or stopped by its reader)
+//! drops what of it still waits. A peer that says nothing for [`SILENCE`]
+//! (it answers a ping every second) is gone, and the connection ends.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -64,8 +69,19 @@ const STREAM_QUEUE: usize = 64;
 /// Incoming streams waiting to be accepted.
 const ACCEPT_QUEUE: usize = 256;
 
+/// The most streams the peer may hold open here at once, as quinn's limit
+/// (`transport::configured_transport`): past it the connection ends.
+pub const MAX_OPEN_STREAMS: usize = 1024;
+
 /// How often the round trip is timed.
 const PING_EVERY: Duration = Duration::from_secs(1);
+
+/// A peer heard from not once in this long is gone (it answers each ping).
+pub const SILENCE: Duration = Duration::from_secs(30);
+
+/// Once the connection ended, the longest the writer goes on trying to get
+/// what it holds (a `CLOSE`) onto the link.
+const LAST_WORDS: Duration = Duration::from_secs(2);
 
 /// Which end of the byte stream this is: the dialer opens even stream ids,
 /// the listener odd ones.
@@ -75,12 +91,14 @@ pub enum Role {
     Listener,
 }
 
-/// A frame for the writer, with the budget it holds until it is written.
+/// A frame for the writer, with the budget it holds until it is written;
+/// one of a stream given up (`abandoned`) is dropped unwritten.
 struct Frame {
     kind: u8,
     id: u32,
     payload: Vec<u8>,
     _budget: Option<OwnedSemaphorePermit>,
+    abandoned: Option<Arc<AtomicBool>>,
 }
 
 /// What an incoming stream's reader is handed.
@@ -90,26 +108,43 @@ enum Chunk {
     Reset(u32),
 }
 
-/// An outgoing stream's state the reader may change: the peer stopped it
-/// (`stopped`), or it is over (`done`: written whole, reset, stopped, or
-/// the connection ended).
+/// An outgoing stream's state the reader and the writer may change: the
+/// peer stopped it (`stopped`); it is over (`done`: written whole, reset,
+/// stopped, or the connection ended); what of it still waits is to be
+/// dropped (`abandoned`: reset or stopped, never the connection's end, so a
+/// `CLOSE` still follows what was queued before it).
 #[derive(Clone)]
 struct OutState {
     stopped: CancellationToken,
     done: CancellationToken,
+    abandoned: Arc<AtomicBool>,
+}
+
+impl OutState {
+    /// Given up: what waits is dropped, and it is over.
+    fn abandon(&self) {
+        self.abandoned.store(true, Ordering::Release);
+        self.done.cancel();
+    }
 }
 
 struct Shared {
     writes: mpsc::UnboundedSender<Frame>,
     budget: Arc<Semaphore>,
+    /// The next stream id to open, past `u32` once they ran out.
+    next_id: Mutex<u64>,
     outgoing: Mutex<HashMap<u32, OutState>>,
-    accept: tokio::sync::Mutex<mpsc::Receiver<ByteInStream>>,
-    next_id: AtomicU32,
     ended: CancellationToken,
     close_reason: Mutex<Option<String>>,
     started: Instant,
     /// The last round trip in microseconds; `u64::MAX` before the first.
     rtt_us: AtomicU64,
+    /// When the peer was last heard from, in microseconds since `started`.
+    heard_us: AtomicU64,
+    /// A `PONG` waits to be written: another `PING` does not queue one more.
+    pong_waiting: AtomicBool,
+    /// How long a silent peer is waited for ([`SILENCE`]).
+    silence: Duration,
     bytes_sent: AtomicU64,
     bytes_received: AtomicU64,
     frames_sent: AtomicU64,
@@ -140,14 +175,20 @@ impl Shared {
                 id,
                 payload,
                 _budget: None,
+                abandoned: None,
             })
             .map_err(|_| ConnectionError::Closed)
+    }
+
+    fn micros(&self) -> u64 {
+        self.started.elapsed().as_micros() as u64
     }
 }
 
 /// See the module docs.
 pub struct ByteStreamConnection {
     shared: Arc<Shared>,
+    accept: tokio::sync::Mutex<mpsc::Receiver<ByteInStream>>,
 }
 
 impl ByteStreamConnection {
@@ -160,22 +201,38 @@ impl ByteStreamConnection {
     where
         S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
     {
+        Self::waiting(io, role, remote, peer_key, SILENCE)
+    }
+
+    /// [`ByteStreamConnection::new`], a peer silent for `silence` gone.
+    fn waiting<S>(
+        io: S,
+        role: Role,
+        remote: SocketAddr,
+        peer_key: Option<PeerKey>,
+        silence: Duration,
+    ) -> Arc<Self>
+    where
+        S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    {
         let (read, write) = tokio::io::split(io);
         let (writes, frames) = mpsc::unbounded_channel();
         let (accepted, accept) = mpsc::channel(ACCEPT_QUEUE);
         let shared = Arc::new(Shared {
             writes,
             budget: Arc::new(Semaphore::new(WRITE_BUDGET)),
-            outgoing: Mutex::new(HashMap::new()),
-            accept: tokio::sync::Mutex::new(accept),
-            next_id: AtomicU32::new(match role {
+            next_id: Mutex::new(match role {
                 Role::Dialer => 0,
                 Role::Listener => 1,
             }),
+            outgoing: Mutex::new(HashMap::new()),
             ended: CancellationToken::new(),
             close_reason: Mutex::new(None),
             started: Instant::now(),
             rtt_us: AtomicU64::new(u64::MAX),
+            heard_us: AtomicU64::new(0),
+            pong_waiting: AtomicBool::new(false),
+            silence,
             bytes_sent: AtomicU64::new(0),
             bytes_received: AtomicU64::new(0),
             frames_sent: AtomicU64::new(0),
@@ -185,8 +242,11 @@ impl ByteStreamConnection {
         });
         tokio::spawn(write_frames(write, frames, shared.clone()));
         tokio::spawn(read_frames(read, accepted, role, shared.clone()));
-        tokio::spawn(time_round_trips(shared.clone()));
-        Arc::new(Self { shared })
+        tokio::spawn(keep_time(shared.clone()));
+        Arc::new(Self {
+            shared,
+            accept: tokio::sync::Mutex::new(accept),
+        })
     }
 
     /// Whether a round trip was timed yet (the tests').
@@ -208,16 +268,33 @@ impl Connection for ByteStreamConnection {
         if self.shared.ended.is_cancelled() {
             return Err(ConnectionError::Closed);
         }
-        let id = self.shared.next_id.fetch_add(2, Ordering::Relaxed);
         let state = OutState {
             stopped: CancellationToken::new(),
             done: self.shared.ended.child_token(),
+            abandoned: Arc::new(AtomicBool::new(false)),
         };
-        self.shared
-            .outgoing
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(id, state.clone());
+        let id = {
+            let mut next = self
+                .shared
+                .next_id
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            let Ok(id) = u32::try_from(*next) else {
+                drop(next);
+                self.shared.end("the connection ran out of stream ids");
+                return Err(ConnectionError::Closed);
+            };
+            *next += 2;
+            self.shared
+                .outgoing
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(id, state.clone());
+            // Its opening frame, queued with the id taken: streams reach the
+            // peer in the order of their ids, whichever task writes first.
+            self.shared.send(DATA, id, Vec::new())?;
+            id
+        };
         Ok(Box::new(ByteOutStream {
             id,
             shared: self.shared.clone(),
@@ -227,7 +304,7 @@ impl Connection for ByteStreamConnection {
     }
 
     async fn accept_uni(&self) -> Result<Box<dyn InStream>, ConnectionError> {
-        let mut accept = self.shared.accept.lock().await;
+        let mut accept = self.accept.lock().await;
         match accept.recv().await {
             Some(stream) => Ok(Box::new(stream)),
             None => Err(ConnectionError::Closed),
@@ -316,7 +393,7 @@ impl OutStream for ByteOutStream {
                 budget = self.shared.budget.clone().acquire_many_owned(chunk.len() as u32) => {
                     budget.map_err(|_| ConnectionError::Closed)?
                 }
-                () = self.shared.ended.cancelled() => return Err(ConnectionError::Closed),
+                () = self.state.done.cancelled() => return Err(ConnectionError::Closed),
             };
             self.shared
                 .writes
@@ -325,6 +402,7 @@ impl OutStream for ByteOutStream {
                     id: self.id,
                     payload: chunk.to_vec(),
                     _budget: Some(budget),
+                    abandoned: Some(self.state.abandoned.clone()),
                 })
                 .map_err(|_| ConnectionError::Closed)?;
         }
@@ -336,7 +414,19 @@ impl OutStream for ByteOutStream {
             return Err(ConnectionError::Closed);
         }
         self.finished = true;
-        self.shared.send(FIN, self.id, Vec::new())
+        if self.shared.ended.is_cancelled() {
+            return Err(ConnectionError::Closed);
+        }
+        self.shared
+            .writes
+            .send(Frame {
+                kind: FIN,
+                id: self.id,
+                payload: Vec::new(),
+                _budget: None,
+                abandoned: Some(self.state.abandoned.clone()),
+            })
+            .map_err(|_| ConnectionError::Closed)
     }
 
     fn delivered(&self) -> Delivered {
@@ -348,29 +438,27 @@ impl OutStream for ByteOutStream {
             return;
         }
         self.finished = true;
+        // What of it still waits is dropped; the peer hears it was given up.
+        self.state.abandon();
         let _ = self
             .shared
             .send(RESET, self.id, code.to_le_bytes().to_vec());
-        self.state.done.cancel();
-        forget_outgoing(&self.shared, self.id);
+        self.shared
+            .outgoing
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.id);
     }
 }
 
 impl Drop for ByteOutStream {
     fn drop(&mut self) {
-        // Dropped unfinished: given up, as quinn resets a dropped stream.
+        // Dropped unfinished: it ends there, as quinn finishes a dropped
+        // stream (the peer has every byte written).
         if !self.finished {
-            self.reset(0);
+            let _ = self.finish();
         }
     }
-}
-
-fn forget_outgoing(shared: &Shared, id: u32) {
-    shared
-        .outgoing
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .remove(&id);
 }
 
 struct ByteInStream {
@@ -378,13 +466,26 @@ struct ByteInStream {
     chunks: mpsc::Receiver<Chunk>,
     /// What came and was not read yet.
     leftover: Vec<u8>,
+    /// Its end came, or it was stopped here.
     ended: bool,
-    shared: Arc<Shared>,
+    /// Why it failed, said again to every later read.
+    failure: Option<ConnectionError>,
+    /// Weak: a stream waiting to be accepted must not keep the connection.
+    shared: Weak<Shared>,
 }
 
 impl ByteInStream {
+    fn fail(&mut self, error: ConnectionError) -> ConnectionError {
+        self.ended = true;
+        self.failure = Some(error.clone());
+        error
+    }
+
     /// The next part of the stream: `Ok(None)` at its end.
     async fn next(&mut self) -> Result<Option<Vec<u8>>, ConnectionError> {
+        if let Some(failure) = &self.failure {
+            return Err(failure.clone());
+        }
         if !self.leftover.is_empty() {
             return Ok(Some(std::mem::take(&mut self.leftover)));
         }
@@ -397,16 +498,10 @@ impl ByteInStream {
                 self.ended = true;
                 Ok(None)
             }
-            Some(Chunk::Reset(code)) => {
-                self.ended = true;
-                Err(ConnectionError::Other(format!(
-                    "reset by the peer ({code})"
-                )))
-            }
-            None => {
-                self.ended = true;
-                Err(ConnectionError::Closed)
-            }
+            Some(Chunk::Reset(code)) => Err(self.fail(ConnectionError::Other(format!(
+                "reset by the peer ({code})"
+            )))),
+            None => Err(self.fail(ConnectionError::Closed)),
         }
     }
 }
@@ -417,7 +512,7 @@ impl InStream for ByteInStream {
         let mut filled = 0;
         while filled < buf.len() {
             let Some(mut data) = self.next().await? else {
-                return Err(ConnectionError::Other("the stream ended early".into()));
+                return Err(self.fail(ConnectionError::Other("the stream ended early".into())));
             };
             let take = data.len().min(buf.len() - filled);
             buf[filled..filled + take].copy_from_slice(&data[..take]);
@@ -433,7 +528,7 @@ impl InStream for ByteInStream {
         let mut all = Vec::new();
         while let Some(data) = self.next().await? {
             if all.len() + data.len() > limit {
-                return Err(ConnectionError::Other("stream exceeds limit".into()));
+                return Err(self.fail(ConnectionError::Other("stream exceeds limit".into())));
             }
             all.extend_from_slice(&data);
         }
@@ -448,7 +543,7 @@ impl InStream for ByteInStream {
         let mut all = Vec::new();
         while let Some(data) = self.next().await? {
             if all.len() + data.len() > limit {
-                return Err(ConnectionError::Other("stream exceeds limit".into()));
+                return Err(self.fail(ConnectionError::Other("stream exceeds limit".into())));
             }
             progress.fetch_add(data.len() as u64, Ordering::Relaxed);
             all.extend_from_slice(&data);
@@ -460,10 +555,12 @@ impl InStream for ByteInStream {
         if self.ended {
             return;
         }
-        self.ended = true;
+        self.fail(ConnectionError::Other("stopped here".into()));
         self.leftover.clear();
         self.chunks.close();
-        let _ = self.shared.send(STOP, self.id, code.to_le_bytes().to_vec());
+        if let Some(shared) = self.shared.upgrade() {
+            let _ = shared.send(STOP, self.id, code.to_le_bytes().to_vec());
+        }
     }
 }
 
@@ -474,8 +571,10 @@ impl Drop for ByteInStream {
     }
 }
 
-/// Write each frame to the link, flushing once nothing more waits. A
-/// `CLOSE` is the last: written, then the connection ends.
+/// Write each frame to the link, flushing once nothing more waits, and
+/// dropping the frames of a stream given up. A `CLOSE` is the last: written,
+/// then the connection ends. Once it has ended, what the writer holds gets
+/// [`LAST_WORDS`] to go out.
 async fn write_frames<W>(
     mut write: W,
     mut frames: mpsc::UnboundedReceiver<Frame>,
@@ -492,19 +591,33 @@ async fn write_frames<W>(
         let Some(frame) = frame else {
             break;
         };
+        if frame
+            .abandoned
+            .as_ref()
+            .is_some_and(|abandoned| abandoned.load(Ordering::Acquire))
+        {
+            continue;
+        }
         let mut head = [0u8; HEADER];
         head[0] = frame.kind;
         head[1..5].copy_from_slice(&frame.id.to_le_bytes());
         head[5..9].copy_from_slice(&(frame.payload.len() as u32).to_le_bytes());
+        let last = frame.kind == CLOSE;
         let wrote = async {
             write.write_all(&head).await?;
             write.write_all(&frame.payload).await?;
-            if frames.is_empty() || frame.kind == CLOSE {
+            if frames.is_empty() || last {
                 write.flush().await?;
             }
             std::io::Result::Ok(())
-        }
-        .await;
+        };
+        let wrote = tokio::select! {
+            wrote = wrote => wrote,
+            () = async {
+                shared.ended.cancelled().await;
+                tokio::time::sleep(LAST_WORDS).await;
+            } => Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "the link took nothing")),
+        };
         if let Err(e) = wrote {
             shared.end(format!("the byte stream failed: {e}"));
             break;
@@ -525,8 +638,9 @@ async fn write_frames<W>(
                     state.done.cancel();
                 }
             }
+            PONG => shared.pong_waiting.store(false, Ordering::Release),
             CLOSE => {
-                let _ = write.shutdown().await;
+                let _ = tokio::time::timeout(LAST_WORDS, write.shutdown()).await;
                 shared.end("closed");
                 break;
             }
@@ -545,12 +659,12 @@ async fn read_frames<R>(
 ) where
     R: AsyncRead + Send + Unpin,
 {
-    // The peer opens the other parity of ids; `None` before its first.
     let peer_parity = match role {
         Role::Dialer => 1,
         Role::Listener => 0,
     };
     let mut incoming: HashMap<u32, mpsc::Sender<Chunk>> = HashMap::new();
+    // The last stream id the peer opened; `None` before its first.
     let mut last_opened: Option<u32> = None;
     let why = loop {
         let mut head = [0u8; HEADER];
@@ -562,8 +676,8 @@ async fn read_frames<R>(
             break Some("the byte stream ended".to_string());
         }
         let kind = head[0];
-        let id = u32::from_le_bytes(head[1..5].try_into().unwrap());
-        let len = u32::from_le_bytes(head[5..9].try_into().unwrap()) as usize;
+        let id = u32::from_le_bytes([head[1], head[2], head[3], head[4]]);
+        let len = u32::from_le_bytes([head[5], head[6], head[7], head[8]]) as usize;
         let most = match kind {
             DATA => MAX_CHUNK,
             FIN => 0,
@@ -576,20 +690,23 @@ async fn read_frames<R>(
             break Some(format!("a frame of kind {kind} too long ({len} bytes)"));
         }
         let mut payload = vec![0u8; len];
-        if read.read_exact(&mut payload).await.is_err() {
+        let read_body = tokio::select! {
+            read = read.read_exact(&mut payload) => read,
+            () = shared.ended.cancelled() => break None,
+        };
+        if read_body.is_err() {
             break Some("the byte stream ended".to_string());
         }
+        shared.heard_us.store(shared.micros(), Ordering::Relaxed);
         shared
             .bytes_received
             .fetch_add((HEADER + len) as u64, Ordering::Relaxed);
         shared.frames_received.fetch_add(1, Ordering::Relaxed);
-        let code = || {
-            u32::from_le_bytes(
-                payload
-                    .get(..4)
-                    .and_then(|b| b.try_into().ok())
-                    .unwrap_or([0; 4]),
-            )
+        let code = |payload: &[u8]| {
+            payload
+                .get(..4)
+                .and_then(|b| <[u8; 4]>::try_from(b).ok())
+                .map_or(0, u32::from_le_bytes)
         };
         match kind {
             DATA | FIN | RESET => {
@@ -598,6 +715,15 @@ async fn read_frames<R>(
                 }
                 if last_opened.is_none_or(|last| id > last) {
                     last_opened = Some(id);
+                    if incoming.len() >= MAX_OPEN_STREAMS {
+                        // Those this side stopped or dropped hold no place.
+                        incoming.retain(|_, sender| !sender.is_closed());
+                        if incoming.len() >= MAX_OPEN_STREAMS {
+                            break Some(format!(
+                                "the peer held more than {MAX_OPEN_STREAMS} streams open"
+                            ));
+                        }
+                    }
                     let (sender, chunks) = mpsc::channel(STREAM_QUEUE);
                     incoming.insert(id, sender);
                     let stream = ByteInStream {
@@ -605,7 +731,8 @@ async fn read_frames<R>(
                         chunks,
                         leftover: Vec::new(),
                         ended: false,
-                        shared: shared.clone(),
+                        failure: None,
+                        shared: Arc::downgrade(&shared),
                     };
                     let sent = tokio::select! {
                         sent = accepted.send(stream) => sent.is_ok(),
@@ -620,9 +747,11 @@ async fn read_frames<R>(
                     continue;
                 };
                 let (chunk, last) = match kind {
+                    // The empty frame that opens a stream carries nothing.
+                    DATA if payload.is_empty() => continue,
                     DATA => (Chunk::Data(payload), false),
                     FIN => (Chunk::Fin, true),
-                    _ => (Chunk::Reset(code()), true),
+                    _ => (Chunk::Reset(code(&payload)), true),
                 };
                 let delivered = tokio::select! {
                     sent = sender.send(chunk) => sent.is_ok(),
@@ -640,19 +769,21 @@ async fn read_frames<R>(
                     .remove(&id);
                 if let Some(state) = state {
                     state.stopped.cancel();
-                    state.done.cancel();
+                    state.abandon();
                 }
             }
             PING => {
-                let _ = shared.send(PONG, 0, payload);
+                // One answer waiting at most, however many pings come.
+                if !shared.pong_waiting.swap(true, Ordering::AcqRel) {
+                    let _ = shared.send(PONG, 0, payload);
+                }
             }
             PONG => {
                 if let Ok(sent) = <[u8; 8]>::try_from(payload.as_slice()) {
                     let sent = u64::from_le_bytes(sent);
-                    let now = shared.started.elapsed().as_micros() as u64;
                     shared
                         .rtt_us
-                        .store(now.saturating_sub(sent), Ordering::Relaxed);
+                        .store(shared.micros().saturating_sub(sent), Ordering::Relaxed);
                 }
             }
             CLOSE => {
@@ -670,15 +801,24 @@ async fn read_frames<R>(
     drop(incoming);
 }
 
-/// Time the round trip every [`PING_EVERY`], from the first moment on.
-async fn time_round_trips(shared: Arc<Shared>) {
+/// Time the round trip every [`PING_EVERY`], from the first moment on, and
+/// end the connection once the peer said nothing for [`SILENCE`].
+async fn keep_time(shared: Arc<Shared>) {
     let mut every = tokio::time::interval(PING_EVERY);
     loop {
         tokio::select! {
             _ = every.tick() => {}
             () = shared.ended.cancelled() => return,
         }
-        let now = shared.started.elapsed().as_micros() as u64;
+        let now = shared.micros();
+        let heard = shared.heard_us.load(Ordering::Relaxed);
+        if now.saturating_sub(heard) >= shared.silence.as_micros() as u64 {
+            shared.end(format!(
+                "the peer said nothing for {} ms",
+                shared.silence.as_millis()
+            ));
+            return;
+        }
         if shared.send(PING, 0, now.to_le_bytes().to_vec()).is_err() {
             return;
         }
@@ -706,6 +846,15 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(5), future)
             .await
             .unwrap_or_else(|_| panic!("{what} within 5 s"))
+    }
+
+    /// A raw frame, as a peer writes it.
+    fn raw(kind: u8, id: u32, payload: &[u8]) -> Vec<u8> {
+        let mut frame = vec![kind];
+        frame.extend_from_slice(&id.to_le_bytes());
+        frame.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        frame.extend_from_slice(payload);
+        frame
     }
 
     #[tokio::test]
@@ -745,6 +894,23 @@ mod tests {
         assert_eq!(within("read", got.read_to_end(64)).await.unwrap(), b"pong");
     }
 
+    /// A stream opened first and written last still arrives: it was opened
+    /// on the link as its id was taken.
+    #[tokio::test]
+    async fn a_stream_opened_first_and_written_last_is_not_lost() {
+        let (dialer, listener) = pair();
+        let mut early = dialer.open_uni().await.unwrap();
+        let mut late = dialer.open_uni().await.unwrap();
+        late.write_all(b"second").await.unwrap();
+        late.finish().unwrap();
+        early.write_all(b"first").await.unwrap();
+        early.finish().unwrap();
+        let mut a = within("accept", listener.accept_uni()).await.unwrap();
+        let mut b = within("accept", listener.accept_uni()).await.unwrap();
+        assert_eq!(within("read", a.read_to_end(64)).await.unwrap(), b"first");
+        assert_eq!(within("read", b.read_to_end(64)).await.unwrap(), b"second");
+    }
+
     #[tokio::test]
     async fn a_reset_reaches_the_reader_and_a_stop_the_writer() {
         let (dialer, listener) = pair();
@@ -757,6 +923,10 @@ mod tests {
             matches!(&read, Err(ConnectionError::Other(e)) if e.contains("19791")),
             "{read:?}"
         );
+        assert!(
+            got.read_to_end(64).await.is_err(),
+            "a failed stream says so again, never a clean end"
+        );
 
         let mut out = dialer.open_uni().await.unwrap();
         out.write_all(b"part").await.unwrap();
@@ -764,6 +934,37 @@ mod tests {
         got.stop(0x4d4f);
         within("delivered once stopped", out.delivered()).await;
         assert!(out.write_all(b"more").await.is_err(), "stopped by the peer");
+    }
+
+    /// BG3 over a slow link: a frame given up drops what of it still waits,
+    /// so the keyframe after it does not wait behind it.
+    #[tokio::test]
+    async fn a_reset_drops_what_of_the_stream_still_waits() {
+        let (a, b) = tokio::io::duplex(1024);
+        let dialer = ByteStreamConnection::new(a, Role::Dialer, nowhere(), None);
+        let listener = ByteStreamConnection::new(b, Role::Listener, nowhere(), None);
+        let mut moot = dialer.open_uni().await.unwrap();
+        moot.write_all(&vec![1u8; 200_000]).await.unwrap();
+        moot.finish().unwrap();
+        moot.reset(0x4d4f);
+        let mut key = dialer.open_uni().await.unwrap();
+        key.write_all(b"keyframe").await.unwrap();
+        key.finish().unwrap();
+        let mut got = within("accept", listener.accept_uni()).await.unwrap();
+        assert!(
+            within("read", got.read_to_end(1 << 20)).await.is_err(),
+            "reset"
+        );
+        let mut got = within("accept", listener.accept_uni()).await.unwrap();
+        assert_eq!(
+            within("read", got.read_to_end(64)).await.unwrap(),
+            b"keyframe"
+        );
+        assert!(
+            listener.stats().bytes_received < 100_000,
+            "most of the moot frame never crossed: {}",
+            listener.stats().bytes_received
+        );
     }
 
     #[tokio::test]
@@ -785,24 +986,46 @@ mod tests {
 
     #[tokio::test]
     async fn a_frame_that_breaks_the_rules_ends_the_connection() {
-        let (mut raw, b) = tokio::io::duplex(1024);
+        let (mut peer, b) = tokio::io::duplex(1024);
         let listener = ByteStreamConnection::new(b, Role::Listener, nowhere(), None);
         // DATA on an odd id: the listener's own parity.
-        let mut frame = vec![DATA];
-        frame.extend_from_slice(&1u32.to_le_bytes());
-        frame.extend_from_slice(&0u32.to_le_bytes());
-        raw.write_all(&frame).await.unwrap();
+        peer.write_all(&raw(DATA, 1, b"")).await.unwrap();
         assert!(within("ended", listener.accept_uni()).await.is_err());
         assert!(listener.close_reason().unwrap().contains("did not open"));
 
-        let (mut raw, b) = tokio::io::duplex(1024);
+        let (mut peer, b) = tokio::io::duplex(1024);
         let listener = ByteStreamConnection::new(b, Role::Listener, nowhere(), None);
         let mut frame = vec![DATA];
         frame.extend_from_slice(&0u32.to_le_bytes());
         frame.extend_from_slice(&(MAX_CHUNK as u32 + 1).to_le_bytes());
-        raw.write_all(&frame).await.unwrap();
+        peer.write_all(&frame).await.unwrap();
         assert!(within("ended", listener.accept_uni()).await.is_err());
         assert!(listener.close_reason().unwrap().contains("too long"));
+    }
+
+    /// A peer that opens streams and never ends them is cut off past
+    /// [`MAX_OPEN_STREAMS`], as quinn's limit would hold it.
+    #[tokio::test]
+    async fn a_peer_holding_too_many_streams_open_is_cut_off() {
+        let (mut peer, b) = tokio::io::duplex(1 << 20);
+        let listener = ByteStreamConnection::new(b, Role::Listener, nowhere(), None);
+        let taker = tokio::spawn({
+            let listener = listener.clone();
+            async move {
+                let mut held = Vec::new();
+                while let Ok(stream) = listener.accept_uni().await {
+                    held.push(stream);
+                }
+                held.len()
+            }
+        });
+        let mut frames = Vec::new();
+        for n in 0..=MAX_OPEN_STREAMS as u32 {
+            frames.extend_from_slice(&raw(DATA, n * 2, b"x"));
+        }
+        peer.write_all(&frames).await.unwrap();
+        assert_eq!(within("cut off", taker).await.unwrap(), MAX_OPEN_STREAMS);
+        assert!(listener.close_reason().unwrap().contains("streams open"));
     }
 
     #[tokio::test]
@@ -822,6 +1045,22 @@ mod tests {
         let mut got = within("accept", listener.accept_uni()).await.unwrap();
         within("read", got.read_to_end(2000)).await.unwrap();
         assert!(listener.stats().bytes_received >= 1000);
+    }
+
+    /// A peer that answers nothing is gone after its silence ([`SILENCE`],
+    /// shortened here).
+    #[tokio::test]
+    async fn a_silent_peer_is_gone() {
+        let (_peer, b) = tokio::io::duplex(1 << 20);
+        let silence = Duration::from_millis(1500);
+        let listener = ByteStreamConnection::waiting(b, Role::Listener, nowhere(), None, silence);
+        let ended = tokio::time::timeout(silence * 3, listener.accept_uni()).await;
+        assert!(
+            matches!(ended, Ok(Err(ConnectionError::Closed))),
+            "{:?}",
+            ended.map(|r| r.err())
+        );
+        assert!(listener.close_reason().unwrap().contains("said nothing"));
     }
 
     /// The budget holds a writer back while the link does not take its
