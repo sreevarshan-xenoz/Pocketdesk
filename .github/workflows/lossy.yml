@@ -58,9 +58,17 @@ jobs:
         commit: ${{ fromJSON(needs.plan.outputs.commits) }}
         permille: ${{ fromJSON(needs.plan.outputs.permilles) }}
     steps:
+      # The whole history, then the commit named, as a short or full sha,
+      # a tag or a branch: checkout's `ref` takes no short sha.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ matrix.commit }}
+          fetch-depth: 0
+      - name: Check out the commit measured
+        env:
+          COMMIT: ${{ matrix.commit }}
+        run: |
+          sha=$(git rev-parse --verify --quiet "$COMMIT^{commit}" || git rev-parse --verify "origin/$COMMIT^{commit}")
+          git checkout --detach "$sha"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
