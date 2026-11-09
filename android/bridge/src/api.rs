@@ -6404,7 +6404,6 @@ mod bluetooth_road_tests {
         assert_eq!(road, 2);
     }
 
-    /// This phone's pin of `fingerprint` for `address`, in `certs`.
     /// Phase 2c: a stream session on a stream the app hands over. The
     /// computer hears the stream hello, then the phone's TLS with this
     /// phone's certificate, then the session's opening streams over the
@@ -6413,6 +6412,9 @@ mod bluetooth_road_tests {
     async fn connect_streaming_bluetooth_runs_a_session() {
         use pocketdesk_core::streaming::Connection;
         use pocketdesk_core::streaming::byte_stream::{ByteStreamConnection, Role};
+        // The session's statics (the connect generation a stop retires) are
+        // other tests' too.
+        let _session = super::receive_tests::SESSION_STATICS.lock().await;
         let _globals = super::TRANSFER_TEST_LOCK.lock().await;
         let certs = std::env::temp_dir().join(format!("bridge-bt-stream-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&certs);
@@ -6433,10 +6435,14 @@ mod bluetooth_road_tests {
                 computer_stream.read_exact(&mut byte).await.unwrap();
                 hello.push(byte[0]);
             }
-            let tls = tokio_rustls::TlsAcceptor::from(computer.control_server_config().unwrap())
-                .accept(computer_stream)
-                .await
-                .expect("the phone's TLS");
+            let tls =
+                match tokio_rustls::TlsAcceptor::from(computer.control_server_config().unwrap())
+                    .accept(computer_stream)
+                    .await
+                {
+                    Ok(tls) => tls,
+                    Err(e) => return Err(format!("the phone's TLS: {e}")),
+                };
             let key = tls
                 .get_ref()
                 .1
@@ -6463,7 +6469,7 @@ mod bluetooth_road_tests {
                 }
             }
             conn.close(0, b"test over");
-            (String::from_utf8(hello).unwrap(), key, said)
+            Ok((String::from_utf8(hello).unwrap(), key, said))
         });
 
         let started = connect_streaming_bluetooth(
@@ -6474,11 +6480,15 @@ mod bluetooth_road_tests {
             pocketdesk_core::streaming::SessionMode::Screen,
         )
         .await;
-        let (hello, key, said) = computer_side.await.unwrap();
+        let computer = computer_side.await.unwrap();
         let _ = stop_streaming().await;
         *crate::CERT_DIR.lock().unwrap() = had;
         let _ = std::fs::remove_dir_all(&certs);
 
+        let (hello, key, said) = match computer {
+            Ok(seen) => seen,
+            Err(e) => panic!("the computer's side: {e}; the phone's: {started:?}"),
+        };
         assert!(started.is_ok(), "{started:?}");
         assert_eq!(
             hello,
@@ -6526,6 +6536,7 @@ mod bluetooth_road_tests {
         assert!(matches!(read, Ok(0)), "closed, with nothing sent: {read:?}");
     }
 
+    /// This phone's pin of `fingerprint` for `address`, in `certs`.
     fn pin(certs: &std::path::Path, address: &str, fingerprint: [u8; 32]) {
         let label = pocketdesk_core::streaming::transport::peer_label_for_address(address).unwrap();
         CertManager::load_or_create(certs)
