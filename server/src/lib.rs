@@ -96,6 +96,7 @@ pub mod service;
 pub mod session_telemetry;
 pub mod shared_input;
 pub mod state;
+pub(crate) mod stream_session;
 pub mod sway_tree;
 pub mod system_state;
 pub mod tel_handler;
