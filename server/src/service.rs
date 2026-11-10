@@ -728,8 +728,8 @@ pub async fn run(config: Config) -> Result<()> {
     });
 
     // The Bluetooth road (the fallback): it listens while
-    // `bluetooth_fallback` is on and a radio is present (Windows only for
-    // now), and its control links and stream sessions come to the loop
+    // `bluetooth_fallback` is on and a radio is present (Windows and
+    // Linux), and its control links and stream sessions come to the loop
     // below.
     let (bluetooth_control_tx, mut bluetooth_control) = tokio::sync::mpsc::channel(4);
     let (bluetooth_session_tx, mut bluetooth_sessions) = tokio::sync::mpsc::channel(4);
@@ -1965,7 +1965,7 @@ where
                     Some(Refused::NotPaired)
                 };
                 if let Some(why) = refused {
-                    crate::bluetooth::refused(&device_id, why);
+                    crate::bluetooth::refused(&device_id, crate::bluetooth::What::Control, why);
                     say_refused(&writer).await;
                     return Ok(());
                 }

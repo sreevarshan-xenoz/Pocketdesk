@@ -23,7 +23,7 @@ mod refused;
 #[cfg(windows)]
 mod windows;
 
-pub(crate) use refused::{Refused, refused};
+pub(crate) use refused::{Refused, What, refused};
 
 #[cfg(test)]
 pub(crate) use links::turn;

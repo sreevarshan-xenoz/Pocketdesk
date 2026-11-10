@@ -575,10 +575,23 @@ pub async fn bluetooth_session_gate(
         Err(_) => false,
     };
     if !allowed {
-        tracing::warn!(
-            device_id = device_id.unwrap_or("<none announced>"),
-            "Refused a stream session over Bluetooth"
-        );
+        // Told to the owner as a refused control link is (Activity and a
+        // notification), by why; a session that named no device is only
+        // logged.
+        match device_id {
+            Some(id) => {
+                use crate::bluetooth::Refused;
+                let why = if recording || is_computer_device(id) {
+                    Refused::Computer
+                } else if is_paired_device(id) {
+                    Refused::OtherKey
+                } else {
+                    Refused::NotPaired
+                };
+                crate::bluetooth::refused(id, crate::bluetooth::What::Screen, why);
+            }
+            None => tracing::warn!("Refused a screen session over Bluetooth that named no device"),
+        }
         return None;
     }
     permissions_gate(claim.device_id, claim.peer, true).await
