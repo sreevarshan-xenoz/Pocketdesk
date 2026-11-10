@@ -31,8 +31,13 @@ object BluetoothRoadRule {
     /** The wait between tries to open a transfer link. */
     const val LINK_STEP_MS = 500L
 
-    /** What a computer said of its Bluetooth road: its radio's [address], the control [service] and the transfer service ([link]). */
-    data class Info(val address: String, val service: UUID, val link: UUID)
+    /**
+     * What a computer said of its Bluetooth road: its radio's [address], the
+     * control [service], the transfer service ([link]) and the screen service
+     * ([screen]; null in what an older app kept, when the screen dials the
+     * transfer service).
+     */
+    data class Info(val address: String, val service: UUID, val link: UUID, val screen: UUID? = null)
 
     /**
      * Whether to dial the computer by Bluetooth now: the switch is on
@@ -158,14 +163,15 @@ object BluetoothRoadRule {
     fun tryLinkAgain(startedAt: Long, now: Long): Boolean =
         now + LINK_STEP_MS < startedAt + LINK_TRY_MS
 
-    /** The bridge's `{address, service, link}` (`nativeBluetoothInfo`), or null when it is empty or does not read. */
+    /** The bridge's `{address, service, link, screen}` (`nativeBluetoothInfo`; `screen` may be absent), or null when it is empty or does not read. */
     fun info(json: String?): Info? {
         if (json.isNullOrBlank()) return null
         return runCatching {
             val o = JSONObject(json)
             val address = o.getString("address").uppercase()
             if (!ADDRESS.matches(address)) return null
-            Info(address, UUID.fromString(o.getString("service")), UUID.fromString(o.getString("link")))
+            val screen = o.optString("screen").takeIf { it.isNotEmpty() }?.let { UUID.fromString(it) }
+            Info(address, UUID.fromString(o.getString("service")), UUID.fromString(o.getString("link")), screen)
         }.getOrNull()
     }
 

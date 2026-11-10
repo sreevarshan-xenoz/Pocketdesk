@@ -788,7 +788,7 @@ pub fn control_road() -> u8 {
 }
 
 /// What the computer at `address` last said of its Bluetooth road, as
-/// `{address, service, link}` JSON; `""` when nothing.
+/// `{address, service, link, screen}` JSON; `""` when nothing.
 pub fn bluetooth_info(address: &str) -> String {
     crate::bluetooth::info(address)
 }
@@ -3038,7 +3038,7 @@ pub async fn connect_streaming_wan(
 pub const BLUETOOTH_STREAM_PORT: u16 = 1;
 
 /// Run a stream session with the computer at `address` on `fd`, an RFCOMM
-/// stream to its transfer service the app dialed and handed over (the
+/// stream to its screen service the app dialed and handed over (the
 /// Bluetooth fallback, phase 2c): the stream hello, TLS held to the pin for
 /// `address` as the control link's (never pinned by first use), then the
 /// session over the byte stream, where the computer gives it its low
