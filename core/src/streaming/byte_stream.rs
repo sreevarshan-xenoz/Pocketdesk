@@ -83,6 +83,10 @@ pub const SILENCE: Duration = Duration::from_secs(30);
 /// what it holds (a `CLOSE`) onto the link.
 const LAST_WORDS: Duration = Duration::from_secs(2);
 
+/// How long a writer that failed waits for the reader to say why the
+/// connection ended (the peer's `CLOSE` may still be unread).
+const READER_GRACE: Duration = Duration::from_millis(500);
+
 /// Which end of the byte stream this is: the dialer opens even stream ids,
 /// the listener odd ones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -619,6 +623,13 @@ async fn write_frames<W>(
             } => Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "the link took nothing")),
         };
         if let Err(e) = wrote {
+            // A peer that closed did so with a `CLOSE` the reader may not
+            // have read yet: its reason, not this broken pipe, is why the
+            // connection ended, so the reader is given a moment to say it.
+            tokio::select! {
+                () = shared.ended.cancelled() => {}
+                () = tokio::time::sleep(READER_GRACE) => {}
+            }
             shared.end(format!("the byte stream failed: {e}"));
             break;
         }

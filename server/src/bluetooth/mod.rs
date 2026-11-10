@@ -6,8 +6,9 @@
 //! internet road's rules), and the transfer service
 //! ([`link_uuid`](pocketdesk_core::protocol::bluetooth::link_uuid)), whose
 //! connections are transfer links a control link asked for (the link hello
-//! first, [`links`]): RFCOMM carries one connection per channel between two
-//! devices, so a transfer cannot share the control link's channel. It
+//! first, [`links`]) or stream sessions, the screen over Bluetooth (the stream
+//! hello first, then TLS): RFCOMM carries one connection per channel between
+//! two devices, so neither can share the control link's channel. It
 //! listens only on Windows for now (Linux is phase 3), while
 //! `bluetooth_fallback` is on and the computer has a radio.
 
@@ -23,7 +24,9 @@ pub(crate) use links::turn;
 use links::{BluetoothLinks, LinkTable};
 pub(crate) use links::{ONE_AT_A_TIME, busy as transfer_busy};
 
-use pocketdesk_core::protocol::bluetooth::{BluetoothInfo, LINK_HELLO, PACKET, RoadState};
+use pocketdesk_core::protocol::bluetooth::{
+    BluetoothInfo, LINK_HELLO, PACKET, RoadState, STREAM_HELLO,
+};
 use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -253,6 +256,12 @@ pub(crate) struct Control {
     pub(crate) links: Arc<BluetoothLinks>,
 }
 
+/// A stream session's connection over Bluetooth, for the server's loop: its
+/// stream, the hello read and the phone's TLS still to come.
+pub(crate) struct Session {
+    pub(crate) stream: Stream,
+}
+
 /// A stream with the one byte already read from it put back in front: the
 /// Bluetooth road reads it to tell TLS from anything else, as the TCP road
 /// peeks, and a Bluetooth stream cannot peek.
@@ -323,7 +332,7 @@ pub(crate) struct Incoming {
 pub(crate) enum Kind {
     /// The control service: TLS only.
     Control,
-    /// The transfer service: a link hello only.
+    /// The transfer service: a link hello or a stream hello only.
     // Only the Windows radio listens yet.
     #[cfg_attr(not(windows), allow(dead_code))]
     Link,
@@ -338,8 +347,20 @@ const HELLO_WAIT: Duration = Duration::from_secs(5);
 /// open connections' cap and the control link's own timeouts after it.
 const CONTROL_HELLO_WAIT: Duration = Duration::from_secs(20);
 
-/// The longest link hello: the word, a space, a `u64` and the newline.
+/// The longest hello: the link hello's word, a space, a `u64` and the
+/// newline (the stream hello, its word and the newline, is shorter).
 const HELLO_MAX: usize = LINK_HELLO.len() + 1 + 20 + 1;
+
+/// Whether `line`, the start of a hello, can still become one: it is the
+/// start of the link hello's word or of the stream hello's, or it has gone
+/// past one's word (the link hello's id comes next).
+fn hello_so_far(line: &[u8]) -> bool {
+    let word = |hello: &str| {
+        let hello = hello.as_bytes();
+        hello.starts_with(&line[..line.len().min(hello.len())])
+    };
+    word(LINK_HELLO) || word(STREAM_HELLO)
+}
 
 /// What a new connection's first bytes say it is.
 enum Arrival<S> {
@@ -347,13 +368,17 @@ enum Arrival<S> {
     Control(Prefixed<S>),
     /// The link hello: the transfer link with this id.
     Link(u64, S),
+    /// The stream hello: a stream session, its TLS next.
+    Stream(S),
 }
 
 /// Read what a new connection to the `kind` service is, within
-/// [`CONTROL_HELLO_WAIT`] (control) or [`HELLO_WAIT`] (transfer): a TLS record on the control service, a link hello on the
+/// [`CONTROL_HELLO_WAIT`] (control) or [`HELLO_WAIT`] (transfer): a TLS
+/// record on the control service, a link hello or a stream hello on the
 /// transfer service. Anything else (either on the other's service
 /// included), a hello longer than [`HELLO_MAX`], or silence, is `None`.
-/// Nothing past the hello's newline is read.
+/// Nothing past the hello's newline is read (a stream session's TLS starts
+/// there).
 async fn sort<S: AsyncRead + Unpin>(mut stream: S, kind: Kind) -> Option<Arrival<S>> {
     let read = async move {
         let mut byte = [0u8; 1];
@@ -366,10 +391,7 @@ async fn sort<S: AsyncRead + Unpin>(mut stream: S, kind: Kind) -> Option<Arrival
         }
         let mut line = vec![byte[0]];
         while line.len() < HELLO_MAX && byte[0] != b'\n' {
-            if !LINK_HELLO
-                .as_bytes()
-                .starts_with(&line[..line.len().min(LINK_HELLO.len())])
-            {
+            if !hello_so_far(&line) {
                 return None;
             }
             if stream.read(&mut byte).await.ok()? == 0 {
@@ -380,9 +402,11 @@ async fn sort<S: AsyncRead + Unpin>(mut stream: S, kind: Kind) -> Option<Arrival
         if byte[0] != b'\n' {
             return None;
         }
-        let id = pocketdesk_core::protocol::bluetooth::parse_link_hello(
-            std::str::from_utf8(&line).ok()?,
-        )?;
+        let line = std::str::from_utf8(&line).ok()?;
+        if pocketdesk_core::protocol::bluetooth::parse_stream_hello(line) {
+            return Some(Arrival::Stream(stream));
+        }
+        let id = pocketdesk_core::protocol::bluetooth::parse_link_hello(line)?;
         Some(Arrival::Link(id, stream))
     };
     let wait = match kind {
@@ -394,12 +418,13 @@ async fn sort<S: AsyncRead + Unpin>(mut stream: S, kind: Kind) -> Option<Arrival
 
 /// Sort each connection the listener accepts, each on a task of its own: a
 /// transfer link goes to the transfer waiting for its id, a control link to
-/// `control` with links of its own; anything else is dropped. Each lives
-/// only while `state` listens.
+/// `control` with links of its own, a stream session to `sessions`; anything
+/// else is dropped. Each lives only while `state` listens.
 async fn serve(
     mut accepted: mpsc::Receiver<Incoming>,
     table: Arc<LinkTable>,
     control: mpsc::Sender<Control>,
+    sessions: mpsc::Sender<Session>,
     state: &'static Listening,
 ) {
     while let Some(Incoming {
@@ -410,12 +435,16 @@ async fn serve(
     {
         let table = table.clone();
         let control = control.clone();
+        let sessions = sessions.clone();
         let stream = Endable::new(stream, state.period()).closing(closed);
         tokio::spawn(async move {
             match sort(stream, kind).await {
                 Some(Arrival::Control(stream)) => {
                     let links = Arc::new(BluetoothLinks::new(table));
                     let _ = control.send(Control { stream, links }).await;
+                }
+                Some(Arrival::Stream(stream)) => {
+                    let _ = sessions.send(Session { stream }).await;
                 }
                 Some(Arrival::Link(id, stream)) => {
                     if !table.offer(id, stream) {
@@ -645,10 +674,17 @@ async fn keep_listening(
 
 /// The Bluetooth road's listener, for the server's life: listens while
 /// `bluetooth_fallback` is on and a radio is present (Windows only for
-/// now), and hands each control link to `control`.
-pub(crate) async fn run(control: mpsc::Sender<Control>) {
+/// now), and hands each control link to `control` and each stream session to
+/// `sessions`.
+pub(crate) async fn run(control: mpsc::Sender<Control>, sessions: mpsc::Sender<Session>) {
     let (accepted_tx, accepted_rx) = mpsc::channel(8);
-    tokio::spawn(serve(accepted_rx, Arc::default(), control, &LISTENING));
+    tokio::spawn(serve(
+        accepted_rx,
+        Arc::default(),
+        control,
+        sessions,
+        &LISTENING,
+    ));
     keep_listening(
         radio(),
         &LISTENING,
@@ -669,7 +705,7 @@ fn live(stream: DuplexStream) -> Stream {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pocketdesk_core::protocol::bluetooth::format_link_hello;
+    use pocketdesk_core::protocol::bluetooth::{format_link_hello, format_stream_hello};
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::io::AsyncWriteExt;
 
@@ -688,17 +724,25 @@ mod tests {
         mpsc::Sender<Incoming>,
         Arc<LinkTable>,
         mpsc::Receiver<Control>,
+        mpsc::Receiver<Session>,
     ) {
         let (accepted_tx, accepted_rx) = mpsc::channel(8);
         let (control_tx, control_rx) = mpsc::channel(8);
+        let (sessions_tx, sessions_rx) = mpsc::channel(8);
         let table = Arc::new(LinkTable::default());
         let state: &'static Listening = Box::leak(Box::new(Listening::new()));
         state.start(BluetoothInfo {
             address: format_address([0, 0, 0x5E, 0, 0x53, 1]),
             service: pocketdesk_core::protocol::bluetooth::SERVICE_UUID.to_string(),
         });
-        tokio::spawn(serve(accepted_rx, table.clone(), control_tx, state));
-        (accepted_tx, table, control_rx)
+        tokio::spawn(serve(
+            accepted_rx,
+            table.clone(),
+            control_tx,
+            sessions_tx,
+            state,
+        ));
+        (accepted_tx, table, control_rx, sessions_rx)
     }
 
     /// A connection from the phone to the `kind` service that sends
@@ -729,7 +773,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_link_hello_goes_to_the_transfer_waiting_for_it() {
-        let (accepted, table, _control) = serving();
+        let (accepted, table, _control, _sessions) = serving();
         let (waiting, arrived) = table.wait();
         let mut hello = format_link_hello(waiting.id).into_bytes();
         hello.extend_from_slice(b"after");
@@ -744,9 +788,31 @@ mod tests {
         assert_eq!(read_some(&mut phone).await, b"back");
     }
 
+    /// A stream hello on the transfer service is a stream session: what the
+    /// phone sends after it (its TLS) is left unread for the session.
+    #[tokio::test]
+    async fn a_stream_hello_goes_to_the_session_loop_with_the_rest_unread() {
+        let (accepted, table, mut control, mut sessions) = serving();
+        let (waiting, _arrived) = table.wait();
+        let mut hello = format_stream_hello().into_bytes();
+        let record = [pocketdesk_core::protocol::TLS_HANDSHAKE_RECORD, 3, 1];
+        hello.extend_from_slice(&record);
+        let mut phone = dial(&accepted, Kind::Link, &hello).await;
+        let mut session = sessions.recv().await.expect("a stream session");
+        assert_eq!(read_some(&mut session.stream).await, record);
+        session.stream.write_all(b"back").await.unwrap();
+        assert_eq!(read_some(&mut phone).await, b"back");
+        assert!(control.try_recv().is_err(), "not a control link");
+        let (late, _) = tokio::io::duplex(1024);
+        assert!(
+            table.offer(waiting.id, live(late)),
+            "and no transfer's id was taken"
+        );
+    }
+
     #[tokio::test]
     async fn tls_goes_to_the_control_loop_with_its_first_byte() {
-        let (accepted, _table, mut control) = serving();
+        let (accepted, _table, mut control, _sessions) = serving();
         let record = [pocketdesk_core::protocol::TLS_HANDSHAKE_RECORD, 3, 1];
         let _phone = dial(&accepted, Kind::Control, &record).await;
         let mut link = control.recv().await.expect("a control link");
@@ -757,7 +823,7 @@ mod tests {
 
     #[tokio::test]
     async fn anything_else_is_dropped() {
-        let (accepted, table, mut control) = serving();
+        let (accepted, table, mut control, mut sessions) = serving();
         let (waiting, _arrived) = table.wait();
         let tls = vec![pocketdesk_core::protocol::TLS_HANDSHAKE_RECORD, 3, 1];
         for (kind, first) in [
@@ -776,6 +842,13 @@ mod tests {
             // service, a hello on the control service.
             (Kind::Link, tls.clone()),
             (Kind::Control, format_link_hello(waiting.id).into_bytes()),
+            (Kind::Control, format_stream_hello().into_bytes()),
+            // Near misses of the stream hello.
+            (Kind::Link, b"POCKETDESK-BT-STREAM \n".to_vec()),
+            (Kind::Link, b"POCKETDESK-BT-STREAM 1\n".to_vec()),
+            (Kind::Link, b"POCKETDESK-BT-STREAMS\n".to_vec()),
+            (Kind::Link, b"POCKETDESK-BT-STREAM\r\n".to_vec()),
+            (Kind::Link, b"POCKETDESK-BT-\n".to_vec()),
         ] {
             let mut phone = dial(&accepted, kind, &first).await;
             let mut rest = Vec::new();
@@ -786,6 +859,7 @@ mod tests {
             assert!(rest.is_empty(), "{kind:?} {first:?}");
         }
         assert!(control.try_recv().is_err(), "no control link");
+        assert!(sessions.try_recv().is_err(), "no stream session");
         let (late, _) = tokio::io::duplex(1024);
         assert!(
             table.offer(waiting.id, live(late)),
@@ -1032,7 +1106,14 @@ mod tests {
         let (accepted_tx, accepted_rx) = mpsc::channel(8);
         let (control_tx, mut control_rx) = mpsc::channel(8);
         let table = Arc::new(LinkTable::default());
-        let serving = tokio::spawn(serve(accepted_rx, table.clone(), control_tx, state));
+        let (sessions_tx, _sessions_rx) = mpsc::channel(8);
+        let serving = tokio::spawn(serve(
+            accepted_rx,
+            table.clone(),
+            control_tx,
+            sessions_tx,
+            state,
+        ));
         let listening = tokio::spawn({
             let radio: Arc<dyn Radio> = radio.clone();
             let on = on.clone();

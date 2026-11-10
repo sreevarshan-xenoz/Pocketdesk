@@ -150,6 +150,13 @@ object RustCore {
         codecCaps: Int,
     ): String
 
+    private external fun nativeConnectStreamingBluetooth(
+        address: String,
+        fd: Int,
+        monitorIndex: Int,
+        codecCaps: Int,
+    ): String
+
     private external fun nativeResetReconnectBackoff()
     private external fun nativeConnectV2(address: String, port: Int): String
     private external fun nativeReceiveFrames(timeoutMs: Int): ByteArray
@@ -723,6 +730,14 @@ object RustCore {
      */
     fun connectStreamingWan(address: String, identityJson: String, monitorIndex: Int = -1): Result<Unit> =
         envelope(nativeConnectStreamingWan(address, identityJson, monitorIndex, videoCodecCaps())).map { }
+
+    /**
+     * A screen session over the Bluetooth road (phase 2c), on [fd], the
+     * bridge's end of a stream link `BluetoothRoad.openStream` opened: the
+     * bridge owns and closes it from here on.
+     */
+    fun connectStreamingBluetooth(address: String, fd: Int, monitorIndex: Int = -1): Result<Unit> =
+        envelope(nativeConnectStreamingBluetooth(address, fd, monitorIndex, videoCodecCaps())).map { }
 
     /** Connect the phone as a remote (T10i): input only, no picture or sound. */
     fun connectRemote(address: String, port: Int): Result<Unit> = envelope(nativeConnectRemote(address, port)).map { }

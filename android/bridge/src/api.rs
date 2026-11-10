@@ -741,6 +741,14 @@ fn pinned_control_manager(
     address: &str,
     timeout: Duration,
 ) -> Result<Option<ConnectionManager>, String> {
+    Ok(pinned_tls(address)?.map(|tls| ConnectionManager::new(timeout, tls)))
+}
+
+/// The control link's TLS for a road where nothing pairs: this phone's own
+/// certificate presented, the computer's held to its pin for `address`.
+/// `None` when this phone has no pin for `address`.
+#[cfg(unix)]
+fn pinned_tls(address: &str) -> Result<Option<Arc<tokio_rustls::rustls::ClientConfig>>, String> {
     let dir = crate::CERT_DIR
         .lock()
         .unwrap()
@@ -750,7 +758,7 @@ fn pinned_control_manager(
         .map_err(|e| format!("This phone's certificate: {e}"))?;
     let pinned = pocketdesk_core::streaming::transport::peer_label_for_address(address)
         .is_some_and(|label| certs.is_peer_trusted(&label));
-    Ok(pinned.then(|| ConnectionManager::new(timeout, certs.control_client_config_pinned_only())))
+    Ok(pinned.then(|| certs.control_client_config_pinned_only()))
 }
 
 /// How long the control link's TLS and handshake may take on a Bluetooth
@@ -3020,6 +3028,123 @@ pub async fn connect_streaming_wan(
         0,
         monitor_index,
         Some(dial),
+    )
+    .await
+}
+
+/// The port a stream session over Bluetooth is kept under: there is none on
+/// this road, and 0 is the internet road's.
+#[cfg(unix)]
+pub const BLUETOOTH_STREAM_PORT: u16 = 1;
+
+/// Run a stream session with the computer at `address` on `fd`, an RFCOMM
+/// stream to its transfer service the app dialed and handed over (the
+/// Bluetooth fallback, phase 2c): the stream hello, TLS held to the pin for
+/// `address` as the control link's (never pinned by first use), then the
+/// session over the byte stream, where the computer gives it its low
+/// setting. `fd` is this call's from here on, closed whenever the session
+/// does not come up on it.
+#[cfg(unix)]
+pub async fn connect_streaming_bluetooth(
+    address: String,
+    fd: std::os::fd::OwnedFd,
+    monitor_index: Option<u32>,
+    codec_caps: u8,
+    mode: pocketdesk_core::streaming::SessionMode,
+) -> Result<(), String> {
+    use pocketdesk_core::streaming::byte_stream::{ByteStreamConnection, Role};
+    let mut stream =
+        crate::bluetooth::stream_of(fd).map_err(|e| format!("The Bluetooth stream: {e}"))?;
+    let Some(tls) = pinned_tls(&address)? else {
+        tracing::warn!(peer = %address, "Bluetooth: no pin for this computer");
+        return Err(format!(
+            "This phone has not verified the computer at {address} yet: connect at home first"
+        ));
+    };
+
+    let generation = {
+        let mut handle_guard = (*STREAMING_HANDLE).lock().await;
+        if let Some(handle) = &*handle_guard {
+            if handle.address == address
+                && handle.port == BLUETOOTH_STREAM_PORT
+                && handle.monitor_index == monitor_index
+                && handle.mode == mode
+                && handle.connection.close_reason().is_none()
+            {
+                tracing::info!("Bluetooth session already active for {address}, skipping connect");
+                return Ok(());
+            }
+            tracing::info!(
+                "Stopping existing session for {} before connecting to {address} over Bluetooth",
+                handle.address
+            );
+        }
+        if let Some(handle) = handle_guard.take() {
+            teardown_streaming_handle(handle).await;
+            clear_hud_window();
+        }
+        crate::CONNECT_GENERATION.begin()
+    };
+    *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Connecting;
+
+    let fail = |message: String| {
+        *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Error(PocketdeskErrorDto {
+            code: PocketdeskError::ConnectionFailed {
+                address: String::new(),
+                port: 0,
+                reason: String::new(),
+            }
+            .code() as u32,
+            message: message.clone(),
+            is_retryable: true,
+        });
+        message
+    };
+    let hello = pocketdesk_core::protocol::bluetooth::format_stream_hello();
+    stream
+        .write_all(hello.as_bytes())
+        .await
+        .map_err(|e| fail(format!("The Bluetooth stream: {e}")))?;
+    let server_name = tokio_rustls::rustls::pki_types::ServerName::try_from(address.clone())
+        .map_err(|e| fail(format!("{address} is not an address: {e}")))?;
+    let tls = tokio::time::timeout(
+        BLUETOOTH_HANDSHAKE_WAIT,
+        tokio_rustls::TlsConnector::from(tls).connect(server_name, stream),
+    )
+    .await
+    .map_err(|_| fail("The computer did not answer over Bluetooth".to_string()))?
+    .map_err(|e| fail(format!("TLS over Bluetooth: {e}")))?;
+    let peer_key = tls
+        .get_ref()
+        .1
+        .peer_certificates()
+        .and_then(pocketdesk_core::streaming::PeerKey::from_tls_certs);
+    tracing::info!(peer = %address, "Stream session over Bluetooth: TLS up");
+    // A Bluetooth link has no address.
+    let connection: pocketdesk_core::streaming::SharedConnection = ByteStreamConnection::new(
+        tls,
+        Role::Dialer,
+        std::net::SocketAddr::from(([0, 0, 0, 0], 0)),
+        peer_key,
+    );
+    let (client, packet_rx, audio_rx) = StreamingClient::attach(
+        connection,
+        monitor_index,
+        Some(&client_identity().device_id),
+        None,
+        Some(codec_caps),
+        mode,
+    )
+    .await;
+    install_streaming(
+        generation,
+        client,
+        packet_rx,
+        audio_rx,
+        address,
+        BLUETOOTH_STREAM_PORT,
+        monitor_index,
+        None,
     )
     .await
 }
@@ -6277,6 +6402,138 @@ mod bluetooth_road_tests {
         assert!(waited, "installed only once the lock was free");
         assert!(matches!(state, Ok(ConnectionState::Connected)), "{state:?}");
         assert_eq!(road, 2);
+    }
+
+    /// Phase 2c: a stream session on a stream the app hands over. The
+    /// computer hears the stream hello, then the phone's TLS with this
+    /// phone's certificate, then the session's opening streams over the
+    /// byte stream (the device's id among them).
+    #[tokio::test]
+    async fn connect_streaming_bluetooth_runs_a_session() {
+        use pocketdesk_core::streaming::Connection;
+        use pocketdesk_core::streaming::byte_stream::{ByteStreamConnection, Role};
+        // The session's statics (the connect generation a stop retires) are
+        // other tests' too.
+        let _session = super::receive_tests::SESSION_STATICS.lock().await;
+        let _globals = super::TRANSFER_TEST_LOCK.lock().await;
+        let certs = std::env::temp_dir().join(format!("bridge-bt-stream-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&certs);
+        let had = crate::CERT_DIR.lock().unwrap().replace(certs.clone());
+        let computer = CertManager::new().unwrap();
+        pin(&certs, "192.0.2.62", computer.cert_fingerprint());
+        let phone_cert = CertManager::load_or_create(&certs)
+            .unwrap()
+            .cert_fingerprint();
+        let (phone_end, computer_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        computer_stream.set_nonblocking(true).unwrap();
+        let mut computer_stream = tokio::net::UnixStream::from_std(computer_stream).unwrap();
+
+        let computer_side = tokio::spawn(async move {
+            let mut hello = Vec::new();
+            let mut byte = [0u8; 1];
+            while byte[0] != b'\n' {
+                computer_stream.read_exact(&mut byte).await.unwrap();
+                hello.push(byte[0]);
+            }
+            let tls =
+                match tokio_rustls::TlsAcceptor::from(computer.control_server_config().unwrap())
+                    .accept(computer_stream)
+                    .await
+                {
+                    Ok(tls) => tls,
+                    Err(e) => return Err(format!("the phone's TLS: {e}")),
+                };
+            let key = tls
+                .get_ref()
+                .1
+                .peer_certificates()
+                .and_then(pocketdesk_core::streaming::PeerKey::from_tls_certs);
+            let conn = ByteStreamConnection::new(
+                tls,
+                Role::Listener,
+                std::net::SocketAddr::from(([0, 0, 0, 0], 0)),
+                key.clone(),
+            );
+            let mut said = Vec::new();
+            for _ in 0..8 {
+                let Ok(Ok(mut stream)) =
+                    tokio::time::timeout(Duration::from_secs(5), conn.accept_uni()).await
+                else {
+                    break;
+                };
+                if let Ok(data) = stream.read_to_end(1024).await {
+                    said.push(data);
+                }
+                if said.iter().any(|d| d.starts_with(&[0xFE, 0x00])) {
+                    break;
+                }
+            }
+            conn.close(0, b"test over");
+            Ok((String::from_utf8(hello).unwrap(), key, said))
+        });
+
+        let started = connect_streaming_bluetooth(
+            "192.0.2.62".to_string(),
+            std::os::fd::OwnedFd::from(phone_end),
+            None,
+            0,
+            pocketdesk_core::streaming::SessionMode::Screen,
+        )
+        .await;
+        let computer = computer_side.await.unwrap();
+        let _ = stop_streaming().await;
+        *crate::CERT_DIR.lock().unwrap() = had;
+        let _ = std::fs::remove_dir_all(&certs);
+
+        let (hello, key, said) = match computer {
+            Ok(seen) => seen,
+            Err(e) => panic!("the computer's side: {e}; the phone's: {started:?}"),
+        };
+        assert!(started.is_ok(), "{started:?}");
+        assert_eq!(
+            hello,
+            pocketdesk_core::protocol::bluetooth::format_stream_hello()
+        );
+        assert_eq!(
+            key,
+            Some(pocketdesk_core::streaming::PeerKey::Tls(phone_cert)),
+            "the phone's own certificate, presented"
+        );
+        let id = client_identity().device_id;
+        assert!(
+            said.iter()
+                .any(|d| d.starts_with(&[0xFE, 0x00]) && d.ends_with(id.as_bytes())),
+            "the session names this device: {said:?}"
+        );
+    }
+
+    /// A computer never verified at home gets no stream session over
+    /// Bluetooth: nothing pins by first use on this road.
+    #[tokio::test]
+    async fn connect_streaming_bluetooth_needs_the_pin_from_home() {
+        let _globals = super::TRANSFER_TEST_LOCK.lock().await;
+        let certs =
+            std::env::temp_dir().join(format!("bridge-bt-stream-nopin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&certs);
+        let had = crate::CERT_DIR.lock().unwrap().replace(certs.clone());
+        let (phone_end, computer_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        let started = connect_streaming_bluetooth(
+            "192.0.2.63".to_string(),
+            std::os::fd::OwnedFd::from(phone_end),
+            None,
+            0,
+            pocketdesk_core::streaming::SessionMode::Screen,
+        )
+        .await;
+        // The phone's end was closed: the computer's side reads its end.
+        let mut computer_stream = computer_stream;
+        let mut rest = Vec::new();
+        let read = std::io::Read::read_to_end(&mut computer_stream, &mut rest);
+        *crate::CERT_DIR.lock().unwrap() = had;
+        let _ = std::fs::remove_dir_all(&certs);
+        let error = started.expect_err("refused");
+        assert!(error.contains("connect at home first"), "{error}");
+        assert!(matches!(read, Ok(0)), "closed, with nothing sent: {read:?}");
     }
 
     /// This phone's pin of `fingerprint` for `address`, in `certs`.

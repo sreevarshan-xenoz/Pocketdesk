@@ -549,6 +549,59 @@ fn bluetooth_may_act_in(
         )
 }
 
+/// The stream gate for a session over the Bluetooth road (phase 2): the
+/// control link's rules, not the stream gate's. The device the session
+/// announces must be a paired phone (never one of the owner's computers, nor
+/// one being recorded as paired both ways) whose bound TLS key is the one
+/// the session's TLS proved ([`bluetooth_may_act`]); pairing is required
+/// whatever the setting, so [`permissions_gate`] runs with it on (the
+/// phone's own permissions, and the owner's answer for one that asks
+/// first). Nothing binds by first use here, and no iroh key is registered
+/// from the session's claim: both happen at home.
+pub async fn bluetooth_session_gate(
+    claim: pocketdesk_core::streaming::SessionClaim,
+) -> Option<DevicePermissions> {
+    let device_id = claim.device_id.as_deref();
+    let recording = device_id.is_some_and(crate::peer_computers::being_recorded);
+    let allowed = match state::state_dir() {
+        Ok(dir) => bluetooth_session_allowed_in(
+            &dir,
+            device_id,
+            claim.peer_key.as_ref(),
+            device_id.is_some_and(is_paired_device),
+            device_id.is_some_and(is_computer_device),
+            recording,
+        ),
+        Err(_) => false,
+    };
+    if !allowed {
+        tracing::warn!(
+            device_id = device_id.unwrap_or("<none announced>"),
+            "Refused a stream session over Bluetooth"
+        );
+        return None;
+    }
+    permissions_gate(claim.device_id, claim.peer, true).await
+}
+
+/// The decision of [`bluetooth_session_gate`] before the permissions: the
+/// session announced a device, which is paired, is not a computer and is not
+/// being recorded as one, and [`bluetooth_may_act_in`] holds for the key its
+/// TLS proved. Reads only.
+fn bluetooth_session_allowed_in(
+    dir: &std::path::Path,
+    device_id: Option<&str>,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
+    paired: bool,
+    computer: bool,
+    recording: bool,
+) -> bool {
+    let Some(device_id) = device_id else {
+        return false;
+    };
+    paired && !computer && !recording && bluetooth_may_act_in(dir, device_id, key, paired, computer)
+}
+
 /// The standing of a connection that goes by `device_id` and proved `key`.
 pub(crate) fn standing(
     device_id: &str,
@@ -2001,6 +2054,80 @@ mod tests {
         assert!(
             decide_control_identity_in(&dir, "phone", None, true).is_err(),
             "no key, now that the phone has one"
+        );
+    }
+
+    /// The Bluetooth stream gate's decision: a paired phone, not a computer
+    /// and not being recorded as one, with the TLS key bound to it; nothing
+    /// binds, and no other key passes.
+    #[test]
+    fn a_bluetooth_session_needs_a_paired_phone_with_its_bound_key() {
+        use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
+        let dir = key_dir("bt-session");
+        let phone = PeerKey::Tls([1; 32]);
+        let may = |id: Option<&str>,
+                   key: Option<&PeerKey>,
+                   paired: bool,
+                   computer: bool,
+                   recording: bool| {
+            bluetooth_session_allowed_in(&dir, id, key, paired, computer, recording)
+        };
+        // Nothing bound yet: refused, and asking binds nothing.
+        assert!(!may(Some("phone"), Some(&phone), true, false, false));
+        assert!(
+            matches!(
+                device_keys::check(&dir, "phone", Slot::Tls, Some(&hex(&[1; 32]))),
+                Verdict::FirstUse
+            ),
+            "the decision bound nothing"
+        );
+        // Bound at home.
+        assert!(device_keys::bind_first(&dir, "phone", &hex(&[1; 32])).unwrap());
+        assert!(may(Some("phone"), Some(&phone), true, false, false));
+        // Each of the rest alone refuses it.
+        assert!(
+            !may(None, Some(&phone), true, false, false),
+            "no device announced"
+        );
+        assert!(
+            !may(Some("phone"), None, true, false, false),
+            "no key proved"
+        );
+        assert!(
+            !may(
+                Some("phone"),
+                Some(&PeerKey::Tls([2; 32])),
+                true,
+                false,
+                false
+            ),
+            "another key"
+        );
+        assert!(
+            !may(
+                Some("phone"),
+                Some(&PeerKey::Iroh("a".repeat(64))),
+                true,
+                false,
+                false
+            ),
+            "an iroh key is not this road's"
+        );
+        assert!(
+            !may(Some("phone"), Some(&phone), false, false, false),
+            "not paired"
+        );
+        assert!(
+            !may(Some("phone"), Some(&phone), true, true, false),
+            "a computer"
+        );
+        assert!(
+            !may(Some("phone"), Some(&phone), true, false, true),
+            "being recorded"
+        );
+        assert!(
+            !may(Some("stranger"), Some(&phone), true, false, false),
+            "a device with no key bound"
         );
     }
 

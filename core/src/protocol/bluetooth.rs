@@ -6,7 +6,10 @@
 //! home: TLS with the pinned certificate, then the usual handshake. A file
 //! transfer opens a second RFCOMM connection, to the transfer service
 //! ([`link_uuid`]: RFCOMM carries one connection per channel between two
-//! devices), whose first line is the link hello ([`format_link_hello`]).
+//! devices), whose first line is the link hello ([`format_link_hello`]). The
+//! screen takes that service too: a connection whose first line is the stream
+//! hello ([`format_stream_hello`]) is a stream session, TLS and then the
+//! stream session's frames (`core::streaming::byte_stream`).
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -102,6 +105,23 @@ pub fn parse_link_hello(line: &str) -> Option<u64> {
         return None;
     }
     id.parse().ok()
+}
+
+/// The first line of a stream session's connection, on the transfer
+/// service ([`link_uuid`]): it says this RFCOMM connection carries a stream
+/// session (the screen, sound and input over Bluetooth), not a transfer.
+pub const STREAM_HELLO: &str = "POCKETDESK-BT-STREAM";
+
+/// The first line of a stream session's connection: [`STREAM_HELLO`] and a
+/// newline. The phone's TLS starts right after it.
+pub fn format_stream_hello() -> String {
+    format!("{STREAM_HELLO}\n")
+}
+
+/// Whether `line` is a [`format_stream_hello`] line, with or without its
+/// newline; any other line is not.
+pub fn parse_stream_hello(line: &str) -> bool {
+    line.strip_suffix('\n').unwrap_or(line) == STREAM_HELLO
 }
 
 /// Computer → phone, over a Bluetooth control link: open a transfer
@@ -286,6 +306,30 @@ mod tests {
         ] {
             assert_eq!(parse_link_hello(bad), None, "{bad:?}");
         }
+    }
+
+    #[test]
+    fn stream_hello_line() {
+        assert_eq!(format_stream_hello(), "POCKETDESK-BT-STREAM\n");
+        assert!(parse_stream_hello(&format_stream_hello()));
+        assert!(parse_stream_hello("POCKETDESK-BT-STREAM"));
+        for bad in [
+            "",
+            "\n",
+            "POCKETDESK-BT-STREAM \n",
+            "POCKETDESK-BT-STREAM 1\n",
+            "POCKETDESK-BT-STREAM\r\n",
+            "POCKETDESK-BT-STREAM\n\n",
+            "POCKETDESK-BT-STREAMS\n",
+            "POCKETDESK-BT-STREA\n",
+            "pocketdesk-bt-stream\n",
+            "POCKETDESK-BT-LINK 7\n",
+        ] {
+            assert!(!parse_stream_hello(bad), "{bad:?}");
+        }
+        // The two hellos are told apart by their first line.
+        assert_eq!(parse_link_hello(&format_stream_hello()), None);
+        assert!(!parse_stream_hello(&format_link_hello(7)));
     }
 
     #[test]

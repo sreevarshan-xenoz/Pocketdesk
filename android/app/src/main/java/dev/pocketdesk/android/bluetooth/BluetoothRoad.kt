@@ -87,6 +87,10 @@ object BluetoothRoad {
     ) {
         @Volatile
         var transfer: Pipe? = null
+
+        /** A screen session's link (phase 2c), while one runs on this road. */
+        @Volatile
+        var stream: Pipe? = null
     }
 
     /** Whether the phone may use Bluetooth: the nearby-devices permission (Android 12 on). */
@@ -225,6 +229,7 @@ object BluetoothRoad {
         val road = live ?: return
         live = null
         road.transfer?.close()
+        road.stream?.close()
         road.pipe.close()
         Log.i(TAG, "the Bluetooth road ended")
     }
@@ -249,6 +254,8 @@ object BluetoothRoad {
         pipe.onEnd = {
             if (live === road) live = null
             road.transfer?.close()
+            // A screen session ends with its road.
+            road.stream?.close()
         }
         // Given up before the pumps run, so no close can race the detach.
         val theirs = pipe.detachTheirs()
@@ -353,17 +360,7 @@ object BluetoothRoad {
      * says the hello and runs the TLS).
      */
     private fun answer(app: Context, road: Road, id: Long) {
-        val started = SystemClock.elapsedRealtime()
-        var socket: BluetoothSocket? = null
-        while (socket == null && live === road) {
-            val left = started + BluetoothRoadRule.LINK_TRY_MS - SystemClock.elapsedRealtime()
-            if (left <= 0) break
-            socket = connect(app, road.device, road.link, left)
-            if (socket == null) {
-                if (!BluetoothRoadRule.tryLinkAgain(started, SystemClock.elapsedRealtime())) break
-                Thread.sleep(BluetoothRoadRule.LINK_STEP_MS)
-            }
-        }
+        val socket = linkSocket(app, road)
         if (socket == null) {
             Log.i(TAG, "a transfer link did not open")
             return
@@ -381,6 +378,62 @@ object BluetoothRoad {
             pipe.close()
             Log.i(TAG, "a transfer link was not taken")
         }
+    }
+
+    /**
+     * A new connection to the computer's transfer service on [road], tried
+     * again for a few seconds while the last one's channel is still closing;
+     * null when none opened, or the road ended meanwhile.
+     */
+    private fun linkSocket(app: Context, road: Road): BluetoothSocket? {
+        val started = SystemClock.elapsedRealtime()
+        var socket: BluetoothSocket? = null
+        while (socket == null && live === road) {
+            val left = started + BluetoothRoadRule.LINK_TRY_MS - SystemClock.elapsedRealtime()
+            if (left <= 0) break
+            socket = connect(app, road.device, road.link, left)
+            if (socket == null) {
+                if (!BluetoothRoadRule.tryLinkAgain(started, SystemClock.elapsedRealtime())) break
+                Thread.sleep(BluetoothRoadRule.LINK_STEP_MS)
+            }
+        }
+        return socket
+    }
+
+    /**
+     * Open a screen session's link to the computer at [address] (phase 2c):
+     * on the live road to it, a new connection to its transfer service,
+     * pumped to one end of a socket pair. The bridge's end, a descriptor it
+     * then owns ([RustCore.connectStreamingBluetooth]); null when the
+     * control link to [address] is not on this road, or no connection
+     * opened. While it runs, the transfer service's one connection is the
+     * session's, so a file waits for it to end. Never on the main thread.
+     */
+    fun openStream(ctx: Context, address: String): Int? {
+        if (Looper.myLooper() == Looper.getMainLooper()) return null
+        val road = live?.takeIf { it.address == address && it.pipe.alive } ?: return null
+        val socket = linkSocket(ctx.applicationContext, road)
+        if (socket == null) {
+            Log.i(TAG, "a stream link did not open")
+            return null
+        }
+        val pipe = try {
+            Pipe.of(socket)
+        } catch (_: IOException) {
+            runCatching { socket.close() }
+            return null
+        }
+        road.stream?.close()
+        road.stream = pipe
+        // The road ended while this connected: its session does not start.
+        if (live !== road) {
+            pipe.close()
+            return null
+        }
+        val theirs = pipe.detachTheirs()
+        pipe.start("bt-road-stream")
+        Log.i(TAG, "a stream link opened")
+        return theirs.takeIf { it >= 0 }
     }
 
     /**

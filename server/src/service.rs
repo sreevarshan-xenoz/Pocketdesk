@@ -17,10 +17,9 @@ use pocketdesk_core::protocol::kdeconnect::{
 use pocketdesk_core::protocol::v2::{ALPN_V2, IdentityPacketV2, V2_MAX_VERSION, V2_MIN_VERSION};
 use pocketdesk_core::protocol::{HANDSHAKE_HELLO, HANDSHAKE_OK};
 use pocketdesk_core::streaming::QuinnConnection;
-use pocketdesk_core::streaming::StreamingServer;
 use pocketdesk_core::streaming::input_packet::InputPacket;
 use pocketdesk_core::streaming::latency_probe;
-use pocketdesk_core::streaming::transport::{CertManager, StreamTransportConfig};
+use pocketdesk_core::streaming::transport::CertManager;
 use pocketdesk_core::tailscale::{DiscoveryEvent, DiscoveryService, TailscaleClient};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -730,11 +729,30 @@ pub async fn run(config: Config) -> Result<()> {
 
     // The Bluetooth road (the fallback): it listens while
     // `bluetooth_fallback` is on and a radio is present (Windows only for
-    // now), and its control links come to the loop below.
+    // now), and its control links and stream sessions come to the loop
+    // below.
     let (bluetooth_control_tx, mut bluetooth_control) = tokio::sync::mpsc::channel(4);
-    tokio::spawn(crate::bluetooth::run(bluetooth_control_tx));
+    let (bluetooth_session_tx, mut bluetooth_sessions) = tokio::sync::mpsc::channel(4);
+    tokio::spawn(crate::bluetooth::run(
+        bluetooth_control_tx,
+        bluetooth_session_tx,
+    ));
 
     tracing::info!("Press Ctrl+C to stop");
+
+    // What each stream session's server is built from, whichever road it
+    // arrives on (`stream_session`).
+    let stream_setup = crate::stream_session::SessionSetup {
+        config: streaming_config.clone(),
+        input_tx: input_tx.clone(),
+        cert_manager: Arc::clone(&cert_manager),
+        allow_hevc: config.allow_hevc,
+        slow_link_frame_rate: config.slow_link_frame_rate,
+        laser: config.laser_pointer && crate::laser::available(),
+        capture_backend: config.capture_backend,
+        mic_relay_device: config.mic_relay_device.clone(),
+        cast: cast_tx.clone(),
+    };
 
     // At most a few connections per address and so many in all (R3): every
     // accepted connection costs a task and buffers before it proves anything.
@@ -837,6 +855,20 @@ pub async fn run(config: Config) -> Result<()> {
                     }
                 });
             }
+            Some(session) = bluetooth_sessions.recv() => {
+                let tls = control_tls.clone();
+                // Its low setting (`low_link`) follows from its transport, a byte
+                // stream, in the streamer itself.
+                let mut setup = stream_setup.clone();
+                setup.laser = config.laser_pointer && crate::laser::available();
+                tokio::spawn(async move {
+                    if let Err(error) =
+                        handle_bluetooth_session(session.stream, tls, &setup).await
+                    {
+                        tracing::warn!("Bluetooth stream session failed: {error:#}");
+                    }
+                });
+            }
             quic_incoming = quic_endpoint.accept() => {
                 if let Some(incoming) = quic_incoming {
                     let Some(incoming) = crate::conn_budget::proven(incoming) else {
@@ -852,17 +884,12 @@ pub async fn run(config: Config) -> Result<()> {
                         continue;
                     };
                     let registry_clone = Arc::clone(&registry);
-                    let cert_manager_clone = Arc::clone(&cert_manager);
                     let local_v2_identity = local_v2_identity.clone();
-                    let streaming_config = streaming_config.clone();
-                    let input_tx = input_tx.clone();
+                    // Asked at each session: whether the compositor draws the
+                    // dot can change while the server runs.
+                    let mut stream_setup = stream_setup.clone();
+                    stream_setup.laser = config.laser_pointer && crate::laser::available();
                     let pairing_required = config.pairing_required;
-                    let allow_hevc = config.allow_hevc;
-                    let slow_link_frame_rate = config.slow_link_frame_rate;
-                    let laser = config.laser_pointer && crate::laser::available();
-                    let capture_backend = config.capture_backend;
-                    let mic_relay_device = config.mic_relay_device.clone();
-                    let cast_tx = cast_tx.clone();
 
                     tokio::spawn(async move {
                         let _slot = slot;
@@ -888,45 +915,12 @@ pub async fn run(config: Config) -> Result<()> {
                                 }
                             }
                             Some(ALPN_V1_STREAM) => {
-                                let mut streaming_server = StreamingServer::new(
-                                    streaming_config,
-                                    StreamTransportConfig::default(),
-                                    cert_manager_clone
-                                );
-                                streaming_server.set_input_channel(input_tx);
-                                // R4 E2: phone-mic frames feed a pw-loopback
-                                // virtual source for the life of this session.
-                                let (mic_tx, mic_rx) = tokio::sync::mpsc::channel(64);
-                                tokio::spawn(crate::mic_relay::run_mic_relay(
-                                    mic_rx,
-                                    mic_relay_device,
-                                ));
-                                streaming_server.set_mic_channel(mic_tx);
-                                // K5: a cast's sound plays here.
-                                let (sound_tx, sound_rx) = tokio::sync::mpsc::channel(64);
-                                tokio::spawn(crate::phone_sound::run(sound_rx));
-                                streaming_server.set_phone_sound_channel(sound_tx);
-                                if let Some(cast_tx) = cast_tx {
-                                    streaming_server.set_cast_channel(cast_tx);
-                                }
-                                // F6 part 2: a camera cast, while the owner offers phones as a camera.
-                                streaming_server.set_webcam_offer(crate::phone_camera::offered);
-                                streaming_server.set_session_telemetry(true);
-                                streaming_server.set_hevc_allowed(allow_hevc);
-                                streaming_server.set_slow_link_frame_rate(slow_link_frame_rate);
-                                streaming_server.set_laser(laser);
-                                streaming_server.set_capture_backend(capture_backend);
-                                streaming_server.set_screen_grant(state::screen_grant());
-                                state::apply_gnome_unattended();
                                 // The gate judges the deviceId the client announces in-band
                                 // against the key its TLS certificate proved (device keys). It
                                 // runs with pairing off too, so a paired device's own
                                 // permissions still apply.
-                                streaming_server.set_session_gate(move |claim| {
-                                    Box::pin(crate::plugins::pair::session_gate(
-                                        claim,
-                                        pairing_required,
-                                    ))
+                                let mut streaming_server = stream_setup.server(move |claim| {
+                                    crate::plugins::pair::session_gate(claim, pairing_required)
                                 });
                                 if let Err(e) = streaming_server
                                     .run_on_connection(QuinnConnection::shared(conn))
@@ -1723,6 +1717,56 @@ where
             pairing_required,
         )
         .await
+    }
+    .instrument(conn_span)
+    .await
+}
+
+/// A stream session over the Bluetooth road: an RFCOMM stream from a bonded
+/// phone, its stream hello already read, carrying TLS with the pinned
+/// certificates as the control link does; then the session's frames on that
+/// stream (`ByteStreamConnection`), with the stream pipeline as at home. The
+/// session is judged by `bluetooth_session_gate`: the control link's rules,
+/// not the LAN's.
+pub(crate) async fn handle_bluetooth_session<S>(
+    stream: S,
+    tls: tokio_rustls::TlsAcceptor,
+    setup: &crate::stream_session::SessionSetup,
+) -> Result<()>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    use pocketdesk_core::streaming::byte_stream::{ByteStreamConnection, Role};
+    use tracing::Instrument;
+    let conn_span = tracing::info_span!(
+        "conn",
+        id = %uuid::Uuid::new_v4(),
+        transport = "bluetooth",
+        proto = %pocketdesk_core::protocol::PROTOCOL_VERSION
+    );
+    async move {
+        tracing::info!("Handling a stream session over Bluetooth");
+        let stream = timeout(Duration::from_secs(8), tls.accept(stream))
+            .await
+            .context("TLS handshake timeout")?
+            .context("TLS handshake failed")?;
+        let peer_key = stream
+            .get_ref()
+            .1
+            .peer_certificates()
+            .and_then(pocketdesk_core::streaming::PeerKey::from_tls_certs);
+        // A Bluetooth link has no address.
+        let connection = ByteStreamConnection::new(
+            stream,
+            Role::Listener,
+            std::net::SocketAddr::from(([0, 0, 0, 0], 0)),
+            peer_key,
+        );
+        let mut streaming_server = setup.server(crate::plugins::pair::bluetooth_session_gate);
+        streaming_server
+            .run_on_connection(connection)
+            .await
+            .context("stream session over Bluetooth")
     }
     .instrument(conn_span)
     .await
