@@ -7,9 +7,10 @@
 //! transfer opens a second RFCOMM connection, to the transfer service
 //! ([`link_uuid`]: RFCOMM carries one connection per channel between two
 //! devices), whose first line is the link hello ([`format_link_hello`]). The
-//! screen takes that service too: a connection whose first line is the stream
-//! hello ([`format_stream_hello`]) is a stream session, TLS and then the
-//! stream session's frames (`core::streaming::byte_stream`).
+//! screen has a third service of its own ([`stream_uuid`]), so a screen
+//! session never holds a transfer's channel: a connection to it starts with
+//! the stream hello ([`format_stream_hello`]) and is a stream session, TLS
+//! and then the stream session's frames (`core::streaming::byte_stream`).
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -32,13 +33,14 @@ pub fn service_uuid() -> String {
 
 /// [`service_uuid`] for a given value of the variable: `env` when it parses
 /// as a UUID (given back in lower case, hyphenated), else [`SERVICE_UUID`].
-/// An override equal to the default's transfer service
-/// ([`link_uuid`]`(SERVICE_UUID)`) is refused too: its own transfer service
-/// would be the owner's control service.
+/// An override that differs from the default only in the low two bits of its
+/// last byte is refused too: it would share a service with the owner's own
+/// (a transfer or screen service of one is the other's control service, or
+/// each other's).
 pub fn service_uuid_from(env: Option<&str>) -> String {
     let default = Uuid::parse_str(SERVICE_UUID).expect("SERVICE_UUID is a UUID");
     env.and_then(|value| Uuid::parse_str(value.trim()).ok())
-        .filter(|uuid| *uuid != link_uuid(default))
+        .filter(|uuid| (uuid.as_u128() ^ default.as_u128()) >> 2 != 0)
         .map(|uuid| uuid.hyphenated().to_string())
         .unwrap_or_else(|| SERVICE_UUID.to_string())
 }
@@ -86,6 +88,21 @@ pub fn link_uuid(service: Uuid) -> Uuid {
     Uuid::from_bytes(bytes)
 }
 
+/// The screen service's name in its SDP record.
+pub const STREAM_SERVICE_NAME: &str = "Pocketdesk screen";
+
+/// The UUID of the screen service that goes with the control service
+/// `service`: the same UUID with bit `0x02` of its last byte flipped, so it
+/// is neither `service` nor [`link_uuid`]`(service)`. The screen has its own
+/// RFCOMM service because a channel carries one connection per device pair:
+/// on the transfer service a screen session would hold it and make files
+/// wait. Both ends work it out from the control service.
+pub fn stream_uuid(service: Uuid) -> Uuid {
+    let mut bytes = *service.as_bytes();
+    bytes[15] ^= 0x02;
+    Uuid::from_bytes(bytes)
+}
+
 /// The first word of a transfer connection's first line: it says this
 /// RFCOMM connection carries a transfer for a control link already open.
 pub const LINK_HELLO: &str = "POCKETDESK-BT-LINK";
@@ -107,9 +124,11 @@ pub fn parse_link_hello(line: &str) -> Option<u64> {
     id.parse().ok()
 }
 
-/// The first line of a stream session's connection, on the transfer
-/// service ([`link_uuid`]): it says this RFCOMM connection carries a stream
-/// session (the screen, sound and input over Bluetooth), not a transfer.
+/// The first line of a stream session's connection, on the screen service
+/// ([`stream_uuid`]; the transfer service ([`link_uuid`]) still takes it for
+/// one release, for a phone app that dials there): it says this RFCOMM
+/// connection carries a stream session (the screen, sound and input over
+/// Bluetooth), not a transfer.
 pub const STREAM_HELLO: &str = "POCKETDESK-BT-STREAM";
 
 /// The first line of a stream session's connection: [`STREAM_HELLO`] and a
@@ -225,10 +244,13 @@ mod tests {
         assert_eq!(service_uuid_from(None), SERVICE_UUID);
         // The default's transfer service as an override would take the
         // owner's control service for its transfers.
-        assert_eq!(
-            service_uuid_from(Some("b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b12")),
-            SERVICE_UUID
-        );
+        for near in ["12", "11", "10"] {
+            assert_eq!(
+                service_uuid_from(Some(&format!("b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b{near}"))),
+                SERVICE_UUID,
+                "{near}"
+            );
+        }
         assert!(Uuid::parse_str(SERVICE_UUID).is_ok(), "the default parses");
     }
 
@@ -249,6 +271,25 @@ mod tests {
             link_uuid(control),
             "an override separates them"
         );
+    }
+
+    #[test]
+    fn the_screen_service_is_derived_and_distinct() {
+        let control = Uuid::parse_str(SERVICE_UUID).unwrap();
+        assert_eq!(
+            stream_uuid(control),
+            Uuid::parse_str("b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b11").unwrap()
+        );
+        for service in [control, Uuid::nil(), Uuid::max(), Uuid::new_v4()] {
+            let (link, screen) = (link_uuid(service), stream_uuid(service));
+            assert_ne!(screen, service);
+            assert_ne!(screen, link);
+            assert_ne!(link, service);
+            assert_eq!(screen, stream_uuid(service), "stable");
+            assert_eq!(stream_uuid(screen), service, "one bit, both ways");
+        }
+        let other = Uuid::parse_str("0f1e2d3c-4b5a-4968-8776-655443322110").unwrap();
+        assert_ne!(stream_uuid(other), stream_uuid(control));
     }
 
     #[test]

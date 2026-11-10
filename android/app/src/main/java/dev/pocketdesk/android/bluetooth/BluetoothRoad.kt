@@ -83,6 +83,8 @@ object BluetoothRoad {
         val port: Int,
         val device: BluetoothDevice,
         val link: UUID,
+        /** The screen service; the transfer's when the computer has not said one (an older record). */
+        val screen: UUID,
         val pipe: Pipe,
     ) {
         @Volatile
@@ -250,7 +252,7 @@ object BluetoothRoad {
             runCatching { socket.close() }
             return Result.failure(e)
         }
-        val road = Road(address, port, device, info.link, pipe)
+        val road = Road(address, port, device, info.link, info.screen ?: info.link, pipe)
         pipe.onEnd = {
             if (live === road) live = null
             road.transfer?.close()
@@ -360,7 +362,7 @@ object BluetoothRoad {
      * says the hello and runs the TLS).
      */
     private fun answer(app: Context, road: Road, id: Long) {
-        val socket = linkSocket(app, road)
+        val socket = linkSocket(app, road, road.link)
         if (socket == null) {
             Log.i(TAG, "a transfer link did not open")
             return
@@ -381,17 +383,17 @@ object BluetoothRoad {
     }
 
     /**
-     * A new connection to the computer's transfer service on [road], tried
-     * again for a few seconds while the last one's channel is still closing;
-     * null when none opened, or the road ended meanwhile.
+     * A new connection to the computer's [service] (transfer or screen) on
+     * [road], tried again for a few seconds while the last one's channel is
+     * still closing; null when none opened, or the road ended meanwhile.
      */
-    private fun linkSocket(app: Context, road: Road): BluetoothSocket? {
+    private fun linkSocket(app: Context, road: Road, service: UUID): BluetoothSocket? {
         val started = SystemClock.elapsedRealtime()
         var socket: BluetoothSocket? = null
         while (socket == null && live === road) {
             val left = started + BluetoothRoadRule.LINK_TRY_MS - SystemClock.elapsedRealtime()
             if (left <= 0) break
-            socket = connect(app, road.device, road.link, left)
+            socket = connect(app, road.device, service, left)
             if (socket == null) {
                 if (!BluetoothRoadRule.tryLinkAgain(started, SystemClock.elapsedRealtime())) break
                 Thread.sleep(BluetoothRoadRule.LINK_STEP_MS)
@@ -402,17 +404,18 @@ object BluetoothRoad {
 
     /**
      * Open a screen session's link to the computer at [address] (phase 2c):
-     * on the live road to it, a new connection to its transfer service,
+     * on the live road to it, a new connection to its screen service,
      * pumped to one end of a socket pair. The bridge's end, a descriptor it
      * then owns ([RustCore.connectStreamingBluetooth]); null when the
      * control link to [address] is not on this road, or no connection
-     * opened. While it runs, the transfer service's one connection is the
-     * session's, so a file waits for it to end. Never on the main thread.
+     * opened. The screen has a service of its own, so a file does not wait
+     * for it (the computer's older record, with no screen service, dials the
+     * transfer service as before). Never on the main thread.
      */
     fun openStream(ctx: Context, address: String): Int? {
         if (Looper.myLooper() == Looper.getMainLooper()) return null
         val road = live?.takeIf { it.address == address && it.pipe.alive } ?: return null
-        val socket = linkSocket(ctx.applicationContext, road)
+        val socket = linkSocket(ctx.applicationContext, road, road.screen)
         if (socket == null) {
             Log.i(TAG, "a stream link did not open")
             return null

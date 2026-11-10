@@ -232,12 +232,12 @@ impl Drop for Listener {
     }
 }
 
-/// The most Bluetooth connections open at once, both services together:
+/// The most Bluetooth connections open at once, all three services together:
 /// this road has no address for the server's per-address budget, so it
 /// keeps its own.
 const MAX_OPEN: usize = 8;
 
-/// How many accepted Bluetooth connections are open, shared by both
+/// How many accepted Bluetooth connections are open, shared by the three
 /// services' accept threads.
 #[derive(Clone, Default)]
 pub(crate) struct Open(Arc<AtomicUsize>);
@@ -495,6 +495,36 @@ mod tests {
             assert_eq!(
                 query.lpszServiceInstanceName.to_string().unwrap(),
                 LINK_SERVICE_NAME
+            );
+        }
+    }
+
+    #[test]
+    fn the_screen_record_names_its_own_service() {
+        use pocketdesk_core::protocol::bluetooth::{
+            SERVICE_UUID, STREAM_SERVICE_NAME, link_uuid, stream_uuid,
+        };
+        let control = uuid::Uuid::parse_str(SERVICE_UUID).unwrap();
+        let record = service_record(
+            stream_uuid(control),
+            STREAM_SERVICE_NAME,
+            SOCKADDR_BTH::default(),
+        );
+        let query = record.query();
+        // SAFETY: the pointers are into `record`, alive here.
+        unsafe {
+            assert_eq!(
+                *query.lpServiceClassId,
+                GUID::from_u128(stream_uuid(control).as_u128())
+            );
+            assert_ne!(*query.lpServiceClassId, GUID::from_u128(control.as_u128()));
+            assert_ne!(
+                *query.lpServiceClassId,
+                GUID::from_u128(link_uuid(control).as_u128())
+            );
+            assert_eq!(
+                query.lpszServiceInstanceName.to_string().unwrap(),
+                STREAM_SERVICE_NAME
             );
         }
     }

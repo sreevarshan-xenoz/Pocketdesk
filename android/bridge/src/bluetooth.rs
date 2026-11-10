@@ -18,7 +18,7 @@ use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use pocketdesk_core::protocol::bluetooth::{
-    BluetoothInfo, LINK_PACKET, PACKET, format_link_hello, link_uuid, parse_address,
+    BluetoothInfo, LINK_PACKET, PACKET, format_link_hello, link_uuid, parse_address, stream_uuid,
 };
 use tokio::io::AsyncWriteExt;
 
@@ -70,9 +70,10 @@ pub(crate) fn receive(packet_type: &str, body: &serde_json::Value, from: &str, r
     }
 }
 
-/// A [`PACKET`] body as the app keeps it, `{address, service, link}`: the
-/// radio's address, the control service's UUID and the transfer service's
-/// ([`link_uuid`]); `None` when the address or the service does not read.
+/// A [`PACKET`] body as the app keeps it, `{address, service, link, screen}`:
+/// the radio's address, the control service's UUID, the transfer service's
+/// ([`link_uuid`]) and the screen service's ([`stream_uuid`]); `None` when
+/// the address or the service does not read.
 fn info_of(body: &serde_json::Value) -> Option<String> {
     let info: BluetoothInfo = serde_json::from_value(body.clone()).ok()?;
     parse_address(&info.address)?;
@@ -82,14 +83,16 @@ fn info_of(body: &serde_json::Value) -> Option<String> {
             "address": info.address.to_ascii_uppercase(),
             "service": service.hyphenated().to_string(),
             "link": link_uuid(service).hyphenated().to_string(),
+            "screen": stream_uuid(service).hyphenated().to_string(),
         })
         .to_string(),
     )
 }
 
 /// What the computer at `address` last said of its Bluetooth road, as
-/// `{address, service, link}` JSON (`link` the transfer service the app
-/// dials for a link request); `""` when it has said nothing.
+/// `{address, service, link, screen}` JSON (`link` the transfer service the
+/// app dials for a link request, `screen` the one it dials for a screen
+/// session); `""` when it has said nothing.
 pub(crate) fn info(address: &str) -> String {
     INFO.lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -203,6 +206,7 @@ mod tests {
                 "address": "00:00:5E:00:53:01",
                 "service": SERVICE,
                 "link": "b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b12",
+                "screen": "b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b11",
             })
         );
         assert_eq!(info("192.0.2.11"), "", "another computer said nothing");

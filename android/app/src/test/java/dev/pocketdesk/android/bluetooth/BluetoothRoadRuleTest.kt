@@ -113,6 +113,12 @@ class BluetoothRoadRuleTest {
         assertEquals(computer, said?.address)
         assertEquals("b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b13", said?.service.toString())
         assertEquals("b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b12", said?.link.toString())
+        assertNull("a record kept before the screen service has none", said?.screen)
+        val withScreen = BluetoothRoadRule.info(
+            """{"address":"00:00:5E:00:53:01","service":"b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b13","link":"b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b12","screen":"b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b11"}""",
+        )
+        assertEquals("b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b11", withScreen?.screen.toString())
+        assertNull(BluetoothRoadRule.info("""{"address":"00:00:5E:00:53:01","service":"b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b13","link":"b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b12","screen":"nope"}"""))
         assertNull(BluetoothRoadRule.info(""))
         assertNull(BluetoothRoadRule.info(null))
         assertNull(BluetoothRoadRule.info("not json"))
