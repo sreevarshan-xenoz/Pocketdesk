@@ -833,7 +833,8 @@ pub const BLUETOOTH_SWITCH: &str = "let a phone bonded to this computer reach it
 
 /// What the Bluetooth fallback's row says of the road now: the running
 /// server's last check, or nothing while no server says. Nothing either
-/// off Windows, where the row's note already says it is Windows only.
+/// where there is no listener (not Windows, not Linux), where the row's
+/// note already says so.
 pub fn bluetooth_line(road: Option<RoadState>) -> Option<String> {
     road.filter(|road| *road != RoadState::Unsupported)
         .map(|road| format!("Bluetooth: {}", road.words()))
@@ -1554,8 +1555,10 @@ impl SettingsForm {
                         ui,
                         if cfg!(windows) {
                             "When neither this network nor the internet reaches this computer, a phone bonded to it in Windows' Bluetooth settings still can, for the light features (not the screen). Pairing and each phone's permissions still apply. The server follows the switch within about a second."
+                        } else if cfg!(target_os = "linux") {
+                            "When neither this network nor the internet reaches this computer, a phone bonded to it (in your desktop's Bluetooth settings, with bluetoothd running and the adapter on) still can, for the light features (not the screen). Pairing and each phone's permissions still apply. The server follows the switch within about a second."
                         } else {
-                            "When neither this network nor the internet reaches this computer, a phone bonded to it can still reach it over Bluetooth, for the light features (not the screen). Windows only for now: this computer does not listen yet."
+                            "When neither this network nor the internet reaches this computer, a phone bonded to it can still reach it over Bluetooth, for the light features (not the screen). Windows and Linux only for now: this system does not listen yet."
                         },
                     );
                 });
@@ -3912,7 +3915,7 @@ mod tests {
         assert_eq!(
             bluetooth_line(Some(RoadState::Unsupported)),
             None,
-            "the note says it is Windows only"
+            "the note says it is not supported here"
         );
         assert_eq!(bluetooth_line(None), None, "no server, nothing said");
     }

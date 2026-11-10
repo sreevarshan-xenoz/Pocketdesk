@@ -167,8 +167,8 @@ pub enum RoadState {
     NoRadio,
     /// The switch (`bluetooth_fallback`) is off.
     Off,
-    /// The switch is on, but this system does not listen yet: Windows only
-    /// for now.
+    /// The switch is on, but this system does not listen: Windows and
+    /// Linux only for now.
     Unsupported,
 }
 
@@ -193,7 +193,7 @@ impl RoadState {
             RoadState::Listening => "listening",
             RoadState::NoRadio => "no radio",
             RoadState::Off => "off",
-            RoadState::Unsupported => "Windows only for now",
+            RoadState::Unsupported => "Windows and Linux only for now",
         }
     }
 }
@@ -222,7 +222,12 @@ mod tests {
         .collect();
         assert_eq!(
             words,
-            ["listening", "no radio", "off", "Windows only for now"]
+            [
+                "listening",
+                "no radio",
+                "off",
+                "Windows and Linux only for now"
+            ]
         );
         assert_eq!(
             serde_json::to_value(RoadState::NoRadio).unwrap(),
