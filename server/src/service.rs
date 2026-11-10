@@ -1965,7 +1965,7 @@ where
                     Some(Refused::NotPaired)
                 };
                 if let Some(why) = refused {
-                    crate::bluetooth::refused(&device_id, why);
+                    crate::bluetooth::refused(&device_id, crate::bluetooth::What::Control, why);
                     say_refused(&writer).await;
                     return Ok(());
                 }

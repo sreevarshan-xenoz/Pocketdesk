@@ -309,11 +309,18 @@ pub fn describe(event: &Event) -> String {
         }
         "session_ended" => "Session ended".to_string(),
         "session_refused" => "Session refused".to_string(),
-        "bluetooth_refused" => match text(event, "reason") {
-            Some("other_key") => "Refused over Bluetooth: not the key paired here".to_string(),
-            Some("computer") => "Refused over Bluetooth: phones only".to_string(),
-            _ => "Refused over Bluetooth: not paired".to_string(),
-        },
+        "bluetooth_refused" => {
+            let what = if text(event, "what") == Some("screen") {
+                "Screen refused over Bluetooth"
+            } else {
+                "Refused over Bluetooth"
+            };
+            match text(event, "reason") {
+                Some("other_key") => format!("{what}: not the key paired here"),
+                Some("computer") => format!("{what}: phones only"),
+                _ => format!("{what}: not paired"),
+            }
+        }
         "phone_linked" => "Connected".to_string(),
         "phone_unlinked" => "Disconnected".to_string(),
         "phone_paired" => "Paired".to_string(),
@@ -595,6 +602,14 @@ mod tests {
         );
         assert_eq!(said("computer"), "Refused over Bluetooth: phones only");
         assert!(Filter::Phones.admits("bluetooth_refused"));
+        let screen = describe(&event(
+            "bluetooth_refused",
+            json!({"reason": "other_key", "what": "screen"}),
+        ));
+        assert_eq!(
+            screen,
+            "Screen refused over Bluetooth: not the key paired here"
+        );
     }
 
     /// J4: Search narrows by the line as shown, with the kind chip.

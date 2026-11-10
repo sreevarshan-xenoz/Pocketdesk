@@ -88,11 +88,39 @@ fn words(why: Refused, name: &str) -> (&'static str, String) {
     (summary, body)
 }
 
-/// `device_id` was refused over Bluetooth for `why`: logged, and told to
-/// the owner when due.
-pub(crate) fn refused(device_id: &str, why: Refused) {
+/// What was refused over Bluetooth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum What {
+    /// A control link.
+    Control,
+    /// A screen session (phase 2).
+    Screen,
+}
+
+impl What {
+    /// The event's `what`.
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            What::Control => "control",
+            What::Screen => "screen",
+        }
+    }
+
+    fn words(self) -> &'static str {
+        match self {
+            What::Control => "control connection",
+            What::Screen => "screen session",
+        }
+    }
+}
+
+/// `device_id`'s `what` was refused over Bluetooth for `why`: logged, and
+/// told to the owner when due (one minute's limit per device, whatever was
+/// refused).
+pub(crate) fn refused(device_id: &str, what: What, why: Refused) {
     tracing::warn!(
-        "Refused {device_id}'s control connection over Bluetooth: {}",
+        "Refused {device_id}'s {} over Bluetooth: {}",
+        what.words(),
         why.reason()
     );
     let now = Instant::now();
@@ -107,7 +135,7 @@ pub(crate) fn refused(device_id: &str, why: Refused) {
     crate::events::emit(
         "bluetooth_refused",
         Some(device_id),
-        serde_json::json!({ "reason": why.code() }),
+        serde_json::json!({ "reason": why.code(), "what": what.code() }),
         serde_json::json!({}),
     );
     if notify {
