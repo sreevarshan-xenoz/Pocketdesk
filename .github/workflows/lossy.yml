@@ -27,6 +27,14 @@ on:
         description: "The test pattern's size, WIDTHxHEIGHT"
         required: true
         default: "1280x720"
+      kbps:
+        description: "The link's rate back, kbit/s (a narrow one makes the rate controllers work)"
+        required: true
+        default: "20000"
+      delay_ms:
+        description: "The link's delay each way, ms"
+        required: true
+        default: "10"
 
 env:
   CARGO_TERM_COLOR: always
@@ -92,11 +100,13 @@ jobs:
         env:
           POCKETDESK_LOSSY_PERMILLE: ${{ matrix.permille }}
           POCKETDESK_LOSSY_SECS: ${{ inputs.seconds }}
+          POCKETDESK_LOSSY_KBPS: ${{ inputs.kbps }}
+          POCKETDESK_LOSSY_DELAY_MS: ${{ inputs.delay_ms }}
           SIZE: ${{ inputs.size }}
           COMMIT: ${{ matrix.commit }}
         run: |
           export POCKETDESK_LOSSY_WIDTH="${SIZE%x*}" POCKETDESK_LOSSY_HEIGHT="${SIZE#*x}"
-          echo "commit $COMMIT ($(git rev-parse --short HEAD)), loss ${POCKETDESK_LOSSY_PERMILLE} per mille, ${SIZE}, ${POCKETDESK_LOSSY_SECS} s" | tee result.txt
+          echo "commit $COMMIT ($(git rev-parse --short HEAD)), loss ${POCKETDESK_LOSSY_PERMILLE} per mille, ${POCKETDESK_LOSSY_KBPS} kbit/s, ${POCKETDESK_LOSSY_DELAY_MS} ms each way, ${SIZE}, ${POCKETDESK_LOSSY_SECS} s" | tee result.txt
           cargo test -p pocketdesk-server --release --test lossy_link_smoothness -- --ignored --nocapture 2>&1 | tee -a result.txt
           {
             echo "### $COMMIT ($(git rev-parse --short HEAD)), ${POCKETDESK_LOSSY_PERMILLE} per mille"
