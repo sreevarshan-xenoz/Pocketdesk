@@ -1,15 +1,19 @@
 //! The Bluetooth road on this computer (the fallback when neither the home
 //! nor the internet road reaches it): the listener a bonded phone dials, and
-//! where it dials, told over a working road. It listens on two services:
+//! where it dials, told over a working road. It listens on three services:
 //! the control service, whose connections are control links (TLS from the
 //! first byte, served by `service::handle_bluetooth_control` under the
-//! internet road's rules), and the transfer service
+//! internet road's rules), the transfer service
 //! ([`link_uuid`](pocketdesk_core::protocol::bluetooth::link_uuid)), whose
 //! connections are transfer links a control link asked for (the link hello
-//! first, [`links`]) or stream sessions, the screen over Bluetooth (the stream
-//! hello first, then TLS): RFCOMM carries one connection per channel between
-//! two devices, so neither can share the control link's channel. It
-//! listens only on Windows for now (Linux is phase 3), while
+//! first, [`links`]), and the screen service
+//! ([`stream_uuid`](pocketdesk_core::protocol::bluetooth::stream_uuid)),
+//! whose connections are stream sessions, the screen over Bluetooth (the
+//! stream hello first, then TLS): RFCOMM carries one connection per channel
+//! between two devices, so none can share another's channel, and a screen
+//! session never makes a file wait. For one release the transfer service
+//! still takes a stream hello too, for a phone app that dials the screen
+//! there. It listens only on Windows for now (Linux is phase 3), while
 //! `bluetooth_fallback` is on and the computer has a radio.
 
 mod links;
@@ -327,15 +331,19 @@ pub(crate) struct Incoming {
     pub(crate) closed: Option<tokio::sync::oneshot::Receiver<()>>,
 }
 
-/// Which of the two services a connection came to.
+/// Which of the three services a connection came to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Kind {
     /// The control service: TLS only.
     Control,
-    /// The transfer service: a link hello or a stream hello only.
+    /// The transfer service: a link hello, or (for one release, for a phone
+    /// app that dials the screen here) a stream hello.
     // Only the Windows radio listens yet.
     #[cfg_attr(not(windows), allow(dead_code))]
     Link,
+    /// The screen service: a stream hello only.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    Screen,
 }
 
 /// How long a new transfer connection has to send its whole link hello.
@@ -351,15 +359,16 @@ const CONTROL_HELLO_WAIT: Duration = Duration::from_secs(20);
 /// newline (the stream hello, its word and the newline, is shorter).
 const HELLO_MAX: usize = LINK_HELLO.len() + 1 + 20 + 1;
 
-/// Whether `line`, the start of a hello, can still become one: it is the
-/// start of the link hello's word or of the stream hello's, or it has gone
-/// past one's word (the link hello's id comes next).
-fn hello_so_far(line: &[u8]) -> bool {
+/// Whether `line`, the start of a hello to the `kind` service, can still
+/// become one: it is the start of the link hello's word (not on the screen
+/// service) or of the stream hello's, or it has gone past the link hello's
+/// word (its id comes next).
+fn hello_so_far(line: &[u8], kind: Kind) -> bool {
     let word = |hello: &str| {
         let hello = hello.as_bytes();
         hello.starts_with(&line[..line.len().min(hello.len())])
     };
-    word(LINK_HELLO) || word(STREAM_HELLO)
+    (kind != Kind::Screen && word(LINK_HELLO)) || word(STREAM_HELLO)
 }
 
 /// What a new connection's first bytes say it is.
@@ -373,10 +382,11 @@ enum Arrival<S> {
 }
 
 /// Read what a new connection to the `kind` service is, within
-/// [`CONTROL_HELLO_WAIT`] (control) or [`HELLO_WAIT`] (transfer): a TLS
+/// [`CONTROL_HELLO_WAIT`] (control) or [`HELLO_WAIT`] (the others): a TLS
 /// record on the control service, a link hello or a stream hello on the
-/// transfer service. Anything else (either on the other's service
-/// included), a hello longer than [`HELLO_MAX`], or silence, is `None`.
+/// transfer service, a stream hello on the screen service. Anything else
+/// (any on another's service included), a hello longer than [`HELLO_MAX`],
+/// or silence, is `None`.
 /// Nothing past the hello's newline is read (a stream session's TLS starts
 /// there).
 async fn sort<S: AsyncRead + Unpin>(mut stream: S, kind: Kind) -> Option<Arrival<S>> {
@@ -391,7 +401,7 @@ async fn sort<S: AsyncRead + Unpin>(mut stream: S, kind: Kind) -> Option<Arrival
         }
         let mut line = vec![byte[0]];
         while line.len() < HELLO_MAX && byte[0] != b'\n' {
-            if !hello_so_far(&line) {
+            if !hello_so_far(&line, kind) {
                 return None;
             }
             if stream.read(&mut byte).await.ok()? == 0 {
@@ -406,12 +416,15 @@ async fn sort<S: AsyncRead + Unpin>(mut stream: S, kind: Kind) -> Option<Arrival
         if pocketdesk_core::protocol::bluetooth::parse_stream_hello(line) {
             return Some(Arrival::Stream(stream));
         }
+        if kind == Kind::Screen {
+            return None;
+        }
         let id = pocketdesk_core::protocol::bluetooth::parse_link_hello(line)?;
         Some(Arrival::Link(id, stream))
     };
     let wait = match kind {
         Kind::Control => CONTROL_HELLO_WAIT,
-        Kind::Link => HELLO_WAIT,
+        Kind::Link | Kind::Screen => HELLO_WAIT,
     };
     tokio::time::timeout(wait, read).await.ok().flatten()
 }
@@ -464,19 +477,21 @@ trait Radio: Send + Sync + 'static {
     /// The radio's address, when there is a radio.
     fn address(&self) -> Option<[u8; 6]>;
 
-    /// Listen on the control service `control` and the transfer service
-    /// `link`, each connection accepted going to `accepted` with its kind,
-    /// until the returned listener is dropped. Both or neither.
+    /// Listen on the control service `control`, the transfer service `link`
+    /// and the screen service `screen`, each connection accepted going to
+    /// `accepted` with its kind, until the returned listener is dropped. All
+    /// three or none.
     fn listen(
         &self,
         control: uuid::Uuid,
         link: uuid::Uuid,
+        screen: uuid::Uuid,
         accepted: mpsc::Sender<Incoming>,
     ) -> std::io::Result<Box<dyn Listener>>;
 }
 
-/// A running listener on both services; dropping it stops both (and takes
-/// their SDP records down).
+/// A running listener on the three services; dropping it stops all (and
+/// takes their SDP records down).
 trait Listener: Send {
     /// Whether it stopped by itself (the radio went, say).
     fn ended(&self) -> bool;
@@ -496,6 +511,7 @@ impl Radio for NoRadio {
         &self,
         _control: uuid::Uuid,
         _link: uuid::Uuid,
+        _screen: uuid::Uuid,
         _accepted: mpsc::Sender<Incoming>,
     ) -> std::io::Result<Box<dyn Listener>> {
         Err(std::io::ErrorKind::Unsupported.into())
@@ -506,9 +522,9 @@ impl Radio for NoRadio {
 #[cfg(windows)]
 struct Winsock;
 
-/// The two services' sockets: one ending ends both.
+/// The three services' sockets: one ending ends all.
 #[cfg(windows)]
-struct WinsockListener([Arc<windows::Listener>; 2]);
+struct WinsockListener([Arc<windows::Listener>; 3]);
 
 #[cfg(windows)]
 impl Listener for WinsockListener {
@@ -536,18 +552,22 @@ impl Radio for Winsock {
         &self,
         control: uuid::Uuid,
         link: uuid::Uuid,
+        screen: uuid::Uuid,
         accepted: mpsc::Sender<Incoming>,
     ) -> std::io::Result<Box<dyn Listener>> {
-        use pocketdesk_core::protocol::bluetooth::{LINK_SERVICE_NAME, SERVICE_NAME};
+        use pocketdesk_core::protocol::bluetooth::{
+            LINK_SERVICE_NAME, SERVICE_NAME, STREAM_SERVICE_NAME,
+        };
         let runtime = tokio::runtime::Handle::try_current().map_err(std::io::Error::other)?;
-        // Made before either accepts, so a failure leaves neither (each
-        // closes as it drops).
-        let both = WinsockListener([
+        // Made before any accepts, so a failure leaves none (each closes as
+        // it drops).
+        let all = WinsockListener([
             Arc::new(windows::listen(control, SERVICE_NAME)?),
             Arc::new(windows::listen(link, LINK_SERVICE_NAME)?),
+            Arc::new(windows::listen(screen, STREAM_SERVICE_NAME)?),
         ]);
         let open = windows::Open::default();
-        for (listener, kind) in both.0.iter().zip([Kind::Control, Kind::Link]) {
+        for (listener, kind) in all.0.iter().zip([Kind::Control, Kind::Link, Kind::Screen]) {
             windows::spawn_accepting(
                 listener.clone(),
                 kind,
@@ -556,7 +576,7 @@ impl Radio for Winsock {
                 runtime.clone(),
             )?;
         }
-        Ok(Box::new(both))
+        Ok(Box::new(all))
     }
 }
 
@@ -640,9 +660,10 @@ async fn keep_listening(
             let started = match uuid::Uuid::parse_str(&service) {
                 Ok(uuid) => {
                     let link = pocketdesk_core::protocol::bluetooth::link_uuid(uuid);
+                    let screen = pocketdesk_core::protocol::bluetooth::stream_uuid(uuid);
                     let radio = radio.clone();
                     let accepted = accepted.clone();
-                    tokio::task::spawn_blocking(move || radio.listen(uuid, link, accepted))
+                    tokio::task::spawn_blocking(move || radio.listen(uuid, link, screen, accepted))
                         .await
                         .unwrap_or_else(|e| Err(std::io::Error::other(e)))
                 }
@@ -788,16 +809,27 @@ mod tests {
         assert_eq!(read_some(&mut phone).await, b"back");
     }
 
-    /// A stream hello on the transfer service is a stream session: what the
+    /// A stream hello on the screen service is a stream session: what the
     /// phone sends after it (its TLS) is left unread for the session.
     #[tokio::test]
-    async fn a_stream_hello_goes_to_the_session_loop_with_the_rest_unread() {
+    async fn a_stream_hello_on_the_screen_service_goes_to_the_session_loop() {
+        stream_hello_is_a_session(Kind::Screen).await;
+    }
+
+    /// The transfer service still takes a stream hello for one release (a
+    /// phone app that dials the screen there).
+    #[tokio::test]
+    async fn a_stream_hello_on_the_transfer_service_is_still_a_session() {
+        stream_hello_is_a_session(Kind::Link).await;
+    }
+
+    async fn stream_hello_is_a_session(kind: Kind) {
         let (accepted, table, mut control, mut sessions) = serving();
         let (waiting, _arrived) = table.wait();
         let mut hello = format_stream_hello().into_bytes();
         let record = [pocketdesk_core::protocol::TLS_HANDSHAKE_RECORD, 3, 1];
         hello.extend_from_slice(&record);
-        let mut phone = dial(&accepted, Kind::Link, &hello).await;
+        let mut phone = dial(&accepted, kind, &hello).await;
         let mut session = sessions.recv().await.expect("a stream session");
         assert_eq!(read_some(&mut session.stream).await, record);
         session.stream.write_all(b"back").await.unwrap();
@@ -849,6 +881,19 @@ mod tests {
             (Kind::Link, b"POCKETDESK-BT-STREAMS\n".to_vec()),
             (Kind::Link, b"POCKETDESK-BT-STREAM\r\n".to_vec()),
             (Kind::Link, b"POCKETDESK-BT-\n".to_vec()),
+            // The screen service takes a stream hello and nothing else: not
+            // a link hello (a transfer's id is not taken there), not TLS,
+            // not a near miss.
+            (Kind::Screen, format_link_hello(waiting.id).into_bytes()),
+            (Kind::Screen, tls.clone()),
+            (Kind::Screen, b"GET / HTTP/1.1\r\n".to_vec()),
+            (Kind::Screen, b"POCKETDESK-BT-LINK \n".to_vec()),
+            (Kind::Screen, b"POCKETDESK-BT-STREAM \n".to_vec()),
+            (Kind::Screen, b"POCKETDESK-BT-STREAM 1\n".to_vec()),
+            (Kind::Screen, b"POCKETDESK-BT-STREAMS\n".to_vec()),
+            (Kind::Screen, b"POCKETDESK-BT-STREAM\r\n".to_vec()),
+            (Kind::Screen, b"pocketdesk-bt-stream\n".to_vec()),
+            (Kind::Screen, b"POCKETDESK-BT-\n".to_vec()),
         ] {
             let mut phone = dial(&accepted, kind, &first).await;
             let mut rest = Vec::new();
@@ -867,12 +912,47 @@ mod tests {
         );
     }
 
+    /// The service a connection came to is what sorts it: a stream hello on
+    /// the screen service is a stream session, a link hello there is not.
+    #[tokio::test]
+    async fn the_screen_service_sorts_only_stream_hellos() {
+        let (server_end, mut phone_end) = tokio::io::duplex(1024);
+        phone_end
+            .write_all(format_stream_hello().as_bytes())
+            .await
+            .unwrap();
+        assert!(matches!(
+            sort(server_end, Kind::Screen).await,
+            Some(Arrival::Stream(_))
+        ));
+        let (server_end, mut phone_end) = tokio::io::duplex(1024);
+        phone_end
+            .write_all(format_link_hello(7).as_bytes())
+            .await
+            .unwrap();
+        assert!(sort(server_end, Kind::Screen).await.is_none());
+        let (server_end, mut phone_end) = tokio::io::duplex(1024);
+        phone_end
+            .write_all(format_link_hello(7).as_bytes())
+            .await
+            .unwrap();
+        assert!(matches!(
+            sort(server_end, Kind::Link).await,
+            Some(Arrival::Link(7, _))
+        ));
+    }
+
     #[tokio::test(start_paused = true)]
     async fn a_hello_that_never_ends_is_dropped_in_time() {
         let (server_end, mut phone_end) = tokio::io::duplex(1024);
         phone_end.write_all(b"POCKETDESK-BT").await.unwrap();
         let at = tokio::time::Instant::now();
         assert!(sort(server_end, Kind::Link).await.is_none());
+        assert_eq!(at.elapsed(), HELLO_WAIT);
+        let (server_end, mut phone_end2) = tokio::io::duplex(1024);
+        phone_end2.write_all(b"POCKETDESK-BT-STR").await.unwrap();
+        let at = tokio::time::Instant::now();
+        assert!(sort(server_end, Kind::Screen).await.is_none());
         assert_eq!(at.elapsed(), HELLO_WAIT);
         let (server_end, _silent) = tokio::io::duplex(1024);
         let at = tokio::time::Instant::now();
@@ -937,12 +1017,18 @@ mod tests {
             &self,
             control: uuid::Uuid,
             link: uuid::Uuid,
+            screen: uuid::Uuid,
             accepted: mpsc::Sender<Incoming>,
         ) -> std::io::Result<Box<dyn Listener>> {
             assert_eq!(
                 link,
                 pocketdesk_core::protocol::bluetooth::link_uuid(control)
             );
+            assert_eq!(
+                screen,
+                pocketdesk_core::protocol::bluetooth::stream_uuid(control)
+            );
+            assert!(screen != control && screen != link, "three services");
             *self.accepted.lock().unwrap() = Some(accepted);
             self.ended.store(false, Ordering::SeqCst);
             self.running.store(true, Ordering::SeqCst);
