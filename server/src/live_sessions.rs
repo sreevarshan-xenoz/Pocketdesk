@@ -1039,7 +1039,10 @@ mod tests {
             (RoadState::Listening, "Bluetooth: listening"),
             (RoadState::NoRadio, "Bluetooth: no radio"),
             (RoadState::Off, "Bluetooth: off"),
-            (RoadState::Unsupported, "Bluetooth: Windows only for now"),
+            (
+                RoadState::Unsupported,
+                "Bluetooth: Windows and Linux only for now",
+            ),
         ] {
             let raw = shared::render_mirror(&[], false, &[], Some(road), 100);
             assert_eq!(bluetooth_status_line(&raw, 101).as_deref(), Some(line));
