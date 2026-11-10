@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1463 open items.
+1464 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 20 |
 | Away from home: another network, or through a router | 46 |
 | A second computer | 249 |
-| A Linux desktop (the Azure VM serves for some) | 266 |
+| A Linux desktop (the Azure VM serves for some) | 267 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 99 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 400 |
 
@@ -2156,6 +2156,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Refusals in words: a KDE session on X11 says it needs Wayland; the KWin scripting interface unavailable (or scripts disabled in `kwinrc`) says KWin did not take the script; xdg-desktop-portal stopped says the portal is missing; a portal whose `AvailableSourceTypes` lacks windows says it cannot share a single window; a non-KDE desktop never picks this path. (where: linux)
 - The match: choosing another window in the dialog (of a different size) ends the session saying the window cannot be shown to be the lent one, shows nothing, and keeps no grant; choosing a monitor says it was a screen; two windows of the same size lent or chosen: the session refuses (cannot tell which), and say whether the portal names the window (its stream id or mapping id) so that twins can be told apart. Say what size KWin reports for a window's stream against its frame and client geometry at scale 1, 1.25 and 1.5 (the match compares device pixels, the client area or the frame times the output's scale, within 2 pixels): which of the two it is, whether it includes a shadow, and whether a window with a server-side title bar differs; and that the script's `output.scale` and `clientGeometry` read right. A window on a fractional-scale output is lent without being refused, and a 533x400 window at 1.5 and an 800x600 one at 1 are refused as twins. (where: linux)
 - Input, once it is wired (not built): a click, scroll and key through the portal's RemoteDesktop on a window source land in the lent window only, with another window over it and with another window active; the guard's questions over the table (`window_kde::KdeOs`) agree with what KWin does. (where: linux)
+
+**286. Bluetooth when Wi-Fi drops (phase 1: the light features over RFCOMM, Windows and Android)**
+
+- The Linux listener (phase 3, BlueZ over D-Bus; built 2026-11-10, **nothing of it has run on a device**: CI only compiles it): on a Linux computer with Bluetooth and bluetoothd running, a throwaway server from this branch on a test service, the OPPO bonded with that computer in its desktop's Bluetooth settings and connected once at home: the log says "Listening over Bluetooth" and `pocketdesk status` says "Bluetooth: listening" (and "no radio" with the adapter switched off by `bluetoothctl power off`, listening again within 10 s of `power on`, "off" with the switch off, the profiles gone from BlueZ); `sdptool browse local` (or the phone's SDP lookup) shows the three records ("Pocketdesk", "Pocketdesk transfers", "Pocketdesk screen") each on an RFCOMM channel; with Wi-Fi off on the phone the link moves to Bluetooth (`transport="bluetooth"` in the log) and the control link, a transfer link and a screen session each reach their service; an unbonded device is refused or offered pairing by BlueZ, and Pocketdesk refuses it at TLS; `systemctl restart bluetooth` mid-link ends the link and the listener starts again; a ninth connection is refused. Also say whether `RegisterProfile` with no `Channel` and no `ServiceRecord` makes BlueZ allocate a channel and write the record itself, whether an RFCOMM socket fd from `NewConnection` works through tokio's `UnixStream`, and what a clean close (the server done with a connection) does to the phone's side (RFCOMM shutdown ends both directions). (where: linux)
 
 **287. Frames side by side (BG3)**
 

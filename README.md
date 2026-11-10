@@ -51,7 +51,7 @@ A server for Linux (Wayland-native, Hyprland first) and Windows 10/11, a desktop
 
 **From anywhere, and yours alone**
 - On your network, through Tailscale, or over the internet with no port forward and no VPN (iroh punches a direct path, or uses a relay).
-- **Over Bluetooth when Wi-Fi drops**, between a Windows computer and the Android phone bonded with it: the light features (the clipboard, notifications, the remote, small files) keep working when neither the network nor the internet reaches the computer; the screen does not go over Bluetooth yet, and none of it is checked on a device yet ([how](docs/guide.md#bluetooth-when-wi-fi-drops)).
+- **Over Bluetooth when Wi-Fi drops**, between a Windows or Linux computer (BlueZ) and the Android phone bonded with it: the light features (the clipboard, notifications, the remote, small files) keep working when neither the network nor the internet reaches the computer; the screen goes too, at a lower quality (about 480 lines, 15 frames a second), on a Bluetooth service of its own, and none of it is checked on a device yet, the Linux listener least of all ([how](docs/guide.md#bluetooth-when-wi-fi-drops)).
 - No account and no Pocketdesk server. Each end holds the other to its key (TLS 1.3), and each phone has its own permissions.
 
 **KDE Plasma**

@@ -13,9 +13,11 @@
 //! between two devices, so none can share another's channel, and a screen
 //! session never makes a file wait. For one release the transfer service
 //! still takes a stream hello too, for a phone app that dials the screen
-//! there. It listens only on Windows for now (Linux is phase 3), while
-//! `bluetooth_fallback` is on and the computer has a radio.
+//! there. It listens on Windows (Winsock) and on Linux (BlueZ over D-Bus),
+//! while `bluetooth_fallback` is on and the computer has a radio.
 
+#[cfg(target_os = "linux")]
+mod bluez;
 mod links;
 mod refused;
 #[cfg(windows)]
@@ -338,11 +340,11 @@ pub(crate) enum Kind {
     Control,
     /// The transfer service: a link hello, or (for one release, for a phone
     /// app that dials the screen here) a stream hello.
-    // Only the Windows radio listens yet.
-    #[cfg_attr(not(windows), allow(dead_code))]
+    // Only the Windows and Linux radios listen.
+    #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
     Link,
     /// The screen service: a stream hello only.
-    #[cfg_attr(not(windows), allow(dead_code))]
+    #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
     Screen,
 }
 
@@ -497,11 +499,11 @@ trait Listener: Send {
     fn ended(&self) -> bool;
 }
 
-/// No radio this computer listens on yet (Linux is phase 3).
-#[cfg(not(windows))]
+/// No radio this system listens on (neither Windows nor Linux).
+#[cfg(not(any(windows, target_os = "linux")))]
 struct NoRadio;
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 impl Radio for NoRadio {
     fn address(&self) -> Option<[u8; 6]> {
         None
@@ -583,7 +585,9 @@ impl Radio for Winsock {
 fn radio() -> Arc<dyn Radio> {
     #[cfg(windows)]
     let radio = Arc::new(Winsock);
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    let radio = Arc::new(bluez::BlueZ::new());
+    #[cfg(not(any(windows, target_os = "linux")))]
     let radio = Arc::new(NoRadio);
     radio
 }
@@ -597,8 +601,8 @@ const CHECK_EVERY: Duration = Duration::from_secs(10);
 /// config file's time each, the radio left alone.
 const SWITCH_EVERY: Duration = Duration::from_secs(1);
 
-/// Whether this system has a listener (Windows only for now).
-const LISTENS_HERE: bool = cfg!(windows);
+/// Whether this system has a listener (Windows and Linux).
+const LISTENS_HERE: bool = cfg!(any(windows, target_os = "linux"));
 
 /// Listen while `wanted()` (the `bluetooth_fallback` switch) is on and
 /// `radio` has an address: start when both hold, stop (the SDP record taken
@@ -694,8 +698,8 @@ async fn keep_listening(
 }
 
 /// The Bluetooth road's listener, for the server's life: listens while
-/// `bluetooth_fallback` is on and a radio is present (Windows only for
-/// now), and hands each control link to `control` and each stream session to
+/// `bluetooth_fallback` is on and a radio is present (Windows and Linux),
+/// and hands each control link to `control` and each stream session to
 /// `sessions`.
 pub(crate) async fn run(control: mpsc::Sender<Control>, sessions: mpsc::Sender<Session>) {
     let (accepted_tx, accepted_rx) = mpsc::channel(8);
@@ -1068,7 +1072,7 @@ mod tests {
         let running = || radio.running.load(Ordering::SeqCst);
 
         // No radio: nothing listens, nothing is told, and the road says
-        // so (off Windows, that it is Windows only).
+        // so (on a system with no listener, that it is not supported).
         tokio::time::sleep(Duration::from_millis(30)).await;
         assert!(!running());
         assert_eq!(state.get(), None);
