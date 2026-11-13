@@ -158,6 +158,16 @@ def dump_nodes(dump: str) -> list[tuple[str, int, int]]:
     return out
 
 
+def scroll_up_swipe(dump: str) -> list[str]:
+    """`input swipe` arguments (x1 y1 x2 y2 ms) that scroll up most of a
+    screen whose size is the dump's first bounds; a portrait 1080x2400
+    when the dump says nothing."""
+    found = re.search(r'bounds="\[0,0\]\[(\d+),(\d+)\]"', dump)
+    width, height = (int(found.group(1)), int(found.group(2))) if found else (1080, 2400)
+    x = width // 2
+    return [str(x), str(height * 4 // 5), str(x), str(height // 5), "300"]
+
+
 def connect_button(dump: str, address: str) -> Optional[tuple[int, int]]:
     """Where to tap Connect on Home's card for the computer at `address`:
     the first Connect below the line that starts with it (W1)."""
@@ -388,6 +398,11 @@ class Phone:
 
     def accessibility_on(self) -> bool:
         return f"{APP}/{APP}.control.ControlService" in adb("shell", "settings", "get", "secure", "enabled_accessibility_services")
+
+    def scroll_up(self) -> list[str]:
+        """`input swipe` arguments that scroll a list up most of a screen,
+        in whichever way the phone is turned."""
+        return scroll_up_swipe(self.dump())
 
     def dump(self) -> str:
         """The screen's views. `uiautomator` suppresses other Accessibility
@@ -1533,7 +1548,16 @@ def start_session(ctx: Ctx) -> Optional[float]:
                             for t, _, _ in dump_nodes(ctx.phone.dump())), 4, 2):
         tap_text("Exit", ctx.phone.dump())
         time.sleep(2)
-    spot = wait_for(lambda: connect_button(ctx.phone.dump(), "127.0.0.1"), 20, 2)
+    def find() -> Optional[tuple[int, int]]:
+        found = connect_button(ctx.phone.dump(), "127.0.0.1")
+        if not found:
+            # Below a notice or another computer's card (landscape shows
+            # little): the list scrolled up, and looked at again.
+            adb("shell", "input", "swipe", *ctx.phone.scroll_up())
+            time.sleep(1)
+        return found
+
+    spot = wait_for(find, 20, 2)
     for _ in range(3):
         if spot:
             break

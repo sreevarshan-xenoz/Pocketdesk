@@ -95,6 +95,11 @@ class PureParts(unittest.TestCase):
         self.assertFalse(dc.status_running('{"api": 1, "server": {"running": false}}'))
         self.assertFalse(dc.status_running("no server"))
 
+    def test_a_scroll_up_in_either_orientation(self):
+        landscape = '<node index="0" text="" bounds="[0,0][2400,1080]" />'
+        self.assertEqual(dc.scroll_up_swipe(landscape), ["1200", "864", "1200", "216", "300"])
+        self.assertEqual(dc.scroll_up_swipe(""), ["540", "1920", "540", "480", "300"])
+
     def test_the_heights_the_encoder_was_rebuilt_at(self):
         esc = chr(27)
         log = (esc + "[2m2026" + esc + "[0m INFO width=960 height=540 Encoder rebuilt at frame resolution\n"
