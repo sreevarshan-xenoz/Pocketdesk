@@ -229,10 +229,17 @@ object BluetoothRoad {
      */
     fun networkGone(ctx: Context) {
         val app = ctx.applicationContext
-        if (!usable(app)) return
+        if (!usable(app)) {
+            Log.i(TAG, "the network went: the Bluetooth road is not usable (switch, permission or radio)")
+            return
+        }
         thread(name = "bt-road-gone", isDaemon = true) {
             runCatching {
-                val own = PhoneLink.target(app) ?: return@runCatching
+                val own = PhoneLink.target(app) ?: run {
+                    Log.i(TAG, "the network went: no computer is linked to dial")
+                    return@runCatching
+                }
+                Log.i(TAG, "the network went: waiting for the link to end")
                 val started = SystemClock.elapsedRealtime()
                 while (true) {
                     val dial = BluetoothRoadRule.dialOnLoss(
