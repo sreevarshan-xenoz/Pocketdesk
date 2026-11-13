@@ -95,6 +95,14 @@ class PureParts(unittest.TestCase):
         self.assertFalse(dc.status_running('{"api": 1, "server": {"running": false}}'))
         self.assertFalse(dc.status_running("no server"))
 
+    def test_the_heights_the_encoder_was_rebuilt_at(self):
+        esc = chr(27)
+        log = (esc + "[2m2026" + esc + "[0m INFO width=960 height=540 Encoder rebuilt at frame resolution\n"
+               "INFO something else height=1080\n"
+               "INFO Encoder rebuilt at frame resolution width=1280 height=720 codec=H.264\n")
+        self.assertEqual(dc.rebuilt_heights(log), [540, 720])
+        self.assertEqual(dc.rebuilt_heights(""), [])
+
     def test_the_phone_s_bonded_devices(self):
         dump = (
             "Bluetooth Status\n  enabled: true\n  Bonded devices:\n"
