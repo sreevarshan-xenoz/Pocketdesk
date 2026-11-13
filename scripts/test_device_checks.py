@@ -97,8 +97,8 @@ class PureParts(unittest.TestCase):
 
     def test_a_scroll_up_in_either_orientation(self):
         landscape = '<node index="0" text="" bounds="[0,0][2400,1080]" />'
-        self.assertEqual(dc.scroll_up_swipe(landscape), ["1200", "864", "1200", "216", "300"])
-        self.assertEqual(dc.scroll_up_swipe(""), ["540", "1920", "540", "480", "300"])
+        self.assertEqual(dc.scroll_up_swipe(landscape), ["1200", "756", "1200", "432", "400"])
+        self.assertEqual(dc.scroll_up_swipe(""), ["540", "1680", "540", "960", "400"])
 
     def test_the_heights_the_encoder_was_rebuilt_at(self):
         esc = chr(27)
