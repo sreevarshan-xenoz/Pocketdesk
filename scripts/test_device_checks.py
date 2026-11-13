@@ -95,6 +95,11 @@ class PureParts(unittest.TestCase):
         self.assertFalse(dc.status_running('{"api": 1, "server": {"running": false}}'))
         self.assertFalse(dc.status_running("no server"))
 
+    def test_a_scroll_up_in_either_orientation(self):
+        landscape = '<node index="0" text="" bounds="[0,0][2400,1080]" />'
+        self.assertEqual(dc.scroll_up_swipe(landscape), ["1200", "864", "1200", "216", "300"])
+        self.assertEqual(dc.scroll_up_swipe(""), ["540", "1920", "540", "480", "300"])
+
     def test_the_phone_s_bonded_devices(self):
         dump = (
             "Bluetooth Status\n  enabled: true\n  Bonded devices:\n"
