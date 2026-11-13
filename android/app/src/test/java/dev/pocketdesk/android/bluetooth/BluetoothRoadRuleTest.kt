@@ -140,6 +140,14 @@ class BluetoothRoadRuleTest {
     }
 
     @Test
+    fun dials_at_once_when_the_network_goes_and_the_link_has_ended() {
+        assertEquals(true, BluetoothRoadRule.dialOnLoss(linked = false, usableNetwork = false, waited = 0))
+        assertEquals("the end not seen yet", false, BluetoothRoadRule.dialOnLoss(linked = true, usableNetwork = false, waited = 1_000))
+        assertNull(BluetoothRoadRule.dialOnLoss(linked = true, usableNetwork = false, waited = BluetoothRoadRule.GONE_WAIT_MS))
+        assertNull("a network back: the usual roads", BluetoothRoadRule.dialOnLoss(linked = false, usableNetwork = true, waited = 0))
+    }
+
+    @Test
     fun says_when_only_the_bond_is_missing() {
         fun unbonded(
             enabled: Boolean = true,

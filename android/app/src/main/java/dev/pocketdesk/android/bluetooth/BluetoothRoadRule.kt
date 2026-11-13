@@ -156,6 +156,27 @@ object BluetoothRoadRule {
         state != null && state.startsWith("Error(") && state.contains("is_retryable: false") &&
             state.contains("has not verified the computer at") && state.contains("connect at home first")
 
+    /**
+     * How long after the network went the link's end is waited for before
+     * giving up the early dial: the bridge may take half a minute to see a
+     * link that went quiet (one that rode another way, such as USB) end.
+     */
+    const val GONE_WAIT_MS = 45_000L
+
+    /**
+     * After the network went ([BluetoothRoad.networkGone]), [waited] ms ago:
+     * true to dial now (the link has ended and no network is back), false to
+     * look again shortly (the bridge has not seen the end yet), null to stop
+     * (a network came back, so the usual roads will do, or the end was not
+     * seen within [GONE_WAIT_MS], and the features' own tries take over).
+     */
+    fun dialOnLoss(linked: Boolean, usableNetwork: Boolean, waited: Long): Boolean? = when {
+        usableNetwork -> null
+        !linked -> true
+        waited >= GONE_WAIT_MS -> null
+        else -> false
+    }
+
     /** Whether to take the next link request: the computer serves one transfer link at a time, so none while one is up. */
     fun takeLinkRequest(linkLive: Boolean): Boolean = !linkLive
 

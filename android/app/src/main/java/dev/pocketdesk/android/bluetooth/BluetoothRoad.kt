@@ -19,6 +19,8 @@ import androidx.core.content.ContextCompat
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.bridge.RustCore
+import dev.pocketdesk.android.notify.PhoneLink
+import dev.pocketdesk.android.service.NetworkWait
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
@@ -52,6 +54,9 @@ object BluetoothRoad {
 
     /** How often, while the road lives with a local network up, the phone looks whether home answers again. */
     private const val HOME_CHECK_MS = 15_000L
+
+    /** How often, after the network went, the link's end is looked for. */
+    private const val GONE_STEP_MS = 500L
 
     /** Once a network is back, a moment for its address and routes before home is tried. */
     private const val SETTLE_MS = 3_000L
@@ -214,6 +219,38 @@ object BluetoothRoad {
      * start with none): the rest after failed dials is let go, and a live
      * road is checked once for leaving ([moveOffIfBack]).
      */
+    /**
+     * The phone's network went (Wi-Fi off, out of range): rather than wait
+     * for the next feature that asks for the link (up to a minute), its own
+     * computer is dialed as soon as the bridge has seen the link end, which
+     * with no usable network goes by Bluetooth first ([RustCore.connectToPeer]).
+     * Waits at most [BluetoothRoadRule.GONE_WAIT_MS] for the end to be seen; nothing when the
+     * road may not be used, a network came back, or the link is up again.
+     */
+    fun networkGone(ctx: Context) {
+        val app = ctx.applicationContext
+        if (!usable(app)) return
+        thread(name = "bt-road-gone", isDaemon = true) {
+            runCatching {
+                val own = PhoneLink.target(app) ?: return@runCatching
+                val started = SystemClock.elapsedRealtime()
+                while (true) {
+                    val dial = BluetoothRoadRule.dialOnLoss(
+                        linked = RustCore.controlPeer() != null,
+                        usableNetwork = NetworkWait.usable(app, own.address),
+                        waited = SystemClock.elapsedRealtime() - started,
+                    ) ?: return@runCatching
+                    if (dial) {
+                        Log.i(TAG, "the network went: dialing the computer at once")
+                        RustCore.connectToPeer(own.address, own.controlPort, HostStore.wanIdentity(app, own.address))
+                        return@runCatching
+                    }
+                    Thread.sleep(GONE_STEP_MS)
+                }
+            }.onFailure { Log.w(TAG, "the dial after the network went failed: ${it.javaClass.simpleName}") }
+        }
+    }
+
     fun networkBack(ctx: Context) {
         synchronized(rests) { rests.clear() }
         val road = live ?: return
