@@ -7011,6 +7011,54 @@ def rebuilt_heights(log: str) -> list[int]:
             for m in [re.search(r"height=(\d+)", line)] if m]
 
 
+# What of a session's record the screen checks say: its length and rate,
+# the encoder's time, the capture-to-phone delay, and the frames dropped.
+BT_RECORD_KEYS = ("dur", "kbps", "enc_p50", "e2e_p50", "e2e_p95", "e2e_p99", "trimmed", "replaced", "outcome")
+
+
+def record_said(record: dict[str, str]) -> str:
+    """The parts of a session record the screen checks say, in order."""
+    return ", ".join(f"{key} {record[key]}" for key in BT_RECORD_KEYS if key in record) or "no fields"
+
+
+def screen_over_bluetooth(ctx: Ctx, seconds: int) -> tuple[str, str]:
+    """Over Bluetooth alone, Connect on the throwaway's card: a stream
+    session over Bluetooth, the picture at the low setting (at most about
+    600 lines), up for `seconds`, then ended; its record said."""
+    log = ctx.server.log
+    homes, roads = len(loop_stamps(log(), "tcp")), len(loop_stamps(log(), "iroh"))
+    took, said = onto_bluetooth(ctx)
+    if took is None:
+        return "TIMEOUT", said
+    sessions = log().count("Handling a stream session over Bluetooth")
+    heights = len(rebuilt_heights(log()))
+    records = len(session_records(ctx.server.root))
+    on_phone = phone_seconds()
+    if start_session(ctx) is None:
+        return "SKIP", said + "; no Connect on a 127.0.0.1 card on Home"
+    if not wait_for(lambda: log().count("Handling a stream session over Bluetooth") > sessions, 45, 1):
+        road = phone_log_of("BluetoothRoad")
+        return "FAIL", said + "; no stream session over Bluetooth within 45 s of Connect" + (
+            f" (the phone's road last said: {road})" if road else "")
+    opened = first_line("BluetoothRoad", "a stream link opened", on_phone)
+    up = wait_for(lambda: in_session(ctx), 45, 1)
+    time.sleep(seconds)
+    still = in_session(ctx)
+    new_heights = rebuilt_heights(log())[heights:]
+    alone = only_bluetooth(ctx, homes, roads)
+    end_session(ctx)
+    wait_for(lambda: len(session_records(ctx.server.root)) > records, 30, 1)
+    record = (session_records(ctx.server.root)[records:] or [{}])[-1]
+    low = bool(new_heights) and max(new_heights) <= BT7_MOST_LINES
+    said += ("; a stream session over Bluetooth" + ("" if opened else " (the phone did not say its stream link opened)")
+             + ("; the session was up" if up else "; the session never showed up live")
+             + ("" if still else f"; but it was gone before {seconds} s")
+             + (f"; encoder rebuilt at heights {new_heights}" if new_heights else "; no encoder rebuild seen")
+             + (f"; record: {record_said(record)}" if record else "; no session record")
+             + ("" if alone else "; but a home or internet link came meanwhile"))
+    return ("PASS" if up and still and low and alone else "FAIL"), said
+
+
 @check("bt7-screen", "§286")
 def bt7_screen(ctx: Ctx) -> tuple[str, str]:
     """Over Bluetooth alone, a screen session (phase 2): Connect on the
@@ -7018,39 +7066,22 @@ def bt7_screen(ctx: Ctx) -> tuple[str, str]:
     stream session over Bluetooth), the picture comes at the low setting
     (rebuilt at most about 600 lines high), it runs 20 s, and it ends
     cleanly; its record's rate is said."""
-    def body(ctx: Ctx) -> tuple[str, str]:
-        log = ctx.server.log
-        homes, roads = len(loop_stamps(log(), "tcp")), len(loop_stamps(log(), "iroh"))
-        took, said = onto_bluetooth(ctx)
-        if took is None:
-            return "TIMEOUT", said
-        sessions = log().count("Handling a stream session over Bluetooth")
-        heights = len(rebuilt_heights(log()))
-        records = len(session_records(ctx.server.root))
-        on_phone = phone_seconds()
-        if start_session(ctx) is None:
-            return "SKIP", said + "; no Connect on a 127.0.0.1 card on Home"
-        if not wait_for(lambda: log().count("Handling a stream session over Bluetooth") > sessions, 45, 1):
-            road = phone_log_of("BluetoothRoad")
-            return "FAIL", said + "; no stream session over Bluetooth within 45 s of Connect" + (
-                f" (the phone's road last said: {road})" if road else "")
-        opened = first_line("BluetoothRoad", "a stream link opened", on_phone)
-        up = wait_for(lambda: in_session(ctx), 45, 1)
-        time.sleep(20)
-        new_heights = rebuilt_heights(log())[heights:]
-        alone = only_bluetooth(ctx, homes, roads)
-        end_session(ctx)
-        wait_for(lambda: len(session_records(ctx.server.root)) > records, 30, 1)
-        record = (session_records(ctx.server.root)[records:] or [{}])[-1]
-        low = bool(new_heights) and max(new_heights) <= BT7_MOST_LINES
-        said += ("; a stream session over Bluetooth" + ("" if opened else " (the phone did not say its stream link opened)")
-                 + ("; the session was up" if up else "; the session never showed up live")
-                 + (f"; encoder rebuilt at heights {new_heights}" if new_heights else "; no encoder rebuild seen")
-                 + (f"; record: {record.get('dur', '?')} s, {record.get('kbps', '?')} kbit/s, "
-                    f"outcome {record.get('outcome', '?')}" if record else "; no session record")
-                 + ("" if alone else "; but a home or internet link came meanwhile"))
-        return ("PASS" if up and low and alone else "FAIL"), said
-    return bt_check(ctx, body)
+    return bt_check(ctx, lambda ctx: screen_over_bluetooth(ctx, 20))
+
+
+@check("bt8-screen-moving", "§286")
+def bt8_screen_moving(ctx: Ctx) -> tuple[str, str]:
+    """`bt7-screen` with a picture that changes every frame: the throwaway
+    shows its moving test pattern (`POCKETDESK_TEST_PATTERN`, as the
+    lossy-link bench does) instead of this computer's desktop, and the
+    session runs 60 s, so the low setting's rate cap, not an idle desktop,
+    sets what crosses; its record says the rate and the capture-to-phone
+    delay."""
+    ctx.server.extra["POCKETDESK_TEST_PATTERN"] = "1"
+    try:
+        return bt_check(ctx, lambda ctx: screen_over_bluetooth(ctx, 60))
+    finally:
+        ctx.server.extra.pop("POCKETDESK_TEST_PATTERN", None)
 
 
 # A share over 8 MiB, which waits for Wi-Fi on the Bluetooth road.
