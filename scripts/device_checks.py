@@ -158,6 +158,17 @@ def dump_nodes(dump: str) -> list[tuple[str, int, int]]:
     return out
 
 
+def scroll_up_swipe(dump: str) -> list[str]:
+    """`input swipe` arguments (x1 y1 x2 y2 ms) that scroll up about a
+    third of a screen whose size is the dump's first bounds (a portrait
+    1080x2400 when the dump says nothing): a whole screen at once jumped
+    past a card's buttons on the OPPO in landscape."""
+    found = re.search(r'bounds="\[0,0\]\[(\d+),(\d+)\]"', dump)
+    width, height = (int(found.group(1)), int(found.group(2))) if found else (1080, 2400)
+    x = width // 2
+    return [str(x), str(height * 7 // 10), str(x), str(height * 2 // 5), "400"]
+
+
 def connect_button(dump: str, address: str) -> Optional[tuple[int, int]]:
     """Where to tap Connect on Home's card for the computer at `address`:
     the first Connect below the line that starts with it (W1)."""
@@ -388,6 +399,11 @@ class Phone:
 
     def accessibility_on(self) -> bool:
         return f"{APP}/{APP}.control.ControlService" in adb("shell", "settings", "get", "secure", "enabled_accessibility_services")
+
+    def scroll_up(self) -> list[str]:
+        """`input swipe` arguments that scroll a list up about a third of a screen,
+        in whichever way the phone is turned."""
+        return scroll_up_swipe(self.dump())
 
     def dump(self) -> str:
         """The screen's views. `uiautomator` suppresses other Accessibility
@@ -1533,7 +1549,16 @@ def start_session(ctx: Ctx) -> Optional[float]:
                             for t, _, _ in dump_nodes(ctx.phone.dump())), 4, 2):
         tap_text("Exit", ctx.phone.dump())
         time.sleep(2)
-    spot = wait_for(lambda: connect_button(ctx.phone.dump(), "127.0.0.1"), 20, 2)
+    def find() -> Optional[tuple[int, int]]:
+        found = connect_button(ctx.phone.dump(), "127.0.0.1")
+        if not found:
+            # Below a notice or another computer's card (landscape shows
+            # little): the list scrolled up, and looked at again.
+            adb("shell", "input", "swipe", *ctx.phone.scroll_up())
+            time.sleep(1)
+        return found
+
+    spot = wait_for(find, 20, 2)
     for _ in range(3):
         if spot:
             break
@@ -6970,6 +6995,61 @@ def bt5_back_to_wifi(ctx: Ctx) -> tuple[str, str]:
                  + ("" if linked else "; but not linked 10 s later"))
         ok = back is not None and back <= BT_HOME_LIMIT and linked
         return ("PASS" if ok else "FAIL"), said
+    return bt_check(ctx, body)
+
+
+# The tallest picture the low setting sends (about 480 lines: 1080 by 2 is
+# 540), with room for a screen taller than 1080.
+BT7_MOST_LINES = 600
+
+
+def rebuilt_heights(log: str) -> list[int]:
+    """The heights the encoder was rebuilt at ("Encoder rebuilt at frame
+    resolution ... height=540"), in order, colour codes stripped."""
+    plain = re.sub(chr(27) + r"\[[0-9;]*m", "", log)
+    return [int(m.group(1)) for line in plain.splitlines() if "Encoder rebuilt at frame resolution" in line
+            for m in [re.search(r"height=(\d+)", line)] if m]
+
+
+@check("bt7-screen", "§286")
+def bt7_screen(ctx: Ctx) -> tuple[str, str]:
+    """Over Bluetooth alone, a screen session (phase 2): Connect on the
+    throwaway's card opens one over the Bluetooth road (the server takes a
+    stream session over Bluetooth), the picture comes at the low setting
+    (rebuilt at most about 600 lines high), it runs 20 s, and it ends
+    cleanly; its record's rate is said."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        log = ctx.server.log
+        homes, roads = len(loop_stamps(log(), "tcp")), len(loop_stamps(log(), "iroh"))
+        took, said = onto_bluetooth(ctx)
+        if took is None:
+            return "TIMEOUT", said
+        sessions = log().count("Handling a stream session over Bluetooth")
+        heights = len(rebuilt_heights(log()))
+        records = len(session_records(ctx.server.root))
+        on_phone = phone_seconds()
+        if start_session(ctx) is None:
+            return "SKIP", said + "; no Connect on a 127.0.0.1 card on Home"
+        if not wait_for(lambda: log().count("Handling a stream session over Bluetooth") > sessions, 45, 1):
+            road = phone_log_of("BluetoothRoad")
+            return "FAIL", said + "; no stream session over Bluetooth within 45 s of Connect" + (
+                f" (the phone's road last said: {road})" if road else "")
+        opened = first_line("BluetoothRoad", "a stream link opened", on_phone)
+        up = wait_for(lambda: in_session(ctx), 45, 1)
+        time.sleep(20)
+        new_heights = rebuilt_heights(log())[heights:]
+        alone = only_bluetooth(ctx, homes, roads)
+        end_session(ctx)
+        wait_for(lambda: len(session_records(ctx.server.root)) > records, 30, 1)
+        record = (session_records(ctx.server.root)[records:] or [{}])[-1]
+        low = bool(new_heights) and max(new_heights) <= BT7_MOST_LINES
+        said += ("; a stream session over Bluetooth" + ("" if opened else " (the phone did not say its stream link opened)")
+                 + ("; the session was up" if up else "; the session never showed up live")
+                 + (f"; encoder rebuilt at heights {new_heights}" if new_heights else "; no encoder rebuild seen")
+                 + (f"; record: {record.get('dur', '?')} s, {record.get('kbps', '?')} kbit/s, "
+                    f"outcome {record.get('outcome', '?')}" if record else "; no session record")
+                 + ("" if alone else "; but a home or internet link came meanwhile"))
+        return ("PASS" if up and low and alone else "FAIL"), said
     return bt_check(ctx, body)
 
 
