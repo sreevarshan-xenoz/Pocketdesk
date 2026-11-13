@@ -39,6 +39,20 @@ object RustCore {
     private external fun nativeCheckTailscaleStatus(): String
     private external fun nativeGetPeers(): String
     private external fun nativeConnectToPeer(address: String, port: Int, wanIdentity: String): String
+
+    // The Bluetooth road (protocol.md 1.4a); the app's side dials RFCOMM and
+    // hands each stream over as one end of a socket pair (`detachFd`).
+    /** The control link over [fd], taken in every case; the envelope of [nativeConnectToPeer]. */
+    private external fun nativeConnectOverBluetooth(address: String, port: Int, fd: Int): String
+    /** `{address, service, link}` the computer at [address] last said, `""` if none. */
+    private external fun nativeBluetoothInfo(address: String): String
+    /** The oldest transfer link asked for, as a `Long` in decimal (`toLong()`), `""` if none. */
+    private external fun nativeTakeBluetoothLinkRequest(): String
+    /** Answer link [id] on [fd], a new connection to the transfer service; [fd] taken in every case. */
+    private external fun nativeOfferBluetoothLink(id: Long, fd: Int): Boolean
+    /** The live control link's road: 0 home (or none), 1 the internet, 2 Bluetooth. */
+    private external fun nativeControlRoad(): Int
+
     private external fun nativeSendClipboard(address: String, port: Int, content: String): String
     private external fun nativeGetClipboard(address: String, port: Int): String
     private external fun nativeGetClipboardState(address: String, port: Int): String
@@ -133,6 +147,13 @@ object RustCore {
         port: Int,
         monitorIndex: Int,
         attempt: Int,
+        codecCaps: Int,
+    ): String
+
+    private external fun nativeConnectStreamingBluetooth(
+        address: String,
+        fd: Int,
+        monitorIndex: Int,
         codecCaps: Int,
     ): String
 
@@ -326,6 +347,7 @@ object RustCore {
      * public resolvers), and point it at the app-private data dir.
      */
     fun start(context: Context) {
+        appContext = context.applicationContext
         nativeInit(context.applicationContext)
         nativeSetDataDir(context.filesDir.absolutePath)
         // U3: what this phone calls itself to computers.
@@ -336,6 +358,10 @@ object RustCore {
 
     @Volatile
     private var watchingNetwork = false
+
+    /** The application, for the Bluetooth road a connect may take; set by [start]. */
+    @Volatile
+    private var appContext: Context? = null
 
     /**
      * Tell the bridge when the phone's default network changes (2b): its
@@ -362,6 +388,10 @@ object RustCore {
                     // loss included (BB5 review: the loss alone cleared the
                     // internet road's rest while nothing could be reached).
                     if (seen && was != network) nativeNetworkChanged()
+                    // A network back, or the first one after a start with
+                    // none: Bluetooth may be dialed again at once, and a live
+                    // Bluetooth road checks once whether to move off it.
+                    if (was != network) dev.pocketdesk.android.bluetooth.BluetoothRoad.networkBack(context)
                     seen = true
                 }
 
@@ -390,10 +420,61 @@ object RustCore {
 
     /**
      * The control link to [address]: TLS over TCP, else, with the computer's
-     * cached [wanIdentity], over the internet (T10a).
+     * cached [wanIdentity], over the internet (T10a), else by Bluetooth
+     * (protocol.md 1.4a). With no usable network at all Bluetooth goes
+     * first. What the computer said of its Bluetooth road is kept after
+     * each connect, for the day Wi-Fi is gone.
      */
-    fun connectToPeer(address: String, port: Int, wanIdentity: String? = null): Result<String> =
-        envelope(nativeConnectToPeer(address, port, wanIdentity ?: ""))
+    fun connectToPeer(address: String, port: Int, wanIdentity: String? = null): Result<String> {
+        val ctx = appContext ?: return envelope(nativeConnectToPeer(address, port, wanIdentity ?: ""))
+        val linked = controlPeer() == (address to port)
+        val network = linked || dev.pocketdesk.android.service.NetworkWait.usable(ctx, address)
+        var bluetooth: Result<String>? = null
+        if (!network) {
+            bluetooth = runCatching {
+                dev.pocketdesk.android.bluetooth.BluetoothRoad.dial(ctx, address, port, hasUsableNetwork = false, otherRoadsFailed = false)
+            }.getOrNull()
+            if (bluetooth != null && controlPeer() == (address to port)) return bluetooth
+        }
+        val result = envelope(nativeConnectToPeer(address, port, wanIdentity ?: ""))
+        if (controlPeer() == (address to port)) {
+            keepBluetoothInfo(ctx, address)
+            return result
+        }
+        if (network) {
+            bluetooth = runCatching {
+                dev.pocketdesk.android.bluetooth.BluetoothRoad.dial(ctx, address, port, hasUsableNetwork = true, otherRoadsFailed = true)
+            }.getOrNull()
+            if (bluetooth != null && controlPeer() == (address to port)) return bluetooth
+        }
+        // A Bluetooth refusal no retry changes (a computer not verified at
+        // home yet) says more than the other roads' failure.
+        if (bluetooth != null && dev.pocketdesk.android.bluetooth.BluetoothRoadRule.finalRefusal(bluetooth.getOrNull())) return bluetooth
+        return result
+    }
+
+    /** Keep what the computer at [address] said of its Bluetooth road with its saved record. */
+    private fun keepBluetoothInfo(ctx: Context, address: String) {
+        runCatching {
+            val info = nativeBluetoothInfo(address)
+            if (info.isNotEmpty()) dev.pocketdesk.android.HostStore.saveBluetoothInfo(ctx, address, info)
+        }
+    }
+
+    /** The control link over [fd], one end of a socket pair pumped to an RFCOMM socket; [fd] is the bridge's in every case. */
+    internal fun connectOverBluetooth(address: String, port: Int, fd: Int): Result<String> =
+        envelope(nativeConnectOverBluetooth(address, port, fd))
+
+    /** The oldest transfer link the computer asked for over a Bluetooth control link, or null. */
+    internal fun takeBluetoothLinkRequest(): Long? =
+        runCatching { nativeTakeBluetoothLinkRequest() }.getOrNull()?.toLongOrNull()
+
+    /** Answer transfer link [id] on [fd] (blocks while the hello and TLS run); [fd] is the bridge's in every case. */
+    internal fun offerBluetoothLink(id: Long, fd: Int): Boolean =
+        runCatching { nativeOfferBluetoothLink(id, fd) }.getOrDefault(false)
+
+    /** The live control link's road: 0 home (or none), 1 the internet, 2 Bluetooth. */
+    fun controlRoad(): Int = runCatching { nativeControlRoad() }.getOrDefault(0)
 
     /**
      * The person asked for [address] (Home's Connect): the internet road's
@@ -673,6 +754,14 @@ object RustCore {
         monitorIndex: Int = -1,
     ): Result<String> =
         envelope(nativeConnectStreamingRace(address, port, identityJson, monitorIndex, videoCodecCaps()))
+
+    /**
+     * A screen session over the Bluetooth road (phase 2c), on [fd], the
+     * bridge's end of a stream link `BluetoothRoad.openStream` opened: the
+     * bridge owns and closes it from here on.
+     */
+    fun connectStreamingBluetooth(address: String, fd: Int, monitorIndex: Int = -1): Result<Unit> =
+        envelope(nativeConnectStreamingBluetooth(address, fd, monitorIndex, videoCodecCaps())).map { }
 
     /** Connect the phone as a remote (T10i): input only, no picture or sound. */
     fun connectRemote(address: String, port: Int): Result<Unit> = envelope(nativeConnectRemote(address, port)).map { }

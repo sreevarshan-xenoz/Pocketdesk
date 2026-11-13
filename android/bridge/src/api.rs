@@ -564,18 +564,8 @@ pub async fn connect_to_peer(
     // and re-register the same device_id, which the server reads as a
     // reconnect storm. Reuse what is already connected.
     let _one_at_a_time = crate::session::CONNECT_LOCK.lock().await;
-    {
-        // Locked in the same order as the control reader (writer, then peer) so
-        // the two can never dead-lock against each other.
-        let writer_live = (*CONTROL_WRITER).lock().await.is_some();
-        let live = (*CONTROL_PEER).lock().await;
-        if writer_live
-            && live
-                .as_ref()
-                .is_some_and(|(host, live_port)| *host == address && *live_port == port)
-        {
-            return Ok(ConnectionState::Connected);
-        }
+    if live_to(&address, port).await {
+        return Ok(ConnectionState::Connected);
     }
 
     let conn_mgr = control_manager(Duration::from_secs(10))?;
@@ -583,28 +573,18 @@ pub async fn connect_to_peer(
     *state_guard = ConnectionState::Connecting;
 
     let identity = client_identity();
-
-    let conn_id = uuid::Uuid::new_v4().to_string();
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let span = tracing::info_span!(
-        "conn",
-        id = %conn_id,
-        session = %session_id,
-        peer = %address,
-        transport = "tcp",
-        proto = %pocketdesk_core::protocol::PROTOCOL_VERSION
-    );
+    let span = control_span(&address, "tcp");
 
     use tracing::Instrument;
 
     let result = async move {
-        // The stream, and whether it came by the internet road.
-        let dialed: Result<(ControlDuplex, bool), _> =
+        // The stream, and the road it came by.
+        let dialed: Result<(ControlDuplex, crate::Road), _> =
             match conn_mgr.connect_named(&address, port, &identity).await {
                 Ok((stream, claims)) => {
                     // U3: the computer's name, for the app to keep.
                     crate::peer_names::note(&address, claims);
-                    Ok((Box::new(stream) as ControlDuplex, false))
+                    Ok((Box::new(stream) as ControlDuplex, crate::Road::Home))
                 }
                 Err(home) => match wan_identity.as_deref().map(WanTarget::parse) {
                     Some(Ok(target)) if INTERNET_PAUSE.may_try(&address, Instant::now()) => {
@@ -615,7 +595,7 @@ pub async fn connect_to_peer(
                         match dial_internet_control(&target, &identity, &address, true).await {
                             Ok(stream) => {
                                 INTERNET_PAUSE.succeeded(&address);
-                                Ok((stream, true))
+                                Ok((stream, crate::Road::Internet))
                             }
                             Err(e) => {
                                 tracing::warn!("The internet road failed too: {e}");
@@ -636,402 +616,7 @@ pub async fn connect_to_peer(
                 },
             };
         match dialed {
-            Ok((stream, over_internet)) => {
-                let (reader, writer) = tokio::io::split(stream);
-                let writer_arc = Arc::new(Mutex::new(writer));
-                let replaced = (*CONTROL_WRITER).lock().await.replace(writer_arc.clone());
-                let old_peer = crate::CONTROL_PEER.lock().await.replace((address.clone(), port));
-                // A connection this one replaces (to another computer, or one
-                // the check above found dead) is closed, so its reader ends
-                // instead of holding the socket and a server slot.
-                if let Some(old) = replaced {
-                    let _ = old.lock().await.shutdown().await;
-                    // Its reader leaves its slots alone, as it is not the
-                    // live one: what another computer's carried is forgotten
-                    // here instead, or its links, offers and pairing answer
-                    // would be read as this one's (AR1). The same computer
-                    // dialed again keeps what is still its own.
-                    if let Some(old_peer) = old_peer.filter(|old| *old != (address.clone(), port)) {
-                        forget_link(&old_peer).await;
-                    }
-                }
-                crate::CONTROL_OVER_INTERNET.store(over_internet, Ordering::SeqCst);
-                crate::session::CONTROL_LINKS.fetch_add(1, Ordering::SeqCst);
-
-                // Create a broadcast channel for forwarding incoming packets to Flutter
-                let (packet_tx, _) = broadcast::channel(256);
-                {
-                    let mut incoming = crate::INCOMING_PACKETS.lock().await;
-                    *incoming = Some(packet_tx.clone());
-                }
-                // Which computer this connection is to: a reply request is
-                // acted on only when it came from the phone's own computer.
-                let from_peer = (address.clone(), port);
-
-                tokio::spawn(
-                    async move {
-                        let mut reader = tokio::io::BufReader::new(reader);
-                        let mut line = String::new();
-                        while let Ok(n) = reader.read_line(&mut line).await {
-                            if n == 0 {
-                                break;
-                            }
-                            // Replaced by a newer connection (another computer,
-                            // or this one dialed again): it handles nothing
-                            // more, or what it latched would be read as the
-                            // newer one's (AR1).
-                            if !is_live((*CONTROL_WRITER).lock().await.as_ref(), &writer_arc) {
-                                break;
-                            }
-                            let trimmed = line.trim().to_string();
-                            if !trimmed.is_empty() {
-                                // What it says of this phone's standing there
-                                // (BB1): not paired, or let in.
-                                if let Ok(pkt) = NetworkPacket::from_wire(&trimmed) {
-                                    crate::unpaired::heard(&from_peer.0, &pkt.packet_type, &pkt.body);
-                                }
-                                // The computer's keyboard and mouse on this
-                                // phone as a screen (BK5): kept for the
-                                // pointer thread, its pings answered at once,
-                                // and nothing else to look at in it.
-                                if trimmed.contains("shared_input.input")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type
-                                        == pocketdesk_core::protocol::phone_screen::INPUT
-                                {
-                                    for pong in crate::phone_screen::receive(
-                                        &pkt.body,
-                                        &from_peer.0,
-                                        from_peer.1,
-                                    ) {
-                                        let (host, port) = from_peer.clone();
-                                        tokio::spawn(async move {
-                                            let _ = send_on_live(&host, port, &pong).await;
-                                        });
-                                    }
-                                    line.clear();
-                                    continue;
-                                }
-                                // Cache the server's iroh WAN identity as it is
-                                // announced, independent of Kotlin's poll loop.
-                                if trimmed.contains("pocketdesk.endpoint")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == "kdeconnect.pocketdesk.endpoint"
-                                {
-                                    *crate::WAN_IDENTITY.lock().await = Some((
-                                        from_peer.0.clone(),
-                                        from_peer.1,
-                                        pkt.body.to_string(),
-                                    ));
-                                }
-                                // Who drives, when several phones are
-                                // connected (N7).
-                                if trimmed.contains("pocketdesk.control")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == "kdeconnect.pocketdesk.control"
-                                {
-                                    *crate::CONTROL_STATE.lock().await = Some((
-                                        from_peer.0.clone(),
-                                        from_peer.1,
-                                        pkt.body.to_string(),
-                                    ));
-                                }
-                                // How to wake this desktop (N6), kept for the
-                                // app to save with the computer.
-                                if trimmed.contains("pocketdesk.wake_info")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == "kdeconnect.pocketdesk.wake_info"
-                                {
-                                    *crate::WAKE_INFO.lock().await = Some((
-                                        from_peer.0.clone(),
-                                        from_peer.1,
-                                        pkt.body.to_string(),
-                                    ));
-                                }
-                                // Find-my-device siren: latch so the UI can ring
-                                // even if the poll loop misses the packet.
-                                if trimmed.contains("findmydevice")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == "kdeconnect.findmydevice"
-                                    && pkt
-                                        .body
-                                        .get("ring")
-                                        .and_then(|v| v.as_bool())
-                                        .unwrap_or(true)
-                                {
-                                    crate::SIREN_RINGING
-                                        .store(true, std::sync::atomic::Ordering::SeqCst);
-                                }
-                                // Pairing decisions/announcements from the
-                                // desktop latch for the pairing UI (Tier-2 #11b).
-                                if trimmed.contains("kdeconnect.pair")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && (pkt.packet_type == "kdeconnect.pair"
-                                        || pkt.packet_type == "kdeconnect.pocketdesk.pair")
-                                {
-                                    let mut slot = crate::PAIR_RESULT.lock().await;
-                                    *slot = Some(pkt.body.clone());
-                                    // A packet carrying the PIN itself must not
-                                    // reach Kotlin pollers — the latch consumed it.
-                                    if pkt.body.get("pin").is_some() {
-                                        line.clear();
-                                        continue;
-                                    }
-                                }
-                                // Desktop notifications addressed to us queue
-                                // for the notification-posting poller (Tier-2 #11c).
-                                if trimmed.contains("kdeconnect.notification")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == "kdeconnect.notification"
-                                    && pkt.source.as_deref() != Some(&client_identity().device_id)
-                                    && !pkt
-                                        .body
-                                        .get("isClear")
-                                        .and_then(|v| v.as_bool())
-                                        .unwrap_or(false)
-                                    && pkt.body.get("id").is_some()
-                                {
-                                    crate::queue_notification(
-                                        &pkt.body,
-                                        pkt.source.as_deref().unwrap_or("desktop"),
-                                    );
-                                }
-                                // A reply the desktop asks us to text (N5b):
-                                // latched for the app to send.
-                                if trimmed.contains("kdeconnect.sms.request")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == "kdeconnect.sms.request"
-                                {
-                                    crate::queue_sms_request(&pkt.body, &from_peer.0, from_peer.1);
-                                }
-                                // A file the desktop's owner sent us (F7b):
-                                // latched for the session to download.
-                                if trimmed.contains("file_offer")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == crate::download::FILE_OFFER
-                                {
-                                    crate::queue_file_offer(&pkt.body);
-                                }
-                                // A task's result (ecosystem 1c), kept for
-                                // the app under its run's id.
-                                if trimmed.contains("task_result")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == crate::tasks::TASK_RESULT
-                                {
-                                    crate::tasks::receive(&pkt.body);
-                                }
-                                // A number the computer asks this phone to
-                                // dial (L4), kept with its computer.
-                                if trimmed.contains("pocketdesk.dial")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == pocketdesk_core::protocol::dial::DIAL
-                                {
-                                    crate::dials::receive(&pkt.body, &from_peer.0, from_peer.1);
-                                }
-                                // A question the computer puts to its
-                                // owner (BF3), kept with its computer.
-                                if trimmed.contains("pocketdesk.ask")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == pocketdesk_core::protocol::ask::ASK
-                                {
-                                    crate::asks::receive(&pkt.body, &from_peer.0, from_peer.1);
-                                }
-                                // A screenshot or a lock the computer asks
-                                // of this phone (O2), kept with its computer.
-                                if trimmed.contains("pocketdesk.phone_action")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type
-                                        == pocketdesk_core::protocol::phone_action::PHONE_ACTION
-                                {
-                                    crate::phone_actions::receive(&pkt.body, &from_peer.0, from_peer.1);
-                                }
-                                // What the computer types here (M4), kept
-                                // in order with its computer.
-                                if trimmed.contains("pocketdesk.type")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == pocketdesk_core::protocol::typing::TYPE
-                                {
-                                    crate::typing::receive(&pkt.body, &from_peer.0, from_peer.1);
-                                }
-                                // A command for this phone's automation
-                                // apps (L6), kept with its computer.
-                                if trimmed.contains("pocketdesk.command")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == pocketdesk_core::protocol::command::COMMAND
-                                {
-                                    crate::commands::receive(&pkt.body, &from_peer.0, from_peer.1);
-                                }
-                                // A link the computer handed over (T8a),
-                                // kept for the app to show.
-                                if trimmed.contains("pocketdesk.link")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == pocketdesk_core::protocol::link::LINK
-                                {
-                                    crate::links::receive(&pkt.body);
-                                }
-                                // The computer's requests to browse this
-                                // phone's shared folders (T10g).
-                                if trimmed.contains("phone_files.")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                {
-                                    crate::phone_file_requests::receive(
-                                        &pkt.packet_type,
-                                        &pkt.body,
-                                        &from_peer.0,
-                                        from_peer.1,
-                                    );
-                                }
-                                // The computer's requests for this phone's
-                                // recent photos (C7).
-                                // F6 part 2: and to be its camera, kept with them.
-                                if (trimmed.contains("phone_photos.")
-                                    || trimmed.contains("phone_camera."))
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                {
-                                    crate::photo_requests::receive(
-                                        &pkt.packet_type,
-                                        &pkt.body,
-                                        &from_peer.0,
-                                        from_peer.1,
-                                    );
-                                }
-                                // The computer's asks for this phone's
-                                // location (GeoClue); the place is never
-                                // kept here, only the ask.
-                                if trimmed.contains("phone_location.ask")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                {
-                                    crate::location_requests::receive(
-                                        &pkt.packet_type,
-                                        &pkt.body,
-                                        &from_peer.0,
-                                        from_peer.1,
-                                    );
-                                }
-                                // What the computer says of wake helpers: a
-                                // helper's duty, an owner phone's word of the
-                                // helper. Read again here; only a body that
-                                // reads is kept for the app.
-                                if trimmed.contains("pocketdesk.wake_helper_")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                {
-                                    crate::wake_helper::receive(
-                                        &pkt.packet_type,
-                                        &pkt.body,
-                                        &from_peer.0,
-                                        from_peer.1,
-                                    );
-                                }
-                                // The computer's mutes for this phone (D2).
-                                if trimmed.contains("pocketdesk.quiet")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                {
-                                    crate::quiet_requests::receive(
-                                        &pkt.packet_type,
-                                        &pkt.body,
-                                        &from_peer.0,
-                                        from_peer.1,
-                                    );
-                                }
-                                // The computer's answers to this phone's
-                                // notifications (T10c), kept for the app.
-                                if (trimmed.contains("kdeconnect.notification.")
-                                    || trimmed.contains("notification_open"))
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                {
-                                    crate::notification_answers::receive(
-                                        &pkt.packet_type,
-                                        &pkt.body,
-                                        &from_peer.0,
-                                        from_peer.1,
-                                    );
-                                }
-                                // The computer's clipboard (T10b), kept
-                                // for the app; still passed on, since it is
-                                // also the answer to the phone's request.
-                                // N7: whether the computer is in use.
-                                if trimmed.contains("in_use_answer")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type
-                                        == pocketdesk_core::protocol::in_use::ANSWER
-                                {
-                                    crate::in_use::receive(&pkt.body, &from_peer.0, from_peer.1);
-                                }
-                                // N5: the computer's music, kept for the app.
-                                if trimmed.contains("computer_media")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type
-                                        == pocketdesk_core::protocol::computer_media::PUSH
-                                {
-                                    crate::computer_media::receive(
-                                        &pkt.body,
-                                        &from_peer.0,
-                                        from_peer.1,
-                                    );
-                                }
-                                if trimmed.contains("kdeconnect.clipboard")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == "kdeconnect.clipboard"
-                                {
-                                    crate::clipboard_push::receive(
-                                        &pkt.body,
-                                        &from_peer.0,
-                                        from_peer.1,
-                                    );
-                                }
-                                // A press for the phone's player (T8d),
-                                // kept for the app to act on.
-                                if trimmed.contains("phone_media_control")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type
-                                        == pocketdesk_core::protocol::phone_media::PHONE_MEDIA_CONTROL
-                                {
-                                    crate::media_presses::receive(&pkt.body);
-                                }
-                                // The answer to a folder request (T6b),
-                                // kept by the path asked.
-                                if trimmed.contains("folder_fetch_reply")
-                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == crate::download::FOLDER_FETCH_REPLY
-                                {
-                                    crate::latch_folder_reply(&pkt.body);
-                                }
-                                let latched = NetworkPacket::from_wire(&trimmed)
-                                    .is_ok_and(|p| crate::kept_from_pollers(&p.packet_type));
-                                if !latched {
-                                    let _ = packet_tx.send(trimmed);
-                                }
-                            }
-                            line.clear();
-                        }
-                        // Only retire the shared slots if they still belong to
-                        // *this* connection. An older reader that dies late
-                        // would otherwise wipe a newer connection's writer,
-                        // permanently pushing every query onto the one-shot
-                        // fallback path. Asked under the state's and the
-                        // writer's locks, in connect_to_peer's order: a dial
-                        // holds the state's while it connects, and one that
-                        // succeeded meanwhile must win (AR1 review).
-                        let mut state_guard = (*CONNECTION_STATE).lock().await;
-                        let mut writer_guard = (*CONTROL_WRITER).lock().await;
-                        if !is_live(writer_guard.as_ref(), &writer_arc) {
-                            tracing::debug!("Control connection replaced");
-                            return;
-                        }
-                        tracing::warn!("Control connection lost");
-                        *crate::CONTROL_PEER.lock().await = None;
-                        crate::CONTROL_OVER_INTERNET.store(false, Ordering::SeqCst);
-                        *crate::INCOMING_PACKETS.lock().await = None;
-                        *state_guard = ConnectionState::Disconnected;
-                        *writer_guard = None;
-                        forget_link(&from_peer).await;
-                    }
-                    .instrument(tracing::debug_span!("control_reader")),
-                );
-
-                tracing::info!("Connected to peer");
-                Ok(ConnectionState::Connected)
-            }
+            Ok((stream, road)) => Ok(run_control(stream, address, port, road).await),
             Err(e) => {
                 tracing::error!(error = %e, "Connection failed");
                 Ok(ConnectionState::Error(PocketdeskErrorDto::from(e)))
@@ -1041,15 +626,573 @@ pub async fn connect_to_peer(
     .instrument(span)
     .await;
 
-    if let Ok(ref state) = result {
-        *state_guard = match state {
-            ConnectionState::Connected => ConnectionState::Connected,
-            ConnectionState::Disconnected => ConnectionState::Disconnected,
-            ConnectionState::Connecting => ConnectionState::Connecting,
-            ConnectionState::Error(e) => ConnectionState::Error(e.clone()),
-        };
+    if let Ok(state) = &result {
+        *state_guard = state.clone();
     }
     result
+}
+
+/// Whether the live control connection is to `address`, `port`.
+async fn live_to(address: &str, port: u16) -> bool {
+    // Locked in the same order as the control reader (writer, then peer) so
+    // the two can never dead-lock against each other.
+    let writer_live = (*CONTROL_WRITER).lock().await.is_some();
+    let live = (*CONTROL_PEER).lock().await;
+    writer_live
+        && live
+            .as_ref()
+            .is_some_and(|(host, live_port)| *host == address && *live_port == port)
+}
+
+/// The span a control link to `address` runs in, carried by `transport`.
+fn control_span(address: &str, transport: &str) -> tracing::Span {
+    let conn_id = uuid::Uuid::new_v4().to_string();
+    let session_id = uuid::Uuid::new_v4().to_string();
+    tracing::info_span!(
+        "conn",
+        id = %conn_id,
+        session = %session_id,
+        peer = %address,
+        transport = %transport,
+        proto = %pocketdesk_core::protocol::PROTOCOL_VERSION
+    )
+}
+
+/// Run the control link to the computer at `address` (its control `port`)
+/// on `fd`, an RFCOMM stream the app dialed and handed over (the Bluetooth
+/// fallback): TLS with the computer held to the pin for `address`, as at
+/// home, the handshake, then the link as any other. `fd` is this call's
+/// from here on, closed whenever the link does not come up on it.
+#[cfg(unix)]
+pub async fn connect_over_bluetooth(
+    address: String,
+    port: u16,
+    fd: std::os::fd::OwnedFd,
+) -> Result<ConnectionState, String> {
+    let stream =
+        crate::bluetooth::stream_of(fd).map_err(|e| format!("The Bluetooth stream: {e}"))?;
+    // Another road is up already: it stays, and this stream closes.
+    if live_to(&address, port).await {
+        return Ok(ConnectionState::Connected);
+    }
+    // Nothing pairs on this road, so nothing is pinned on it by first use:
+    // the computer must have been verified at home (its pin for `address`).
+    let conn_mgr = match pinned_control_manager(&address, BLUETOOTH_HANDSHAKE_WAIT)? {
+        Some(conn_mgr) => conn_mgr,
+        None => {
+            tracing::warn!(peer = %address, "Bluetooth: no pin for this computer");
+            return Ok(ConnectionState::Error(PocketdeskErrorDto {
+                code: PocketdeskError::TlsError {
+                    detail: String::new(),
+                }
+                .code() as u32,
+                message: format!(
+                    "This phone has not verified the computer at {address} yet: connect at home first"
+                ),
+                is_retryable: false,
+            }));
+        }
+    };
+    let identity = client_identity();
+    let span = control_span(&address, "bluetooth");
+
+    use tracing::Instrument;
+    // The TLS and handshake run before the connect lock is taken: the
+    // computer waits only so long for the first byte, and another dial
+    // (the home road's, say) may hold the lock for 10 s or more.
+    let secured = conn_mgr
+        .secure_named(stream, &address, port, &identity)
+        .instrument(span.clone())
+        .await;
+    let _one_at_a_time = crate::session::CONNECT_LOCK.lock().await;
+    let mut state_guard = (*CONNECTION_STATE).lock().await;
+    match secured {
+        Ok((mut stream, claims)) => {
+            crate::peer_names::note(&address, claims);
+            // Another road came up meanwhile: it stays, and this link closes.
+            if live_to(&address, port).await {
+                let _ = stream.shutdown().await;
+                return Ok(ConnectionState::Connected);
+            }
+            let state = run_control(stream, address, port, crate::Road::Bluetooth)
+                .instrument(span)
+                .await;
+            *state_guard = state.clone();
+            Ok(state)
+        }
+        Err(e) => {
+            span.in_scope(|| tracing::error!(error = %e, "Connection over Bluetooth failed"));
+            let state = ConnectionState::Error(PocketdeskErrorDto::from(e));
+            // Said only while no other link is up: a live one's state stays.
+            if (*CONTROL_WRITER).lock().await.is_none() {
+                *state_guard = state.clone();
+            }
+            Ok(state)
+        }
+    }
+}
+
+/// [`control_manager`] for a road where nothing pairs: the computer's
+/// certificate must already be pinned for `address`, and a computer with no
+/// pin is refused rather than pinned by first use. `None` when this phone
+/// has no pin for `address`.
+#[cfg(unix)]
+fn pinned_control_manager(
+    address: &str,
+    timeout: Duration,
+) -> Result<Option<ConnectionManager>, String> {
+    Ok(pinned_tls(address)?.map(|tls| ConnectionManager::new(timeout, tls)))
+}
+
+/// The control link's TLS for a road where nothing pairs: this phone's own
+/// certificate presented, the computer's held to its pin for `address`.
+/// `None` when this phone has no pin for `address`.
+#[cfg(unix)]
+fn pinned_tls(address: &str) -> Result<Option<Arc<tokio_rustls::rustls::ClientConfig>>, String> {
+    let dir = crate::CERT_DIR
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "no data directory configured".to_string())?;
+    let certs = pocketdesk_core::streaming::transport::CertManager::load_or_create(&dir)
+        .map_err(|e| format!("This phone's certificate: {e}"))?;
+    let pinned = pocketdesk_core::streaming::transport::peer_label_for_address(address)
+        .is_some_and(|label| certs.is_peer_trusted(&label));
+    Ok(pinned.then(|| certs.control_client_config_pinned_only()))
+}
+
+/// How long the control link's TLS and handshake may take on a Bluetooth
+/// stream: a slower link than the home road's.
+#[cfg(unix)]
+const BLUETOOTH_HANDSHAKE_WAIT: Duration = Duration::from_secs(15);
+
+/// Answer the computer's request for transfer link `id` on `fd`, a new
+/// RFCOMM connection the app opened to its transfer service
+/// ([`crate::bluetooth::offer_link`]). `fd` is this call's, closed unless a
+/// transfer took it. Whether one did.
+#[cfg(unix)]
+pub async fn offer_bluetooth_link(id: u64, fd: std::os::fd::OwnedFd) -> bool {
+    match crate::bluetooth::stream_of(fd) {
+        Ok(stream) => crate::bluetooth::offer_link(id, stream).await,
+        Err(e) => {
+            tracing::warn!("Bluetooth: the transfer link's stream: {e}");
+            false
+        }
+    }
+}
+
+/// The road the live control link came by, as the app reads it: 0 home
+/// (or none), 1 the internet, 2 Bluetooth.
+pub fn control_road() -> u8 {
+    crate::control_road() as u8
+}
+
+/// What the computer at `address` last said of its Bluetooth road, as
+/// `{address, service, link, screen}` JSON; `""` when nothing.
+pub fn bluetooth_info(address: &str) -> String {
+    crate::bluetooth::info(address)
+}
+
+/// The oldest transfer link the computer asked for over a Bluetooth
+/// control link and the app has not taken.
+pub async fn take_bluetooth_link_request() -> Option<u64> {
+    crate::bluetooth::take_link_request().await
+}
+
+/// Run the control link on `stream`, already secured to the computer at
+/// `address` (its control `port`), which came by `road`: it becomes the live
+/// one, replacing any other, and a reader handles what the computer sends
+/// until it closes. The caller holds [`crate::session::CONNECT_LOCK`] and
+/// the connection state.
+async fn run_control(
+    stream: ControlDuplex,
+    address: String,
+    port: u16,
+    road: crate::Road,
+) -> ConnectionState {
+    use tracing::Instrument;
+    let (reader, writer) = tokio::io::split(stream);
+    let writer_arc = Arc::new(Mutex::new(writer));
+    let replaced = (*CONTROL_WRITER).lock().await.replace(writer_arc.clone());
+    let old_peer = crate::CONTROL_PEER
+        .lock()
+        .await
+        .replace((address.clone(), port));
+    // A connection this one replaces (to another computer, or one
+    // the check above found dead) is closed, so its reader ends
+    // instead of holding the socket and a server slot.
+    if let Some(old) = replaced {
+        let _ = old.lock().await.shutdown().await;
+        // Its reader leaves its slots alone, as it is not the
+        // live one: what another computer's carried is forgotten
+        // here instead, or its links, offers and pairing answer
+        // would be read as this one's (AR1). The same computer
+        // dialed again keeps what is still its own.
+        if let Some(old_peer) = old_peer.filter(|old| *old != (address.clone(), port)) {
+            forget_link(&old_peer).await;
+        }
+        // Transfer links the old link asked for, even the same computer's:
+        // the link that would carry them is gone.
+        crate::bluetooth::forget_link_requests();
+    }
+    crate::set_control_road(road);
+    crate::session::CONTROL_LINKS.fetch_add(1, Ordering::SeqCst);
+
+    // Create a broadcast channel for forwarding incoming packets to Flutter
+    let (packet_tx, _) = broadcast::channel(256);
+    {
+        let mut incoming = crate::INCOMING_PACKETS.lock().await;
+        *incoming = Some(packet_tx.clone());
+    }
+    // Which computer this connection is to: a reply request is
+    // acted on only when it came from the phone's own computer.
+    let from_peer = (address.clone(), port);
+
+    tokio::spawn(
+        async move {
+            let mut reader = tokio::io::BufReader::new(reader);
+            let mut line = String::new();
+            while let Ok(n) = reader.read_line(&mut line).await {
+                if n == 0 {
+                    break;
+                }
+                // Replaced by a newer connection (another computer,
+                // or this one dialed again): it handles nothing
+                // more, or what it latched would be read as the
+                // newer one's (AR1).
+                if !is_live((*CONTROL_WRITER).lock().await.as_ref(), &writer_arc) {
+                    break;
+                }
+                let trimmed = line.trim().to_string();
+                if !trimmed.is_empty() {
+                    // What it says of this phone's standing there
+                    // (BB1): not paired, or let in.
+                    if let Ok(pkt) = NetworkPacket::from_wire(&trimmed) {
+                        crate::unpaired::heard(&from_peer.0, &pkt.packet_type, &pkt.body);
+                    }
+                    // The computer's keyboard and mouse on this
+                    // phone as a screen (BK5): kept for the
+                    // pointer thread, its pings answered at once,
+                    // and nothing else to look at in it.
+                    if trimmed.contains("shared_input.input")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == pocketdesk_core::protocol::phone_screen::INPUT
+                    {
+                        for pong in
+                            crate::phone_screen::receive(&pkt.body, &from_peer.0, from_peer.1)
+                        {
+                            let (host, port) = from_peer.clone();
+                            tokio::spawn(async move {
+                                let _ = send_on_live(&host, port, &pong).await;
+                            });
+                        }
+                        line.clear();
+                        continue;
+                    }
+                    // Cache the server's iroh WAN identity as it is
+                    // announced, independent of Kotlin's poll loop.
+                    if trimmed.contains("pocketdesk.endpoint")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == "kdeconnect.pocketdesk.endpoint"
+                    {
+                        *crate::WAN_IDENTITY.lock().await =
+                            Some((from_peer.0.clone(), from_peer.1, pkt.body.to_string()));
+                    }
+                    // Who drives, when several phones are
+                    // connected (N7).
+                    if trimmed.contains("pocketdesk.control")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == "kdeconnect.pocketdesk.control"
+                    {
+                        *crate::CONTROL_STATE.lock().await =
+                            Some((from_peer.0.clone(), from_peer.1, pkt.body.to_string()));
+                    }
+                    // How to wake this desktop (N6), kept for the
+                    // app to save with the computer.
+                    if trimmed.contains("pocketdesk.wake_info")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == "kdeconnect.pocketdesk.wake_info"
+                    {
+                        *crate::WAKE_INFO.lock().await =
+                            Some((from_peer.0.clone(), from_peer.1, pkt.body.to_string()));
+                    }
+                    // Find-my-device siren: latch so the UI can ring
+                    // even if the poll loop misses the packet.
+                    if trimmed.contains("findmydevice")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == "kdeconnect.findmydevice"
+                        && pkt
+                            .body
+                            .get("ring")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(true)
+                    {
+                        crate::SIREN_RINGING.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    // Pairing decisions/announcements from the
+                    // desktop latch for the pairing UI (Tier-2 #11b).
+                    if trimmed.contains("kdeconnect.pair")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && (pkt.packet_type == "kdeconnect.pair"
+                            || pkt.packet_type == "kdeconnect.pocketdesk.pair")
+                    {
+                        let mut slot = crate::PAIR_RESULT.lock().await;
+                        *slot = Some(pkt.body.clone());
+                        // A packet carrying the PIN itself must not
+                        // reach Kotlin pollers — the latch consumed it.
+                        if pkt.body.get("pin").is_some() {
+                            line.clear();
+                            continue;
+                        }
+                    }
+                    // Desktop notifications addressed to us queue
+                    // for the notification-posting poller (Tier-2 #11c).
+                    if trimmed.contains("kdeconnect.notification")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == "kdeconnect.notification"
+                        && pkt.source.as_deref() != Some(&client_identity().device_id)
+                        && !pkt
+                            .body
+                            .get("isClear")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false)
+                        && pkt.body.get("id").is_some()
+                    {
+                        crate::queue_notification(
+                            &pkt.body,
+                            pkt.source.as_deref().unwrap_or("desktop"),
+                        );
+                    }
+                    // A reply the desktop asks us to text (N5b):
+                    // latched for the app to send.
+                    if trimmed.contains("kdeconnect.sms.request")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == "kdeconnect.sms.request"
+                    {
+                        crate::queue_sms_request(&pkt.body, &from_peer.0, from_peer.1);
+                    }
+                    // A file the desktop's owner sent us (F7b):
+                    // latched for the session to download.
+                    if trimmed.contains("file_offer")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == crate::download::FILE_OFFER
+                    {
+                        crate::queue_file_offer(&pkt.body);
+                    }
+                    // A task's result (ecosystem 1c), kept for
+                    // the app under its run's id.
+                    if trimmed.contains("task_result")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == crate::tasks::TASK_RESULT
+                    {
+                        crate::tasks::receive(&pkt.body);
+                    }
+                    // A number the computer asks this phone to
+                    // dial (L4), kept with its computer.
+                    if trimmed.contains("pocketdesk.dial")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == pocketdesk_core::protocol::dial::DIAL
+                    {
+                        crate::dials::receive(&pkt.body, &from_peer.0, from_peer.1);
+                    }
+                    // A question the computer puts to its
+                    // owner (BF3), kept with its computer.
+                    if trimmed.contains("pocketdesk.ask")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == pocketdesk_core::protocol::ask::ASK
+                    {
+                        crate::asks::receive(&pkt.body, &from_peer.0, from_peer.1);
+                    }
+                    // A screenshot or a lock the computer asks
+                    // of this phone (O2), kept with its computer.
+                    if trimmed.contains("pocketdesk.phone_action")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == pocketdesk_core::protocol::phone_action::PHONE_ACTION
+                    {
+                        crate::phone_actions::receive(&pkt.body, &from_peer.0, from_peer.1);
+                    }
+                    // What the computer types here (M4), kept
+                    // in order with its computer.
+                    if trimmed.contains("pocketdesk.type")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == pocketdesk_core::protocol::typing::TYPE
+                    {
+                        crate::typing::receive(&pkt.body, &from_peer.0, from_peer.1);
+                    }
+                    // A command for this phone's automation
+                    // apps (L6), kept with its computer.
+                    if trimmed.contains("pocketdesk.command")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == pocketdesk_core::protocol::command::COMMAND
+                    {
+                        crate::commands::receive(&pkt.body, &from_peer.0, from_peer.1);
+                    }
+                    // A link the computer handed over (T8a),
+                    // kept for the app to show.
+                    if trimmed.contains("pocketdesk.link")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == pocketdesk_core::protocol::link::LINK
+                    {
+                        crate::links::receive(&pkt.body);
+                    }
+                    // The computer's requests to browse this
+                    // phone's shared folders (T10g).
+                    if trimmed.contains("phone_files.")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                    {
+                        crate::phone_file_requests::receive(
+                            &pkt.packet_type,
+                            &pkt.body,
+                            &from_peer.0,
+                            from_peer.1,
+                        );
+                    }
+                    // The computer's requests for this phone's
+                    // recent photos (C7).
+                    // F6 part 2: and to be its camera, kept with them.
+                    if (trimmed.contains("phone_photos.") || trimmed.contains("phone_camera."))
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                    {
+                        crate::photo_requests::receive(
+                            &pkt.packet_type,
+                            &pkt.body,
+                            &from_peer.0,
+                            from_peer.1,
+                        );
+                    }
+                    // The computer's asks for this phone's
+                    // location (GeoClue); the place is never
+                    // kept here, only the ask.
+                    if trimmed.contains("phone_location.ask")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                    {
+                        crate::location_requests::receive(
+                            &pkt.packet_type,
+                            &pkt.body,
+                            &from_peer.0,
+                            from_peer.1,
+                        );
+                    }
+                    // What the computer says of wake helpers: a
+                    // helper's duty, an owner phone's word of the
+                    // helper. Read again here; only a body that
+                    // reads is kept for the app.
+                    if trimmed.contains("pocketdesk.wake_helper_")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                    {
+                        crate::wake_helper::receive(
+                            &pkt.packet_type,
+                            &pkt.body,
+                            &from_peer.0,
+                            from_peer.1,
+                        );
+                    }
+                    // The computer's mutes for this phone (D2).
+                    if trimmed.contains("pocketdesk.quiet")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                    {
+                        crate::quiet_requests::receive(
+                            &pkt.packet_type,
+                            &pkt.body,
+                            &from_peer.0,
+                            from_peer.1,
+                        );
+                    }
+                    // The computer's answers to this phone's
+                    // notifications (T10c), kept for the app.
+                    if (trimmed.contains("kdeconnect.notification.")
+                        || trimmed.contains("notification_open"))
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                    {
+                        crate::notification_answers::receive(
+                            &pkt.packet_type,
+                            &pkt.body,
+                            &from_peer.0,
+                            from_peer.1,
+                        );
+                    }
+                    // The computer's clipboard (T10b), kept
+                    // for the app; still passed on, since it is
+                    // also the answer to the phone's request.
+                    // N7: whether the computer is in use.
+                    if trimmed.contains("in_use_answer")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == pocketdesk_core::protocol::in_use::ANSWER
+                    {
+                        crate::in_use::receive(&pkt.body, &from_peer.0, from_peer.1);
+                    }
+                    // N5: the computer's music, kept for the app.
+                    if trimmed.contains("computer_media")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == pocketdesk_core::protocol::computer_media::PUSH
+                    {
+                        crate::computer_media::receive(&pkt.body, &from_peer.0, from_peer.1);
+                    }
+                    if trimmed.contains("kdeconnect.clipboard")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == "kdeconnect.clipboard"
+                    {
+                        crate::clipboard_push::receive(&pkt.body, &from_peer.0, from_peer.1);
+                    }
+                    // A press for the phone's player (T8d),
+                    // kept for the app to act on.
+                    if trimmed.contains("phone_media_control")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type
+                            == pocketdesk_core::protocol::phone_media::PHONE_MEDIA_CONTROL
+                    {
+                        crate::media_presses::receive(&pkt.body);
+                    }
+                    // Where to dial this computer by Bluetooth, and
+                    // the transfer links it asks for on that road.
+                    if trimmed.contains("pocketdesk.bluetooth")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                    {
+                        crate::bluetooth::receive(&pkt.packet_type, &pkt.body, &from_peer.0, road);
+                    }
+                    // The answer to a folder request (T6b),
+                    // kept by the path asked.
+                    if trimmed.contains("folder_fetch_reply")
+                        && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                        && pkt.packet_type == crate::download::FOLDER_FETCH_REPLY
+                    {
+                        crate::latch_folder_reply(&pkt.body);
+                    }
+                    let latched = NetworkPacket::from_wire(&trimmed)
+                        .is_ok_and(|p| crate::kept_from_pollers(&p.packet_type));
+                    if !latched {
+                        let _ = packet_tx.send(trimmed);
+                    }
+                }
+                line.clear();
+            }
+            // Only retire the shared slots if they still belong to
+            // *this* connection. An older reader that dies late
+            // would otherwise wipe a newer connection's writer,
+            // permanently pushing every query onto the one-shot
+            // fallback path. Asked under the state's and the
+            // writer's locks, in connect_to_peer's order: a dial
+            // holds the state's while it connects, and one that
+            // succeeded meanwhile must win (AR1 review).
+            let mut state_guard = (*CONNECTION_STATE).lock().await;
+            let mut writer_guard = (*CONTROL_WRITER).lock().await;
+            if !is_live(writer_guard.as_ref(), &writer_arc) {
+                tracing::debug!("Control connection replaced");
+                return;
+            }
+            tracing::warn!("Control connection lost");
+            *crate::CONTROL_PEER.lock().await = None;
+            crate::set_control_road(crate::Road::Home);
+            *crate::INCOMING_PACKETS.lock().await = None;
+            *state_guard = ConnectionState::Disconnected;
+            *writer_guard = None;
+            forget_link(&from_peer).await;
+        }
+        .instrument(tracing::debug_span!("control_reader")),
+    );
+
+    tracing::info!("Connected to peer");
+    ConnectionState::Connected
 }
 
 /// Poll for incoming KDE Connect packets from the control connection.
@@ -1121,6 +1264,8 @@ async fn forget_link(from: &(String, u16)) {
     crate::photo_requests::forget();
     crate::location_requests::forget();
     crate::quiet_requests::forget();
+    // Transfer links asked for on it: nothing waits for them now.
+    crate::bluetooth::forget_link_requests();
 }
 
 /// The cached iroh WAN identity (raw `kdeconnect.pocketdesk.endpoint` body
@@ -2422,15 +2567,31 @@ async fn check_transfer_connection(
     tls: &tokio_rustls::TlsAcceptor,
     key: &str,
 ) -> Result<TransferStream, &'static str> {
-    let mut stream = tokio::time::timeout(Duration::from_secs(5), tls.accept(stream))
+    let mut stream = transfer_tls(stream, tls, Duration::from_secs(5)).await?;
+    if !presents_key(&mut stream, key).await {
+        return Err("without the key");
+    }
+    Ok(stream)
+}
+
+/// The phone's side of a transfer's TLS on `stream`, done within `wait`: the
+/// dialer must be the pinned desktop of `tls` ([`transfer_acceptor`]) and
+/// speak the transfer protocol. A connection the desktop dialed at home, or
+/// a Bluetooth transfer link after its hello.
+pub(crate) async fn transfer_tls<S>(
+    stream: S,
+    tls: &tokio_rustls::TlsAcceptor,
+    wait: Duration,
+) -> Result<tokio_rustls::server::TlsStream<S>, &'static str>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let stream = tokio::time::timeout(wait, tls.accept(stream))
         .await
         .map_err(|_| "no TLS handshake")?
         .map_err(|_| "not the computer")?;
     if stream.get_ref().1.alpn_protocol() != Some(pocketdesk_core::protocol::ALPN_TRANSFER) {
         return Err("not a file transfer");
-    }
-    if !presents_key(&mut stream, key).await {
-        return Err("without the key");
     }
     Ok(stream)
 }
@@ -2708,17 +2869,22 @@ async fn dial_home(
             .await
         }
     };
-    // V8: with the control link to this computer by the internet road, home
-    // most likely does not answer, and a QUIC dial to an address that does
-    // not waits out its 10 s. Home gets a short try instead: a phone back on
-    // its Wi-Fi with the link still on the road answers well within it (V8
-    // review), and one away falls to the road seconds sooner.
+    // V8: with the control link to this computer by the internet road (or
+    // Bluetooth), home most likely does not answer, and a QUIC dial to an
+    // address that does not waits out its 10 s. Home gets a short try
+    // instead: a phone back on its Wi-Fi with the link still on the road
+    // answers well within it (V8 review), and one away falls to the road
+    // seconds sooner.
     let connected = if crate::link::home_unreachable(address).await {
         match tokio::time::timeout(HOME_TRY_WHILE_AWAY, connecting).await {
             Ok(connected) => connected,
             Err(_) => {
+                let road = match crate::control_road() {
+                    crate::Road::Bluetooth => "Bluetooth",
+                    _ => "the internet road",
+                };
                 return Err(DialFailed::plain(format!(
-                    "{address} did not answer at home within {} s, and its control link is by the internet road",
+                    "{address} did not answer at home within {} s, and its control link is by {road}",
                     HOME_TRY_WHILE_AWAY.as_secs()
                 )));
             }
@@ -3071,6 +3237,123 @@ async fn dial_wan(
     )
     .await;
     Ok((attached, dial))
+}
+
+/// The port a stream session over Bluetooth is kept under: there is none on
+/// this road, and 0 is the internet road's.
+#[cfg(unix)]
+pub const BLUETOOTH_STREAM_PORT: u16 = 1;
+
+/// Run a stream session with the computer at `address` on `fd`, an RFCOMM
+/// stream to its screen service the app dialed and handed over (the
+/// Bluetooth fallback, phase 2c): the stream hello, TLS held to the pin for
+/// `address` as the control link's (never pinned by first use), then the
+/// session over the byte stream, where the computer gives it its low
+/// setting. `fd` is this call's from here on, closed whenever the session
+/// does not come up on it.
+#[cfg(unix)]
+pub async fn connect_streaming_bluetooth(
+    address: String,
+    fd: std::os::fd::OwnedFd,
+    monitor_index: Option<u32>,
+    codec_caps: u8,
+    mode: pocketdesk_core::streaming::SessionMode,
+) -> Result<(), String> {
+    use pocketdesk_core::streaming::byte_stream::{ByteStreamConnection, Role};
+    let mut stream =
+        crate::bluetooth::stream_of(fd).map_err(|e| format!("The Bluetooth stream: {e}"))?;
+    let Some(tls) = pinned_tls(&address)? else {
+        tracing::warn!(peer = %address, "Bluetooth: no pin for this computer");
+        return Err(format!(
+            "This phone has not verified the computer at {address} yet: connect at home first"
+        ));
+    };
+
+    let generation = {
+        let mut handle_guard = (*STREAMING_HANDLE).lock().await;
+        if let Some(handle) = &*handle_guard {
+            if handle.address == address
+                && handle.port == BLUETOOTH_STREAM_PORT
+                && handle.monitor_index == monitor_index
+                && handle.mode == mode
+                && handle.connection.close_reason().is_none()
+            {
+                tracing::info!("Bluetooth session already active for {address}, skipping connect");
+                return Ok(());
+            }
+            tracing::info!(
+                "Stopping existing session for {} before connecting to {address} over Bluetooth",
+                handle.address
+            );
+        }
+        if let Some(handle) = handle_guard.take() {
+            teardown_streaming_handle(handle).await;
+            clear_hud_window();
+        }
+        crate::CONNECT_GENERATION.begin()
+    };
+    *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Connecting;
+
+    let fail = |message: String| {
+        *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Error(PocketdeskErrorDto {
+            code: PocketdeskError::ConnectionFailed {
+                address: String::new(),
+                port: 0,
+                reason: String::new(),
+            }
+            .code() as u32,
+            message: message.clone(),
+            is_retryable: true,
+        });
+        message
+    };
+    let hello = pocketdesk_core::protocol::bluetooth::format_stream_hello();
+    stream
+        .write_all(hello.as_bytes())
+        .await
+        .map_err(|e| fail(format!("The Bluetooth stream: {e}")))?;
+    let server_name = tokio_rustls::rustls::pki_types::ServerName::try_from(address.clone())
+        .map_err(|e| fail(format!("{address} is not an address: {e}")))?;
+    let tls = tokio::time::timeout(
+        BLUETOOTH_HANDSHAKE_WAIT,
+        tokio_rustls::TlsConnector::from(tls).connect(server_name, stream),
+    )
+    .await
+    .map_err(|_| fail("The computer did not answer over Bluetooth".to_string()))?
+    .map_err(|e| fail(format!("TLS over Bluetooth: {e}")))?;
+    let peer_key = tls
+        .get_ref()
+        .1
+        .peer_certificates()
+        .and_then(pocketdesk_core::streaming::PeerKey::from_tls_certs);
+    tracing::info!(peer = %address, "Stream session over Bluetooth: TLS up");
+    // A Bluetooth link has no address.
+    let connection: pocketdesk_core::streaming::SharedConnection = ByteStreamConnection::new(
+        tls,
+        Role::Dialer,
+        std::net::SocketAddr::from(([0, 0, 0, 0], 0)),
+        peer_key,
+    );
+    let (client, packet_rx, audio_rx) = StreamingClient::attach(
+        connection,
+        monitor_index,
+        Some(&client_identity().device_id),
+        None,
+        Some(codec_caps),
+        mode,
+    )
+    .await;
+    install_streaming(
+        generation,
+        client,
+        packet_rx,
+        audio_rx,
+        address,
+        BLUETOOTH_STREAM_PORT,
+        monitor_index,
+        None,
+    )
+    .await
 }
 
 /// This phone's WAN (iroh) key, kept in its data directory across runs so
@@ -3694,8 +3977,6 @@ mod watched_link_tests {
 
 #[cfg(test)]
 mod home_skip_tests {
-    use std::sync::atomic::Ordering;
-
     /// V8: with the control link to this computer on the internet road, the
     /// session's home dial gets 2 s, not its 10, and the caller takes the road.
     #[tokio::test]
@@ -3703,10 +3984,10 @@ mod home_skip_tests {
         // The control link's statics, as the pairing road's test holds them.
         let _globals = super::TRANSFER_TEST_LOCK.lock().await;
         let was_peer = crate::CONTROL_PEER.lock().await.clone();
-        let was_road = crate::CONTROL_OVER_INTERNET.load(Ordering::SeqCst);
+        let was_road = crate::control_road();
         // A documentation address: nothing answers there.
         *crate::CONTROL_PEER.lock().await = Some(("192.0.2.7".to_string(), 1716));
-        crate::CONTROL_OVER_INTERNET.store(true, Ordering::SeqCst);
+        crate::set_control_road(crate::Road::Internet);
         let started = std::time::Instant::now();
         let said = super::connect_streaming(
             "192.0.2.7".to_string(),
@@ -3718,7 +3999,7 @@ mod home_skip_tests {
         .await;
         let took = started.elapsed();
         *crate::CONTROL_PEER.lock().await = was_peer;
-        crate::CONTROL_OVER_INTERNET.store(was_road, Ordering::SeqCst);
+        crate::set_control_road(was_road);
         assert!(said.unwrap_err().contains("internet road"));
         assert!(took < std::time::Duration::from_secs(4), "{took:?}");
     }
@@ -5901,7 +6182,7 @@ mod internet_road_tests {
                 .await
                 .is_ok_and(|accepted| accepted.is_ok())
         });
-        crate::CONTROL_OVER_INTERNET.store(true, Ordering::SeqCst);
+        crate::set_control_road(crate::Road::Internet);
         // A home that answers (but speaks no TLS): the PIN went there, and
         // its failure is not a matter of networks.
         *crate::CONTROL_PEER.lock().await = Some(("127.0.0.1".to_string(), port));
@@ -5911,7 +6192,7 @@ mod internet_road_tests {
         let started = std::time::Instant::now();
         let refused = pair_with_pin("127.0.0.1".into(), closed, "123456".into()).await;
         let took = started.elapsed();
-        crate::CONTROL_OVER_INTERNET.store(false, Ordering::SeqCst);
+        crate::set_control_road(crate::Road::Home);
         *crate::CONTROL_PEER.lock().await = None;
         *crate::CERT_DIR.lock().unwrap() = had;
         let _ = std::fs::remove_dir_all(&certs);
@@ -6127,5 +6408,474 @@ mod share_tag_tests {
         tag_body(&mut body, None, &tags);
         assert!(body.get("keep").is_none());
         assert!(body.get("folderId").is_some());
+    }
+}
+
+#[cfg(all(test, unix))]
+mod bluetooth_road_tests {
+    use super::*;
+    use pocketdesk_core::protocol::bluetooth::{LINK_PACKET, PACKET};
+    use pocketdesk_core::protocol::{HANDSHAKE_HELLO, HANDSHAKE_OK};
+    use pocketdesk_core::streaming::transport::CertManager;
+    use tokio::io::BufReader;
+
+    /// The computer's end of a control link: TLS as its server, the
+    /// opening, then what the test has it say; held open until `close`.
+    async fn computer_end(
+        stream: tokio::net::UnixStream,
+        computer: CertManager,
+        says: Vec<Vec<u8>>,
+        close: tokio::sync::oneshot::Receiver<()>,
+    ) -> String {
+        let tls = tokio_rustls::TlsAcceptor::from(computer.control_server_config().unwrap())
+            .accept(stream)
+            .await
+            .expect("the phone's TLS");
+        let mut tls = BufReader::new(tls);
+        let mut hello = String::new();
+        tls.read_line(&mut hello).await.unwrap();
+        assert_eq!(hello.trim(), HANDSHAKE_HELLO);
+        tls.get_mut()
+            .write_all(
+                format!(
+                    "{HANDSHAKE_OK}\n{{\"type\":\"kdeconnect.identity\",\"body\":{{\"deviceName\":\"Desk\"}}}}\n"
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let mut phone = String::new();
+        tls.read_line(&mut phone).await.unwrap();
+        for line in says {
+            tls.get_mut().write_all(&line).await.unwrap();
+        }
+        tls.get_mut().flush().await.unwrap();
+        let _ = close.await;
+        phone
+    }
+
+    /// The control link runs on a stream the app hands over: the link is
+    /// live, by road 2, and what the computer says on it is heard.
+    #[tokio::test]
+    async fn connect_over_bluetooth_runs_control() {
+        let _globals = super::TRANSFER_TEST_LOCK.lock().await;
+        let certs = std::env::temp_dir().join(format!("bridge-bt-control-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&certs);
+        let had = crate::CERT_DIR.lock().unwrap().replace(certs.clone());
+        crate::bluetooth::forget_link_requests();
+        let computer = CertManager::new().unwrap();
+        let fingerprint = computer.cert_fingerprint();
+        // Verified at home before: the Bluetooth link pins nothing itself.
+        pin(&certs, "192.0.2.61", fingerprint);
+        let (phone_end, computer_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        computer_stream.set_nonblocking(true).unwrap();
+        let computer_stream = tokio::net::UnixStream::from_std(computer_stream).unwrap();
+        let says = vec![
+            NetworkPacket::new(PACKET)
+                .with_body(serde_json::json!({
+                    "address": "00:00:5E:00:53:01",
+                    "service": "b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b13",
+                }))
+                .to_wire()
+                .unwrap(),
+            NetworkPacket::new(LINK_PACKET)
+                .with_body(serde_json::json!({ "id": u64::MAX }))
+                .to_wire()
+                .unwrap(),
+        ];
+        let (close, closed) = tokio::sync::oneshot::channel();
+        let computer_side = tokio::spawn(computer_end(computer_stream, computer, says, closed));
+
+        let state = connect_over_bluetooth(
+            "192.0.2.61".to_string(),
+            1716,
+            std::os::fd::OwnedFd::from(phone_end),
+        )
+        .await;
+        let road = control_road();
+        let peer = control_peer().await;
+        let mut request = None;
+        for _ in 0..100 {
+            request = take_bluetooth_link_request().await;
+            if request.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let info = bluetooth_info("192.0.2.61");
+        // The computer closes: the link ends and the road is home again.
+        let _ = close.send(());
+        let phone = computer_side.await.unwrap();
+        for _ in 0..100 {
+            if control_peer().await.is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let road_after = control_road();
+        let pinned = CertManager::load_or_create(&certs).unwrap().known_peers();
+        *crate::CERT_DIR.lock().unwrap() = had;
+        let _ = std::fs::remove_dir_all(&certs);
+
+        assert!(matches!(state, Ok(ConnectionState::Connected)), "{state:?}");
+        assert_eq!(road, 2);
+        assert_eq!(
+            peer.as_deref(),
+            Some(r#"{"host":"192.0.2.61","port":1716}"#)
+        );
+        assert!(phone.contains("kdeconnect.identity"), "{phone}");
+        assert_eq!(request, Some(u64::MAX), "the link request, its id whole");
+        assert!(info.contains("00:00:5E:00:53:01"), "{info}");
+        assert_eq!(road_after, 0);
+        let label =
+            pocketdesk_core::streaming::transport::peer_label_for_address("192.0.2.61").unwrap();
+        assert!(
+            pinned.contains(&(label, fingerprint)),
+            "pinned by the computer's address, as at home"
+        );
+    }
+
+    /// A stream that never becomes a control link is closed, and leaves the
+    /// road as it was.
+    #[tokio::test]
+    async fn a_failed_bluetooth_link_closes_its_stream() {
+        let _globals = super::TRANSFER_TEST_LOCK.lock().await;
+        let certs = std::env::temp_dir().join(format!("bridge-bt-failed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&certs);
+        let had = crate::CERT_DIR.lock().unwrap().replace(certs.clone());
+        pin(
+            &certs,
+            "192.0.2.62",
+            CertManager::new().unwrap().cert_fingerprint(),
+        );
+        let (phone_end, computer_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        computer_stream.set_nonblocking(true).unwrap();
+        let mut computer_stream = tokio::net::UnixStream::from_std(computer_stream).unwrap();
+        let connecting = tokio::spawn(connect_over_bluetooth(
+            "192.0.2.62".to_string(),
+            1716,
+            std::os::fd::OwnedFd::from(phone_end),
+        ));
+        // Not TLS: the phone gives up on it.
+        let mut hello = [0u8; 5];
+        computer_stream.read_exact(&mut hello).await.unwrap();
+        computer_stream
+            .write_all(b"HTTP/1.1 400 Bad\r\n\r\n")
+            .await
+            .unwrap();
+        let state = connecting.await.unwrap();
+        let mut rest = Vec::new();
+        let closed = tokio::time::timeout(
+            Duration::from_secs(5),
+            computer_stream.read_to_end(&mut rest),
+        )
+        .await;
+        let road = control_road();
+        *crate::CERT_DIR.lock().unwrap() = had;
+        let _ = std::fs::remove_dir_all(&certs);
+        assert!(matches!(state, Ok(ConnectionState::Error(_))), "{state:?}");
+        assert!(matches!(closed, Ok(Ok(_))), "the stream closed");
+        assert_eq!(road, 0);
+    }
+
+    /// The TLS starts at once, though another dial holds the connect lock
+    /// (the computer waits only so long for the first byte); the link is
+    /// installed once the lock is free.
+    #[tokio::test]
+    async fn the_bluetooth_hello_goes_while_another_dial_holds_the_lock() {
+        let _globals = super::TRANSFER_TEST_LOCK.lock().await;
+        let certs = std::env::temp_dir().join(format!("bridge-bt-locked-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&certs);
+        let had = crate::CERT_DIR.lock().unwrap().replace(certs.clone());
+        let computer = CertManager::new().unwrap();
+        pin(&certs, "192.0.2.65", computer.cert_fingerprint());
+        let (phone_end, computer_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        computer_stream.set_nonblocking(true).unwrap();
+        let computer_stream = tokio::net::UnixStream::from_std(computer_stream).unwrap();
+
+        let held = crate::session::CONNECT_LOCK.lock().await;
+        let connecting = tokio::spawn(connect_over_bluetooth(
+            "192.0.2.65".to_string(),
+            1716,
+            std::os::fd::OwnedFd::from(phone_end),
+        ));
+        // TLS and the opening, all while the lock is held.
+        let opened = tokio::time::timeout(Duration::from_secs(5), async {
+            let tls = tokio_rustls::TlsAcceptor::from(computer.control_server_config().unwrap())
+                .accept(computer_stream)
+                .await
+                .expect("the phone's TLS");
+            let mut tls = BufReader::new(tls);
+            let mut hello = String::new();
+            tls.read_line(&mut hello).await.unwrap();
+            tls.get_mut()
+                .write_all(
+                    format!("{HANDSHAKE_OK}\n{{\"type\":\"kdeconnect.identity\"}}\n").as_bytes(),
+                )
+                .await
+                .unwrap();
+            tls.get_mut().flush().await.unwrap();
+            let mut phone = String::new();
+            tls.read_line(&mut phone).await.unwrap();
+            (hello, phone, tls)
+        })
+        .await
+        .expect("TLS and the opening while the lock is held");
+        let (hello, phone, tls) = opened;
+        let waited = !connecting.is_finished();
+        drop(held);
+        let state = connecting.await.unwrap();
+        let road = control_road();
+        // The computer closes: the link ends.
+        drop(tls);
+        for _ in 0..100 {
+            if control_peer().await.is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        *crate::CERT_DIR.lock().unwrap() = had;
+        let _ = std::fs::remove_dir_all(&certs);
+        assert_eq!(hello.trim(), HANDSHAKE_HELLO);
+        assert!(phone.contains("kdeconnect.identity"), "{phone}");
+        assert!(waited, "installed only once the lock was free");
+        assert!(matches!(state, Ok(ConnectionState::Connected)), "{state:?}");
+        assert_eq!(road, 2);
+    }
+
+    /// Phase 2c: a stream session on a stream the app hands over. The
+    /// computer hears the stream hello, then the phone's TLS with this
+    /// phone's certificate, then the session's opening streams over the
+    /// byte stream (the device's id among them).
+    #[tokio::test]
+    async fn connect_streaming_bluetooth_runs_a_session() {
+        use pocketdesk_core::streaming::Connection;
+        use pocketdesk_core::streaming::byte_stream::{ByteStreamConnection, Role};
+        // The session's statics (the connect generation a stop retires) are
+        // other tests' too.
+        let _session = super::receive_tests::SESSION_STATICS.lock().await;
+        let _globals = super::TRANSFER_TEST_LOCK.lock().await;
+        let certs = std::env::temp_dir().join(format!("bridge-bt-stream-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&certs);
+        let had = crate::CERT_DIR.lock().unwrap().replace(certs.clone());
+        let computer = CertManager::new().unwrap();
+        pin(&certs, "192.0.2.62", computer.cert_fingerprint());
+        let phone_cert = CertManager::load_or_create(&certs)
+            .unwrap()
+            .cert_fingerprint();
+        let (phone_end, computer_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        computer_stream.set_nonblocking(true).unwrap();
+        let mut computer_stream = tokio::net::UnixStream::from_std(computer_stream).unwrap();
+
+        let computer_side = tokio::spawn(async move {
+            let mut hello = Vec::new();
+            let mut byte = [0u8; 1];
+            while byte[0] != b'\n' {
+                computer_stream.read_exact(&mut byte).await.unwrap();
+                hello.push(byte[0]);
+            }
+            let tls =
+                match tokio_rustls::TlsAcceptor::from(computer.control_server_config().unwrap())
+                    .accept(computer_stream)
+                    .await
+                {
+                    Ok(tls) => tls,
+                    Err(e) => return Err(format!("the phone's TLS: {e}")),
+                };
+            let key = tls
+                .get_ref()
+                .1
+                .peer_certificates()
+                .and_then(pocketdesk_core::streaming::PeerKey::from_tls_certs);
+            let conn = ByteStreamConnection::new(
+                tls,
+                Role::Listener,
+                std::net::SocketAddr::from(([0, 0, 0, 0], 0)),
+                key.clone(),
+            );
+            let mut said = Vec::new();
+            for _ in 0..8 {
+                let Ok(Ok(mut stream)) =
+                    tokio::time::timeout(Duration::from_secs(5), conn.accept_uni()).await
+                else {
+                    break;
+                };
+                if let Ok(data) = stream.read_to_end(1024).await {
+                    said.push(data);
+                }
+                if said.iter().any(|d| d.starts_with(&[0xFE, 0x00])) {
+                    break;
+                }
+            }
+            conn.close(0, b"test over");
+            Ok((String::from_utf8(hello).unwrap(), key, said))
+        });
+
+        let started = connect_streaming_bluetooth(
+            "192.0.2.62".to_string(),
+            std::os::fd::OwnedFd::from(phone_end),
+            None,
+            0,
+            pocketdesk_core::streaming::SessionMode::Screen,
+        )
+        .await;
+        let computer = computer_side.await.unwrap();
+        let _ = stop_streaming().await;
+        *crate::CERT_DIR.lock().unwrap() = had;
+        let _ = std::fs::remove_dir_all(&certs);
+
+        let (hello, key, said) = match computer {
+            Ok(seen) => seen,
+            Err(e) => panic!("the computer's side: {e}; the phone's: {started:?}"),
+        };
+        assert!(started.is_ok(), "{started:?}");
+        assert_eq!(
+            hello,
+            pocketdesk_core::protocol::bluetooth::format_stream_hello()
+        );
+        assert_eq!(
+            key,
+            Some(pocketdesk_core::streaming::PeerKey::Tls(phone_cert)),
+            "the phone's own certificate, presented"
+        );
+        let id = client_identity().device_id;
+        assert!(
+            said.iter()
+                .any(|d| d.starts_with(&[0xFE, 0x00]) && d.ends_with(id.as_bytes())),
+            "the session names this device: {said:?}"
+        );
+    }
+
+    /// A computer never verified at home gets no stream session over
+    /// Bluetooth: nothing pins by first use on this road.
+    #[tokio::test]
+    async fn connect_streaming_bluetooth_needs_the_pin_from_home() {
+        let _globals = super::TRANSFER_TEST_LOCK.lock().await;
+        let certs =
+            std::env::temp_dir().join(format!("bridge-bt-stream-nopin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&certs);
+        let had = crate::CERT_DIR.lock().unwrap().replace(certs.clone());
+        let (phone_end, computer_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        let started = connect_streaming_bluetooth(
+            "192.0.2.63".to_string(),
+            std::os::fd::OwnedFd::from(phone_end),
+            None,
+            0,
+            pocketdesk_core::streaming::SessionMode::Screen,
+        )
+        .await;
+        // The phone's end was closed: the computer's side reads its end.
+        let mut computer_stream = computer_stream;
+        let mut rest = Vec::new();
+        let read = std::io::Read::read_to_end(&mut computer_stream, &mut rest);
+        *crate::CERT_DIR.lock().unwrap() = had;
+        let _ = std::fs::remove_dir_all(&certs);
+        let error = started.expect_err("refused");
+        assert!(error.contains("connect at home first"), "{error}");
+        assert!(matches!(read, Ok(0)), "closed, with nothing sent: {read:?}");
+    }
+
+    /// This phone's pin of `fingerprint` for `address`, in `certs`.
+    fn pin(certs: &std::path::Path, address: &str, fingerprint: [u8; 32]) {
+        let label = pocketdesk_core::streaming::transport::peer_label_for_address(address).unwrap();
+        CertManager::load_or_create(certs)
+            .unwrap()
+            .pin_peer(&label, fingerprint)
+            .unwrap();
+    }
+
+    /// A computer this phone never verified at home is not dialed over
+    /// Bluetooth: no TLS, no pin by first use, the stream closed, and an
+    /// error the app does not retry.
+    #[tokio::test]
+    async fn an_unverified_computer_gets_no_bluetooth_link() {
+        let _globals = super::TRANSFER_TEST_LOCK.lock().await;
+        let certs = std::env::temp_dir().join(format!("bridge-bt-unpinned-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&certs);
+        let had = crate::CERT_DIR.lock().unwrap().replace(certs.clone());
+        let (phone_end, computer_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        computer_stream.set_nonblocking(true).unwrap();
+        let mut computer_stream = tokio::net::UnixStream::from_std(computer_stream).unwrap();
+        let state = connect_over_bluetooth(
+            "192.0.2.63".to_string(),
+            1716,
+            std::os::fd::OwnedFd::from(phone_end),
+        )
+        .await;
+        let mut said = Vec::new();
+        let closed = tokio::time::timeout(
+            Duration::from_secs(5),
+            computer_stream.read_to_end(&mut said),
+        )
+        .await;
+        let road = control_road();
+        let pinned = CertManager::load_or_create(&certs).unwrap().known_peers();
+        *crate::CERT_DIR.lock().unwrap() = had;
+        let _ = std::fs::remove_dir_all(&certs);
+        match state {
+            Ok(ConnectionState::Error(e)) => {
+                assert_eq!(
+                    e.message,
+                    "This phone has not verified the computer at 192.0.2.63 yet: connect at home first"
+                );
+                assert!(!e.is_retryable);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(closed, Ok(Ok(0))), "EOF at once: {closed:?}");
+        assert!(said.is_empty(), "not even a TLS hello");
+        assert!(pinned.is_empty(), "nothing pinned");
+        assert_eq!(road, 0);
+    }
+
+    /// The pinned-only client refuses a computer with no pin even past the
+    /// up-front check (one forgotten meanwhile): the TLS fails, nothing is
+    /// pinned.
+    #[tokio::test]
+    async fn the_bluetooth_link_never_pins_by_first_use() {
+        let dir = std::env::temp_dir().join(format!("bridge-bt-tofu-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let phone = CertManager::load_or_create(&dir).unwrap();
+        let computer = CertManager::new().unwrap();
+        let (phone_end, computer_end) = tokio::io::duplex(64 * 1024);
+        let server = tokio::spawn(async move {
+            let _ = tokio_rustls::TlsAcceptor::from(computer.control_server_config().unwrap())
+                .accept(computer_end)
+                .await;
+        });
+        let manager = ConnectionManager::new(
+            Duration::from_secs(5),
+            phone.control_client_config_pinned_only(),
+        );
+        let identity = client_identity();
+        let secured = manager
+            .secure_named(phone_end, "192.0.2.64", 1716, &identity)
+            .await;
+        let _ = server.await;
+        let pinned = CertManager::load_or_create(&dir).unwrap().known_peers();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(secured.is_err());
+        assert!(pinned.is_empty());
+    }
+
+    /// A refusal over Bluetooth reaches the app in words: the file too big
+    /// for the road, and the one-at-a-time rule.
+    #[test]
+    fn a_bluetooth_refusal_is_said_as_the_computer_said_it() {
+        let wifi = refusal_text(
+            "file",
+            "over 8 MiB over Bluetooth: the file waits for Wi-Fi",
+            true,
+        );
+        assert_eq!(
+            wifi,
+            "The computer refused the file: over 8 MiB over Bluetooth: the file waits for Wi-Fi"
+        );
+        let turn = refusal_text(
+            "download",
+            "one file at a time over Bluetooth: try again once the other has crossed",
+            true,
+        );
+        assert!(turn.contains("one file at a time over Bluetooth"), "{turn}");
     }
 }

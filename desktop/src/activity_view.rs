@@ -39,7 +39,8 @@ impl Filter {
             Filter::Sessions => kind.starts_with("session_"),
             // A lock when a phone left is about phones too (E5).
             Filter::Phones => {
-                kind.starts_with("phone_") || kind == "away_locked" || kind == "device_removed"
+                kind.starts_with("phone_")
+                    || matches!(kind, "away_locked" | "device_removed" | "bluetooth_refused")
             }
             Filter::FilesAndLinks => matches!(kind, "file_received" | "link_received"),
             Filter::Messages => matches!(kind, "notification" | "text_received"),
@@ -308,6 +309,18 @@ pub fn describe(event: &Event) -> String {
         }
         "session_ended" => "Session ended".to_string(),
         "session_refused" => "Session refused".to_string(),
+        "bluetooth_refused" => {
+            let what = if text(event, "what") == Some("screen") {
+                "Screen refused over Bluetooth"
+            } else {
+                "Refused over Bluetooth"
+            };
+            match text(event, "reason") {
+                Some("other_key") => format!("{what}: not the key paired here"),
+                Some("computer") => format!("{what}: phones only"),
+                _ => format!("{what}: not paired"),
+            }
+        }
         "phone_linked" => "Connected".to_string(),
         "phone_unlinked" => "Disconnected".to_string(),
         "phone_paired" => "Paired".to_string(),
@@ -576,6 +589,27 @@ mod tests {
         let removed = event("device_removed", json!({"by": "a1b2c3d4e5f6"}));
         assert_eq!(describe(&removed), "Removed from afar by a1b2c3d4");
         assert!(Filter::Phones.admits("device_removed"));
+    }
+
+    /// The Bluetooth fallback: a phone turned away says why, among the phones.
+    #[test]
+    fn a_bluetooth_refusal_says_why() {
+        let said = |reason: &str| describe(&event("bluetooth_refused", json!({"reason": reason})));
+        assert_eq!(said("not_paired"), "Refused over Bluetooth: not paired");
+        assert_eq!(
+            said("other_key"),
+            "Refused over Bluetooth: not the key paired here"
+        );
+        assert_eq!(said("computer"), "Refused over Bluetooth: phones only");
+        assert!(Filter::Phones.admits("bluetooth_refused"));
+        let screen = describe(&event(
+            "bluetooth_refused",
+            json!({"reason": "other_key", "what": "screen"}),
+        ));
+        assert_eq!(
+            screen,
+            "Screen refused over Bluetooth: not the key paired here"
+        );
     }
 
     /// J4: Search narrows by the line as shown, with the kind chip.

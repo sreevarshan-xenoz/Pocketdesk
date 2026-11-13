@@ -51,4 +51,27 @@ class UploadMarksTest {
             UploadRetry.again(listOf("a" to 1), UploadRetry.START_GRACE_MS, waiting),
         )
     }
+
+    /**
+     * A file held for the Bluetooth road (over 8 MiB, or a call or music)
+     * goes again however often it was held, and is never given up: its
+     * held send is taken back from its count.
+     */
+    @Test
+    fun `one held for the Bluetooth road goes again and is never given up`() {
+        val how = mapOf("a" to SendOutcome.WAITED, "b" to SendOutcome.WAITED, "c" to SendOutcome.FAILED)
+        val handed = listOf("a" to 1, "b" to UploadRetry.MAX_SENDS, "c" to UploadRetry.MAX_SENDS)
+        assertEquals(
+            "held ones again, their sends not counted; c gave out",
+            listOf("a" to 0, "b" to UploadRetry.MAX_SENDS - 1),
+            UploadRetry.again(handed, 1_000) { how[it] },
+        )
+        assertEquals("only c is given up", 1, UploadRetry.givenUp(handed) { how[it] })
+        // Handed again (the uploader adds one), held again: the count stays.
+        var sends = UploadRetry.MAX_SENDS
+        repeat(5) {
+            sends = UploadRetry.again(listOf("a" to sends + 1), 1_000) { SendOutcome.WAITED }!!.single().second
+        }
+        assertEquals(UploadRetry.MAX_SENDS, sends)
+    }
 }

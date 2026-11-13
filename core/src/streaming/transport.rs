@@ -284,6 +284,20 @@ impl CertManager {
         Arc::new(config)
     }
 
+    /// [`CertManager::control_client_config`] that never pins by first use:
+    /// a server whose label has no pin yet is refused, nothing is written.
+    /// For a road where nothing pairs (the Bluetooth fallback): the computer
+    /// must have been verified at home first.
+    pub fn control_client_config_pinned_only(&self) -> Arc<rustls::ClientConfig> {
+        let mut config = self.client_with_own_cert(Arc::new(TofuVerifier {
+            known_peers: self.known_peers.clone(),
+            peers_path: self.peers_path.clone(),
+            pinned_only: true,
+        }));
+        config.alpn_protocols = vec![crate::protocol::ALPN_CONTROL.to_vec()];
+        Arc::new(config)
+    }
+
     /// A control channel's TLS client configuration that pins nothing
     /// (pair a computer nearby): any certificate is taken, its holder still
     /// proving its key, and nothing is written to the pins. The caller
@@ -433,6 +447,7 @@ impl CertManager {
         self.client_with_own_cert(Arc::new(TofuVerifier {
             known_peers: self.known_peers.clone(),
             peers_path: self.peers_path.clone(),
+            pinned_only: false,
         }))
     }
 
@@ -757,6 +772,8 @@ struct TofuVerifier {
     known_peers: Arc<Mutex<HashMap<String, [u8; 32]>>>,
     /// Optional path for persisting known peers to disk on first-accept.
     peers_path: Option<PathBuf>,
+    /// Refuse a peer with no pin instead of pinning it (no first use).
+    pinned_only: bool,
 }
 
 impl rustls::client::danger::ServerCertVerifier for TofuVerifier {
@@ -798,6 +815,12 @@ impl rustls::client::danger::ServerCertVerifier for TofuVerifier {
                      This could be a man-in-the-middle attack. \
                      If you recently reinstalled the remote device, \
                      delete its entry and reconnect."
+                )))
+            }
+            None if self.pinned_only => {
+                warn!("Pinned only: no pin for {label}, refused");
+                Err(rustls::Error::General(format!(
+                    "No certificate is pinned for {label}: verify the computer at home first."
                 )))
             }
             None => {
@@ -1291,6 +1314,12 @@ pub const STREAM_KIND_CAST_CONTROL: u8 = 4;
 /// Sent to no one else, so a viewer that does not know it never meets it.
 pub const STREAM_KIND_CURSOR: u8 = 5;
 
+/// The code a video frame's stream is reset or stopped with when a newer
+/// keyframe made it moot (BG3): the computer resets those still on the
+/// wire as it sends the keyframe, and the phone stops those it no longer
+/// needs.
+pub const VIDEO_MOOT: u32 = 0x4d4f;
+
 /// Packet header for streaming transport
 ///
 /// Bytes:
@@ -1658,6 +1687,7 @@ mod tests {
         let verifier = TofuVerifier {
             known_peers: stale.known_peers.clone(),
             peers_path: stale.peers_path.clone(),
+            pinned_only: false,
         };
         use rustls::client::danger::ServerCertVerifier;
         assert!(
@@ -1672,6 +1702,47 @@ mod tests {
                 .is_err(),
             "the address was pinned since this manager loaded"
         );
+    }
+
+    /// The pinned-only client takes the pinned certificate and refuses an
+    /// address with no pin, writing nothing.
+    #[test]
+    fn pinned_only_refuses_an_unknown_address_and_pins_nothing() {
+        let dir = pin_dir("pinned-only");
+        let phone = CertManager::load_or_create(&dir).unwrap();
+        let (desktop, _) = generate_identity().unwrap();
+        let desktop = CertificateDer::from(desktop);
+        let known: std::net::IpAddr = "192.0.2.31".parse().unwrap();
+        let unknown: std::net::IpAddr = "192.0.2.32".parse().unwrap();
+        phone
+            .pin_peer(&peer_label_for_ip(known), CertManager::cert_hash(&desktop))
+            .unwrap();
+        let verifier = TofuVerifier {
+            known_peers: phone.known_peers.clone(),
+            peers_path: phone.peers_path.clone(),
+            pinned_only: true,
+        };
+        use rustls::client::danger::ServerCertVerifier;
+        let verify = |ip: std::net::IpAddr| {
+            verifier.verify_server_cert(
+                &desktop,
+                &[],
+                &ServerName::IpAddress(ip.into()),
+                &[],
+                rustls::pki_types::UnixTime::now(),
+            )
+        };
+        assert!(verify(known).is_ok(), "the pinned certificate");
+        assert!(verify(unknown).is_err(), "no pin, no first use");
+        assert_eq!(phone.known_peers().len(), 1);
+        assert_eq!(
+            CertManager::load_or_create(&dir)
+                .unwrap()
+                .known_peers()
+                .len(),
+            1
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -2113,6 +2184,7 @@ mod tests {
             .with_custom_certificate_verifier(Arc::new(TofuVerifier {
                 known_peers: phone.known_peers.clone(),
                 peers_path: None,
+                pinned_only: false,
             }))
             .with_no_client_auth();
         anonymous.alpn_protocols = vec![crate::protocol::ALPN_CONTROL.to_vec()];

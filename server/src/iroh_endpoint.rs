@@ -27,7 +27,7 @@ use iroh_mainline_address_lookup::DhtAddressLookup;
 use pocketdesk_core::local::config::DhtPublish;
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket};
 use pocketdesk_core::streaming::transport::{CertManager, StreamTransportConfig};
-use pocketdesk_core::streaming::{IrohConnection, SessionInput, StreamingConfig, StreamingServer};
+use pocketdesk_core::streaming::{IrohConnection, SessionInput, StreamingConfig};
 use tokio::sync::broadcast;
 
 /// Packet type carrying the server's WAN identity to registered clients.
@@ -629,6 +629,19 @@ pub async fn spawn_wan_endpoint(
     spawn_endpoint_recorder(endpoint.clone(), dht_publish, dht_check);
 
     let accept = endpoint.clone();
+    // What each session's server is built from, the LAN's and Bluetooth's
+    // too (`stream_session`).
+    let setup = crate::stream_session::SessionSetup {
+        config,
+        input_tx,
+        cert_manager,
+        allow_hevc,
+        slow_link_frame_rate,
+        laser,
+        capture_backend,
+        mic_relay_device,
+        cast,
+    };
     // Another computer's link, on its own congestion controller (BK11),
     // when there is a control loop to take it.
     let computer_link = control.is_some().then(|| {
@@ -654,11 +667,7 @@ pub async fn spawn_wan_endpoint(
                 incoming.refuse();
                 continue;
             };
-            let config = config.clone();
-            let input_tx = input_tx.clone();
-            let cert_manager = Arc::clone(&cert_manager);
-            let mic_relay_device = mic_relay_device.clone();
-            let cast = cast.clone();
+            let setup = setup.clone();
             let control = control.clone();
             let computer_link = computer_link.clone();
             tokio::spawn(async move {
@@ -687,35 +696,12 @@ pub async fn spawn_wan_endpoint(
                     return;
                 }
                 let _slot = slot;
-                let mut streaming_server =
-                    StreamingServer::new(config, StreamTransportConfig::default(), cert_manager);
-                streaming_server.set_input_channel(input_tx);
-                // R4 E2: WAN sessions get the same phone-mic relay as LAN.
-                let (mic_tx, mic_rx) = tokio::sync::mpsc::channel(64);
-                tokio::spawn(crate::mic_relay::run_mic_relay(mic_rx, mic_relay_device));
-                streaming_server.set_mic_channel(mic_tx);
-                // K5: a cast's sound plays here, as on the LAN.
-                let (sound_tx, sound_rx) = tokio::sync::mpsc::channel(64);
-                tokio::spawn(crate::phone_sound::run(sound_rx));
-                streaming_server.set_phone_sound_channel(sound_tx);
-                if let Some(cast) = cast {
-                    streaming_server.set_cast_channel(cast);
-                }
-                // F6 part 2: a camera cast, while the owner offers phones as a camera.
-                streaming_server.set_webcam_offer(crate::phone_camera::offered);
-                streaming_server.set_session_telemetry(true);
-                streaming_server.set_hevc_allowed(allow_hevc);
-                streaming_server.set_slow_link_frame_rate(slow_link_frame_rate);
-                streaming_server.set_laser(laser);
-                streaming_server.set_capture_backend(capture_backend);
-                streaming_server.set_screen_grant(crate::state::screen_grant());
-                crate::state::apply_gnome_unattended();
                 // The gate judges the deviceId the client announces in-band
                 // against the iroh key the connection proved (device keys). It
                 // runs with pairing off too, so a paired device's own
                 // permissions still apply.
-                streaming_server.set_session_gate(move |claim| {
-                    Box::pin(crate::plugins::pair::session_gate(claim, pairing_required))
+                let mut streaming_server = setup.server(move |claim| {
+                    crate::plugins::pair::session_gate(claim, pairing_required)
                 });
                 if let Err(e) = streaming_server
                     .run_on_connection(IrohConnection::shared(conn))

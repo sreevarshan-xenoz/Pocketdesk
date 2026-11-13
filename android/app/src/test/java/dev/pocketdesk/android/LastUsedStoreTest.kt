@@ -71,8 +71,8 @@ class LastUsedStoreTest {
     }
 }
 
-/** Only what HostStore asks of a Context: its preferences, kept in memory. */
-private class FakeContext : ContextWrapper(null) {
+/** Only what HostStore asks of a Context: its preferences, kept in memory (other stores' tests use it too). */
+internal class FakeContext : ContextWrapper(null) {
     private val files = mutableMapOf<String, FakePrefs>()
 
     override fun getSharedPreferences(name: String, mode: Int): SharedPreferences = files.getOrPut(name) { FakePrefs() }
@@ -80,7 +80,7 @@ private class FakeContext : ContextWrapper(null) {
     override fun getApplicationContext(): Context = this
 }
 
-private class FakePrefs : SharedPreferences {
+internal class FakePrefs : SharedPreferences {
     private val values = mutableMapOf<String, Any?>()
 
     override fun getAll(): Map<String, *> = values.toMap()

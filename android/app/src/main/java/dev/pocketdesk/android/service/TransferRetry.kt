@@ -26,9 +26,29 @@ object TransferRetry {
     /** The phone itself will not take this file (no room, an unsafe place): never retried. */
     class Refusal(message: String) : Exception(message)
 
-    /** [delayBefore] for a failure [error]: a [Refusal] is final, whatever it says. */
+    /**
+     * A file held by the Bluetooth road's rules (over 8 MiB waits for
+     * Wi-Fi; nothing starts during a call or music to a headset) until the
+     * wait ran out: not tried again now, though not refused either, so a
+     * later send (the camera's, the kept folders' next run) may go.
+     * [forWifi]: it waited for Wi-Fi, else for a call or music to stop.
+     */
+    class Waited(message: String, val forWifi: Boolean = true) : Exception(message)
+
+    /**
+     * Whether [error] held the file for the Bluetooth road, on the phone
+     * ([Waited]) or by the computer's own refusal (over 8 MiB "waits for
+     * Wi-Fi"): it goes again later, not counted as a failure.
+     */
+    fun held(error: Throwable?): Boolean {
+        if (error is Waited) return true
+        val text = error?.message?.lowercase() ?: return false
+        return "bluetooth" in text && "waits for wi-fi" in text
+    }
+
+    /** [delayBefore] for a failure [error]: a [Refusal] or a [Waited] is final, whatever it says. */
     fun delayAfter(attempt: Int, error: Throwable?, enabled: Boolean): Long? =
-        if (error is Refusal) null else delayBefore(attempt, error?.message, enabled)
+        if (error is Refusal || error is Waited) null else delayBefore(attempt, error?.message, enabled)
 
     /**
      * How long the transfers wait, in all, for a network during one outage
@@ -63,7 +83,7 @@ object TransferRetry {
         hasNetwork: Boolean,
         waitedOfflineSeconds: Long,
     ): Next {
-        val final = error is Refusal || error?.message?.let(::isFinal) == true
+        val final = error is Refusal || error is Waited || error?.message?.let(::isFinal) == true
         if (!enabled || final) return Next.Stop(noNetwork = false)
         if (!hasNetwork) {
             val left = NETWORK_WAIT_SECONDS - waitedOfflineSeconds
@@ -219,7 +239,8 @@ object TransferRetry {
     /**
      * Refusals that pass: while other transfers run, or a request that went
      * by the internet road while the home network came back (the computer
-     * dials a download back on the home network only).
+     * dials a download back on the home network only), or one file while
+     * another still crosses by Bluetooth (one at a time there).
      */
-    private val BUSY = listOf("busy", "still running", "need the local network")
+    private val BUSY = listOf("busy", "still running", "need the local network", "one file at a time over bluetooth")
 }

@@ -92,4 +92,17 @@ class HostStatusTest {
         assertEquals(usual, HostStatus.buttons(paired = false, unpairedByIt = false))
         assertEquals(usual, HostStatus.buttons(paired = false, unpairedByIt = true))
     }
+
+    /** The Bluetooth fallback: a computer reached by Bluetooth says so, in place of "On this network". */
+    @Test
+    fun aComputerReachedByBluetoothSaysSo() {
+        assertEquals(
+            listOf(Part.OverBluetooth, Part.Paired),
+            HostStatus.parts(usual, named = false, online = false, paired = true, auto = false, bluetooth = true),
+        )
+        assertEquals(
+            listOf(Part.Paired),
+            HostStatus.parts(usual, named = false, online = false, paired = true, auto = false, bluetooth = false),
+        )
+    }
 }

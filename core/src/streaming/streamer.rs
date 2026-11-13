@@ -1282,6 +1282,15 @@ impl StreamingServer {
 
             // Update encoder config with current bitrate
             encoder_config.bitrate_bps = *encoder_bitrate_rx.borrow();
+            // The low setting on a narrow road (Bluetooth phase 2b): the
+            // picture made smaller below, and from the first frame the rate
+            // and the bitrate the arbiter holds it to.
+            let low_link = super::low_link::applies(connection.transport_family());
+            if low_link {
+                encoder_config.fps = encoder_config.fps.min(super::low_link::FPS);
+                encoder_config.bitrate_bps =
+                    encoder_config.bitrate_bps.min(super::low_link::BITRATE_BPS);
+            }
 
             let mut encoder =
                 VideoEncoder::new(encoder_config).context("Failed to create video encoder")?;
@@ -1560,7 +1569,11 @@ impl StreamingServer {
                             () => {
                                 if frame.gpu.is_some()
                                     && super::dmabuf::needs_pixels(
-                                        encoder.takes_dmabuf(),
+                                        // The low setting shrinks the picture
+                                        // in memory: a tiled buffer on the card
+                                        // cannot be read back there, so the
+                                        // capture goes back to copies.
+                                        encoder.takes_dmabuf() && !low_link,
                                         software_crop && crop.is_some(),
                                         frame.width,
                                         frame.height,
@@ -1603,6 +1616,16 @@ impl StreamingServer {
                         // as the software crop makes them, so a crop is one
                         // rebuild and the stream stays 4:2:0.
                         frame.to_even();
+                        if low_link {
+                            let factor = super::low_link::factor(frame.height);
+                            if factor > 1 && !frame.downscale(factor) {
+                                debug!(
+                                    width = frame.width,
+                                    height = frame.height,
+                                    "A frame went at its own size: it could not be made smaller"
+                                );
+                            }
+                        }
 
                         // Adopt the frame resolution into the encoder: the
                         // crop size (or the real capture size) must be what
@@ -1839,6 +1862,10 @@ impl StreamingServer {
             let mut packets_dropped = 0u64;
             let mut connection_closed = false;
             let mut in_flight = InFlight::new(MAX_VIDEO_IN_FLIGHT);
+            // BG3: the wire numbers frames once per session, so a rebuilt
+            // encoder (which numbers from 0 again) does not read on the
+            // phone as frames from the past.
+            let mut wire_sequence: u64 = 0;
 
             loop {
                 tokio::select! {
@@ -1904,6 +1931,15 @@ impl StreamingServer {
                             // with the writes below, is the delivery ceiling's
                             // signal (R6f).
                             let send_started = Instant::now();
+                            // BG3: a keyframe restarts the picture, so the
+                            // frames still on the wire are moot: reset, no
+                            // time spent resending them, and room at once.
+                            if packet.is_keyframe {
+                                let reset = in_flight.moot(transport::VIDEO_MOOT);
+                                if reset > 0 {
+                                    debug!(reset, seq = packet.sequence, "Reset frames a keyframe made moot");
+                                }
+                            }
                             if !in_flight.admit(&transport_cancel).await {
                                 connection_closed = true;
                                 packets_dropped += 1;
@@ -1915,7 +1951,7 @@ impl StreamingServer {
                                 Ok(mut send_stream) => {
                                     // Build and send header
                                     let header = transport::PacketHeader {
-                                        sequence: packet.sequence,
+                                        sequence: wire_sequence,
                                         stream_kind: transport::STREAM_KIND_VIDEO,
                                         is_keyframe: packet.is_keyframe,
                                         timestamp_us: packet.timestamp.elapsed().as_micros() as u64,
@@ -1942,7 +1978,8 @@ impl StreamingServer {
                                         packets_dropped += 1;
                                         continue;
                                     }
-                                    in_flight.push(send_stream.delivered());
+                                    in_flight.push_stream(send_stream);
+                                    wire_sequence += 1;
                                     super::latency_trace::written(packet.sequence);
 
                                     packets_sent += 1;
@@ -2471,6 +2508,9 @@ impl StreamingServer {
             let arb_fps_tx = self.fps_tx.clone();
             let configured_fps = self.config.fps.max(1);
             let slow_link_frame_rate = self.slow_link_frame_rate;
+            // The low setting (Bluetooth phase 2b): decided at once, not
+            // after the first tick, so a narrow road is not flooded first.
+            let low_link = super::low_link::applies(connection.transport_family());
             tasks.spawn(async move {
                 // Seed with the configured rate; the first tick reconciles.
                 let mut applied = configured_bitrate;
@@ -2478,11 +2518,17 @@ impl StreamingServer {
                 let mut delivery = DeliveryCeiling::new(configured_bitrate);
                 let mut last_tick = Instant::now();
                 let mut applied_fps = configured_fps;
+                let mut wait = if low_link {
+                    Duration::ZERO
+                } else {
+                    Duration::from_secs(2)
+                };
                 loop {
                     tokio::select! {
                         _ = arb_cancel.cancelled() => break,
-                        _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+                        _ = tokio::time::sleep(wait) => {}
                     }
+                    wait = Duration::from_secs(2);
                     let stats = arb_conn.stats();
                     loss.sample(stats.lost_packets, stats.datagrams_sent);
                     let loss_cap = loss.ceiling();
@@ -2500,17 +2546,29 @@ impl StreamingServer {
                     };
                     let preset_ceil =
                         preset_bitrate_ceil(arb_preset.load(Ordering::Relaxed), configured_bitrate);
+                    let low_cap = if low_link {
+                        super::low_link::BITRATE_BPS
+                    } else {
+                        u32::MAX
+                    };
                     let effective = configured_bitrate
                         .min(relay_cap)
                         .min(preset_ceil)
                         .min(loss_cap)
-                        .min(delivery_cap);
+                        .min(delivery_cap)
+                        .min(low_cap);
                     // R6f: fewer frames when the rate cannot give each one
                     // enough bits; "Full quality" keeps the session's own.
                     let fps = if slow_link_frame_rate && !arb_full_quality.load(Ordering::Relaxed) {
                         slow_link_fps(configured_fps, applied_fps, effective)
                     } else {
                         configured_fps
+                    };
+                    // The low setting holds even "Full quality" to its rate.
+                    let fps = if low_link {
+                        fps.min(super::low_link::FPS)
+                    } else {
+                        fps
                     };
                     if fps == applied_fps && effective == applied {
                         continue;

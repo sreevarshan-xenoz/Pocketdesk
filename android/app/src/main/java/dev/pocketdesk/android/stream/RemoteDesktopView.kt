@@ -1,6 +1,7 @@
 package dev.pocketdesk.android.stream
 
 import android.os.Build
+import android.util.Log
 import android.view.SurfaceView
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -29,6 +30,7 @@ import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.Prefs
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
+import dev.pocketdesk.android.bluetooth.BluetoothRoad
 import dev.pocketdesk.android.bridge.RustCore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -595,7 +597,7 @@ private fun declareFrameRate(holder: android.view.SurfaceHolder, display: androi
 }
 
 /** Which link a live video session came up over (session UI status chip). */
-enum class StreamTransportKind { Lan, Wan }
+enum class StreamTransportKind { Lan, Wan, Bluetooth }
 
 /** Lifecycle of the video connect attempt, reported to the session UI. */
 sealed interface StreamStatus {
@@ -652,11 +654,22 @@ private class DecoderHost {
         report(StreamStatus.Connecting)
         thread = Thread({
             // The Rust bridge blocks, so connect + drain share this thread.
-            // A desktop with a cached iroh WAN identity (R1 stage 3) is dialed
-            // at home and over the internet at once, the first road to answer
-            // carrying the session (BG6); one without, at home only.
-            var connected = false
-            val status = if (wanIdentity != null) {
+            // While the control link runs over Bluetooth (the Wi-Fi is gone),
+            // the screen goes that way first, at the computer's low setting,
+            // rather than waiting on home and the internet (phase 2c).
+            val bluetooth = BluetoothRoad.openStream(context, address)?.let { fd ->
+                RustCore.connectStreamingBluetooth(address, fd, monitorIndex)
+            }
+            bluetooth?.exceptionOrNull()?.let {
+                Log.i("RemoteDesktop", "the screen over Bluetooth did not start: ${it.message}")
+            }
+            var connected = bluetooth?.isSuccess == true
+            // Otherwise a desktop with a cached iroh WAN identity (R1 stage 3)
+            // is dialed at home and over the internet at once, the first road
+            // to answer carrying the session (BG6); one without, at home only.
+            val status = if (connected) {
+                StreamStatus.Up(StreamTransportKind.Bluetooth)
+            } else if (wanIdentity != null) {
                 val raced = RustCore.connectStreamingRace(address, port, wanIdentity, monitorIndex)
                 connected = raced.isSuccess
                 when {

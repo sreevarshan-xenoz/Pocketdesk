@@ -88,6 +88,7 @@ windows = { version = "0.62", features = [
     "UI_Notifications_Management",
     "Data_Xml_Dom",
     "Win32_Foundation",
+    "Win32_Devices_Bluetooth",
     "Win32_Devices_FunctionDiscovery",
     "Win32_Graphics_Direct3D",
     "Win32_Graphics_Direct3D11",

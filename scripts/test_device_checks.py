@@ -95,6 +95,23 @@ class PureParts(unittest.TestCase):
         self.assertFalse(dc.status_running('{"api": 1, "server": {"running": false}}'))
         self.assertFalse(dc.status_running("no server"))
 
+    def test_the_phone_s_bonded_devices(self):
+        dump = (
+            "Bluetooth Status\n  enabled: true\n  Bonded devices:\n"
+            "    XX:XX:XX:XX:53:01 [ DUAL ] Laptop\n"
+            "    00:00:5e:00:53:02 [BR/EDR] Earbuds\n"
+            "\n  ScanMode: SCAN_MODE_CONNECTABLE\n  Other: 00:00:5E:00:53:09\n"
+        )
+        listed = dc.bonded_addresses(dump)
+        self.assertEqual(listed, ["XX:XX:XX:XX:53:01", "00:00:5E:00:53:02"])
+        self.assertTrue(dc.bonded_with(listed, "00:00:5e:00:53:01"), "a masked byte matches any")
+        self.assertTrue(dc.bonded_with(listed, "00:00:5E:00:53:02"))
+        self.assertFalse(dc.bonded_with(listed, "00:00:5E:00:53:09"), "listed after the section is not bonded")
+        self.assertEqual(dc.bonded_addresses("  Bonded devices:\n  ScanMode: x\n"), [])
+        self.assertIsNone(dc.bonded_addresses("Can't find service: bluetooth_manager"))
+        self.assertEqual(dc.bt_address('{"address": "00:00:5e:00:53:01", "service": "x"}'), "00:00:5E:00:53:01")
+        self.assertIsNone(dc.bt_address("not json"))
+
     def test_device_commands_keep_empty_and_spaced_arguments(self):
         self.assertEqual(dc.device_command("am", "--es", "text", ""), "am --es text ''")
         self.assertEqual(dc.device_command("--es", "text", "In hand"), "--es text 'In hand'")
@@ -584,6 +601,59 @@ class SessionParts(unittest.TestCase):
         self.assertIsNone(dc.ring_posted("nothing"))
         self.assertEqual(dc.focus_holder('Audio Focus stack entries (last is top of stack):\n  source:a -- pack: com.example.music -- client: c -- gain: GAIN\n  source:b -- pack: dev.pocketdesk.android -- client: d -- gain: GAIN\n\nNo external focus policy'), "this app")
         self.assertEqual(dc.focus_holder("Audio Focus stack entries (last is top of stack):" + chr(10) * 3), "none")
+
+    def test_the_throwaway_s_bluetooth_service_is_never_the_owner_s(self):
+        """§286: neither the default service nor its transfer service, and
+        its own transfer service is not the default either."""
+        test, default = dc.BT_TEST_SERVICE, dc.BT_DEFAULT_SERVICE
+        self.assertEqual(dc.link_uuid(default), "b1f2c4e0-6a3d-4c8e-9f51-2d7e0a9c4b12")
+        self.assertNotIn(test, (default, dc.link_uuid(default)))
+        self.assertNotEqual(dc.link_uuid(test), default)
+        self.assertEqual(test, test.lower())
+        self.assertEqual(dc.Server(pathlib.Path("t"), pathlib.Path("e")).env()["POCKETDESK_BT_SERVICE_UUID"], test)
+
+    def test_control_links_by_road_with_their_times(self):
+        """§286: each road's links from the server's log, colour codes and all."""
+        esc = chr(27)
+        log = chr(10).join([
+            f'{esc}[2m2026-11-06T10:00:01.500000Z{esc}[0m {esc}[32m INFO{esc}[0m conn{{{esc}[3mtransport{esc}[0m{esc}[2m={esc}[0m"bluetooth"}}: x: Entering main packet loop',
+            '2026-11-06T10:00:02Z  INFO conn{transport="tcp"}: x: Entering main packet loop',
+            '2026-11-06T10:00:03.250Z  INFO x: Stopped listening over Bluetooth',
+            'INFO conn{transport="bluetooth"}: x: Entering main packet loop',
+        ])
+        base = 1793959200  # 2026-11-06T10:00:00Z
+        self.assertEqual(dc.loop_stamps(log, "bluetooth"), [base + 1.5, None])
+        self.assertEqual(dc.loop_stamps(log, "tcp"), [base + 2])
+        self.assertEqual(dc.loop_stamps(log, "iroh"), [])
+        self.assertEqual(dc.line_stamps(log, "Stopped listening over Bluetooth"), [base + 3.25])
+
+    def test_the_bluetooth_road_s_state_in_status(self):
+        out = 'log line {x}' + chr(10) + '{"api":1,"server":{"running":true},"bluetooth":"listening"}'
+        self.assertEqual(dc.bluetooth_state(out), "listening")
+        self.assertIsNone(dc.bluetooth_state('{"api":1,"server":{"running":false},"bluetooth":null}'))
+        self.assertIsNone(dc.bluetooth_state("nothing"))
+
+    def test_the_service_a_saved_computer_names(self):
+        raw = '{"address":"00:00:5E:00:53:01","service":"6C0F7A52-3E19-4D8B-A2C4-5F81D9E03B70","link":"x"}'
+        self.assertEqual(dc.bt_service(raw), dc.BT_TEST_SERVICE)
+        self.assertIsNone(dc.bt_service(None))
+        self.assertIsNone(dc.bt_service("not json"))
+        self.assertIsNone(dc.bt_service('["a"]'))
+
+    def test_the_takeover_s_verdict(self):
+        self.assertEqual(dc.takeover_verdict(6.0), "PASS")
+        self.assertEqual(dc.takeover_verdict(20.0), "PASS")
+        self.assertEqual(dc.takeover_verdict(20.5), "FAIL")
+        self.assertEqual(dc.takeover_verdict(None), "TIMEOUT")
+
+    def test_a_file_that_waits_for_wi_fi(self):
+        mine = ('  NotificationRecord(0x1: pkg=dev.pocketdesk.android user=UserHandle{0} id=3 importance=2\n'
+                '      android.title=String (Waits for Wi-Fi: over 8 MB does not go by Bluetooth)\n')
+        other = ('  NotificationRecord(0x2: pkg=com.example.other user=UserHandle{0} id=1 importance=3\n'
+                 '      android.title=String (Waits for Wi-Fi)\n')
+        self.assertTrue(dc.waits_for_wifi("NOTIFICATION MANAGER\n" + mine + other))
+        self.assertFalse(dc.waits_for_wifi("NOTIFICATION MANAGER\n" + other))
+        self.assertFalse(dc.waits_for_wifi(mine.replace("Waits", "Sends")))
 
 if __name__ == "__main__":
     unittest.main()

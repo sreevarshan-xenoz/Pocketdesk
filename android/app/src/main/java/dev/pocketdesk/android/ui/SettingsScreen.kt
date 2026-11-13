@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -64,7 +65,7 @@ private const val SEARCH_CHARS = 64
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, initialQuery: String = "") {
     val context = LocalContext.current
     Prefs.observedVersion()
 
@@ -76,7 +77,11 @@ fun SettingsScreen(onBack: () -> Unit) {
         }
     }
 
-    var query by rememberSaveable { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf(initialQuery) }
+    // Opened at one setting (the Bluetooth notice's "Turn this off"): found by its title.
+    LaunchedEffect(initialQuery) {
+        if (initialQuery.isNotEmpty()) query = initialQuery
+    }
     val filter = remember { SettingsFilter() }
     filter.query = query
     BackHandler(enabled = query.isNotEmpty()) { query = "" }
@@ -316,6 +321,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                         RustCore.setInternetFiles(it)
                     },
                 )
+                BluetoothFallbackSetting()
                 SettingSwitch(
                     stringResource(R.string.settings_direct_links),
                     stringResource(R.string.settings_direct_links_summary),

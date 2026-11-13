@@ -1136,6 +1136,39 @@ fn settings_search_shows_what_it_finds() {
     assert!(app.query_by_label("Control port (TCP)").is_some());
 }
 
+/// The Bluetooth fallback's row: "Find a setting" finds it by
+/// "Bluetooth", and turning it off writes the key, saved with nothing
+/// waiting for a restart (the server follows it within seconds).
+#[test]
+fn settings_has_bluetooth_fallback_row() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(Some(Tab::Settings));
+    let row = "Keep working over Bluetooth when Wi-Fi drops";
+    find(&app).focus();
+    find(&app).type_text("Bluetooth");
+    app.run_steps(3);
+    assert!(app.query_by_label(row).is_some(), "found");
+    assert!(app.query_by_label("Control port (TCP)").is_none());
+    assert!(
+        app.query_by_label("Files over the internet").is_none(),
+        "only what it finds"
+    );
+
+    app.get_by_label(crate::settings_view::BLUETOOTH_SWITCH)
+        .click();
+    app.run_steps(3);
+    app.get_by_label("Save").click();
+    app.run_steps(3);
+    assert!(app.query_by_label("Saved.").is_some());
+    let saved = std::fs::read_to_string(fixture.config().join("config.toml")).expect("written");
+    assert!(saved.contains("bluetooth_fallback = false"), "{saved}");
+    assert!(
+        app.query_by_label_contains("Restart the server to apply")
+            .is_none(),
+        "saved at once"
+    );
+}
+
 /// UX 2: Settings' Keyboard and mouse section is a pointer to the page,
 /// found by its title or one of its options, whose button opens the page.
 #[test]

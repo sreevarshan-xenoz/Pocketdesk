@@ -5,6 +5,7 @@
 
 pub mod audio;
 pub mod bitrate;
+pub mod byte_stream;
 pub mod cast;
 pub mod cast_control;
 pub mod chaos;
@@ -17,6 +18,7 @@ pub mod dht;
 pub mod dmabuf;
 pub mod encoder_detect;
 pub mod ffmpeg_flags;
+pub mod frame_order;
 mod frame_pool;
 #[cfg(all(windows, feature = "capture", feature = "inproc-windows"))]
 mod gpu_frame;
@@ -35,6 +37,7 @@ pub mod keyframes;
 pub mod latency_probe;
 pub mod latency_trace;
 pub mod latest_frame;
+pub mod low_link;
 pub mod portal_input;
 pub mod session;
 pub mod session_telemetry;
@@ -44,6 +47,7 @@ pub mod transport;
 pub mod wake_helper_net;
 pub mod wheel;
 pub mod window_guard;
+pub mod window_kde;
 pub mod window_target;
 
 // Server-only modules. Feature gates say *what* is built; the
@@ -67,6 +71,8 @@ mod capture_cursor_wl;
 mod capture_d3d;
 #[cfg(all(feature = "capture", windows))]
 pub mod capture_dxgi;
+#[cfg(all(feature = "capture", target_os = "linux"))]
+pub mod capture_kde;
 #[cfg(all(feature = "capture", target_os = "linux"))]
 pub mod capture_linux;
 #[cfg(all(feature = "capture", target_os = "linux"))]
@@ -447,6 +453,59 @@ impl VideoFrame {
         }))
     }
 
+    /// Make this frame `factor` times smaller each way (the low setting on a
+    /// narrow road, [`low_link`]): each pixel the mean of a `factor` by
+    /// `factor` square, the size rounded down to even. A frame on the GPU is
+    /// read back first. `false` (untouched) for a factor of 1 or less, or a
+    /// frame too small to shrink.
+    pub fn downscale(&mut self, factor: u32) -> bool {
+        if factor <= 1 {
+            return false;
+        }
+        let w = (self.width / factor) & !1;
+        let h = (self.height / factor) & !1;
+        if w == 0 || h == 0 {
+            return false;
+        }
+        if self.gpu.is_some() {
+            match self.downloaded() {
+                Ok(Some(mut cpu)) => {
+                    self.data = std::mem::take(&mut cpu.data);
+                    self.stride = cpu.stride;
+                    self.gpu = None;
+                }
+                _ => return false,
+            }
+        }
+        let src_stride = self.stride as usize;
+        let f = factor as usize;
+        let last = (h as usize * f - 1) * src_stride + w as usize * f * 4;
+        if last > self.data.len() {
+            return false;
+        }
+        let area = (f * f) as u32;
+        let mut out = Vec::with_capacity(w as usize * h as usize * 4);
+        for row in 0..h as usize {
+            for col in 0..w as usize {
+                let mut sum = [0u32; 4];
+                for dy in 0..f {
+                    let start = (row * f + dy) * src_stride + col * f * 4;
+                    for px in self.data[start..start + f * 4].as_chunks::<4>().0 {
+                        for (s, &v) in sum.iter_mut().zip(px) {
+                            *s += u32::from(v);
+                        }
+                    }
+                }
+                out.extend(sum.map(|s| ((s + area / 2) / area) as u8));
+            }
+        }
+        self.data = out;
+        self.width = w;
+        self.height = h;
+        self.stride = w * 4;
+        true
+    }
+
     /// Trim an odd width or height down to even (AI1), the last column or
     /// row dropped: `true` when it trimmed. A window captured whole can be
     /// odd-sized, which H.264's 4:2:0 cannot carry, and a crop's first frames
@@ -563,6 +622,30 @@ mod tests {
     fn px(frame: &VideoFrame, x: usize, y: usize) -> (u8, u8) {
         let o = y * frame.stride as usize + x * 4;
         (frame.data[o], frame.data[o + 1])
+    }
+
+    /// The low setting (Bluetooth phase 2b): each pixel the rounded mean of
+    /// its square, the rows packed, the size even.
+    #[test]
+    fn downscale_takes_the_mean_of_each_square() {
+        let mut f = pattern_frame();
+        assert!(!f.downscale(1), "a factor of 1 leaves it");
+        assert!(f.downscale(2));
+        assert_eq!(
+            (f.width, f.height, f.stride),
+            (4, 2, 16),
+            "6 / 2 = 3 rows, down to even"
+        );
+        assert_eq!(f.data.len(), 32);
+        // (0, 0): columns 0 and 1, rows 0 and 1: B 0.5 and G 0.5 round up.
+        assert_eq!(px(&f, 0, 0), (1, 1));
+        // (1, 1): columns 2 and 3, rows 2 and 3.
+        assert_eq!(px(&f, 1, 1), (3, 3));
+        assert_eq!(f.data[3], 255, "alpha kept");
+
+        let mut tiny = pattern_frame();
+        assert!(!tiny.downscale(5), "too small to shrink");
+        assert_eq!(tiny.width, 8);
     }
 
     #[test]

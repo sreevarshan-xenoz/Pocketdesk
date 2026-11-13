@@ -358,8 +358,17 @@ pub fn pairing_required() -> bool {
 /// Whether a connection may be sent desktop state: never one that claims a
 /// paired device without its key (phase B); otherwise always with pairing
 /// off, and only a paired device's with it on. Over the internet road, only
-/// the paired phone with its registered iroh key.
+/// the paired phone with its registered iroh key; over Bluetooth, only a
+/// paired device with its TLS key, with pairing off too.
 pub fn may_receive_pushes(sender: &dyn DeviceSender) -> bool {
+    // A connection over the Bluetooth road is held to that road's rule:
+    // only a paired device with its key, whatever `pairing_required` says.
+    if sender.nearby_by_radio() {
+        return crate::plugins::pair::bluetooth_may_act(
+            sender.device_id(),
+            sender.peer_key().as_ref(),
+        );
+    }
     // A connection over the internet road (T10a) is held to that road's
     // rule, never to the LAN's TLS key (in may_act).
     crate::plugins::pair::may_act(

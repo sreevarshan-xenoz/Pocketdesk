@@ -51,6 +51,15 @@
     <string name="settings_retry_transfers_summary">Un archivo que se corta a mitad se vuelve a enviar hasta 3 veces, desde donde se detuvo; sin red, antes espera hasta 3 minutos a que vuelva</string>
     <string name="settings_internet_files">Archivos por internet</string>
     <string name="settings_internet_files_summary">Envía y recibe archivos con un equipo al que llegas desde fuera, por el mismo enlace. El equipo también puede desactivarlo</string>
+    <string name="settings_bluetooth_fallback">Seguir funcionando por Bluetooth si se cae el Wi-Fi</string>
+    <string name="settings_bluetooth_fallback_summary">Cuando ni esta red ni internet llegan a tu equipo, el enlace va por Bluetooth a un equipo emparejado con este teléfono en los ajustes de Bluetooth de Android: portapapeles, notificaciones, el mando y archivos pequeños. Los archivos de más de 8 MB esperan al Wi-Fi, y ninguno se envía mientras una llamada o la música usan el Bluetooth</string>
+    <string name="settings_bluetooth_fallback_needs_permission">No hace nada hasta que Pocketdesk pueda usar dispositivos cercanos. Actívalo para permitirlo</string>
+    <string name="channel_bluetooth">Enlace por Bluetooth</string>
+    <string name="channel_bluetooth_desc">Avisa una vez cuando se cayó el Wi-Fi y el enlace con tu equipo pasó a Bluetooth.</string>
+    <string name="bluetooth_notice_title">Usando Bluetooth</string>
+    <string name="bluetooth_notice_text">Se cayó el Wi-Fi, así que Pocketdesk usa Bluetooth para llegar a %1$s.</string>
+    <string name="bluetooth_notice_turn_off">Desactivar esto</string>
+    <string name="bluetooth_notice_ok">Aceptar</string>
     <string name="settings_direct_links">Unirse a los enlaces directos de los equipos</string>
     <string name="settings_direct_links_summary">Al escanear un código de «Crear un enlace directo» de un equipo, te unes al Wi-Fi propio de ese equipo solo para Pocketdesk. Tus datos móviles siguen activos para todo lo demás</string>
     <string name="reconnecting_in">Reconectando en %1$d s…</string>
@@ -245,6 +254,12 @@
     <string name="transfer_retrying">Reintentando (%1$d de 3)</string>
     <string name="transfer_waiting_network">Esperando a la red</string>
     <string name="transfer_no_network">Sin red durante 3 minutos</string>
+    <string name="transfer_waits_for_wifi">Espera al Wi-Fi: más de 8 MB no va por Bluetooth</string>
+    <string name="transfer_waits_for_audio">Espera a que terminen la llamada o la música</string>
+    <string name="transfer_waited_wifi">No enviado: por Bluetooth, los archivos de más de 8 MB esperan al Wi-Fi. Vuelve a enviarlo con Wi-Fi</string>
+    <string name="transfer_waited_audio">No enviado: una llamada o la música ocuparon el Bluetooth demasiado tiempo. Vuelve a enviarlo cuando terminen</string>
+    <string name="transfer_not_received_wifi">No recibido: por Bluetooth, los archivos de más de 8 MB esperan al Wi-Fi. Vuelve a pedirlo con Wi-Fi</string>
+    <string name="transfer_not_received_audio">No recibido: una llamada o la música ocuparon el Bluetooth demasiado tiempo. Vuelve a pedirlo cuando terminen</string>
     <string name="transfer_sending_folder">Enviando la carpeta %1$s: %2$d de %3$d</string>
     <string name="transfer_folder_empty">No se pudo enviar nada de %1$s: está vacía o no se pudieron leer sus archivos</string>
     <string name="transfer_folder_stopped">Se dejó de enviar %1$s: el equipo dejó de responder. Sin enviar: %2$d</string>
@@ -345,6 +360,8 @@
     <string name="err_pairing_declined">El equipo rechazó el emparejamiento: el PIN era incorrecto o expiró.</string>
     <string name="err_link_dropped">Se cortó la conexión con el equipo. Puede haberse dormido o salido de la red.</string>
     <string name="err_generic">Algo salió mal al contactar el equipo.</string>
+    <string name="err_waits_for_wifi">Por Bluetooth, los archivos de más de 8 MB esperan al Wi-Fi. Vuelve a enviarlo con Wi-Fi.</string>
+    <string name="err_bluetooth_one_at_a_time">Por Bluetooth pasa un archivo a la vez. Inténtalo de nuevo cuando haya pasado el otro.</string>
     <string name="connecting_still">Siguiendo intentándolo… verifica que el equipo esté despierto con Pocketdesk activo.</string>
     <string name="waiting_for_picture">Conectado: esperando la imagen…</string>
     <string name="waiting_for_approval">Si este equipo pide permiso antes de cada sesión, acéptalo allí.</string>
@@ -831,6 +848,7 @@
     <string name="status_not_paired">Sin emparejar</string>
     <string name="status_unpaired_by_it">Ya no está emparejado con este teléfono</string>
     <string name="status_auto">Se conecta al abrir</string>
+    <string name="status_bluetooth">Por Bluetooth</string>
     <string name="status_used_just_now">Usado hace un momento</string>
     <plurals name="status_used_minutes">
         <item quantity="one">Usado hace %1$d min</item>

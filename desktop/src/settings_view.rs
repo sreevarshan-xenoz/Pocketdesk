@@ -16,6 +16,7 @@ use pocketdesk_core::local::tasks::{
     DEFAULT_DEADLINE_SECS, MAX_DEADLINE_SECS, TaskSpec, name_problem,
 };
 use pocketdesk_core::local::wake::WakeFacts;
+use pocketdesk_core::protocol::bluetooth::RoadState;
 use pocketdesk_core::streaming::{CaptureBackend, VideoQualityPreset};
 
 /// Settings' sections, in page order (U5): a flat grid of about 35 rows
@@ -126,6 +127,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     (
         "internet_files",
         "Files over the internet",
+        Section::Connection,
+    ),
+    (
+        "bluetooth_fallback",
+        "Keep working over Bluetooth when Wi-Fi drops",
         Section::Connection,
     ),
     ("keep_file_dates", "Keep files' dates", Section::Connection),
@@ -822,6 +828,17 @@ fn section_of(key: &str) -> Option<Section> {
         .map(|(_, _, section)| *section)
 }
 
+/// The Bluetooth fallback's switch, beside its row's name.
+pub const BLUETOOTH_SWITCH: &str = "let a phone bonded to this computer reach it over Bluetooth";
+
+/// What the Bluetooth fallback's row says of the road now: the running
+/// server's last check, or nothing while no server says. Nothing either
+/// off Windows, where the row's note already says it is Windows only.
+pub fn bluetooth_line(road: Option<RoadState>) -> Option<String> {
+    road.filter(|road| *road != RoadState::Unsupported)
+        .map(|road| format!("Bluetooth: {}", road.words()))
+}
+
 /// Whether the running server reads `key` again on its own: the event log
 /// and hooks at each event, tasks at each start, Home Assistant every 2 s,
 /// files over the internet at each transfer, answers in notifications at
@@ -885,6 +902,8 @@ pub fn applies_live(key: &str) -> bool {
             | "mqtt_user"
             | "mqtt_password"
             | "internet_files"
+            // Read by the server's Bluetooth listener every second.
+            | "bluetooth_fallback"
             | "keep_file_dates"
             | "toast_answers"
             | "tell_in_use"
@@ -1010,6 +1029,9 @@ pub struct SettingsForm {
     /// The Home Assistant bridge's status as last read, and when (it is
     /// read again every 2 s, not every frame).
     home_assistant: Option<(std::time::Instant, Option<ha::Status>)>,
+    /// How the Bluetooth road stood at the server's last check, as last
+    /// read, and when (read again every 2 s, not every frame).
+    bluetooth: Option<(std::time::Instant, Option<RoadState>)>,
     /// A folder being picked for received files (C2).
     picking_downloads: Option<std::thread::JoinHandle<Option<std::path::PathBuf>>>,
     /// A folder being picked for the folders phones keep here.
@@ -1051,6 +1073,7 @@ impl SettingsForm {
             edited: config,
             wake: pocketdesk_core::local::wake::wake_facts(None),
             home_assistant: None,
+            bluetooth: None,
             picking_downloads: None,
             picking_kept: None,
             picking_notes: None,
@@ -1321,6 +1344,29 @@ impl SettingsForm {
         self.home_assistant.as_ref().and_then(|(_, s)| s.clone())
     }
 
+    /// How the Bluetooth road stands, from the running server's mirror,
+    /// read again when 2 s old; `None` while no server says.
+    fn bluetooth_road(&mut self) -> Option<RoadState> {
+        let stale = self
+            .bluetooth
+            .as_ref()
+            .is_none_or(|(at, _)| at.elapsed() >= std::time::Duration::from_secs(2));
+        if stale {
+            // A mirror a stopped server left says nothing about now.
+            let road = pocketdesk_core::local::paths::state_dir()
+                .ok()
+                .filter(|dir| pocketdesk_core::local::server::is_running(dir))
+                .and_then(|dir| {
+                    std::fs::read_to_string(dir.join(pocketdesk_core::local::paths::LIVE_FILE)).ok()
+                })
+                .and_then(|raw| pocketdesk_core::local::sessions::parse_mirror(&raw))
+                .filter(|m| m.is_fresh(pocketdesk_core::local::pin::now_unix()))
+                .and_then(|m| m.bluetooth);
+            self.bluetooth = Some((std::time::Instant::now(), road));
+        }
+        self.bluetooth.as_ref().and_then(|(_, road)| *road)
+    }
+
     /// Whether saving turns the clipboard's history off (D3): it is emptied then.
     pub fn turns_history_off(&self) -> bool {
         self.saved.clipboard_history > 0 && self.edited.clipboard_history == 0
@@ -1340,6 +1386,9 @@ impl SettingsForm {
             .save_keys_to(path, &changed)
             .map_err(|e: ConfigError| e.to_string())?;
         self.saved = self.edited.clone();
+        // The Bluetooth road may change now: read it again at the next
+        // frame, not up to 2 s on.
+        self.bluetooth = None;
         Ok(())
     }
 
@@ -1360,6 +1409,11 @@ impl SettingsForm {
     pub fn show_section(&mut self, ui: &mut egui::Ui, section: Section) {
         let home_assistant = if section == Section::Automation && self.saved.home_assistant {
             self.home_assistant_status()
+        } else {
+            None
+        };
+        let bluetooth = if section == Section::Connection {
+            bluetooth_line(self.bluetooth_road())
         } else {
             None
         };
@@ -1489,6 +1543,20 @@ impl SettingsForm {
                     note(
                         ui,
                         "On the phone's own link, so nothing dials it back. Relays see sizes and timing, never content.",
+                    );
+                });
+                row(ui, "bluetooth_fallback", |ui| {
+                    ui.checkbox(&mut e.bluetooth_fallback, BLUETOOTH_SWITCH);
+                    if let Some(line) = &bluetooth {
+                        ui.label(line);
+                    }
+                    note(
+                        ui,
+                        if cfg!(windows) {
+                            "When neither this network nor the internet reaches this computer, a phone bonded to it in Windows' Bluetooth settings still can, for the light features (not the screen). Pairing and each phone's permissions still apply. The server follows the switch within about a second."
+                        } else {
+                            "When neither this network nor the internet reaches this computer, a phone bonded to it can still reach it over Bluetooth, for the light features (not the screen). Windows only for now: this computer does not listen yet."
+                        },
                     );
                 });
                 row(ui, "keep_file_dates", |ui| {
@@ -3814,6 +3882,53 @@ mod tests {
         // Windows' timer is named only on Windows (BK10 review M8).
         assert_eq!(quick_note().contains("Windows' timer"), cfg!(windows));
         assert!(quick_note().contains("byte every 50 ms"));
+    }
+
+    /// The Bluetooth fallback is beside "Files over the internet", applies
+    /// at once (the server's listener reads it every second), is drawn
+    /// everywhere, and says how the road stands while a server says.
+    #[test]
+    fn the_bluetooth_fallback_applies_at_once_and_says_how_it_stands() {
+        let key = "bluetooth_fallback";
+        assert!(SETTINGS.iter().any(|(k, n, s)| *k == key
+            && *n == "Keep working over Bluetooth when Wi-Fi drops"
+            && *s == Section::Connection));
+        assert!(applies_live(key));
+        assert!(drawn_here(key));
+        assert!(row_shown("bluetooth", key));
+        assert!(row_shown("wi-fi drops", key));
+        assert_eq!(
+            bluetooth_line(Some(RoadState::Listening)).as_deref(),
+            Some("Bluetooth: listening")
+        );
+        assert_eq!(
+            bluetooth_line(Some(RoadState::NoRadio)).as_deref(),
+            Some("Bluetooth: no radio")
+        );
+        assert_eq!(
+            bluetooth_line(Some(RoadState::Off)).as_deref(),
+            Some("Bluetooth: off")
+        );
+        assert_eq!(
+            bluetooth_line(Some(RoadState::Unsupported)),
+            None,
+            "the note says it is Windows only"
+        );
+        assert_eq!(bluetooth_line(None), None, "no server, nothing said");
+    }
+
+    /// A save reads the Bluetooth road again at once, not up to 2 s on.
+    #[test]
+    fn a_save_reads_the_bluetooth_road_again() {
+        let dir = std::env::temp_dir().join(format!("pd-settings-bt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut form = SettingsForm::from_config(Config::default());
+        form.bluetooth = Some((std::time::Instant::now(), Some(RoadState::Listening)));
+        form.edited.bluetooth_fallback = false;
+        form.save_to(&dir.join("config.toml")).unwrap();
+        assert!(form.bluetooth.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Item 4: the version hints are with the phones, apply at once and

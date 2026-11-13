@@ -79,6 +79,10 @@ pub struct LiveMirror {
     /// The phones with a control link, in a session or not (T10d).
     #[serde(default)]
     pub linked: Vec<LinkedPhone>,
+    /// How the Bluetooth road stands, as the server last checked; absent
+    /// from a server before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bluetooth: Option<crate::protocol::bluetooth::RoadState>,
 }
 
 impl LiveMirror {
@@ -107,6 +111,7 @@ pub fn render_mirror(
     sessions: &[MirrorSession],
     shared_control: bool,
     linked: &[LinkedPhone],
+    bluetooth: Option<crate::protocol::bluetooth::RoadState>,
     now_unix: u64,
 ) -> String {
     serde_json::to_string(&LiveMirror {
@@ -114,6 +119,7 @@ pub fn render_mirror(
         shared_control,
         sessions: sessions.to_vec(),
         linked: linked.to_vec(),
+        bluetooth,
     })
     .unwrap_or_default()
 }
@@ -314,6 +320,7 @@ mod tests {
                     files: false,
                 },
             ],
+            None,
             2,
         ))
         .unwrap();
@@ -326,6 +333,7 @@ mod tests {
         // A mirror from before T10d has no `linked`.
         let old = parse_mirror(r#"{"updated_unix":1,"sessions":[]}"#).unwrap();
         assert!(old.linked.is_empty());
+        assert_eq!(old.bluetooth, None, "nor `bluetooth`");
     }
 
     #[test]
@@ -346,10 +354,15 @@ mod tests {
             }],
             true,
             &[],
+            Some(crate::protocol::bluetooth::RoadState::Listening),
             8,
         );
         let mirror = parse_mirror(&rendered).unwrap();
         assert_eq!(mirror.updated_unix, 8);
+        assert_eq!(
+            mirror.bluetooth,
+            Some(crate::protocol::bluetooth::RoadState::Listening)
+        );
         assert!(mirror.shared_control);
         assert_eq!(mirror.sessions[0].device_id, None);
         assert_eq!(

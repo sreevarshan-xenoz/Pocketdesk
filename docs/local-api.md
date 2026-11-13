@@ -38,10 +38,11 @@ Whether the server runs, the phones in a session now, and how phones reach this 
                "transport": "lan", "started_unix": 1792050000, "driving": true,
                "control_only": false, "cast": false, "sound_only": false,
                "phone_sound_only": false}],
- "endpoint": {"…": "what the server announces for the internet path, or null"}}
+ "endpoint": {"…": "what the server announces for the internet path, or null"},
+ "bluetooth": "listening"}
 ```
 
-`sessions` is empty and `endpoint` null when no server runs. `pocketdesk_version` is this program's: a server started before an upgrade may still be an older one. `transport` is `lan` or `wan`. `driving` says which phone has the keyboard and pointer when several are connected. `control_only` is a phone used as a remote: input only, no screen sent. `cast` is a phone showing its own screen here. `sound_only` is a phone used as this computer's speaker and mic: sound both ways, no screen or input (N5). `phone_sound_only` is a phone playing its own sound here, with no screen (M7).
+`sessions` is empty and `endpoint` null when no server runs. `pocketdesk_version` is this program's: a server started before an upgrade may still be an older one. `transport` is `lan` or `wan`. `driving` says which phone has the keyboard and pointer when several are connected. `control_only` is a phone used as a remote: input only, no screen sent. `cast` is a phone showing its own screen here. `sound_only` is a phone used as this computer's speaker and mic: sound both ways, no screen or input (N5). `phone_sound_only` is a phone playing its own sound here, with no screen (M7). `bluetooth` is how the Bluetooth fallback stands, as the server last checked (the switch each second, the radio every 10 s): `listening`, `no_radio` (the switch is on but there is no radio to listen on), `off` (`bluetooth_fallback` off) or `unsupported` (the switch is on, on a system that does not listen yet: Windows only for now); null when no server runs, or from a server before it.
 
 ### `pocketdesk devices --json`
 
@@ -114,6 +115,7 @@ Every event has `at`, `event` and `device_id` (the phone, or null). The kinds an
 | `file_received` | `size`; or `folder: true`, once, as a folder starts arriving; `key`, the first 16 hex digits of the SHA-256 of where it was saved (its `path` in `received --json`) | `name` (`folder/` for a folder) |
 | `link_received` | `host` | `url` |
 | `session_refused` | — (not paired, denied by you, or without the permission it needs) | — |
+| `bluetooth_refused` | `what`: `control` (a control link) or `screen` (a screen session, phase 2); `reason`: `not_paired` (no phone paired here by that id), `other_key` (paired, but not with the key bound here; it connects at home once to fix it) or `computer` (the road is for phones only). `device_id` is the id the device claimed, not proved. At most one a minute per device, with a desktop notification at most once a minute | — |
 | `phone_paired`, `phone_unpaired` | — (however it was done: the PIN, the desktop app, `pocketdesk unpair`, or a guest grant ending) | — |
 | `device_removed` | `by`, the id of the owner device that removed it from afar (remote revoke); `device_id` is the device removed. `phone_unpaired` follows as for any unpairing | — |
 | `clipboard_too_big` | `bytes`, the text's length; `limit`, 262144 (256 KiB); `out`, true when it was this computer's copy, not shared with `device_id` (or, with none, with any computer it shares the clipboard with), else another computer's, not copied here. At most one a minute per computer and way, with a desktop notification | — |

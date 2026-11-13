@@ -595,7 +595,7 @@ impl SessionRecorder {
             return outcome;
         }
         match self.family {
-            TransportFamily::Quinn => SessionOutcome::LanDirect,
+            TransportFamily::Quinn | TransportFamily::ByteStream => SessionOutcome::LanDirect,
             TransportFamily::Iroh => {
                 if self.ever_relayed.load(Ordering::Relaxed) == 1 {
                     SessionOutcome::WanRelayed

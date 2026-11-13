@@ -1027,6 +1027,10 @@ impl OutStream for IrohSendStream {
             let _ = stopped.await;
         })
     }
+
+    fn reset(&mut self, code: u32) {
+        let _ = self.inner.reset(iroh::endpoint::VarInt::from_u32(code));
+    }
 }
 
 struct IrohRecvStream {
@@ -1070,6 +1074,10 @@ impl InStream for IrohRecvStream {
             progress.fetch_add(chunk.len() as u64, std::sync::atomic::Ordering::Relaxed);
             data.extend_from_slice(&chunk);
         }
+    }
+
+    fn stop(&mut self, code: u32) {
+        let _ = self.inner.stop(iroh::endpoint::VarInt::from_u32(code));
     }
 }
 

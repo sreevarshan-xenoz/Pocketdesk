@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1434 open items.
+1472 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 107 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 124 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 205 |
-| A phone with a SIM | 40 |
-| A second phone | 19 |
-| Away from home: another network, or through a router | 44 |
-| A second computer | 244 |
-| A Linux desktop (the Azure VM serves for some) | 261 |
+| A phone with a SIM | 41 |
+| A second phone | 20 |
+| Away from home: another network, or through a router | 47 |
+| A second computer | 249 |
+| A Linux desktop (the Azure VM serves for some) | 268 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 99 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 396 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 400 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -257,6 +257,29 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A remote, a sound session and a camera session open on the phone: none of them pings every second (the radio's wakes and bytes for the link's keepalives stay as before). (where: here)
 - Wi-Fi back on after the drop, the session reconnecting by itself: the time from the radio's return to the first picture; with a cached internet identity and the computer on the same network, the session comes up at home (the card says LAN), not by a relay, and the log shows no internet dial when home answered within 300 ms. Say the time to the first picture over five runs, and the road. (where: here)
 - Both roads answering at the same moment (the computer on the same network with the internet identity cached, the home dial slowed to 300 ms): one session on the computer afterwards, never two (the loser's dial is dropped, not installed). (where: here)
+
+**286. Bluetooth when Wi-Fi drops (phase 1: the light features over RFCOMM, Windows and Android)**
+
+- `bt6-big-file-waits`: over Bluetooth, a 9 MiB share from the phone says "Waits for Wi-Fi" in its notification and does not cross. Also by hand: after 8 minutes it gives up with "Not sent: over Bluetooth, files over 8 MB wait for Wi-Fi", and is not counted as the computer not answering. (where: here) Partly checked 2026-11-06, the OPPO (Android 14) bonded with the owner's Windows laptop, a throwaway from main at 990a1737 on the test service, by `scripts/device_checks.py --only bt1-takeover … bt6-big-file-waits`: over Bluetooth 7.2 s after the cut, the 9 MiB share said Waits for Wi-Fi within 30 s and did not cross. The by-hand half (after 8 minutes) is still owed.
+- The Windows listener on real hardware: all three SDP records ("Pocketdesk", "Pocketdesk transfers" and "Pocketdesk screen") are registered and the phone finds them (the throwaway's on its test service, the owner's own server's untouched beside it); the radio's address is read and the phone saves it with its computer after a home connect (and a phone connected before the listener started saves it on its next connect); `pocketdesk status` says "Bluetooth: listening", "no radio" with the PC's radio off in Windows' own settings by the owner, and "off" with the switch off; the desktop's Settings row says the same, fresh after a save. (where: here) Partly checked 2026-11-06, the OPPO (Android 14) bonded with the owner's Windows laptop, a throwaway from main at 990a1737 on the test service, by `scripts/device_checks.py --only bt1-takeover … bt6-big-file-waits`: the control service was registered and found by the phone (every check above dialed it); the transfer service's record is not shown yet (no file crossed over Bluetooth); the screen service's was added after.
+- The RFCOMM dial lands within its 12 s; the socket-pair pumps carry TLS both ways under load (the clipboard, notifications and a file at once, for a few minutes) with no stall or garbled packet. (where: here) Partly checked 2026-11-06, the OPPO (Android 14) bonded with the owner's Windows laptop, a throwaway from main at 990a1737 on the test service, by `scripts/device_checks.py --only bt1-takeover … bt6-big-file-waits`: each dial landed (the link came up 7 to 18 s after the cut, home and internet tried first). The load half is still owed.
+- The phone's radio turned off mid-link, and separately its Nearby devices permission revoked in Android's settings mid-link: the link ends at once and cleanly, the app shows it lost (no spinner left turning), and nothing dials until the radio or the permission is back. Say what the computer's log shows for each. (where: here)
+- Files over Bluetooth: a file from the computer (`pocketdesk send`) and one shared from the phone, each under 8 MiB, cross on the transfer service; say the speed. Back-to-back transfers (the next asked while the last link's channel is still closing: the phone's ~8 s connect retry), and two at once: the second is refused "one file at a time over Bluetooth" and goes by its retry (5 s, 15 s, 45 s budget), with a file near 8 MiB at RFCOMM speed. Say whether any retry budget ran out. (where: here)
+- Back to Wi-Fi with a transfer under way over Bluetooth: it is cut and finishes by its retry at home; say how long the link was down. (where: here)
+- Battery with the option on and Wi-Fi fine: over a few hours at home, nothing Bluetooth runs on the phone (no RFCOMM socket in `dumpsys bluetooth_manager`, no Pocketdesk wake lock beyond the usual) and the battery use matches the switch off. (where: here)
+- The one-time notice: the first time the link goes over Bluetooth, a dialog with the app in front, else a notification on the "Bluetooth link" channel ("Wi-Fi dropped, so Pocketdesk is using Bluetooth to reach …"), with "Turn this off" opening Settings at the switch; told once only (Wi-Fi off and on again does not show it again); with notifications off and the app away, it shows when the app opens. (where: here)
+- The phone's switch, "Keep working over Bluetooth when Wi-Fi drops" beside "Files over the internet": on by default; turning it on asks for Nearby devices where not granted; refused, the switch shows off and says why, and nothing dials; off while linked, the road ends. (where: here)
+- The words on the phone: "Over Bluetooth" on the computer's card on Home while linked so (and "On this network" again after); the transfer notification's "Waits for Wi-Fi" and "Waits until the call or music stops"; the computer's own refusals (over 8 MiB, one at a time) in the app's words, in English, Spanish and Tamil; the bridge's road 2 shown as Bluetooth wherever the app names the road (the Home card; say whether any other place, such as the connection details or the doctor, calls it home or the internet). (where: here)
+- The away lock over Bluetooth: with the throwaway's lock seam and `away_lock` on, the phone linked only over Bluetooth counts as near (no lock), and once the throwaway's switch goes off it no longer does (a lock line in the seam file after the away minutes). (where: here)
+- A refusal said: a phone paired with the throwaway at home, its key then changed (the app's data cleared and paired with another throwaway), Wi-Fi off: the throwaway's Activity shows "Refused over Bluetooth: not the key paired here" once, `pocketdesk events` holds one `bluetooth_refused` with `reason` `other_key` within the minute however often the phone dials, and one desktop notification shows. (where: here)
+- Not bonded: the OPPO's bond with this computer removed by hand in the phone's Bluetooth settings, Wi-Fi off: the phone's log says "not dialing the computer over Bluetooth: this phone is not bonded with it" once, not at each dial, and again only after a bond and its removal; `bt1-takeover` then SKIPs with "not bonded" before it cuts Wi-Fi. (where: here)
+- The screen over Bluetooth (phase 2, #664 to the app's side): the OPPO linked to a throwaway over Bluetooth (Wi-Fi off), a screen session opens over it (the server's log: `transport="bluetooth"`, a stream session), shows the throwaway's screen at about 540 lines and at most 15 frames a second, takes taps, and ends cleanly; the session rides the screen service of its own (`Pocketdesk screen`; the phone's log says which UUID it dialed), so a share from the phone during it does not wait for it (a small file crosses on the transfer service while the picture runs; say the picture's frame rate while it does, and whether the file's time changes), and the same for a file sent from the computer meanwhile; a phone app from before this (the transfer service dialed with the stream hello) still opens a screen session against this server, and then a share does wait for it; with a phone paired but its key changed, the session is refused. Say the frame rate and the delay. (where: here)
+
+**287. Frames side by side (BG3)**
+
+- A screen session on the OPPO for 10 minutes with the picture moving: no frame shown out of order or twice (no flicker back), sound steady, and the server's log shows keyframes asked for only after a real loss (`Video hole` at debug on the phone, `Reset frames a keyframe made moot` on the computer). (where: here)
+- An encoder rebuilt mid-session (Quality changed on the phone, and a crop): the picture goes on within a second, with this server, and with a server from before BG3 (which numbers each encoder from 0: the phone takes its keyframe 0 as a new run). (where: here)
+- A phone app from before BG3 against this server: the picture and an encoder rebuild as before (the wire's numbers no longer start again, which it only counts). (where: here)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -885,6 +908,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The schedule: the job is queued with its constraints (`adb shell dumpsys jobscheduler` lists the app's WorkManager job needing an unmetered network and charging; with "Every few hours" the charging need goes); on mobile data with Wi-Fi off, nothing runs; plugged in on Wi-Fi it runs within the period, and on ColorOS 14 the transfer service's notification shows during the run and goes when it ends (or the run waits for the app to be opened or the notification listener's next look, which the log says). (where: OPPO)
 
+**286. Bluetooth when Wi-Fi drops (phase 1: the light features over RFCOMM, Windows and Android)**
+
+- Battery on Bluetooth: an hour linked over Bluetooth (Wi-Fi off, mobile data up where the phone has a SIM), against an hour at home: the phone's and the laptop's battery use. (where: sim)
+
 ## A second phone
 
 **1. Connect + pairing gate (Tier 1 #5, Tier-2 #11b)**
@@ -941,6 +968,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Owner phones learn of it: another owner phone, connected once while the computer is awake, shows "Wake through my helper" in the computer's Wake settings with the helper's name (off by default); a guest phone shows "No wake helper yet". (where: second phone)
 - The limit: two Wakes in a row work; a third within 30 seconds says "the helper was asked a moment ago: try again in half a minute", and one half a minute later works. (where: second phone)
 - Revoking: remove an owner phone from the computer's Devices page: within a minute the helper's list drops it and that phone's Wake now fails ("the helper could not send it" or "could not be reached"); the packet capture shows nothing for it. (where: second phone)
+
+**286. Bluetooth when Wi-Fi drops (phase 1: the light features over RFCOMM, Windows and Android)**
+
+- `SO_BTH_AUTHENTICATE`/`SO_BTH_ENCRYPT` with a bonded and an unbonded device: the bonded OPPO gets through with no prompt; an unbonded phone that knows the address (a second phone, its Pocketdesk given the throwaway's info by hand) dialing the service: say what Windows does (a pairing prompt on the PC or the phone, a refusal, or nothing), and that Pocketdesk then refuses it at TLS whatever Windows did. (where: second phone) Partly checked 2026-11-06, the OPPO (Android 14) bonded with the owner's Windows laptop, a throwaway from main at 990a1737 on the test service, by `scripts/device_checks.py --only bt1-takeover … bt6-big-file-waits`: the bonded OPPO got through with no prompt. The unbonded half is still owed. Seen first: before the OPPO was bonded, the phone never dialed (it dials only a bonded computer), and the runner did not say why.
 
 ## Away from home: another network, or through a router
 
@@ -1068,6 +1099,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **285. Faster recovery (BG6: a dead link noticed in about 3 s, and the home and internet dials raced)**
 
 - The computer reachable only by the internet road (the home address silent: the server's LAN firewalled from the phone, or the phone on its own hotspot): the session comes up in about the internet road's own dial plus 0.3 s (against 10 s of a silent home first), the card says WAN, and no half-open session is left on the computer (its session list has one entry). Say the time and the road. (where: away)
+
+**286. Bluetooth when Wi-Fi drops (phase 1: the light features over RFCOMM, Windows and Android)**
+
+- Leaving Bluetooth for the internet road: the phone over Bluetooth, then on another network where home does not answer but the computer's internet road does (a stranger's Wi-Fi, or mobile data coming back): it moves to the internet road; say how long the link was down. On mobile data alone the 15 s home check never runs. (where: away)
+- The 15 s home check's cost on a stranger's Wi-Fi (connected, home not there) over 30 minutes on Bluetooth: the phone's battery use and data use, against the same 30 minutes without the fallback. (where: away)
+
+**287. Frames side by side (BG3)**
+
+- Over the internet road with loss (the phone on a weak signal, or `POCKETDESK_CHAOS_*` on a throwaway): the picture recovers from a lost packet in about a round trip, without a keyframe each time, and a keyframe asked for does not cause a second one while it is on its way. (where: away)
 
 ## A second computer
 
@@ -1488,6 +1528,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Return by closing the viewer's window, the other computer going away (cable out, app killed), the switch turned off, the server stopped: each ends the capture within a second or two (the host's screen-sharing indicator goes), and a restart of the server lends nothing (no file is written). (where: second computer)
 - A third paired computer dialling the lent index (1000 to 1007, found by trying them) is refused at once with the words of a window not lent; the window is not shown to it. (where: second computer)
 - The phone's apps and the computer's other captures run beside a lent window with no change (a screen session of the host's monitor while a window is lent; the index range does not collide). (where: second computer)
+
+**284. A KDE Plasma computer lends a window to look at (phase 6 follow-up of the window handoff: KDE as the source)**
+
+- The first lend of a window shows the portal's dialog at the host and the viewer waits for it (up to a minute, then the session says no one answered). Choosing the lent window shows its picture alone (not the screen) within about two seconds, with no pointer of the host in it; say how it looks and how long the first picture took. (where: second computer)
+- The kept grant: lend the same window again (return, then borrow): no dialog, the picture within about two seconds; the server's state folder has one owner-only file for that window and nothing else new. Restart the server with the window still open and lend again: no dialog. Close the window: its file is forgotten at the next lend or list. (where: second computer)
+- The picture follows the window: the lent window resized, maximised, moved to another monitor and put on another virtual desktop while lent: say what the stream does (follows the size, stops, shows black) and whether a window covering it shows in the picture. (where: second computer)
+- View only: clicking, scrolling and typing in the viewer's window do nothing on the host (no pointer movement, no focus change, no key typed into any window); the viewer's window says view-only. (where: second computer)
+- A lent window minimised stays lent; one closed ends the viewer's view within about two seconds with the borrower told it closed; return, the other computer going away, the switch turned off and the server stopped each end the capture within a second or two, and the script is unloaded when nothing is lent (and a minute after a list nobody lent from): `org.kde.KWin /Scripting isScriptLoaded pocketdesk-windows` says false; a server killed with a window lent, or after only a list, leaves a script that the next first list or lend replaces, not doubles; a server stopped cleanly after only a list unloads it within two seconds. System Settings, Shortcuts, KWin lists "Pocketdesk: report the windows" while the script is loaded; after the unload say whether the entry stays. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
@@ -2113,10 +2161,23 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A session pinned to NVENC or the software encoder on a host with VA-API: no DMA-BUF format is offered (the log shows no "offers DMA-BUF buffers" line) and the capture is as before. (where: linux)
 - Cropping on the card (`scale_vaapi`'s crop, so a window pick or a lent window need not copy): not built. (where: linux)
 
+**284. A KDE Plasma computer lends a window to look at (phase 6 follow-up of the window handoff: KDE as the source)**
+
+- The script loads: `list` on a KDE host loads the script (`org.kde.KWin /Scripting loadScript` then `run` on `/Scripting/Script<id>`; if that object path is not right on this KWin, the fallback `start`), the first report arrives within three seconds, and `list` names the ordinary windows of programs by title and app, none of Pocketdesk's own, no panel, desktop, menu, notification or dialog. Say which KWin version and whether the script's object path or the fallback worked. (where: linux) Partly checked 2026-11-06 (a GitHub runner's throwaway Arch container, KWin 6.8.2 as `kwin_wayland --virtual`, kglobalacceld 6.8.2, `.github/workflows/rig-kde.yml` on a `rig/` branch): the script loaded, the first report came at once (`LIST_SECS 0.0`) and `list` named the one `wev` window by title and class with its size; the rig has no panel, desktop, menu, notification or dialog, so leaving those out is not shown.
+- The report's facts are right: a window's frame, minimised flag, "shown" (a window on another virtual desktop is not shown), transient-for parent (a dialog), the stacking order (a window raised or lowered), the active window, and `normalWindow` (a panel, the desktop, a menu and a notification are not ordinary). Say which of `normalWindow`, `skipTaskbar`, `desktops`, `transientFor`, `stackingOrder` and `activeWindow` did not behave as the script assumes. (where: linux)
+- Only KWin's report is taken: a second program on the session bus calling `dev.pocketdesk.Windows.Update` with a table that names a made-up window changes nothing (no new window listed, the table's age unchanged). (where: linux)
+- Refusals in words: a KDE session on X11 says it needs Wayland; the KWin scripting interface unavailable (or scripts disabled in `kwinrc`) says KWin did not take the script; xdg-desktop-portal stopped says the portal is missing; a portal whose `AvailableSourceTypes` lacks windows says it cannot share a single window; a non-KDE desktop never picks this path. (where: linux)
+- The match: choosing another window in the dialog (of a different size) ends the session saying the window cannot be shown to be the lent one, shows nothing, and keeps no grant; choosing a monitor says it was a screen; two windows of the same size lent or chosen: the session refuses (cannot tell which), and say whether the portal names the window (its stream id or mapping id) so that twins can be told apart. Say what size KWin reports for a window's stream against its frame and client geometry at scale 1, 1.25 and 1.5 (the match compares device pixels, the client area or the frame times the output's scale, within 2 pixels): which of the two it is, whether it includes a shadow, and whether a window with a server-side title bar differs; and that the script's `output.scale` and `clientGeometry` read right. A window on a fractional-scale output is lent without being refused, and a 533x400 window at 1.5 and an 800x600 one at 1 are refused as twins. (where: linux)
+- Input, once it is wired (not built): a click, scroll and key through the portal's RemoteDesktop on a window source land in the lent window only, with another window over it and with another window active; the guard's questions over the table (`window_kde::KdeOs`) agree with what KWin does. (where: linux)
+
 **285. Faster recovery (BG6: a dead link noticed in about 3 s, and the home and internet dials raced)**
 
 - A slow link carrying a large keyframe (the chaos proxy or a shaped interface at 2 Mbit/s with delay): the link is not read as quiet while the keyframe arrives; no "link dropped". (where: linux)
 - A lossy link (5 % loss): say whether the 3 s quiet limit drops a live session (three of the 1 s pings or their acknowledgements lost in a row); if it does, the limit or the ping rate needs raising. (where: linux)
+
+**287. Frames side by side (BG3)**
+
+- The measuring stick: `lossy_link_smoothness` at 2 % loss against the BG baseline (53 fps, gaps p99 149 ms and max 485, 13 stalls of 200 ms or more in 40 s, e2e p95 435 and p99 623 ms), and on a clean link (no worse than 60 fps, gaps p99 28 ms). Say the numbers and the keyframes asked for. (where: linux) *Partly measured 2026-11-09 on a runner (the Lossy link workflow, software x264, 45 s, 20 Mbit/s, 10 ms each way), before (360dcaf9) and after (f2fafeeb) BG3: no stall of 200 ms or more in any run, before or after. 720p clean: the same (60 fps, gaps p99 18 ms). 1080p at 2 % loss: gaps p95 39 to 22 ms, p99 57 to 55, max 73 to 72. 1080p at 5 %: gaps p95 47 both, max 96 to 91. The e2e tail rose (2 %: p99 27 to 42 ms; 5 %: 30 to 60) mostly because since BG3 the sample counts a frame's wait behind a hole, which the old loop hid. The software encoder's small frames never stalled even before BG3, unlike the desk's NVENC baseline, so the hardware run is still owed.*
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
@@ -3291,3 +3352,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A swipe: the Swipe tool, drag from a start to an end, a key: pressing it draws a swipe from the start to the end over the set time (a list scrolls by the right amount) and lifts at the end; pressing again meanwhile does nothing; the time slider changes its speed. (where: OPPO)
 - The keymap file: one per app in the state folder under `keymaps/`, named `app.<package>.json` (a package such as `con.example` is `app.con.example.json`, a file from before the prefix is renamed as it is read); a second window of the same app opens with it; another app has its own; a file edited into something unsound (a key twice, Escape, a radius out of range, a name with a slash) or past 64 KiB is ignored and the editor starts empty; removing every binding removes the file. No keymap is in any log or sent to the phone. (where: by hand)
 - The Settings row and the bar by hand on Windows and on Linux, light and dark, in a narrow window; the editor's list beside the picture, the markers' labels and the warning; the pointer lock on Windows (confined and recentred) and on a Wayland session (locked). The Settings page's snapshot (`settings_*.png`) shows only the top of the page: confirm by eye the Phones section row, as the snapshot test cannot run without a GPU here. (where: by hand)
+
+**286. Bluetooth when Wi-Fi drops (phase 1: the light features over RFCOMM, Windows and Android)**
+
+- Only the computer is dialed: with earbuds (or a car kit) bonded and connected to the phone, Wi-Fi off: `adb shell dumpsys bluetooth_manager` shows no RFCOMM connection to them from Pocketdesk, and no scan runs. (where: by hand)
+- Home over the real Wi-Fi, not the reverse: the phone saved the throwaway at this PC's address on the home network, Wi-Fi off then on by the phone's own quick settings: over Bluetooth within the target, back at home within about 30 s. (where: by hand)
+- Earbuds on the laptop while `bt2-clipboard` and `bt3-notification` run (and while a file crosses): music in them does not stutter or drop. If it does, a server-side throttle comes in before phase 1 ships (the design's call 2); say how bad. (where: by hand)
+- Earbuds on the phone: music playing to them, or a call, while over Bluetooth: a share says "Waits until the call or music stops" and goes once it stops (or gives up after 8 minutes); the clipboard and notifications still go; the music does not stutter. (where: by hand)
