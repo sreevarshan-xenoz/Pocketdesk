@@ -389,6 +389,8 @@ object RustCore {
                     if (network == current) {
                         current = null
                         nativeNetworkChanged()
+                        // No network now: the computer over Bluetooth, at once.
+                        dev.pocketdesk.android.bluetooth.BluetoothRoad.networkGone(context)
                     }
                 }
             })
