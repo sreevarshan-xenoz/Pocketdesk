@@ -159,13 +159,14 @@ def dump_nodes(dump: str) -> list[tuple[str, int, int]]:
 
 
 def scroll_up_swipe(dump: str) -> list[str]:
-    """`input swipe` arguments (x1 y1 x2 y2 ms) that scroll up most of a
-    screen whose size is the dump's first bounds; a portrait 1080x2400
-    when the dump says nothing."""
+    """`input swipe` arguments (x1 y1 x2 y2 ms) that scroll up about a
+    third of a screen whose size is the dump's first bounds (a portrait
+    1080x2400 when the dump says nothing): a whole screen at once jumped
+    past a card's buttons on the OPPO in landscape."""
     found = re.search(r'bounds="\[0,0\]\[(\d+),(\d+)\]"', dump)
     width, height = (int(found.group(1)), int(found.group(2))) if found else (1080, 2400)
     x = width // 2
-    return [str(x), str(height * 4 // 5), str(x), str(height // 5), "300"]
+    return [str(x), str(height * 7 // 10), str(x), str(height * 2 // 5), "400"]
 
 
 def connect_button(dump: str, address: str) -> Optional[tuple[int, int]]:
@@ -400,7 +401,7 @@ class Phone:
         return f"{APP}/{APP}.control.ControlService" in adb("shell", "settings", "get", "secure", "enabled_accessibility_services")
 
     def scroll_up(self) -> list[str]:
-        """`input swipe` arguments that scroll a list up most of a screen,
+        """`input swipe` arguments that scroll a list up about a third of a screen,
         in whichever way the phone is turned."""
         return scroll_up_swipe(self.dump())
 
