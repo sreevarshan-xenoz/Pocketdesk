@@ -6825,13 +6825,26 @@ def onto_bluetooth(ctx: Ctx) -> tuple[Optional[float], str]:
     run(["adb", "wait-for-device"], timeout=60)
     if not wait_for(lambda: len(loop_stamps(log(), "bluetooth")) > links, 60, 0.5):
         road = phone_log_of("BluetoothRoad")
-        return None, f"no control link over Bluetooth within 60 s of the cut; the phone's road last said: {road or 'nothing'}"
+        # A stall must explain itself: what the phone logged about the road and the link since the cut.
+        seen = [line.split(": ", 1)[-1].strip()[:90]
+                for line in adb("logcat", "-d", "-s", "BluetoothRoad:*", "PocketdeskRust:*").splitlines()
+                if ": " in line][-6:]
+        return None, (f"no control link over Bluetooth within 60 s of the cut; the phone's road last said: {road or 'nothing'}"
+                      f"; its last lines: {seen or 'none'}")
     at = loop_stamps(log(), "bluetooth")[links]
     took = (at - cut) if at is not None else None
     phone = first_line("BluetoothRoad", "the control link runs over Bluetooth", off_phone)
     said = (f"over Bluetooth {took:.1f} s after the cut" if took is not None else "over Bluetooth (no time in the log)")
     if phone:
         said += f" (the phone said so {(phone[0] - off_phone) % 86400:.1f} s after its Wi-Fi went)"
+    if took is not None and took > BT_TARGET:
+        # A slow takeover says where the time went: the phone's road lines, seconds after its Wi-Fi went.
+        steps = []
+        for tag, words in (("BluetoothRoad", "the network went"), ("BluetoothRoad", "dial"), ("PocketdeskRust", "link")):
+            hit = first_line(tag, words, off_phone)
+            if hit:
+                steps.append(f"{(hit[0] - off_phone) % 86400:.1f} s {hit[1].split(': ', 1)[-1].strip()[:60]}")
+        said += f"; phone timeline: {steps or 'no lines'}"
     if not wait_for(lambda: ctx.device in ctx.server.linked(), 15, 1):
         return None, said + ", but the phone is not linked by the server's mirror"
     return took, said
