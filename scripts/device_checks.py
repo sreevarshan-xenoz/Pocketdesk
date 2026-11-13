@@ -7082,6 +7082,9 @@ def bt8_screen_moving(ctx: Ctx) -> tuple[str, str]:
         return bt_check(ctx, lambda ctx: screen_over_bluetooth(ctx, 60))
     finally:
         ctx.server.extra.pop("POCKETDESK_TEST_PATTERN", None)
+        # bt_check left the throwaway up with the pattern; the desktop again (review).
+        ctx.server.stop()
+        by_home(ctx)
 
 
 # A share over 8 MiB, which waits for Wi-Fi on the Bluetooth road.
