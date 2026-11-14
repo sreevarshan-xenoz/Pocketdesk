@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1463 open items.
+1472 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 118 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 124 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 205 |
 | A phone with a SIM | 41 |
 | A second phone | 20 |
-| Away from home: another network, or through a router | 46 |
+| Away from home: another network, or through a router | 47 |
 | A second computer | 249 |
-| A Linux desktop (the Azure VM serves for some) | 266 |
+| A Linux desktop (the Azure VM serves for some) | 268 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 99 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 400 |
 
@@ -248,6 +248,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **282. Zero-copy capture on the PipeWire path (low-latency window handoff, phase 2b: GNOME's and KDE's screen goes from the compositor to VA-API as a DMA-BUF)**
 
 - The Settings row "Copy the screen through memory" on this Windows box's app: its help now names GNOME and KDE. (where: here)
+
+**285. Faster recovery (BG6: a dead link noticed in about 3 s, and the home and internet dials raced)**
+
+- A live session on a still screen (the desk idle for a minute, on a capture backend that sends no idle repeats, such as PipeWire or X11): the session is not dropped for a quiet link, and the log never says "link dropped: quiet". Say how long it ran. (where: here)
+- Wi-Fi off on the phone mid-session: "Reconnecting…" shows within about 3 s of the radio going (the last picture stays, no card), and the session ends and reconnects by itself at about 8 s, against about 10 s before (read them off `adb logcat`: "link quiet", "link dropped: quiet" and the radio going off). Say both times over five runs. (where: here)
+- Wi-Fi off for 5 s and back on mid-session (a roam's gap): "Reconnecting…" shows and then clears, the picture never leaves, and the log shows no "link dropped" and no new session on the computer. Say how many of five runs recovered without a teardown. (where: here)
+- A remote, a sound session and a camera session open on the phone: none of them pings every second (the radio's wakes and bytes for the link's keepalives stay as before). (where: here)
+- Wi-Fi back on after the drop, the session reconnecting by itself: the time from the radio's return to the first picture; with a cached internet identity and the computer on the same network, the session comes up at home (the card says LAN), not by a relay, and the log shows no internet dial when home answered within 300 ms. Say the time to the first picture over five runs, and the road. (where: here)
+- Both roads answering at the same moment (the computer on the same network with the internet identity cached, the home dial slowed to 300 ms): one session on the computer afterwards, never two (the loser's dial is dropped, not installed). (where: here)
 
 **286. Bluetooth when Wi-Fi drops (phase 1: the light features over RFCOMM, Windows and Android)**
 
@@ -1086,6 +1095,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **263. Phone apps in windows of their own, several at once (Settings, Separate windows (Shizuku))**
 
 - The display flags: the display is neither public nor a presentation, so check on each Android at hand that `am start --display <id>` from the helper still launches another app on it (Android 14 first; on 10 to 12, where it may refuse a private display, the page then opens the app on the phone's screen and the log says the launch failed), and that the helper's touch, scroll, Back, Enter and Delete reach that app and no key outside those three is ever pressed. (where: OPPO)
+
+**285. Faster recovery (BG6: a dead link noticed in about 3 s, and the home and internet dials raced)**
+
+- The computer reachable only by the internet road (the home address silent: the server's LAN firewalled from the phone, or the phone on its own hotspot): the session comes up in about the internet road's own dial plus 0.3 s (against 10 s of a silent home first), the card says WAN, and no half-open session is left on the computer (its session list has one entry). Say the time and the road. (where: away)
 
 **286. Bluetooth when Wi-Fi drops (phase 1: the light features over RFCOMM, Windows and Android)**
 
@@ -2156,6 +2169,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Refusals in words: a KDE session on X11 says it needs Wayland; the KWin scripting interface unavailable (or scripts disabled in `kwinrc`) says KWin did not take the script; xdg-desktop-portal stopped says the portal is missing; a portal whose `AvailableSourceTypes` lacks windows says it cannot share a single window; a non-KDE desktop never picks this path. (where: linux)
 - The match: choosing another window in the dialog (of a different size) ends the session saying the window cannot be shown to be the lent one, shows nothing, and keeps no grant; choosing a monitor says it was a screen; two windows of the same size lent or chosen: the session refuses (cannot tell which), and say whether the portal names the window (its stream id or mapping id) so that twins can be told apart. Say what size KWin reports for a window's stream against its frame and client geometry at scale 1, 1.25 and 1.5 (the match compares device pixels, the client area or the frame times the output's scale, within 2 pixels): which of the two it is, whether it includes a shadow, and whether a window with a server-side title bar differs; and that the script's `output.scale` and `clientGeometry` read right. A window on a fractional-scale output is lent without being refused, and a 533x400 window at 1.5 and an 800x600 one at 1 are refused as twins. (where: linux)
 - Input, once it is wired (not built): a click, scroll and key through the portal's RemoteDesktop on a window source land in the lent window only, with another window over it and with another window active; the guard's questions over the table (`window_kde::KdeOs`) agree with what KWin does. (where: linux)
+
+**285. Faster recovery (BG6: a dead link noticed in about 3 s, and the home and internet dials raced)**
+
+- A slow link carrying a large keyframe (the chaos proxy or a shaped interface at 2 Mbit/s with delay): the link is not read as quiet while the keyframe arrives; no "link dropped". (where: linux)
+- A lossy link (5 % loss): say whether the 3 s quiet limit drops a live session (three of the 1 s pings or their acknowledgements lost in a row); if it does, the limit or the ping rate needs raising. (where: linux)
 
 **287. Frames side by side (BG3)**
 

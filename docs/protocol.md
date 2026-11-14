@@ -87,7 +87,7 @@ From `server/src/bluetooth/` (the listener) and `server/src/service.rs` (`handle
   - Control packets on stream 0 are then gated by `is_paired_device(id)` and `permits`.
   - Sources: `core/src/protocol/v2.rs`, `server/src/v2_multiplexer.rs`.
   - The Android UI does not call v2: no caller of `RustCore.connectV2` was found in `android/app/src/main`.
-- **Connection settings.** Keepalive is 15 s and the idle timeout is 45 s. Address migration is on (quinn's default). Source: `core/src/streaming/transport.rs` (`configured_transport`).
+- **Connection settings.** Keepalive is 15 s and the idle timeout is 45 s. Address migration is on (quinn's default). Source: `core/src/streaming/transport.rs` (`configured_transport`). The phone's screen session (home road and internet road alike; not a remote, sound, camera, window or cast session) pings every second instead (`WATCHED_KEEP_ALIVE`, BG6): the computer's acknowledgements keep the datagrams the phone receives rising on a live link whether or not a picture is coming. After 3 s without a datagram the phone says the stream is reconnecting, keeps the last picture and nudges the network (iroh looks at the interfaces and rebinds on a real change); the link is heard from again with nothing torn down, or after 8 s the session ends and reconnects by itself. The 10 s without a frame or video byte stays as the backstop, and a closed connection ends it at once. The limits are in one place, `StallWatch`. When the phone holds the computer's internet identity it dials home and the internet road at once, the internet road after 300 ms (at once when home fails, or from away, where the control link is by the internet road and home gets 2 s); the first to give a session is installed and the other is dropped (`android/bridge/src/dial_race.rs`).
 
 ### 1.4 File and clipboard-image transfers
 
@@ -690,7 +690,7 @@ All of these are inside the app's private storage unless noted. None of it is ba
 | Introductions (ecosystem phase 4) | At A: 30 lists a minute and 5 introductions per 10 minutes per phone; at B: 5 per 10 minutes per introducing computer (refused ones included), 4 PINs waiting at once, each PIN 120 s, single use and discarded after 3 wrong PINs from its phone; A waits 10 s for B. In memory (a restart starts them again); off at B with `computer_introductions = false` | `server/src/introductions.rs`, `core/src/protocol/introductions.rs` |
 | Removals from afar (remote revoke) | 5 removals and 30 lists a minute per asking owner device, in memory (a restart starts them again); never the asker; off with `remote_revoke = false` | `server/src/remote_devices.rs` |
 | Text replies from the phone | 5 a minute; at most 2000 characters | `android/app/.../notify/SmsReplyRule.kt`, `core/src/local/sms.rs` |
-| QUIC idle and keepalive | 45 s idle, 15 s keepalive | `core/src/streaming/transport.rs` |
+| QUIC idle and keepalive | 45 s idle, 15 s keepalive (1 s on the phone's screen session) | `core/src/streaming/transport.rs` |
 | PIN | 300 s; 5 wrong guesses; one new PIN per 10 s | §2.5 |
 
 Every parser above has a fuzz target (`fuzz/`, run by `scripts/fuzz.sh`): each runs 30 s on every pull request and 5 minutes a night in CI.

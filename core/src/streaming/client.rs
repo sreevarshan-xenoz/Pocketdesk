@@ -609,6 +609,66 @@ impl StreamingClient {
         mpsc::Receiver<EncodedPacket>,
         mpsc::Receiver<AudioPacket>,
     )> {
+        Self::connect_pinging(
+            addr,
+            cert_manager,
+            monitor_index,
+            device_id,
+            iroh_id,
+            codec_caps,
+            mode,
+            None,
+        )
+        .await
+    }
+
+    /// [`Self::connect`] for a client that watches its link (BG6): the
+    /// connection pings the computer every second
+    /// ([`super::transport::WATCHED_KEEP_ALIVE`]), so the datagrams this end
+    /// receives keep rising while the link lives, whatever the screen shows.
+    pub async fn connect_watched(
+        addr: &str,
+        cert_manager: std::sync::Arc<CertManager>,
+        monitor_index: Option<u32>,
+        device_id: Option<&str>,
+        iroh_id: Option<&str>,
+        codec_caps: Option<u8>,
+        mode: SessionMode,
+    ) -> Result<(
+        Self,
+        mpsc::Receiver<EncodedPacket>,
+        mpsc::Receiver<AudioPacket>,
+    )> {
+        Self::connect_pinging(
+            addr,
+            cert_manager,
+            monitor_index,
+            device_id,
+            iroh_id,
+            codec_caps,
+            mode,
+            Some(super::transport::WATCHED_KEEP_ALIVE),
+        )
+        .await
+    }
+
+    /// [`Self::connect`], pinging every `keep_alive` when idle, or at the
+    /// default's pace with `None`.
+    #[allow(clippy::too_many_arguments)]
+    async fn connect_pinging(
+        addr: &str,
+        cert_manager: std::sync::Arc<CertManager>,
+        monitor_index: Option<u32>,
+        device_id: Option<&str>,
+        iroh_id: Option<&str>,
+        codec_caps: Option<u8>,
+        mode: SessionMode,
+        keep_alive: Option<std::time::Duration>,
+    ) -> Result<(
+        Self,
+        mpsc::Receiver<EncodedPacket>,
+        mpsc::Receiver<AudioPacket>,
+    )> {
         let addr: SocketAddr = addr
             .parse()
             .with_context(|| format!("Invalid server address: {addr}"))?;
@@ -627,10 +687,17 @@ impl StreamingClient {
         async move {
             info!("Connecting to streaming server");
 
-            let transport = super::transport::StreamClient::new(
-                StreamTransportConfig::default(),
-                &cert_manager,
-            )
+            let transport = match keep_alive {
+                Some(keep_alive) => super::transport::StreamClient::with_keep_alive(
+                    StreamTransportConfig::default(),
+                    &cert_manager,
+                    keep_alive,
+                ),
+                None => super::transport::StreamClient::new(
+                    StreamTransportConfig::default(),
+                    &cert_manager,
+                ),
+            }
             .context("Failed to create QUIC transport")?;
 
             let server_name = addr.ip().to_string();

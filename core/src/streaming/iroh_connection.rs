@@ -370,6 +370,20 @@ pub fn iroh_transport() -> iroh::endpoint::QuicTransportConfig {
 
 /// [`iroh_transport`] on the congestion controller `choice` names.
 pub fn iroh_transport_with(choice: CongestionChoice) -> iroh::endpoint::QuicTransportConfig {
+    iroh_transport_builder(choice).build()
+}
+
+/// [`iroh_transport`] for a client that watches its link (BG6): it pings
+/// every [`WATCHED_KEEP_ALIVE`](super::transport::WATCHED_KEEP_ALIVE) where
+/// iroh's own keepalive is every 5 s, and the computer's acknowledgement is
+/// the sign the link lives (see `transport::WATCHED_KEEP_ALIVE`).
+pub fn iroh_transport_watched() -> iroh::endpoint::QuicTransportConfig {
+    iroh_transport_builder(super::transport::configured_congestion())
+        .keep_alive_interval(super::transport::WATCHED_KEEP_ALIVE)
+        .build()
+}
+
+fn iroh_transport_builder(choice: CongestionChoice) -> iroh::endpoint::QuicTransportConfigBuilder {
     const IDLE_TIMEOUT_SECS: u64 = 45;
     iroh::endpoint::QuicTransportConfig::builder()
         .max_concurrent_uni_streams(1024u32.into())
@@ -382,7 +396,6 @@ pub fn iroh_transport_with(choice: CongestionChoice) -> iroh::endpoint::QuicTran
                 .expect("idle timeout fits IdleTimeout"),
         ))
         .congestion_controller_factory(congestion_factory(choice))
-        .build()
 }
 
 /// The congestion controller of the link between two computers (BK11).
@@ -595,6 +608,32 @@ impl IrohDial {
         .await
     }
 
+    /// [`Self::dial`] for a client that watches its link (BG6): the
+    /// connection pings every second, see [`iroh_transport_watched`].
+    pub async fn dial_watched(
+        endpoint_id: &str,
+        relay_urls: &[String],
+        direct_addrs: &[String],
+        use_relays: bool,
+        timeout: Duration,
+        device_key: Option<iroh::SecretKey>,
+        dht: Option<DhtAddressLookup>,
+    ) -> Result<Self> {
+        let alpn = StreamTransportConfig::default().alpn;
+        Self::dial_alpn_with(
+            &alpn,
+            endpoint_id,
+            relay_urls,
+            direct_addrs,
+            use_relays,
+            timeout,
+            device_key,
+            dht,
+            Some(iroh_transport_watched()),
+        )
+        .await
+    }
+
     /// Dial as [`Self::dial`] does, for the control channel (T10a), and
     /// open its one stream. The stream keeps the dial's endpoint for its
     /// life.
@@ -686,13 +725,63 @@ impl IrohDial {
         device_key: Option<iroh::SecretKey>,
         dht: Option<DhtAddressLookup>,
     ) -> Result<Self> {
+        Self::dial_alpn_with(
+            alpn,
+            endpoint_id,
+            relay_urls,
+            direct_addrs,
+            use_relays,
+            timeout,
+            device_key,
+            dht,
+            None,
+        )
+        .await
+    }
+
+    /// [`Self::dial_alpn`] with this connection's own transport tuning
+    /// (`transport`), or the endpoint's when `None`.
+    #[allow(clippy::too_many_arguments)]
+    async fn dial_alpn_with(
+        alpn: &[u8],
+        endpoint_id: &str,
+        relay_urls: &[String],
+        direct_addrs: &[String],
+        use_relays: bool,
+        timeout: Duration,
+        device_key: Option<iroh::SecretKey>,
+        dht: Option<DhtAddressLookup>,
+        transport: Option<iroh::endpoint::QuicTransportConfig>,
+    ) -> Result<Self> {
         let alpn = alpn.to_vec();
         let (addr, relay_urls) = endpoint_addr(endpoint_id, relay_urls, direct_addrs)?;
 
         let shared = dial_endpoint(device_key, &relay_urls, use_relays).await?;
         let connected = {
             let _dialing = shared.begin(dht);
-            tokio::time::timeout(timeout, shared.endpoint.connect(addr, &alpn)).await
+            tokio::time::timeout(timeout, async {
+                match transport {
+                    None => shared
+                        .endpoint
+                        .connect(addr, &alpn)
+                        .await
+                        .map_err(anyhow::Error::from),
+                    Some(transport) => {
+                        let options =
+                            iroh::endpoint::ConnectOptions::new().with_transport_config(transport);
+                        async {
+                            shared
+                                .endpoint
+                                .connect_with_opts(addr, &alpn, options)
+                                .await?
+                                .await
+                                .map_err(anyhow::Error::from)
+                        }
+                        .await
+                    }
+                }
+            })
+            .await
         };
         let raw = connected
             .context("iroh dial timed out")?
@@ -1192,6 +1281,52 @@ mod tests {
             .await
             .expect("the connection closes with the stream")
             .unwrap();
+        desktop.close().await;
+    }
+
+    /// BG6: a watched session's dial pings the computer every second, and
+    /// the computer's acknowledgement keeps the datagrams the phone receives
+    /// rising on an idle link, which is how the phone tells a still screen
+    /// from a dead link within seconds.
+    #[tokio::test]
+    async fn a_watched_dial_hears_an_idle_computer_every_second() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let alpn = StreamTransportConfig::default().alpn;
+        let (desktop, desktop_addr) = bind_loopback_endpoint(&alpn).await;
+        let accepted = {
+            let desktop = desktop.clone();
+            tokio::spawn(async move {
+                let conn = desktop
+                    .accept()
+                    .await
+                    .unwrap()
+                    .accept()
+                    .unwrap()
+                    .await
+                    .unwrap();
+                conn.closed().await;
+            })
+        };
+        let dial = IrohDial::dial_watched(
+            &desktop.id().to_string(),
+            &[],
+            &[desktop_addr.to_string()],
+            false,
+            Duration::from_secs(5),
+            None,
+            None,
+        )
+        .await
+        .expect("a watched dial");
+        let connection = dial.connection();
+        // The handshake's last packets settle first.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let before = connection.stats().datagrams_received;
+        tokio::time::sleep(Duration::from_millis(3200)).await;
+        let heard = connection.stats().datagrams_received - before;
+        assert!(heard >= 2, "heard {heard} datagrams in 3.2 s of silence");
+        dial.close().await;
+        accepted.abort();
         desktop.close().await;
     }
 

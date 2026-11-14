@@ -63,6 +63,7 @@
     <string name="settings_direct_links">கணினிகளின் நேரடி இணைப்புகளில் சேர்</string>
     <string name="settings_direct_links_summary">கணினியின் “நேரடி இணைப்பை உருவாக்கு” குறியீட்டை ஸ்கேன் செய்யும்போது, அந்தக் கணினியின் சொந்த Wi-Fi-இல் Pocketdesk-க்காக மட்டும் சேரும். மற்ற அனைத்திற்கும் மொபைல் தரவு தொடரும்</string>
     <string name="reconnecting_in">%1$d வினாடிகளில் மீண்டும் இணைகிறது…</string>
+    <string name="link_quiet">மீண்டும் இணைகிறது…</string>
     <string name="reconnect_gave_up">10 நிமிடங்களுக்குப் பிறகு முயற்சி நிறுத்தப்பட்டது.</string>
     <string name="settings_reveal_pin">PIN-ஐ இயல்பாகக் காட்டு</string>
     <string name="settings_reveal_pin_summary">கண் ஐகானைத் தொடாமல் இணைப்பு எண்கள் தெரியும்</string>

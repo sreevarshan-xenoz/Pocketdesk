@@ -142,6 +142,8 @@ fun RemoteDesktopView(
     mapping: DesktopMapping? = null,
     monitorIndex: Int = -1,
     onStatus: (StreamStatus) -> Unit = {},
+    /** True while the link is quiet (the stream is reconnecting, the last picture kept), false when it is heard from again (BG6). */
+    onLinkQuiet: (Boolean) -> Unit = {},
     onVideoSizeChanged: (Int, Int) -> Unit = { _, _ -> },
     /** R4 C2: fires when the server's encoder-fallback ladder changes the
      * wire codec mid-session ("H.264" / "H.265"). */
@@ -218,6 +220,7 @@ fun RemoteDesktopView(
                                         monitorIndex,
                                         onStatus,
                                         onCodecChanged,
+                                        onLinkQuiet,
                                     ) { w, h ->
                                         videoSize = IntSize(w, h)
                                         onVideoSizeChanged(w, h)
@@ -627,6 +630,7 @@ private class DecoderHost {
         monitorIndex: Int = -1,
         onStatus: (StreamStatus) -> Unit = {},
         onCodec: (String) -> Unit = {},
+        onLinkQuiet: (Boolean) -> Unit = {},
         /** Last so call sites keep the size-reporting lambda trailing. */
         onVideoSize: (Int, Int) -> Unit,
     ) {
@@ -643,6 +647,7 @@ private class DecoderHost {
         active.onStalled = {
             report(StreamStatus.Down("video feed stalled — connection closed"))
         }
+        active.onLinkQuiet = { quiet -> if (decoder === active) onLinkQuiet(quiet) }
         active.onClosed = { reason ->
             report(StreamStatus.Down("stream closed by the desktop: $reason"))
         }
@@ -658,29 +663,31 @@ private class DecoderHost {
             bluetooth?.exceptionOrNull()?.let {
                 Log.i("RemoteDesktop", "the screen over Bluetooth did not start: ${it.message}")
             }
-            val overBluetooth = bluetooth?.isSuccess == true
-            // Then LAN; fall back to dialing the cached iroh WAN identity
-            // when the desktop is off-network (R1 stage 3).
-            val lan = if (overBluetooth) bluetooth else RustCore.connectStreaming(address, port, monitorIndex)
-            var connected = lan.isSuccess
-            val status = when {
-                overBluetooth -> StreamStatus.Up(StreamTransportKind.Bluetooth)
-                connected -> StreamStatus.Up(StreamTransportKind.Lan)
-                wanIdentity == null -> StreamStatus.Down(
-                    "LAN connect failed (${lan.exceptionOrNull()?.message ?: "no error"}); " +
-                        "no cached WAN identity for $address — pair/connect on LAN first.",
-                )
-                else -> {
-                    val wan = RustCore.connectStreamingWan(address, wanIdentity, monitorIndex)
-                    connected = wan.isSuccess
-                    if (wan.isSuccess) {
-                        StreamStatus.Up(StreamTransportKind.Wan)
-                    } else {
-                        StreamStatus.Down(
-                            "LAN: ${lan.exceptionOrNull()?.message ?: "?"} · " +
-                                "WAN: ${wan.exceptionOrNull()?.message ?: "?"}",
-                        )
-                    }
+            var connected = bluetooth?.isSuccess == true
+            // Otherwise a desktop with a cached iroh WAN identity (R1 stage 3)
+            // is dialed at home and over the internet at once, the first road
+            // to answer carrying the session (BG6); one without, at home only.
+            val status = if (connected) {
+                StreamStatus.Up(StreamTransportKind.Bluetooth)
+            } else if (wanIdentity != null) {
+                val raced = RustCore.connectStreamingRace(address, port, wanIdentity, monitorIndex)
+                connected = raced.isSuccess
+                when {
+                    raced.getOrNull() == "wan" -> StreamStatus.Up(StreamTransportKind.Wan)
+                    connected -> StreamStatus.Up(StreamTransportKind.Lan)
+                    // The bridge's reason names both roads: "LAN: ... · WAN: ...".
+                    else -> StreamStatus.Down(raced.exceptionOrNull()?.message ?: "LAN: ? · WAN: ?")
+                }
+            } else {
+                val lan = RustCore.connectStreaming(address, port, monitorIndex)
+                connected = lan.isSuccess
+                if (connected) {
+                    StreamStatus.Up(StreamTransportKind.Lan)
+                } else {
+                    StreamStatus.Down(
+                        "LAN connect failed (${lan.exceptionOrNull()?.message ?: "no error"}); " +
+                            "no cached WAN identity for $address — pair/connect on LAN first.",
+                    )
                 }
             }
             report(status)

@@ -55,14 +55,37 @@ impl Default for StreamTransportConfig {
 /// via QUIC path validation) is accepted by the server automatically —
 /// quinn's `ServerConfig::migration` defaults to `true`.
 pub fn configured_transport() -> quinn::TransportConfig {
-    const KEEPALIVE_SECS: u64 = 15;
+    configured_transport_with_keep_alive(KEEPALIVE)
+}
+
+/// How often an idle connection pings its peer: well below half the idle
+/// timeout, to hold NAT bindings through video stalls and radio sleeps.
+const KEEPALIVE: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// [`KEEPALIVE`], for tests that build a client by hand.
+#[cfg(test)]
+pub(crate) fn configured_keep_alive() -> std::time::Duration {
+    KEEPALIVE
+}
+
+/// The keepalive of a client that watches its link (BG6): the phone's
+/// video session pings once a second, and the computer's acknowledgement
+/// is the proof of life, so a link that went away is told from a computer
+/// that has simply nothing new to send (a still screen) within seconds.
+/// A ping is a few dozen bytes, and only a session that is up sends it.
+pub const WATCHED_KEEP_ALIVE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// [`configured_transport`] pinging every `keep_alive` when idle.
+pub fn configured_transport_with_keep_alive(
+    keep_alive: std::time::Duration,
+) -> quinn::TransportConfig {
     const IDLE_TIMEOUT_SECS: u64 = 45;
     let mut transport = quinn::TransportConfig::default();
     transport.datagram_send_buffer_size(16 * 1024 * 1024);
     transport.datagram_receive_buffer_size(Some(16 * 1024 * 1024));
     transport.max_concurrent_uni_streams(1024u32.into());
     transport.max_concurrent_bidi_streams(128u32.into());
-    transport.keep_alive_interval(Some(std::time::Duration::from_secs(KEEPALIVE_SECS)));
+    transport.keep_alive_interval(Some(keep_alive));
     transport.max_idle_timeout(Some(
         std::time::Duration::from_secs(IDLE_TIMEOUT_SECS)
             .try_into()
@@ -309,6 +332,15 @@ impl CertManager {
     /// The client verifies the server's certificate against the stored known_peers
     /// map and auto-accepts unknown peers on first use.
     pub fn client_config(&self, alpns: Vec<Vec<u8>>) -> Result<quinn::ClientConfig> {
+        self.client_config_with_keep_alive(alpns, KEEPALIVE)
+    }
+
+    /// [`Self::client_config`] with a keepalive of `keep_alive` (BG6).
+    pub fn client_config_with_keep_alive(
+        &self,
+        alpns: Vec<Vec<u8>>,
+        keep_alive: std::time::Duration,
+    ) -> Result<quinn::ClientConfig> {
         let mut crypto = self.tls_client_config();
 
         if !alpns.is_empty() {
@@ -319,7 +351,7 @@ impl CertManager {
             .context("Failed to create QUIC client crypto config")?;
 
         let mut client_config = quinn::ClientConfig::new(Arc::new(quic_crypto));
-        client_config.transport_config(Arc::new(configured_transport()));
+        client_config.transport_config(Arc::new(configured_transport_with_keep_alive(keep_alive)));
 
         Ok(client_config)
     }
@@ -1128,9 +1160,19 @@ pub struct StreamClient {
 impl StreamClient {
     /// Create a new streaming client
     pub fn new(config: StreamTransportConfig, cert_manager: &CertManager) -> Result<Self> {
+        Self::with_keep_alive(config, cert_manager, KEEPALIVE)
+    }
+
+    /// [`Self::new`] pinging every `keep_alive` when idle (BG6).
+    pub fn with_keep_alive(
+        config: StreamTransportConfig,
+        cert_manager: &CertManager,
+        keep_alive: std::time::Duration,
+    ) -> Result<Self> {
         info!("Creating streaming client");
 
-        let client_config = cert_manager.client_config(vec![config.alpn.clone()])?;
+        let client_config =
+            cert_manager.client_config_with_keep_alive(vec![config.alpn.clone()], keep_alive)?;
 
         let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse()?)
             .context("Failed to create client endpoint")?;
@@ -1738,6 +1780,22 @@ mod tests {
             let _ = configured_transport();
         }
         unsafe { std::env::remove_var("POCKETDESK_CC") };
+    }
+
+    #[test]
+    fn a_watching_client_pings_every_second() {
+        let rendered = format!(
+            "{:?}",
+            configured_transport_with_keep_alive(WATCHED_KEEP_ALIVE)
+        );
+        assert!(
+            rendered.contains("keep_alive_interval: Some(1s)"),
+            "keepalive: {rendered}"
+        );
+        assert!(
+            rendered.contains("max_idle_timeout: Some(45000)"),
+            "{rendered}"
+        );
     }
 
     #[test]
