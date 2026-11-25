@@ -32,5 +32,5 @@ The Linux and Windows programs are built from the same code as 0.9.0 plus those 
 
 ## Not yet checked on a device
 
-- **The fix itself:** the shrunk build was inspected and the constructor is there, but this release's signed APK had not been started on a phone when these notes were written. (Replaced with the result before publishing.)
+- **The fix on a phone:** this release's signed APK has not been started on a phone yet. What was checked is the built app itself: the release build's `WorkDatabase_Impl` has its constructor (0.9.0's did not), the APK is signed with the release key, and its checksums match. If 0.9.1 still closes as it opens on your phone, please open an issue with the phone model and Android version.
 - Everything 0.9.0's notes list as not yet checked on a device is still open.
