@@ -6,8 +6,7 @@ Categories:
   - Connectivity
   - File Transfer
   - Remote Access
-# The code is MIT OR Apache-2.0; fdroiddata takes one SPDX id.
-License: MIT
+License: AGPL-3.0-only
 AuthorName: sreevarshan-xenoz
 SourceCode: https://github.com/sreevarshan-xenoz/Pocketdesk
 IssueTracker: https://github.com/sreevarshan-xenoz/Pocketdesk/issues

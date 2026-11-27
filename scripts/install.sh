@@ -1261,7 +1261,7 @@ cmd_install() {
     info "Skipping documentation installation (--no-docs)."
   else
     local doc_dir="${INSTALL_PREFIX}/share/doc/${BINARY_NAME}"
-    for doc in README.md SECURITY.md LICENSE-MIT LICENSE-APACHE config.toml.example; do
+    for doc in README.md SECURITY.md LICENSE NOTICE config.toml.example; do
       if [ -f "${extracted_dir}/${doc}" ]; then
         [ "$DRY_RUN" = true ] || sudo install -Dm644 "${extracted_dir}/${doc}" "${doc_dir}/${doc}"
       fi
