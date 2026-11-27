@@ -9,7 +9,7 @@ Its live screen under your fingers, its sound, and the clipboard, files, notific
 
 <p align="center">
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/server%20and%20desktop%20app-Rust-orange?logo=rust" alt="Server and desktop app written in Rust"></a>
-  <a href="#license"><img src="https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue" alt="License: MIT OR Apache-2.0"></a>
+  <a href="#license"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue" alt="License: AGPL-3.0"></a>
   <a href="https://github.com/sreevarshan-xenoz/Pocketdesk/actions"><img src="https://github.com/sreevarshan-xenoz/Pocketdesk/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/sreevarshan-xenoz/Pocketdesk/issues"><img src="https://img.shields.io/github/issues/sreevarshan-xenoz/Pocketdesk" alt="Issues"></a>
   <a href="docs/guide.md#roadmap"><img src="https://img.shields.io/badge/status-beta-orange" alt="Status: beta"></a>
@@ -128,14 +128,14 @@ Close calls were checked against each project's documentation on 2026-10-31 (the
 
 ## License
 
-Pocketdesk is licensed under either of
+GNU Affero General Public License, version 3 ([LICENSE](LICENSE)), with one added term
+([NOTICE](NOTICE)): anything that ships or serves Pocketdesk or a work based on it keeps the
+line "Based on Pocketdesk by sreevarshan-xenoz" with this repository's link in its README and
+its About or credits screen. Whatever is built from it must stay open source under the same
+license, also when only run as a service; it can't go into a closed product. Contributions are
+accepted under the same terms.
 
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT license ([LICENSE-MIT](LICENSE-MIT))
-
-at your option. Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as
-above, without any additional terms or conditions.
+Releases before this change were licensed MIT OR Apache-2.0; copies of those keep that license.
 
 ---
 

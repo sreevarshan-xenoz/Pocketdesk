@@ -94,8 +94,8 @@ Source: "{#RepoRoot}\assets\brand\pocketdesk.ico"; DestDir: "{app}"; Flags: igno
 Source: "{#RepoRoot}\config.toml.example"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#RepoRoot}\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#RepoRoot}\SECURITY.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#RepoRoot}\LICENSE-MIT"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#RepoRoot}\LICENSE-APACHE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#RepoRoot}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#RepoRoot}\NOTICE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\Pocketdesk"; Filename: "{app}\pocketdesk-app.exe"; IconFilename: "{app}\pocketdesk.ico"; Comment: "Your desktop, on your phone"

@@ -54,10 +54,9 @@ for file in README.md SECURITY.md config.toml.example; do
   install -Dm644 "$root/$file" "$doc/$file"
 done
 {
-  printf 'Pocketdesk is licensed under the MIT license or the Apache License 2.0, at your option.\n\n'
-  cat "$root/LICENSE-MIT"
+  cat "$root/NOTICE"
   printf '\n\n'
-  cat "$root/LICENSE-APACHE"
+  cat "$root/LICENSE"
 } > "$doc/copyright"
 chmod 644 "$doc/copyright"
 mkdir -p "$pkg/usr/share/man/man1"

@@ -17,7 +17,7 @@ edition = "2024"
 # The oldest Rust that builds the workspace: the desktop app's egui 0.36
 # needs 1.95 (iroh, for the server and the bridge, needs 1.91).
 rust-version = "1.95"
-license = "MIT OR Apache-2.0"
+license = "AGPL-3.0-only"
 
 [workspace.dependencies]
 anyhow = "1"

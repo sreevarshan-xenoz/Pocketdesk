@@ -58,8 +58,8 @@ PublisherUrl: https://github.com/sreevarshan-xenoz
 PublisherSupportUrl: {REPO}/issues
 PackageName: Pocketdesk
 PackageUrl: {REPO}
-License: MIT OR Apache-2.0
-LicenseUrl: {REPO}/blob/v{version}/LICENSE-MIT
+License: AGPL-3.0-only
+LicenseUrl: {REPO}/blob/v{version}/LICENSE
 ShortDescription: Your Android phone and your computer, together - remote desktop, files, clipboard and notifications.
 Description: |-
   Pocketdesk links an Android phone with this computer: see and drive the computer from the phone, send files and links both

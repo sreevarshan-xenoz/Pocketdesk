@@ -5,7 +5,7 @@ pkgrel=1
 pkgdesc="Your Linux or Windows desktop on your Android phone: screen, input, clipboard, files and notifications over LAN, Tailscale or the internet"
 arch=('x86_64')
 url="https://github.com/sreevarshan-xenoz/Pocketdesk"
-license=('MIT OR Apache-2.0')
+license=('AGPL-3.0-only')
 # The libraries the binaries link to (the .deb's Depends, and namcap's check).
 depends=('ffmpeg' 'glibc' 'hicolor-icon-theme' 'libgcc' 'libpipewire' 'libxcb' 'mesa' 'opus')
 optdepends=(
@@ -67,6 +67,6 @@ package() {
   for file in README.md SECURITY.md config.toml.example; do
     install -Dm644 "${file}" "${pkgdir}/usr/share/doc/${pkgname}/${file}"
   done
-  install -Dm644 LICENSE-MIT "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE-MIT"
-  install -Dm644 LICENSE-APACHE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE-APACHE"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 NOTICE "${pkgdir}/usr/share/licenses/${pkgname}/NOTICE"
 }

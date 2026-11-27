@@ -1,6 +1,29 @@
 Pocketdesk
-Licensed under either of the Apache License 2.0 (LICENSE-APACHE) or the MIT
-license (LICENSE-MIT), at your option.
+Copyright (C) 2026 sreevarshan-xenoz and the Pocketdesk contributors
+https://github.com/sreevarshan-xenoz/Pocketdesk
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU Affero General Public License, version 3, as
+published by the Free Software Foundation (see LICENSE), with the
+additional term below. It comes WITHOUT ANY WARRANTY; see the license.
+
+Additional term (section 7(b) of the AGPL: preservation of author
+attributions)
+
+If you convey Pocketdesk, a modified version of it, or any work based on
+it or that includes any part of it, in source or object form, or make such
+a work available to users over a network, you must keep this attribution,
+readable and unchanged:
+
+    Based on Pocketdesk by sreevarshan-xenoz
+    https://github.com/sreevarshan-xenoz/Pocketdesk
+
+in this NOTICE file shipped with the work, in the work's README or main
+documentation, and in its "About" or credits screen, or its --version or
+--help output, if it has any of them.
+
+Releases of Pocketdesk published before this change were licensed
+"MIT OR Apache-2.0"; copies of those releases keep that license.
 
 This product depends on, or follows the technique of, the following Apache-2.0
 projects. No source of RustDesk (AGPL-3.0) or Sunshine (GPL-3.0) is included.

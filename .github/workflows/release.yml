@@ -121,7 +121,7 @@ jobs:
           name="pocketdesk-${{ needs.version.outputs.name }}-linux-x86_64"
           mkdir -p "release/$name"
           cp portable/pocketdesk portable/pocketdesk-pam-ask target/release/pocketdesk-app target/release/pocketdesk-tray "release/$name/"
-          cp config.toml.example pocketdesk.service README.md SECURITY.md LICENSE-MIT LICENSE-APACHE "release/$name/"
+          cp config.toml.example pocketdesk.service README.md SECURITY.md LICENSE NOTICE "release/$name/"
           cp -r man "release/$name/"
           tar -C release -czf "release/$name.tar.gz" "$name"
 
@@ -233,7 +233,7 @@ jobs:
         run: |
           $name = "pocketdesk-${{ needs.version.outputs.name }}-windows-x86_64"
           New-Item -ItemType Directory -Force "release/$name" | Out-Null
-          Copy-Item target/release/pocketdesk.exe, target/release/pocketdesk-app.exe, target/release/pocketdesk-tray.exe, config.toml.example, README.md, SECURITY.md, LICENSE-MIT, LICENSE-APACHE "release/$name/"
+          Copy-Item target/release/pocketdesk.exe, target/release/pocketdesk-app.exe, target/release/pocketdesk-tray.exe, config.toml.example, README.md, SECURITY.md, LICENSE, NOTICE "release/$name/"
           Compress-Archive -Path "release/$name" -DestinationPath "release/$name.zip"
 
       # The installer, setup.exe (BH1): packaging/windows/pocketdesk.iss.
